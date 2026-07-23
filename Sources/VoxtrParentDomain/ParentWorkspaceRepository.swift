@@ -53,36 +53,3 @@ public final class ParentWorkspaceRepository {
             technicalOwnerAccountId: .pending
         )
         let now = Date.now
-        let participant = WorkspaceParticipant(
-            workspaceId: workspace.workspaceId,
-            accountId: .pending,
-            role: .workspaceOwner,
-            state: .active,
-            invitedAt: now,
-            acceptedAt: now
-        )
-
-        modelContext.insert(parent)
-        modelContext.insert(workspace)
-        modelContext.insert(participant)
-        try modelContext.save()
-
-        return (parent, workspace, participant)
-    }
-
-    public func fetchAllParentProfiles() throws -> [ParentProfile] {
-        try modelContext.fetch(FetchDescriptor<ParentProfile>())
-    }
-
-    public func fetchAllWorkspaces() throws -> [FamilyWorkspace] {
-        try modelContext.fetch(FetchDescriptor<FamilyWorkspace>())
-    }
-
-    public func fetchParticipants(forWorkspace workspaceId: WorkspaceId) throws -> [WorkspaceParticipant] {
-        let rawId = workspaceId.rawValue
-        let descriptor = FetchDescriptor<WorkspaceParticipant>(
-            predicate: #Predicate { $0.workspaceId == rawId }
-        )
-        return try modelContext.fetch(descriptor)
-    }
-}
