@@ -53,3 +53,48 @@ public final class ParentWorkspaceRepository {
             technicalOwnerAccountId: .pending
         )
         let now = Date.now
+        let participant = WorkspaceParticipant(
+            workspaceId: workspace.workspaceId,
+            accountId: .pending,
+            role: .workspaceOwner,
+            state: .active,
+            invitedAt: now,
+            acceptedAt: now
+        )
+
+        modelContext.insert(parent)
+        modelContext.insert(workspace)
+        modelContext.insert(participant)
+        try modelContext.save()
+
+        return (parent, workspace, participant)
+    }
+
+    public func fetchAllParentProfiles() throws -> [ParentProfile] {
+        try modelContext.fetch(FetchDescriptor<ParentProfile>())
+    }
+
+    public func fetchAllWorkspaces() throws -> [FamilyWorkspace] {
+        try modelContext.fetch(FetchDescriptor<FamilyWorkspace>())
+    }
+
+    /// S1.1 FIX: this originally used SwiftData's `#Predicate` macro
+    /// (`FetchDescriptor<WorkspaceParticipant>(predicate: #Predicate {
+    /// $0.workspaceId == rawId })`). The CI test run crashed
+    /// ("Restarting after unexpected exit, crash, or test timeout")
+    /// right as this suite started, immediately after every other suite
+    /// — including one exercising the same `AppSchema` — passed cleanly.
+    /// `#Predicate` was the one genuinely new pattern in this file, and
+    /// has documented real-world runtime crash edge cases on some
+    /// Xcode/OS combinations. Without a crash log to confirm the exact
+    /// cause, the lowest-risk fix is removing the suspect code entirely
+    /// rather than guessing at a `#Predicate` workaround: fetch
+    /// everything and filter in Swift. Fine at this data scale (a
+    /// handful of participants per family); revisit if/when this
+    /// becomes a real performance concern.
+    public func fetchParticipants(forWorkspace workspaceId: WorkspaceId) throws -> [WorkspaceParticipant] {
+        let rawId = workspaceId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<WorkspaceParticipant>())
+        return all.filter { $0.workspaceId == rawId }
+    }
+}
