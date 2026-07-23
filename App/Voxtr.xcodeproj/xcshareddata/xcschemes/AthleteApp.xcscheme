@@ -14,9 +14,23 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "FC897A2ED3185C47431C527F"
+               BlueprintIdentifier = "711A94247F64BEEBA7E79FC7"
                BuildableName = "AthleteApp.app"
                BlueprintName = "AthleteApp"
+               ReferencedContainer = "container:Voxtr.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "948153A5D60574CC4A3900EC"
+               BuildableName = "VoxtrSprint0Tests.xctest"
+               BlueprintName = "VoxtrSprint0Tests"
                ReferencedContainer = "container:Voxtr.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,10 +46,10 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "VoxtrSprint0Tests"
-               BuildableName = "VoxtrSprint0Tests"
+               BlueprintIdentifier = "948153A5D60574CC4A3900EC"
+               BuildableName = "VoxtrSprint0Tests.xctest"
                BlueprintName = "VoxtrSprint0Tests"
-               ReferencedContainer = "container:../Package.swift">
+               ReferencedContainer = "container:Voxtr.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -54,7 +68,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FC897A2ED3185C47431C527F"
+            BlueprintIdentifier = "711A94247F64BEEBA7E79FC7"
             BuildableName = "AthleteApp.app"
             BlueprintName = "AthleteApp"
             ReferencedContainer = "container:Voxtr.xcodeproj">
@@ -71,7 +85,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "FC897A2ED3185C47431C527F"
+            BlueprintIdentifier = "711A94247F64BEEBA7E79FC7"
             BuildableName = "AthleteApp.app"
             BlueprintName = "AthleteApp"
             ReferencedContainer = "container:Voxtr.xcodeproj">
