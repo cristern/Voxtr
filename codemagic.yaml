@@ -50,7 +50,8 @@ workflows:
       - build/reports/junit.xml
     publishing:
       email:
-        recipients: []
+        recipients: 
+        - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -95,7 +96,8 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients: []
+        recipients: 
+        - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -140,7 +142,8 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients: []
+        recipients: 
+        - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -261,7 +264,8 @@ workflows:
         auth: integration
         submit_to_testflight: true
       email:
-        recipients: []
+        recipients: 
+        - cristern@hotmail.com
         notify:
           success: true
           failure: true
