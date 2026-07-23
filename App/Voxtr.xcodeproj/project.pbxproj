@@ -7,82 +7,133 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B93C608AFC66A91C96D10D2B /* AthleteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158C3C97426CE90393D995CA /* AthleteApp.swift */; };
-		7DF602B3DDB31DAD98B44A49 /* ParentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A684E5F0949D370B81070B53 /* ParentApp.swift */; };
-		36338A044E000A7A51957144 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = 22723A80151A75F53D2C5E85 /* VoxtrAppShell */; };
-		9BB061AE3EE17F48DCB24615 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */; };
+		B2D8C723858FC19556671502 /* AthleteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833AD0C6928D0F0CC690D25E /* AthleteApp.swift */; };
+		33FDCC66F414D9F6345576C7 /* ParentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = D919B9677AFCD056440AF16C /* ParentApp.swift */; };
+		621A0C82227ACA2A2BC4BD35 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = F7C152C59F081247A6DA0577 /* VoxtrAppShell */; };
+		12D256AFF53FD88447A9322E /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = 6091254BF755FE0296993ECB /* VoxtrAppShell */; };
+		0D81773B3A4D4813E95F54FD /* DomainModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB26390B97A837AB448B151 /* DomainModelTests.swift */; };
+		8BD2440AF1B6FEE2554279FC /* EventBusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8978A97683057A40946EF8 /* EventBusTests.swift */; };
+		575618F931783B99472CCB75 /* ModuleRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */; };
+		03A338F987E48C6CC36896D2 /* DIContainerAndFeatureFlagTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */; };
+		BC3B401B5525998BB4AD94D0 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */; };
+		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
+		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
+		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
+		19E1302E3303D446D8065346 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = 73464DFCE91F91AB118FEDC7 /* VoxtrAppShell */; };
+		3EBCA781C05F2B56C741CDCE /* VoxtrAthleteDomain in Frameworks */ = {isa = PBXBuildFile; productRef = D8A292C4ECD49D6E2064D674 /* VoxtrAthleteDomain */; };
+		028AC57186050F273D5F00EF /* VoxtrParentDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 92B7DA260EDABE6C3EEC53D7 /* VoxtrParentDomain */; };
+		3DA4CA50866E7CA13CB4D5CB /* VoxtrPlanningDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7382AD2285D7F7BCC8BD960B /* VoxtrPlanningDomain */; };
+		428ED6B83B67EC7BD19706F2 /* VoxtrTrainingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = CB2EB5C7AAE8789198E9AAC9 /* VoxtrTrainingDomain */; };
+		F832ABEB73635723829B17D7 /* VoxtrReflectionDomain in Frameworks */ = {isa = PBXBuildFile; productRef = F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		67165D24D3BB7E7A9A46D997 /* AthleteApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AthleteApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		BC8D9BAFD101DC17E4D4105C /* ParentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ParentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		158C3C97426CE90393D995CA /* AthleteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteApp.swift; sourceTree = "<group>"; };
-		A684E5F0949D370B81070B53 /* ParentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentApp.swift; sourceTree = "<group>"; };
-		FD13A9B388918FC6E02BB848 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-		D662E236B60AC4EDA95EAB41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		CDA203712D32CEA51967A212 /* AthleteApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AthleteApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A7D4622A190B793246A4CC1 /* ParentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ParentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		6A6BF721CDCD53F76E3CAB39 /* VoxtrSprint0Tests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VoxtrSprint0Tests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		833AD0C6928D0F0CC690D25E /* AthleteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteApp.swift; sourceTree = "<group>"; };
+		D919B9677AFCD056440AF16C /* ParentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentApp.swift; sourceTree = "<group>"; };
+		365F56B57BBC3934DECCC815 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C5ED9EAB52F2089B524DF858 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		EBB26390B97A837AB448B151 /* DomainModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainModelTests.swift; sourceTree = "<group>"; };
+		3B8978A97683057A40946EF8 /* EventBusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventBusTests.swift; sourceTree = "<group>"; };
+		58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleRegistryTests.swift; sourceTree = "<group>"; };
+		CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DIContainerAndFeatureFlagTests.swift; sourceTree = "<group>"; };
+		7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		13E9AD7BE823335269AF927B /* Frameworks */ = {
+		E4DBBF0E3191679039B73DE9 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				36338A044E000A7A51957144 /* VoxtrAppShell in Frameworks */,
+				621A0C82227ACA2A2BC4BD35 /* VoxtrAppShell in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		A1AFE4A308C182593F47C079 /* Frameworks */ = {
+		B9343F82E587A5D782DC74C0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9BB061AE3EE17F48DCB24615 /* VoxtrAppShell in Frameworks */,
+				12D256AFF53FD88447A9322E /* VoxtrAppShell in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3FA5F286FB92E85C36E4545D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */,
+				8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */,
+				3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */,
+				19E1302E3303D446D8065346 /* VoxtrAppShell in Frameworks */,
+				3EBCA781C05F2B56C741CDCE /* VoxtrAthleteDomain in Frameworks */,
+				028AC57186050F273D5F00EF /* VoxtrParentDomain in Frameworks */,
+				3DA4CA50866E7CA13CB4D5CB /* VoxtrPlanningDomain in Frameworks */,
+				428ED6B83B67EC7BD19706F2 /* VoxtrTrainingDomain in Frameworks */,
+				F832ABEB73635723829B17D7 /* VoxtrReflectionDomain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		6D110C1E9C087694117E2C1A = {
+		9A12FBE352AAF162D2E9F088 = {
 			isa = PBXGroup;
 			children = (
-				DE1CF65AB363D4F0790CB5F5 /* App */,
-				B9044C3C87AC5EFAF440CECA /* Products */,
+				93850CD870DE9E6235298962 /* App */,
+				AA12E0566EC809CF03DA6CEE /* VoxtrSprint0Tests */,
+				FD5C83B22BC5704BF861F624 /* Products */,
 			);
 			sourceTree = "<group>";
 		};
-		DE1CF65AB363D4F0790CB5F5 /* App */ = {
+		93850CD870DE9E6235298962 /* App */ = {
 			isa = PBXGroup;
 			children = (
-				4BDB9293C586AC7F69803DDC /* AthleteApp */,
-				7BE8FC73D17E049BCE680D8F /* ParentApp */,
+				F7BDFC89967041AC0BA32B06 /* AthleteApp */,
+				96360228209E8CB5B408E505 /* ParentApp */,
 			);
 			name = App;
 			path = "";
 			sourceTree = "<group>";
 		};
-		4BDB9293C586AC7F69803DDC /* AthleteApp */ = {
+		F7BDFC89967041AC0BA32B06 /* AthleteApp */ = {
 			isa = PBXGroup;
 			children = (
-				158C3C97426CE90393D995CA /* AthleteApp.swift */,
-				FD13A9B388918FC6E02BB848 /* Info.plist */,
+				833AD0C6928D0F0CC690D25E /* AthleteApp.swift */,
+				365F56B57BBC3934DECCC815 /* Info.plist */,
 			);
 			path = AthleteApp;
 			sourceTree = "<group>";
 		};
-		7BE8FC73D17E049BCE680D8F /* ParentApp */ = {
+		96360228209E8CB5B408E505 /* ParentApp */ = {
 			isa = PBXGroup;
 			children = (
-				A684E5F0949D370B81070B53 /* ParentApp.swift */,
-				D662E236B60AC4EDA95EAB41 /* Info.plist */,
+				D919B9677AFCD056440AF16C /* ParentApp.swift */,
+				C5ED9EAB52F2089B524DF858 /* Info.plist */,
 			);
 			path = ParentApp;
 			sourceTree = "<group>";
 		};
-		B9044C3C87AC5EFAF440CECA /* Products */ = {
+		AA12E0566EC809CF03DA6CEE /* VoxtrSprint0Tests */ = {
 			isa = PBXGroup;
 			children = (
-				67165D24D3BB7E7A9A46D997 /* AthleteApp.app */,
-				BC8D9BAFD101DC17E4D4105C /* ParentApp.app */,
+				EBB26390B97A837AB448B151 /* DomainModelTests.swift */,
+				3B8978A97683057A40946EF8 /* EventBusTests.swift */,
+				58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */,
+				CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */,
+				7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */,
+			);
+			name = VoxtrSprint0Tests;
+			path = ../Tests/VoxtrSprint0Tests;
+			sourceTree = "<group>";
+		};
+		FD5C83B22BC5704BF861F624 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CDA203712D32CEA51967A212 /* AthleteApp.app */,
+				7A7D4622A190B793246A4CC1 /* ParentApp.app */,
+				6A6BF721CDCD53F76E3CAB39 /* VoxtrSprint0Tests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -90,13 +141,13 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		FC897A2ED3185C47431C527F /* AthleteApp */ = {
+		711A94247F64BEEBA7E79FC7 /* AthleteApp */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = A59346EF246B581E95EB5915 /* Build configuration list for PBXNativeTarget "AthleteApp" */;
+			buildConfigurationList = 7B27FF56ABB02CC217F4E157 /* Build configuration list for PBXNativeTarget "AthleteApp" */;
 			buildPhases = (
-				B97E27EE8EC3AD9C405681D2 /* Sources */,
-				13E9AD7BE823335269AF927B /* Frameworks */,
-				21E06DC0F3E66062CAE554B2 /* Resources */,
+				8017B590FDDEBC110CA2A108 /* Sources */,
+				E4DBBF0E3191679039B73DE9 /* Frameworks */,
+				A9F56F45AEF22641FE30AD4A /* Resources */,
 			);
 			buildRules = (
 			);
@@ -104,19 +155,19 @@
 			);
 			name = AthleteApp;
 			packageProductDependencies = (
-				22723A80151A75F53D2C5E85 /* VoxtrAppShell */,
+				F7C152C59F081247A6DA0577 /* VoxtrAppShell */,
 			);
 			productName = AthleteApp;
-			productReference = 67165D24D3BB7E7A9A46D997 /* AthleteApp.app */;
+			productReference = CDA203712D32CEA51967A212 /* AthleteApp.app */;
 			productType = "com.apple.product-type.application";
 		};
-		0E93935A09E8DFE6B07EB2A0 /* ParentApp */ = {
+		8BCF7307730E4ED09540BF17 /* ParentApp */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 7A0FFDA39CA940239BE1914D /* Build configuration list for PBXNativeTarget "ParentApp" */;
+			buildConfigurationList = D02F834AB0B98D218081F71D /* Build configuration list for PBXNativeTarget "ParentApp" */;
 			buildPhases = (
-				3E7AC1B1BBA4B5C4C6B5A5F1 /* Sources */,
-				A1AFE4A308C182593F47C079 /* Frameworks */,
-				84F3C1DE7B5EEA07CF00B7C5 /* Resources */,
+				727D18B797079B3791F64D8F /* Sources */,
+				B9343F82E587A5D782DC74C0 /* Frameworks */,
+				FACF3B1C5D671D2A1A439DAD /* Resources */,
 			);
 			buildRules = (
 			);
@@ -124,31 +175,62 @@
 			);
 			name = ParentApp;
 			packageProductDependencies = (
-				C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */,
+				6091254BF755FE0296993ECB /* VoxtrAppShell */,
 			);
 			productName = ParentApp;
-			productReference = BC8D9BAFD101DC17E4D4105C /* ParentApp.app */;
+			productReference = 7A7D4622A190B793246A4CC1 /* ParentApp.app */;
 			productType = "com.apple.product-type.application";
+		};
+		948153A5D60574CC4A3900EC /* VoxtrSprint0Tests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1DCDF0FF4CA4AA3E19EF1ED /* Build configuration list for PBXNativeTarget "VoxtrSprint0Tests" */;
+			buildPhases = (
+				054501DC9852D62DC1A7E7D9 /* Sources */,
+				3FA5F286FB92E85C36E4545D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = VoxtrSprint0Tests;
+			packageProductDependencies = (
+				19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */,
+				5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */,
+				598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */,
+				73464DFCE91F91AB118FEDC7 /* VoxtrAppShell */,
+				D8A292C4ECD49D6E2064D674 /* VoxtrAthleteDomain */,
+				92B7DA260EDABE6C3EEC53D7 /* VoxtrParentDomain */,
+				7382AD2285D7F7BCC8BD960B /* VoxtrPlanningDomain */,
+				CB2EB5C7AAE8789198E9AAC9 /* VoxtrTrainingDomain */,
+				F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */,
+			);
+			productName = VoxtrSprint0Tests;
+			productReference = 6A6BF721CDCD53F76E3CAB39 /* VoxtrSprint0Tests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		7D6B9B52D96D4E1A451F79B7 /* Project object */ = {
+		58BB600684DA1681D944C39C /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1600;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					FC897A2ED3185C47431C527F = {
+					711A94247F64BEEBA7E79FC7 = {
 						CreatedOnToolsVersion = 16.0;
 					};
-					0E93935A09E8DFE6B07EB2A0 = {
+					8BCF7307730E4ED09540BF17 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					948153A5D60574CC4A3900EC = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = 711A94247F64BEEBA7E79FC7;
 					};
 				};
 			};
-			buildConfigurationList = 5337242B60D8EBF581B61149 /* Build configuration list for PBXProject "Voxtr" */;
+			buildConfigurationList = DBBD06494645CFD1177FA52F /* Build configuration list for PBXProject "Voxtr" */;
 			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
@@ -156,29 +238,30 @@
 				en,
 				Base,
 			);
-			mainGroup = 6D110C1E9C087694117E2C1A;
+			mainGroup = 9A12FBE352AAF162D2E9F088;
 			packageReferences = (
-				AE48AFD727F7D55C0C70FB1A /* XCLocalSwiftPackageReference ".." */,
+				FC1D1798266D8322277F70AD /* XCLocalSwiftPackageReference ".." */,
 			);
-			productRefGroup = B9044C3C87AC5EFAF440CECA /* Products */;
+			productRefGroup = FD5C83B22BC5704BF861F624 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				FC897A2ED3185C47431C527F /* AthleteApp */,
-				0E93935A09E8DFE6B07EB2A0 /* ParentApp */,
+				711A94247F64BEEBA7E79FC7 /* AthleteApp */,
+				8BCF7307730E4ED09540BF17 /* ParentApp */,
+				948153A5D60574CC4A3900EC /* VoxtrSprint0Tests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		21E06DC0F3E66062CAE554B2 /* Resources */ = {
+		A9F56F45AEF22641FE30AD4A /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		84F3C1DE7B5EEA07CF00B7C5 /* Resources */ = {
+		FACF3B1C5D671D2A1A439DAD /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -188,26 +271,38 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		B97E27EE8EC3AD9C405681D2 /* Sources */ = {
+		8017B590FDDEBC110CA2A108 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B93C608AFC66A91C96D10D2B /* AthleteApp.swift in Sources */,
+				B2D8C723858FC19556671502 /* AthleteApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		3E7AC1B1BBA4B5C4C6B5A5F1 /* Sources */ = {
+		727D18B797079B3791F64D8F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				7DF602B3DDB31DAD98B44A49 /* ParentApp.swift in Sources */,
+				33FDCC66F414D9F6345576C7 /* ParentApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		054501DC9852D62DC1A7E7D9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0D81773B3A4D4813E95F54FD /* DomainModelTests.swift in Sources */,
+				8BD2440AF1B6FEE2554279FC /* EventBusTests.swift in Sources */,
+				575618F931783B99472CCB75 /* ModuleRegistryTests.swift in Sources */,
+				03A338F987E48C6CC36896D2 /* DIContainerAndFeatureFlagTests.swift in Sources */,
+				BC3B401B5525998BB4AD94D0 /* PersistenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		4C2BEA62BC8DC06BDE2D9266 /* Debug */ = {
+		C65B7B56C90606EF619676BE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -238,7 +333,7 @@
 			};
 			name = Debug;
 		};
-		04468142AA29FD4C8A6E8A59 /* Release */ = {
+		FC4A1D774FE1500A7A46EB67 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -262,7 +357,7 @@
 			};
 			name = Release;
 		};
-		EBF9FAB7ED117F2126F95B58 /* Debug */ = {
+		9A1F6E025B871A0BA11F1715 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
@@ -284,7 +379,7 @@
 			};
 			name = Debug;
 		};
-		A4F2F4E195EDE84D2D0A1F2E /* Release */ = {
+		66B0A1DEFF6EEAF108D3FA85 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
@@ -306,7 +401,7 @@
 			};
 			name = Release;
 		};
-		A13723C2B55DF7780105DAE8 /* Debug */ = {
+		CE32E041AB4695AB2CCD0268 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
@@ -328,7 +423,7 @@
 			};
 			name = Debug;
 		};
-		D78B8E649E7C00C3FD6C64DA /* Release */ = {
+		C6EB6D41CA2B49E7169035C5 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = "";
@@ -347,35 +442,82 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		DB9C544C5C95FD24EA5A4C89 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		84AD4E0B5805D258FA06509A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		5337242B60D8EBF581B61149 /* Build configuration list for PBXProject "Voxtr" */ = {
+		DBBD06494645CFD1177FA52F /* Build configuration list for PBXProject "Voxtr" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				4C2BEA62BC8DC06BDE2D9266 /* Debug */,
-				04468142AA29FD4C8A6E8A59 /* Release */,
+				C65B7B56C90606EF619676BE /* Debug */,
+				FC4A1D774FE1500A7A46EB67 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		A59346EF246B581E95EB5915 /* Build configuration list for PBXNativeTarget "AthleteApp" */ = {
+		7B27FF56ABB02CC217F4E157 /* Build configuration list for PBXNativeTarget "AthleteApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				EBF9FAB7ED117F2126F95B58 /* Debug */,
-				A4F2F4E195EDE84D2D0A1F2E /* Release */,
+				9A1F6E025B871A0BA11F1715 /* Debug */,
+				66B0A1DEFF6EEAF108D3FA85 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		7A0FFDA39CA940239BE1914D /* Build configuration list for PBXNativeTarget "ParentApp" */ = {
+		D02F834AB0B98D218081F71D /* Build configuration list for PBXNativeTarget "ParentApp" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				A13723C2B55DF7780105DAE8 /* Debug */,
-				D78B8E649E7C00C3FD6C64DA /* Release */,
+				CE32E041AB4695AB2CCD0268 /* Debug */,
+				C6EB6D41CA2B49E7169035C5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1DCDF0FF4CA4AA3E19EF1ED /* Build configuration list for PBXNativeTarget "VoxtrSprint0Tests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DB9C544C5C95FD24EA5A4C89 /* Debug */,
+				84AD4E0B5805D258FA06509A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -383,22 +525,58 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		AE48AFD727F7D55C0C70FB1A /* XCLocalSwiftPackageReference ".." */ = {
+		FC1D1798266D8322277F70AD /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "..";
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		22723A80151A75F53D2C5E85 /* VoxtrAppShell */ = {
+		F7C152C59F081247A6DA0577 /* VoxtrAppShell */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoxtrAppShell;
 		};
-		C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */ = {
+		6091254BF755FE0296993ECB /* VoxtrAppShell */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoxtrAppShell;
+		};
+		19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrCore;
+		};
+		5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrCoreContracts;
+		};
+		598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrCoreReferenceData;
+		};
+		73464DFCE91F91AB118FEDC7 /* VoxtrAppShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrAppShell;
+		};
+		D8A292C4ECD49D6E2064D674 /* VoxtrAthleteDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrAthleteDomain;
+		};
+		92B7DA260EDABE6C3EEC53D7 /* VoxtrParentDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrParentDomain;
+		};
+		7382AD2285D7F7BCC8BD960B /* VoxtrPlanningDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrPlanningDomain;
+		};
+		CB2EB5C7AAE8789198E9AAC9 /* VoxtrTrainingDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrTrainingDomain;
+		};
+		F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrReflectionDomain;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
-	rootObject = 7D6B9B52D96D4E1A451F79B7 /* Project object */;
+	rootObject = 58BB600684DA1681D944C39C /* Project object */;
 }
