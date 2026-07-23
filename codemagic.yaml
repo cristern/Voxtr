@@ -270,7 +270,8 @@ workflows:
         auth: integration
         submit_to_testflight: true
       email:
-        recipients: []
+        recipients: 
+          - cristern@hotmail.com
         notify:
           success: true
           failure: true
