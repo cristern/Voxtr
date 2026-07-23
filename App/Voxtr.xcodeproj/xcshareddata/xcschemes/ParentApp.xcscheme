@@ -14,9 +14,23 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0E93935A09E8DFE6B07EB2A0"
+               BlueprintIdentifier = "8BCF7307730E4ED09540BF17"
                BuildableName = "ParentApp.app"
                BlueprintName = "ParentApp"
+               ReferencedContainer = "container:Voxtr.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "NO"
+            buildForProfiling = "NO"
+            buildForArchiving = "NO"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "948153A5D60574CC4A3900EC"
+               BuildableName = "VoxtrSprint0Tests.xctest"
+               BlueprintName = "VoxtrSprint0Tests"
                ReferencedContainer = "container:Voxtr.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,10 +46,10 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "VoxtrSprint0Tests"
-               BuildableName = "VoxtrSprint0Tests"
+               BlueprintIdentifier = "948153A5D60574CC4A3900EC"
+               BuildableName = "VoxtrSprint0Tests.xctest"
                BlueprintName = "VoxtrSprint0Tests"
-               ReferencedContainer = "container:../Package.swift">
+               ReferencedContainer = "container:Voxtr.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -54,7 +68,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "0E93935A09E8DFE6B07EB2A0"
+            BlueprintIdentifier = "8BCF7307730E4ED09540BF17"
             BuildableName = "ParentApp.app"
             BlueprintName = "ParentApp"
             ReferencedContainer = "container:Voxtr.xcodeproj">
@@ -71,7 +85,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "0E93935A09E8DFE6B07EB2A0"
+            BlueprintIdentifier = "8BCF7307730E4ED09540BF17"
             BuildableName = "ParentApp.app"
             BlueprintName = "ParentApp"
             ReferencedContainer = "container:Voxtr.xcodeproj">
