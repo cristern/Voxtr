@@ -20,61 +20,11 @@ public final class ParentWorkspaceRepository {
         self.modelContext = modelContext
     }
 
-    /// S1.2a: stages a `ParentProfile`, `FamilyWorkspace`, and
-    /// `WorkspaceParticipant` into this repository's `ModelContext` —
-    /// INSERTS ONLY, NO SAVE. Used when this creation must be part of a
-    /// larger atomic operation spanning multiple domains (see
-    /// `FamilyOnboardingCoordinator`), which controls save/rollback on
-    /// the shared context itself. Callers using this directly are
-    /// responsible for eventually calling `save()` or `rollback()` on
-    /// the same context — this method does neither.
-    ///
-    /// `parentId`/`workspaceId`/`participantId` are injectable (default
-    /// to fresh IDs) so tests can force a genuine SwiftData uniqueness
-    /// violation at `save()` time, rather than simulating one.
-    public func stageParentAndWorkspace(
-        parentId: UUID = UUID(),
-        workspaceId: WorkspaceId = WorkspaceId(),
-        participantId: UUID = UUID(),
-        givenName: String,
-        familyName: String? = nil,
-        preferredName: String? = nil
-    ) -> (parent: ParentProfile, workspace: FamilyWorkspace, participant: WorkspaceParticipant) {
-        let parent = ParentProfile(
-            id: parentId,
-            accountId: .pending,
-            givenName: givenName,
-            familyName: familyName,
-            preferredName: preferredName
-        )
-        let workspace = FamilyWorkspace(
-            id: workspaceId,
-            displayName: "\(givenName)'s family",
-            technicalOwnerAccountId: .pending
-        )
-        let now = Date.now
-        let participant = WorkspaceParticipant(
-            id: participantId,
-            workspaceId: workspace.workspaceId,
-            accountId: .pending,
-            role: .workspaceOwner,
-            state: .active,
-            invitedAt: now,
-            acceptedAt: now
-        )
-
-        modelContext.insert(parent)
-        modelContext.insert(workspace)
-        modelContext.insert(participant)
-
-        return (parent, workspace, participant)
-    }
-
-    /// Standalone convenience: stage + save in one call, as its own
-    /// atomic unit. Preserved for any caller that only needs to create a
-    /// parent/workspace on its own — NOT used by
-    /// `FamilyOnboardingCoordinator`, which stages via the method above
-    /// and controls save/rollback itself across all five entities.
+    /// Creates a `ParentProfile`, a `FamilyWorkspace` owned by that
+    /// parent, and a `WorkspaceParticipant` connecting them with the
+    /// `workspaceOwner` role — as one unit of work. All three are
+    /// inserted before the single `save()` call, so either all three
+    /// persist or (if `save()` throws) none of them do.
     ///
     /// ASSUMPTION, FLAGGED: the participant record for the
     /// self-creating parent is created directly in `.active` state with
@@ -92,9 +42,32 @@ public final class ParentWorkspaceRepository {
         familyName: String? = nil,
         preferredName: String? = nil
     ) throws -> (parent: ParentProfile, workspace: FamilyWorkspace, participant: WorkspaceParticipant) {
-        let staged = stageParentAndWorkspace(givenName: givenName, familyName: familyName, preferredName: preferredName)
+        let parent = ParentProfile(
+            accountId: .pending,
+            givenName: givenName,
+            familyName: familyName,
+            preferredName: preferredName
+        )
+        let workspace = FamilyWorkspace(
+            displayName: "\(givenName)'s family",
+            technicalOwnerAccountId: .pending
+        )
+        let now = Date.now
+        let participant = WorkspaceParticipant(
+            workspaceId: workspace.workspaceId,
+            accountId: .pending,
+            role: .workspaceOwner,
+            state: .active,
+            invitedAt: now,
+            acceptedAt: now
+        )
+
+        modelContext.insert(parent)
+        modelContext.insert(workspace)
+        modelContext.insert(participant)
         try modelContext.save()
-        return staged
+
+        return (parent, workspace, participant)
     }
 
     public func fetchAllParentProfiles() throws -> [ParentProfile] {
