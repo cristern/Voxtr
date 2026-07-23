@@ -78,6 +78,15 @@ public final class ParentWorkspaceRepository {
         try modelContext.fetch(FetchDescriptor<FamilyWorkspace>())
     }
 
+    /// S1.3: unscoped — returns every `WorkspaceParticipant` regardless
+    /// of workspace. Needed so restoration consistency checks can detect
+    /// an orphaned participant even when its workspace is itself
+    /// missing (a scoped-by-workspace-id query can't find what it
+    /// doesn't have a workspace ID for).
+    public func fetchAllParticipants() throws -> [WorkspaceParticipant] {
+        try modelContext.fetch(FetchDescriptor<WorkspaceParticipant>())
+    }
+
     /// S1.1 FIX: this originally used SwiftData's `#Predicate` macro
     /// (`FetchDescriptor<WorkspaceParticipant>(predicate: #Predicate {
     /// $0.workspaceId == rawId })`). The CI test run crashed
