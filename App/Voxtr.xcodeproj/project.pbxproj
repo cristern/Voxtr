@@ -1,0 +1,404 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B93C608AFC66A91C96D10D2B /* AthleteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 158C3C97426CE90393D995CA /* AthleteApp.swift */; };
+		7DF602B3DDB31DAD98B44A49 /* ParentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A684E5F0949D370B81070B53 /* ParentApp.swift */; };
+		36338A044E000A7A51957144 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = 22723A80151A75F53D2C5E85 /* VoxtrAppShell */; };
+		9BB061AE3EE17F48DCB24615 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		67165D24D3BB7E7A9A46D997 /* AthleteApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AthleteApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		BC8D9BAFD101DC17E4D4105C /* ParentApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ParentApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		158C3C97426CE90393D995CA /* AthleteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteApp.swift; sourceTree = "<group>"; };
+		A684E5F0949D370B81070B53 /* ParentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentApp.swift; sourceTree = "<group>"; };
+		FD13A9B388918FC6E02BB848 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		D662E236B60AC4EDA95EAB41 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		13E9AD7BE823335269AF927B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				36338A044E000A7A51957144 /* VoxtrAppShell in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1AFE4A308C182593F47C079 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9BB061AE3EE17F48DCB24615 /* VoxtrAppShell in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		6D110C1E9C087694117E2C1A = {
+			isa = PBXGroup;
+			children = (
+				DE1CF65AB363D4F0790CB5F5 /* App */,
+				B9044C3C87AC5EFAF440CECA /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		DE1CF65AB363D4F0790CB5F5 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				4BDB9293C586AC7F69803DDC /* AthleteApp */,
+				7BE8FC73D17E049BCE680D8F /* ParentApp */,
+			);
+			name = App;
+			path = "";
+			sourceTree = "<group>";
+		};
+		4BDB9293C586AC7F69803DDC /* AthleteApp */ = {
+			isa = PBXGroup;
+			children = (
+				158C3C97426CE90393D995CA /* AthleteApp.swift */,
+				FD13A9B388918FC6E02BB848 /* Info.plist */,
+			);
+			path = AthleteApp;
+			sourceTree = "<group>";
+		};
+		7BE8FC73D17E049BCE680D8F /* ParentApp */ = {
+			isa = PBXGroup;
+			children = (
+				A684E5F0949D370B81070B53 /* ParentApp.swift */,
+				D662E236B60AC4EDA95EAB41 /* Info.plist */,
+			);
+			path = ParentApp;
+			sourceTree = "<group>";
+		};
+		B9044C3C87AC5EFAF440CECA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				67165D24D3BB7E7A9A46D997 /* AthleteApp.app */,
+				BC8D9BAFD101DC17E4D4105C /* ParentApp.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		FC897A2ED3185C47431C527F /* AthleteApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A59346EF246B581E95EB5915 /* Build configuration list for PBXNativeTarget "AthleteApp" */;
+			buildPhases = (
+				B97E27EE8EC3AD9C405681D2 /* Sources */,
+				13E9AD7BE823335269AF927B /* Frameworks */,
+				21E06DC0F3E66062CAE554B2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AthleteApp;
+			packageProductDependencies = (
+				22723A80151A75F53D2C5E85 /* VoxtrAppShell */,
+			);
+			productName = AthleteApp;
+			productReference = 67165D24D3BB7E7A9A46D997 /* AthleteApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		0E93935A09E8DFE6B07EB2A0 /* ParentApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A0FFDA39CA940239BE1914D /* Build configuration list for PBXNativeTarget "ParentApp" */;
+			buildPhases = (
+				3E7AC1B1BBA4B5C4C6B5A5F1 /* Sources */,
+				A1AFE4A308C182593F47C079 /* Frameworks */,
+				84F3C1DE7B5EEA07CF00B7C5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ParentApp;
+			packageProductDependencies = (
+				C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */,
+			);
+			productName = ParentApp;
+			productReference = BC8D9BAFD101DC17E4D4105C /* ParentApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		7D6B9B52D96D4E1A451F79B7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					FC897A2ED3185C47431C527F = {
+						CreatedOnToolsVersion = 16.0;
+					};
+					0E93935A09E8DFE6B07EB2A0 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = 5337242B60D8EBF581B61149 /* Build configuration list for PBXProject "Voxtr" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 6D110C1E9C087694117E2C1A;
+			packageReferences = (
+				AE48AFD727F7D55C0C70FB1A /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = B9044C3C87AC5EFAF440CECA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				FC897A2ED3185C47431C527F /* AthleteApp */,
+				0E93935A09E8DFE6B07EB2A0 /* ParentApp */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		21E06DC0F3E66062CAE554B2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		84F3C1DE7B5EEA07CF00B7C5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		B97E27EE8EC3AD9C405681D2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B93C608AFC66A91C96D10D2B /* AthleteApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3E7AC1B1BBA4B5C4C6B5A5F1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7DF602B3DDB31DAD98B44A49 /* ParentApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		4C2BEA62BC8DC06BDE2D9266 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				MTL_FAST_MATH = YES;
+				COPY_PHASE_STRIP = NO;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+			};
+			name = Debug;
+		};
+		04468142AA29FD4C8A6E8A59 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 6.0;
+				VALIDATE_PRODUCT = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				MTL_FAST_MATH = YES;
+				COPY_PHASE_STRIP = NO;
+				GCC_OPTIMIZATION_LEVEL = s;
+				ENABLE_NS_ASSERTIONS = NO;
+			};
+			name = Release;
+		};
+		EBF9FAB7ED117F2126F95B58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AthleteApp/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.athlete;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A4F2F4E195EDE84D2D0A1F2E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AthleteApp/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.athlete;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A13723C2B55DF7780105DAE8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ParentApp/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.parent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D78B8E649E7C00C3FD6C64DA /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = ParentApp/Info.plist;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.voxtr.parent;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		5337242B60D8EBF581B61149 /* Build configuration list for PBXProject "Voxtr" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4C2BEA62BC8DC06BDE2D9266 /* Debug */,
+				04468142AA29FD4C8A6E8A59 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A59346EF246B581E95EB5915 /* Build configuration list for PBXNativeTarget "AthleteApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EBF9FAB7ED117F2126F95B58 /* Debug */,
+				A4F2F4E195EDE84D2D0A1F2E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A0FFDA39CA940239BE1914D /* Build configuration list for PBXNativeTarget "ParentApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A13723C2B55DF7780105DAE8 /* Debug */,
+				D78B8E649E7C00C3FD6C64DA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AE48AFD727F7D55C0C70FB1A /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "..";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		22723A80151A75F53D2C5E85 /* VoxtrAppShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrAppShell;
+		};
+		C7071AE1FAE1556450B0CAD0 /* VoxtrAppShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrAppShell;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 7D6B9B52D96D4E1A451F79B7 /* Project object */;
+}
