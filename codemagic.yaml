@@ -46,28 +46,22 @@ workflows:
           xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
             | grep -i PRODUCT_BUNDLE_IDENTIFIER || true
 
-      - name: Auto-detect an available iOS Simulator destination (do not hardcode a device name — it will go stale)
+      - name: Auto-detect an available iOS Simulator via simctl (more reliable than scheme-filtered -showdestinations, which returned no concrete simulators for this scheme)
         script: |
           set -e
           mkdir -p build/reports
+          echo "== Informational: xcodebuild -showdestinations (may be incomplete for a test-only scheme) =="
           xcodebuild -showdestinations -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
             > build/reports/destinations.txt 2>&1 || true
-          echo "== Raw destination list =="
           cat build/reports/destinations.txt
-          # Prefer a real iPhone simulator (has a concrete OS version, not
-          # one of the "Any iOS Simulator Device" placeholder rows).
-          SIMULATOR_NAME=$(grep "platform:iOS Simulator" build/reports/destinations.txt \
-            | grep "OS:" \
-            | grep -i "iPhone" \
-            | head -n1 \
-            | sed -E 's/.*name:([^}]*)\}?[[:space:]]*$/\1/' \
-            | sed -E 's/[[:space:]]+$//')
-          if [ -z "$SIMULATOR_NAME" ]; then
-            echo "FAILING BUILD: could not auto-detect any available iPhone simulator from the destination list above. This CI image may not have any iOS Simulator runtimes installed, or the parsing pattern needs adjusting for a new xcodebuild output format — either way, refusing to guess a device name."
+          echo "== Querying simctl directly for an available iPhone simulator (source of truth) =="
+          SIMULATOR_UDID=$(python3 Scripts/pick_simulator.py)
+          if [ -z "$SIMULATOR_UDID" ]; then
+            echo "FAILING BUILD: simctl reports no available iPhone simulator on this CI image at all — see the stderr output above for the full device list. This needs a human to look at what's actually installed, not another guess from me."
             exit 1
           fi
-          echo "Auto-detected simulator: $SIMULATOR_NAME"
-          echo "SIMULATOR_NAME=$SIMULATOR_NAME" >> "$CM_ENV"
+          echo "Auto-detected simulator UDID: $SIMULATOR_UDID"
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$CM_ENV"
 
       - name: Print discovered tests before running (best effort — see script comments if this step's flags don't match your Xcode version)
         script: |
@@ -75,7 +69,7 @@ workflows:
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            -destination "platform=iOS Simulator,name=$SIMULATOR_NAME,OS=latest" \
+            -destination "id=$SIMULATOR_UDID" \
             -enumerate-tests \
             -test-enumeration-format json \
             -test-enumeration-output-path build/reports/discovered-tests.json \
@@ -95,7 +89,7 @@ workflows:
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            -destination "platform=iOS Simulator,name=$SIMULATOR_NAME,OS=latest" \
+            -destination "id=$SIMULATOR_UDID" \
             -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build/reports/xcodebuild-test.log
