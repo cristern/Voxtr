@@ -3,10 +3,9 @@ import SwiftData
 import VoxtrCore
 
 /// Wires together every Core service and every domain module exactly
-/// once. The real `VoxtrApp` (created in Xcode, not in this package —
-/// see the note in the accompanying gap report) should do nothing more
-/// than call `CompositionRoot.build()` and hand the result to its
-/// SwiftUI `Scene`.
+/// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
+/// once at launch (via `CompositionRootLoaderView`) and use the
+/// resulting `modelContainer` for the rest of the app's lifetime.
 @MainActor
 public final class CompositionRoot {
 
@@ -21,7 +20,7 @@ public final class CompositionRoot {
     }
 
     public static func build(
-        persistence: PersistenceProviding = SwiftDataPersistenceController(),
+        persistence: PersistenceProviding = SwiftDataPersistenceController(modelTypes: AppSchema.modelTypes),
         sync: SyncProviding = NoopSyncProvider(),
         featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider()
     ) async throws -> CompositionRoot {
@@ -38,7 +37,7 @@ public final class CompositionRoot {
         }
 
         let log = VoxtrLog.logger(.appShell)
-        log.info("Sprint 0 composition root built with \(ModuleRegistry.allModules().count) modules.")
+        log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 
         await eventBus.publish(AppDidFinishLaunchingEvent())
 
