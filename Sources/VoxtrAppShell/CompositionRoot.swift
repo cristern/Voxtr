@@ -33,7 +33,7 @@ public final class CompositionRoot {
         let modelContainer = try persistence.makeModelContainer()
 
         for module in ModuleRegistry.allModules() {
-            await module.configure(container: container, eventBus: eventBus)
+            await module.configure(container: container, eventBus: eventBus, modelContainer: modelContainer)
         }
 
         let log = VoxtrLog.logger(.appShell)
