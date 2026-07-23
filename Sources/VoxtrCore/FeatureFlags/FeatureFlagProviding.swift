@@ -22,7 +22,16 @@ public enum FeatureFlag: String, CaseIterable, Sendable {
 /// remote-config service is adopted later (e.g. for staged rollouts), add
 /// a second `FeatureFlagProviding` conformance — do not modify this one.
 public final class LocalFeatureFlagProvider: FeatureFlagProviding {
-    private let defaults: UserDefaults
+    // `UserDefaults` is not marked `Sendable` by Apple, but it IS
+    // documented as safe to access concurrently from multiple threads
+    // (Apple's UserDefaults docs: "the class is thread-safe"). Swift 6's
+    // strict concurrency checker can't know that from the type system
+    // alone, so `nonisolated(unsafe)` tells the compiler we're making
+    // that safety claim deliberately and with a stated reason — this is
+    // the targeted fix for exactly this situation, rather than making
+    // the whole class `@unchecked Sendable` (which would silence
+    // checking on every property, not just this one).
+    nonisolated(unsafe) private let defaults: UserDefaults
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
