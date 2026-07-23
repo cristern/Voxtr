@@ -25,6 +25,25 @@ let package = Package(
     products: [
         .library(name: "VoxtrCore", targets: ["VoxtrCore"]),
         .library(name: "VoxtrAppShell", targets: ["VoxtrAppShell"]),
+        // Everything below was previously an internal-only target — fine
+        // for other targets *inside* this package (e.g. VoxtrAppShell
+        // depending on VoxtrAthleteDomain), but invisible to anything
+        // outside the package, including the native VoxtrSprint0Tests
+        // target in App/Voxtr.xcodeproj. SwiftPM only exposes declared
+        // `products` to external consumers — that mismatch (target
+        // exists, product doesn't) is exactly what produced "Missing
+        // package product" for seven targets at once.
+        .library(name: "VoxtrCoreContracts", targets: ["VoxtrCoreContracts"]),
+        .library(name: "VoxtrCoreReferenceData", targets: ["VoxtrCoreReferenceData"]),
+        .library(name: "VoxtrAthleteDomain", targets: ["VoxtrAthleteDomain"]),
+        .library(name: "VoxtrParentDomain", targets: ["VoxtrParentDomain"]),
+        .library(name: "VoxtrPlanningDomain", targets: ["VoxtrPlanningDomain"]),
+        .library(name: "VoxtrTrainingDomain", targets: ["VoxtrTrainingDomain"]),
+        .library(name: "VoxtrReflectionDomain", targets: ["VoxtrReflectionDomain"]),
+        .library(name: "VoxtrDevelopmentDomain", targets: ["VoxtrDevelopmentDomain"]),
+        .library(name: "VoxtrDecisionSupportDomain", targets: ["VoxtrDecisionSupportDomain"]),
+        .library(name: "VoxtrNotificationsDomain", targets: ["VoxtrNotificationsDomain"]),
+        .library(name: "VoxtrSettings", targets: ["VoxtrSettings"]),
     ],
     targets: [
         // MARK: - Infrastructure (Sprint 0, unaffected by v1.2)
