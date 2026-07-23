@@ -16,6 +16,7 @@
 		575618F931783B99472CCB75 /* ModuleRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */; };
 		03A338F987E48C6CC36896D2 /* DIContainerAndFeatureFlagTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */; };
 		BC3B401B5525998BB4AD94D0 /* PersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */; };
+		27D68D7A2123431FE5B3A039 /* ParentWorkspaceRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -40,6 +41,7 @@
 		58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleRegistryTests.swift; sourceTree = "<group>"; };
 		CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DIContainerAndFeatureFlagTests.swift; sourceTree = "<group>"; };
 		7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceTests.swift; sourceTree = "<group>"; };
+		AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentWorkspaceRepositoryTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -123,6 +125,7 @@
 				58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */,
 				CEEC5383023EB706BC523352 /* DIContainerAndFeatureFlagTests.swift */,
 				7F6D31D799AE72FE766EDB67 /* PersistenceTests.swift */,
+				AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -296,6 +299,7 @@
 				575618F931783B99472CCB75 /* ModuleRegistryTests.swift in Sources */,
 				03A338F987E48C6CC36896D2 /* DIContainerAndFeatureFlagTests.swift in Sources */,
 				BC3B401B5525998BB4AD94D0 /* PersistenceTests.swift in Sources */,
+				27D68D7A2123431FE5B3A039 /* ParentWorkspaceRepositoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
