@@ -7,11 +7,14 @@ struct EventBusTests {
     @Test("A subscriber receives an event published after it subscribes")
     func subscriberReceivesEvent() async {
         let bus = EventBus()
-        actor Received { var events: [AppDidFinishLaunchingEvent] = [] }
+        actor Received {
+            var events: [AppDidFinishLaunchingEvent] = []
+            func record(_ event: AppDidFinishLaunchingEvent) { events.append(event) }
+        }
         let received = Received()
 
         _ = await bus.subscribe(to: AppDidFinishLaunchingEvent.self) { event in
-            Task { await received.events.append(event) }
+            Task { await received.record(event) }
         }
 
         await bus.publish(AppDidFinishLaunchingEvent())
