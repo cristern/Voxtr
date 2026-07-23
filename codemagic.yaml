@@ -2,12 +2,15 @@ workflows:
 
   # =======================================================================
   # 1. package-tests — runs the native VoxtrSprint0Tests unit test target
-  #    via the dedicated VoxtrTests scheme. Uses a CONCRETE simulator
-  #    destination for the test action — `generic/platform=iOS Simulator`
-  #    works for build/archive but xcodebuild cannot run tests against a
-  #    generic destination (no runtime to execute against), which was the
-  #    root cause of "no test bundles available to test" together with
-  #    VoxtrSprint0Tests not yet being a real native target.
+  #    via the dedicated VoxtrTests scheme, against a concrete simulator
+  #    destination (xcodebuild test cannot run against a generic
+  #    destination). Produces a REAL .xcresult and converts it to JUnit
+  #    with Scripts/xcresult_to_junit.py — NOT xcpretty, which does not
+  #    understand Swift Testing's console output and is the most likely
+  #    reason a previous run showed `tests="0"` despite completing
+  #    successfully. The workflow hard-fails if zero tests execute or if
+  #    the result bundle/JUnit conversion can't be produced at all — it
+  #    never falls back to writing an empty passing report.
   # =======================================================================
   package-tests:
     name: Voxtr — Package unit tests (Swift Testing)
@@ -19,6 +22,8 @@ workflows:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
         XCODE_SCHEME: "VoxtrTests"
         SIMULATOR_DEVICE: "iPhone 16"
+        RESULT_BUNDLE: "build/reports/VoxtrSprint0Tests.xcresult"
+        JUNIT_OUTPUT: "build/reports/junit.xml"
     triggering:
       events:
         - push
@@ -39,24 +44,65 @@ workflows:
           echo "== Bundle identifiers =="
           xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
             | grep -i PRODUCT_BUNDLE_IDENTIFIER || true
-      - name: Run VoxtrSprint0Tests against a concrete simulator (test action requires a real runtime, not a generic destination)
+
+      - name: Print discovered tests before running (best effort — see script comments if this step's flags don't match your Xcode version)
         script: |
-          xcrun simctl list devicetypes | grep -q "$SIMULATOR_DEVICE" || echo "Warning: $SIMULATOR_DEVICE not found in this image's device list — check the output above and adjust SIMULATOR_DEVICE if this fails."
+          set +e
+          mkdir -p build/reports
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "platform=iOS Simulator,name=$SIMULATOR_DEVICE,OS=latest" \
+            -enumerate-tests \
+            -test-enumeration-format json \
+            -test-enumeration-output-path build/reports/discovered-tests.json \
+            CODE_SIGNING_ALLOWED=NO
+          if [ -f build/reports/discovered-tests.json ]; then
+            echo "== Discovered tests =="
+            cat build/reports/discovered-tests.json
+          else
+            echo "NOTE: -enumerate-tests did not produce output on this Xcode version/image — this is a best-effort visibility step and is NOT what gates pass/fail below. Continuing."
+          fi
+          set -e
+
+      - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty — see script header for why)
+        script: |
+          set -o pipefail
+          rm -rf "$RESULT_BUNDLE"
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "platform=iOS Simulator,name=$SIMULATOR_DEVICE,OS=latest" \
+            -resultBundlePath "$RESULT_BUNDLE" \
             CODE_SIGNING_ALLOWED=NO \
-            | xcpretty --report junit || xcodebuild test \
-                -project "$XCODE_PROJECT" \
-                -scheme "$XCODE_SCHEME" \
-                -destination "platform=iOS Simulator,name=$SIMULATOR_DEVICE,OS=latest" \
-                CODE_SIGNING_ALLOWED=NO
+            2>&1 | tee build/reports/xcodebuild-test.log
+
+      - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
+        script: |
+          set -e
+          python3 Scripts/xcresult_to_junit.py \
+            --xcresult "$RESULT_BUNDLE" \
+            --junit-output "$JUNIT_OUTPUT"
+          # Belt-and-braces: even if the script above somehow exits 0
+          # without a file (it shouldn't), refuse to call this a pass.
+          if [ ! -f "$JUNIT_OUTPUT" ]; then
+            echo "FAILING BUILD: no JUnit report was produced — refusing to report success on missing results."
+            exit 1
+          fi
+          TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Executed test count: $TEST_COUNT"
+          if [ "$TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed."
+            exit 1
+          fi
     artifacts:
+      - build/reports/VoxtrSprint0Tests.xcresult
       - build/reports/junit.xml
+      - build/reports/discovered-tests.json
+      - build/reports/xcodebuild-test.log
     publishing:
       email:
-        recipients: 
+        recipients:
           - cristern@hotmail.com
         notify:
           success: false
@@ -102,7 +148,7 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients:  
+        recipients:
           - cristern@hotmail.com
         notify:
           success: false
@@ -148,7 +194,7 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients:  
+        recipients:
           - cristern@hotmail.com
         notify:
           success: false
@@ -270,7 +316,7 @@ workflows:
         auth: integration
         submit_to_testflight: true
       email:
-        recipients: 
+        recipients:
           - cristern@hotmail.com
         notify:
           success: true
