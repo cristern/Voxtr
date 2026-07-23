@@ -1,7 +1,13 @@
 workflows:
 
   # =======================================================================
-  # 1. package-tests — runs VoxtrSprint0Tests. No signing needed.
+  # 1. package-tests — runs the native VoxtrSprint0Tests unit test target
+  #    via the dedicated VoxtrTests scheme. Uses a CONCRETE simulator
+  #    destination for the test action — `generic/platform=iOS Simulator`
+  #    works for build/archive but xcodebuild cannot run tests against a
+  #    generic destination (no runtime to execute against), which was the
+  #    root cause of "no test bundles available to test" together with
+  #    VoxtrSprint0Tests not yet being a real native target.
   # =======================================================================
   package-tests:
     name: Voxtr — Package unit tests (Swift Testing)
@@ -11,7 +17,8 @@ workflows:
       xcode: latest
       vars:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
-        XCODE_SCHEME: "AthleteApp"
+        XCODE_SCHEME: "VoxtrTests"
+        SIMULATOR_DEVICE: "iPhone 16"
     triggering:
       events:
         - push
@@ -25,33 +32,32 @@ workflows:
           set -e
           echo "== Xcode version =="
           xcodebuild -version
-          echo "== Available schemes (verifies both are shared/discoverable) =="
+          echo "== Available schemes (verifies all are shared/discoverable) =="
           xcodebuild -list -project "$XCODE_PROJECT"
           echo "== Resolved Swift packages =="
           xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
           echo "== Bundle identifiers =="
           xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
             | grep -i PRODUCT_BUNDLE_IDENTIFIER || true
-      - name: Run VoxtrSprint0Tests (unit tests only, no device/signing needed)
+      - name: Run VoxtrSprint0Tests against a concrete simulator (test action requires a real runtime, not a generic destination)
         script: |
+          xcrun simctl list devicetypes | grep -q "$SIMULATOR_DEVICE" || echo "Warning: $SIMULATOR_DEVICE not found in this image's device list — check the output above and adjust SIMULATOR_DEVICE if this fails."
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
-            -destination "generic/platform=iOS Simulator" \
-            -only-testing:VoxtrSprint0Tests \
+            -destination "platform=iOS Simulator,name=$SIMULATOR_DEVICE,OS=latest" \
             CODE_SIGNING_ALLOWED=NO \
             | xcpretty --report junit || xcodebuild test \
                 -project "$XCODE_PROJECT" \
                 -scheme "$XCODE_SCHEME" \
-                -destination "generic/platform=iOS Simulator" \
-                -only-testing:VoxtrSprint0Tests \
+                -destination "platform=iOS Simulator,name=$SIMULATOR_DEVICE,OS=latest" \
                 CODE_SIGNING_ALLOWED=NO
     artifacts:
       - build/reports/junit.xml
     publishing:
       email:
         recipients: 
-        - cristern@hotmail.com
+          - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -96,8 +102,8 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients: 
-        - cristern@hotmail.com
+        recipients:  
+          - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -142,8 +148,8 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     publishing:
       email:
-        recipients: 
-        - cristern@hotmail.com
+        recipients:  
+          - cristern@hotmail.com
         notify:
           success: false
           failure: true
@@ -264,8 +270,7 @@ workflows:
         auth: integration
         submit_to_testflight: true
       email:
-        recipients: 
-        - cristern@hotmail.com
+        recipients: []
         notify:
           success: true
           failure: true
