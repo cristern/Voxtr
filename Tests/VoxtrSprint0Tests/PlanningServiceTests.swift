@@ -291,4 +291,89 @@ struct PlanningServiceTests {
         #expect(first.map(\.title) == ["Monday", "Wednesday", "Thursday"])
         #expect(first.map(\.id) == second.map(\.id))
     }
+
+    @Test("Committing a draft WeekPlan transitions it to committed and increments revision by exactly 1")
+    @MainActor
+    func commitTransitionsToCommittedAndIncrementsRevision() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        #expect(weekPlan.revision == 1)
+
+        let committed = try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(committed.status == .committed)
+        #expect(committed.revision == 2)
+        #expect(committed.committedAt != nil)
+    }
+
+    @Test("Committing an already-committed WeekPlan is rejected")
+    @MainActor
+    func duplicateCommitRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(throws: WeekPlanConflictError.alreadyCommitted) {
+            try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, committedBy: ActorId())
+        }
+        #expect(weekPlan.revision == 2)
+    }
+
+    @Test("Editing a PlannedActivity after its WeekPlan has been committed is rejected")
+    @MainActor
+    func editAfterCommitRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                activityType: .recovery,
+                title: "Should not apply",
+                localDate: LocalDate(year: 2026, month: 1, day: 7),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        let stillOriginal = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(stillOriginal?.title == "Endurance run")
+    }
+
+    @Test("A stale expectedRevision on commit is rejected as a conflict, and the plan is left unchanged")
+    @MainActor
+    func staleRevisionOnCommitRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: WeekPlanConflictError.staleRevision(expected: 99, actual: 1)) {
+            try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 99, committedBy: ActorId())
+        }
+        #expect(weekPlan.status == .draft)
+        #expect(weekPlan.revision == 1)
+    }
 }

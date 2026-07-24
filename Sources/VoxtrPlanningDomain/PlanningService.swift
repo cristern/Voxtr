@@ -9,6 +9,7 @@ public enum PlanningServiceError: Error, Equatable {
     case weekPlanNotFound
     case plannedActivityNotFound
     case plannedActivityDoesNotBelongToWeekPlan
+    case weekPlanNotDraft
     case invalidField(String)
 }
 
@@ -40,6 +41,29 @@ public final class PlanningService {
             return existing
         }
         return try repository.insertWeekPlan(athleteId: athleteId, weekStart: weekStart)
+    }
+
+    /// S2.3: commits a draft WeekPlan. Delegates entirely to `WeekPlan.
+    /// commit` for the actual transition/revision-increment logic (the
+    /// existing optimistic-concurrency model) — this method's only job
+    /// is the existence check ("commit a WeekPlan that doesn't exist"
+    /// isn't one of the two error cases `WeekPlan.commit` itself can
+    /// express, since it needs an instance to call this on).
+    /// `WeekPlanConflictError` (stale revision / already committed)
+    /// propagates directly, unwrapped — same as how `AthleteProfile.
+    /// applyMutation`'s conflict error is surfaced.
+    @discardableResult
+    public func commitWeekPlan(
+        _ weekPlanId: WeekPlanId,
+        expectedRevision: Int,
+        committedBy: ActorId
+    ) throws -> WeekPlan {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        try weekPlan.commit(expectedRevision: expectedRevision, committedBy: committedBy)
+        try repository.save()
+        return weekPlan
     }
 
     /// S2.2: adds a `PlannedActivity` to an existing `WeekPlan`.
@@ -105,8 +129,11 @@ public final class PlanningService {
         plannedIntensity: Int? = nil,
         notes: String? = nil
     ) throws -> PlannedActivity {
-        guard try repository.fetchWeekPlan(byId: weekPlanId) != nil else {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
+        }
+        guard weekPlan.status == .draft else {
+            throw PlanningServiceError.weekPlanNotDraft
         }
         guard let activity = try repository.fetchPlannedActivity(byId: plannedActivityId) else {
             throw PlanningServiceError.plannedActivityNotFound

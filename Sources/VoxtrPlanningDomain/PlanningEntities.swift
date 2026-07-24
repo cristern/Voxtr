@@ -21,7 +21,7 @@ public final class WeekPlan {
     // storage format is business behavior.
     private var weekStartRaw: String
     public var status: WeekPlanStatus
-    public var revision: Int
+    public private(set) var revision: Int
     public var focusNote: String?
     public var committedAt: Date?
     public var committedBy: UUID?
@@ -72,6 +72,48 @@ public final class WeekPlan {
     public var weekStart: LocalDate {
         get { LocalDate(isoString: weekStartRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
         set { weekStartRaw = newValue.isoString }
+    }
+}
+
+// MARK: - WeekPlan commit (S2.3) — mirrors AthleteProfile.applyMutation
+// (Domain & Data Model v1.4) exactly: the same optimistic-concurrency
+// model the entity's own doc comment already said WeekPlan.revision
+// follows (v1.3 Section 8.1/DDM-009), just not yet implemented as a
+// callable method before this story.
+
+/// Thrown by `WeekPlan.commit`. `staleRevision` mirrors
+/// `AthleteProfileConflictError` exactly — someone else committed or
+/// otherwise mutated the plan first. `alreadyCommitted` is the
+/// duplicate-commit case, checked separately so callers can tell the
+/// two situations apart.
+public enum WeekPlanConflictError: Error, Sendable, Equatable {
+    case staleRevision(expected: Int, actual: Int)
+    case alreadyCommitted
+}
+
+public extension WeekPlan {
+    /// The ONLY sanctioned way to transition a WeekPlan from `.draft` to
+    /// `.committed`. `expectedRevision` must be the revision the caller
+    /// last read; a mismatch throws `.staleRevision` and leaves the plan
+    /// completely untouched — no partial mutation. A plan that isn't
+    /// `.draft` throws `.alreadyCommitted` instead, checked first so the
+    /// two failure cases stay distinguishable. On success, `status`,
+    /// `committedAt`, `committedBy` are set and `revision` incremented
+    /// by exactly 1, together, before this returns.
+    @discardableResult
+    func commit(expectedRevision: Int, committedBy: ActorId) throws -> WeekPlanCommitted {
+        guard status == .draft else {
+            throw WeekPlanConflictError.alreadyCommitted
+        }
+        guard revision == expectedRevision else {
+            throw WeekPlanConflictError.staleRevision(expected: expectedRevision, actual: revision)
+        }
+        status = .committed
+        committedAt = .now
+        self.committedBy = committedBy.rawValue
+        revision += 1
+        updatedAt = .now
+        return WeekPlanCommitted(weekPlanId: weekPlanId, athleteId: AthleteId(rawValue: athleteId), revision: revision)
     }
 }
 
