@@ -1,10 +1,9 @@
 import SwiftUI
 import VoxtrAppShell
 
-/// Content is still the Sprint-0 placeholder (`NavigationShellView`) —
-/// story S1.4 (parent onboarding UI) replaces this with `RootView`.
-/// S1.0's job is only the composition/persistence plumbing below, not
-/// the UI that will eventually use it.
+/// S1.4: content is now `RootView`, whose navigation is driven entirely
+/// by `FamilyRestorationState` — no onboarding UI here in this file
+/// itself, that's all in `RootView`/`CreateFamilyView`.
 ///
 /// What DID change in Sprint 1 (S1.0): this now actually builds the
 /// composition root and gets a real, persisted `ModelContainer` at
@@ -14,8 +13,8 @@ import VoxtrAppShell
 struct ParentApp: App {
     var body: some Scene {
         WindowGroup {
-            CompositionRootLoaderView { _ in
-                NavigationShellView()
+            CompositionRootLoaderView { root in
+                RootView(root: root)
             }
         }
     }
