@@ -28,10 +28,24 @@ workflows:
     triggering:
       events:
         - push
-        - pull_request
+      # Automatic trigger: push to develop ONLY. Pull-request validation
+      # is handled entirely by the separate pr-validation workflow now
+      # (CI-01) — this workflow no longer reacts to pull requests at all.
       branch_patterns:
         - pattern: "*"
+          include: false
+        - pattern: develop
           include: true
+      cancel_previous_builds: true
+    # CI-01: skip when only documentation changed. Per Codemagic's own
+    # docs, the build after first adding this "when" block still runs
+    # once regardless of changeset (needed to establish the baseline);
+    # only builds AFTER that are actually skipped when the changeset
+    # matches only the excluded paths.
+    when:
+      changeset:
+        excludes:
+          - "**/*.md"
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -91,6 +105,7 @@ workflows:
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
             -resultBundlePath "$RESULT_BUNDLE" \
+            -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build/reports/xcodebuild-test.log
 
@@ -138,12 +153,10 @@ workflows:
       vars:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
         XCODE_SCHEME: "AthleteApp"
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
+    # CI-01: no automatic triggers — this workflow no longer runs on push
+    # or pull request. It stays available for manual runs in Codemagic
+    # (removing "triggering" entirely doesn't disable manual execution,
+    # it only removes automatic webhook-based triggering).
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -184,12 +197,10 @@ workflows:
       vars:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
         XCODE_SCHEME: "ParentApp"
-    triggering:
-      events:
-        - push
-      branch_patterns:
-        - pattern: main
-          include: true
+    # CI-01: no automatic triggers — this workflow no longer runs on push
+    # or pull request. It stays available for manual runs in Codemagic
+    # (removing "triggering" entirely doesn't disable manual execution,
+    # it only removes automatic webhook-based triggering).
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -219,7 +230,126 @@ workflows:
           failure: true
 
   # =======================================================================
-  # 4. testflight-release — REAL signing. Nothing in this workflow is a
+  # 4. pr-validation (CI-01) — the ONLY automatic PR check now. Runs the
+  #    same test process as package-tests, hard-failing on zero tests,
+  #    and ONLY IF that passes, builds AthleteApp, and ONLY IF that
+  #    passes, builds ParentApp. No `ignore_failure: true` anywhere in
+  #    this workflow — Codemagic's default behavior (stop the whole
+  #    build on the first non-zero-exit script) is exactly what
+  #    enforces "a failed test or build step must stop all later steps."
+  # =======================================================================
+  pr-validation:
+    name: Vǫxtr — PR validation (tests → AthleteApp → ParentApp)
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+      vars:
+        XCODE_PROJECT: "App/Voxtr.xcodeproj"
+        XCODE_SCHEME: "VoxtrTests"
+        ATHLETE_SCHEME: "AthleteApp"
+        PARENT_SCHEME: "ParentApp"
+        RESULT_BUNDLE: "build/reports/VoxtrSprint0Tests.xcresult"
+        JUNIT_OUTPUT: "build/reports/junit.xml"
+    triggering:
+      events:
+        - pull_request
+      # Only PRs targeting main. source:false = match the PR's TARGET
+      # branch. No push event declared at all, so (unlike the workflows
+      # above in earlier rounds) there is no push-to-main leak here —
+      # this workflow structurally cannot run on any push.
+      branch_patterns:
+        - pattern: "*"
+          include: false
+        - pattern: main
+          include: true
+          source: false
+      cancel_previous_builds: true
+    scripts:
+      - name: Validate project (schemes, packages, Xcode version, bundle IDs)
+        script: |
+          set -e
+          echo "== Xcode version =="
+          xcodebuild -version
+          echo "== Available schemes (verifies all are shared/discoverable) =="
+          xcodebuild -list -project "$XCODE_PROJECT"
+          echo "== Resolved Swift packages =="
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME"
+          echo "== Bundle identifiers =="
+          xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
+            | grep -i PRODUCT_BUNDLE_IDENTIFIER || true
+
+      - name: Auto-detect an available iOS Simulator via simctl
+        script: |
+          set -e
+          mkdir -p build/reports
+          SIMULATOR_UDID=$(python3 Scripts/pick_simulator.py)
+          if [ -z "$SIMULATOR_UDID" ]; then
+            echo "FAILING BUILD: simctl reports no available iPhone simulator on this CI image at all."
+            exit 1
+          fi
+          echo "Auto-detected simulator UDID: $SIMULATOR_UDID"
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$CM_ENV"
+
+      - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty)
+        script: |
+          set -o pipefail
+          rm -rf "$RESULT_BUNDLE"
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -resultBundlePath "$RESULT_BUNDLE" \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/reports/xcodebuild-test.log
+
+      - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
+        script: |
+          set -e
+          python3 Scripts/xcresult_to_junit.py \
+            --xcresult "$RESULT_BUNDLE" \
+            --junit-output "$JUNIT_OUTPUT"
+          if [ ! -f "$JUNIT_OUTPUT" ]; then
+            echo "FAILING BUILD: no JUnit report was produced — refusing to report success on missing results."
+            exit 1
+          fi
+          TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Executed test count: $TEST_COUNT"
+          if [ "$TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed."
+            exit 1
+          fi
+
+      - name: Build AthleteApp for the simulator (only reached if tests passed)
+        script: |
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build ParentApp for the simulator (only reached if AthleteApp built)
+        script: |
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$PARENT_SCHEME" \
+            -destination "generic/platform=iOS Simulator" \
+            CODE_SIGNING_ALLOWED=NO
+    artifacts:
+      - build/reports/VoxtrSprint0Tests.xcresult
+      - build/reports/junit.xml
+      - build/reports/xcodebuild-test.log
+    publishing:
+      email:
+        recipients:
+          - cristern@hotmail.com
+        notify:
+          success: false
+          failure: true
+
+  # =======================================================================
+  # 5. testflight-release — REAL signing. Nothing in this workflow is a
   #    literal secret: the API key, Team ID, certificate, and profiles are
   #    all fetched at runtime from Codemagic's App Store Connect
   #    integration and environment variable group, referenced here only

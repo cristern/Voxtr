@@ -1,16 +1,21 @@
 import SwiftUI
 import VoxtrAppShell
 
-/// Deliberately minimal — this is the CI/Sprint-0 shell, not real product
-/// UI. Real parent-facing navigation/screens are Sprint 1+ work. Reuses
-/// the same NavigationShellView as AthleteApp for now since no
-/// parent-specific UI exists yet — both apps compose the same
-/// ModuleRegistry.
+/// S1.4: content is now `RootView`, whose navigation is driven entirely
+/// by `FamilyRestorationState` — no onboarding UI here in this file
+/// itself, that's all in `RootView`/`CreateFamilyView`.
+///
+/// What DID change in Sprint 1 (S1.0): this now actually builds the
+/// composition root and gets a real, persisted `ModelContainer` at
+/// launch, via `CompositionRootLoaderView` — Sprint 0 never called
+/// `CompositionRoot.build()` from either app target at all.
 @main
 struct ParentApp: App {
     var body: some Scene {
         WindowGroup {
-            NavigationShellView()
+            CompositionRootLoaderView { root in
+                RootView(root: root)
+            }
         }
     }
 }

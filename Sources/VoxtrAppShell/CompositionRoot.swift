@@ -1,27 +1,49 @@
 import Foundation
 import SwiftData
 import VoxtrCore
+import VoxtrParentDomain
+import VoxtrAthleteDomain
 
 /// Wires together every Core service and every domain module exactly
-/// once. The real `VoxtrApp` (created in Xcode, not in this package —
-/// see the note in the accompanying gap report) should do nothing more
-/// than call `CompositionRoot.build()` and hand the result to its
-/// SwiftUI `Scene`.
+/// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
+/// once at launch (via `CompositionRootLoaderView`) and use the
+/// resulting `modelContainer` for the rest of the app's lifetime.
+///
+/// S1.2 note: this file now imports `VoxtrParentDomain` and
+/// `VoxtrAthleteDomain` directly, to resolve their repositories and
+/// construct `FamilyOnboardingCoordinator` — see that type's own doc
+/// comment for why cross-domain composition is only legitimate inside
+/// `VoxtrAppShell`. `ModuleRegistry.swift`'s older comment calling
+/// itself "the single place" that does this predates S1.2 and is no
+/// longer literally accurate; the real rule is "only inside
+/// `VoxtrAppShell`," not "only in one specific file."
 @MainActor
 public final class CompositionRoot {
 
     public let container: DIContainer
     public let eventBus: EventBus
     public let modelContainer: ModelContainer
+    /// S1.3: what was found in the store at launch — computed once here,
+    /// exposed for whatever content view (S1.4+) needs to decide between
+    /// onboarding and a restored family screen. See
+    /// `FamilyRestorationState`'s doc comment for the three possible
+    /// states.
+    public let restorationState: FamilyRestorationState
 
-    private init(container: DIContainer, eventBus: EventBus, modelContainer: ModelContainer) {
+    private init(
+        container: DIContainer,
+        eventBus: EventBus,
+        modelContainer: ModelContainer,
+        restorationState: FamilyRestorationState
+    ) {
         self.container = container
         self.eventBus = eventBus
         self.modelContainer = modelContainer
+        self.restorationState = restorationState
     }
 
     public static func build(
-        persistence: PersistenceProviding = SwiftDataPersistenceController(),
+        persistence: PersistenceProviding = SwiftDataPersistenceController(modelTypes: AppSchema.modelTypes),
         sync: SyncProviding = NoopSyncProvider(),
         featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider()
     ) async throws -> CompositionRoot {
@@ -34,14 +56,42 @@ public final class CompositionRoot {
         let modelContainer = try persistence.makeModelContainer()
 
         for module in ModuleRegistry.allModules() {
-            await module.configure(container: container, eventBus: eventBus)
+            await module.configure(container: container, eventBus: eventBus, modelContainer: modelContainer)
         }
 
+        // S1.2: FamilyOnboardingCoordinator depends on repositories the
+        // modules above just registered — built and registered after
+        // the module configuration loop, not inside it, since it's not
+        // owned by any single module.
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: modelContainer.mainContext,
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
+            athleteAccessGrantRepository: container.resolve(AthleteAccessGrantRepository.self)
+        )
+        container.register(FamilyOnboardingCoordinator.self) { coordinator }
+
+        // S1.3: compute what's already on disk, once, at launch.
+        // Registered so it can be re-run later too (e.g. after a future
+        // CloudKit sync merges in data), not just used here.
+        let restorationService = FamilyRestorationService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
+            athleteAccessGrantRepository: container.resolve(AthleteAccessGrantRepository.self)
+        )
+        container.register(FamilyRestorationService.self) { restorationService }
+        let restorationState = try restorationService.restoreState()
+
         let log = VoxtrLog.logger(.appShell)
-        log.info("Sprint 0 composition root built with \(ModuleRegistry.allModules().count) modules.")
+        log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 
         await eventBus.publish(AppDidFinishLaunchingEvent())
 
-        return CompositionRoot(container: container, eventBus: eventBus, modelContainer: modelContainer)
+        return CompositionRoot(
+            container: container,
+            eventBus: eventBus,
+            modelContainer: modelContainer,
+            restorationState: restorationState
+        )
     }
 }

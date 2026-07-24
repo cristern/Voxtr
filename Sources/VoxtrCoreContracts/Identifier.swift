@@ -59,3 +59,18 @@ public struct AccountId: Hashable, Codable, Sendable, RawRepresentable {
 public extension ActorId {
     static let system = ActorId(rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000000")!)
 }
+
+/// S1.1 DECISION: CloudKit account resolution doesn't exist until a
+/// later sprint, but `ParentProfile.accountId`, `FamilyWorkspace.
+/// technicalOwnerAccountId`, and `WorkspaceParticipant.accountId` are
+/// all required, non-optional `AccountId` fields per v1.3. Rather than
+/// generating a per-install random surrogate identity (explicitly
+/// rejected), every account-scoped field created in Sprint 1 uses this
+/// single, well-known, documented sentinel. This is NOT a real account
+/// identifier and must not be treated as one anywhere — it exists so the
+/// required field can be populated without inventing an identity.
+/// Replacing it with real iCloud account identifiers is real migration
+/// work for whichever sprint introduces CloudKit, not a cosmetic rename.
+public extension AccountId {
+    static let pending = AccountId(rawValue: "pending-account-id")
+}

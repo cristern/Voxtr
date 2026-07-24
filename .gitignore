@@ -1,0 +1,12 @@
+# Local working files
+incoming/
+
+# macOS
+.DS_Store
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
+
+# SwiftPM
+.build/
