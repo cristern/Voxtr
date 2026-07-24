@@ -22,6 +22,7 @@
 		7D01238F7EE5FD05E6ABA57A /* FamilyOnboardingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */; };
 		59DB4C63FC17EA05B70F454E /* EndToEndOnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */; };
 		89F8115A52B52562D03C5AC6 /* PlanningRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */; };
+		B753C265C4B075F90ACC2E06 /* PlanningServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -52,6 +53,7 @@
 		1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyOnboardingUITests.swift; sourceTree = "<group>"; };
 		4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndToEndOnboardingTests.swift; sourceTree = "<group>"; };
 		04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningRepositoryTests.swift; sourceTree = "<group>"; };
+		8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -141,6 +143,7 @@
 				1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */,
 				4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */,
 				04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */,
+				8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -320,6 +323,7 @@
 				7D01238F7EE5FD05E6ABA57A /* FamilyOnboardingUITests.swift in Sources */,
 				59DB4C63FC17EA05B70F454E /* EndToEndOnboardingTests.swift in Sources */,
 				89F8115A52B52562D03C5AC6 /* PlanningRepositoryTests.swift in Sources */,
+				B753C265C4B075F90ACC2E06 /* PlanningServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
