@@ -2,6 +2,12 @@ import Foundation
 import VoxtrCore
 import VoxtrCoreContracts
 
+/// S3.2: thrown by `TrainingService.logActivity` when the requested
+/// link would duplicate one that already exists.
+public enum TrainingServiceError: Error, Equatable {
+    case plannedActivityAlreadyLinked
+}
+
 /// S3.0/S3.1: the domain-level use case for logging completed
 /// activities. Lives in `VoxtrTrainingDomain` itself (not
 /// `VoxtrAppShell`) since it only ever touches Training's own entity via
@@ -48,7 +54,15 @@ public final class TrainingService {
         source: String = "manual",
         notes: String? = nil
     ) throws -> LoggedActivity {
-        try repository.insertLoggedActivity(
+        // S3.2: prevent the same PlannedActivity from being linked more
+        // than once — checked before any insert is attempted.
+        if let plannedActivityId {
+            let existingLinks = try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId)
+            guard existingLinks.isEmpty else {
+                throw TrainingServiceError.plannedActivityAlreadyLinked
+            }
+        }
+        return try repository.insertLoggedActivity(
             athleteId: athleteId,
             plannedActivityId: plannedActivityId,
             sportId: sportId,

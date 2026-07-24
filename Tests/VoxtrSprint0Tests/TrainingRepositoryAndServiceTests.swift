@@ -239,4 +239,48 @@ struct TrainingRepositoryAndServiceTests {
         #expect(first.map(\.title) == ["Morning", "Evening"])
         #expect(first.map(\.id) == second.map(\.id))
     }
+
+    @Test("Linking a second LoggedActivity to an already-linked PlannedActivity is rejected")
+    @MainActor
+    func secondLinkToSamePlannedActivityRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let plannedActivityId = PlannedActivityId()
+        _ = try service.logActivity(
+            athleteId: AthleteId(), plannedActivityId: plannedActivityId,
+            activityType: .individualTraining, title: "First log",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000)
+        )
+
+        #expect(throws: TrainingServiceError.plannedActivityAlreadyLinked) {
+            try service.logActivity(
+                athleteId: AthleteId(), plannedActivityId: plannedActivityId,
+                activityType: .individualTraining, title: "Second log",
+                startedAt: Date(timeIntervalSince1970: 1_767_100_000)
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
+    }
+
+    @Test("Logging without a PlannedActivity link is never affected by the duplicate-link check")
+    @MainActor
+    func unlinkedLoggingUnaffectedByDuplicateCheck() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+
+        _ = try service.logActivity(
+            athleteId: AthleteId(), activityType: .individualTraining, title: "First",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000)
+        )
+        _ = try service.logActivity(
+            athleteId: AthleteId(), activityType: .individualTraining, title: "Second",
+            startedAt: Date(timeIntervalSince1970: 1_767_100_000)
+        )
+
+        #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 2)
+    }
 }

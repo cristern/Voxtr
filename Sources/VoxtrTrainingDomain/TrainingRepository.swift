@@ -97,4 +97,17 @@ public final class TrainingRepository {
         }
         return lhs.id.uuidString < rhs.id.uuidString
     }
+
+    /// S3.2: every `LoggedActivity` already linked to this
+    /// `PlannedActivity`. Used by `TrainingService.logActivity` to
+    /// reject a second link to the same `PlannedActivity` — v1.3 never
+    /// described more than a 1:1 relationship, and nothing in this
+    /// project's scope asked for many-to-one logging against one plan.
+    public func fetchLoggedActivities(forPlannedActivity plannedActivityId: PlannedActivityId) throws -> [LoggedActivity] {
+        let rawId = plannedActivityId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<LoggedActivity>())
+        return all
+            .filter { $0.plannedActivityId == rawId }
+            .sorted(by: Self.deterministicOrder)
+    }
 }
