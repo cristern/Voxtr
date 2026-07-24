@@ -1,4 +1,3 @@
-import Foundation
 import Testing
 import SwiftData
 import VoxtrCore
@@ -224,23 +223,32 @@ struct FamilyOnboardingCoordinatorTests {
     @Test("A genuine save failure (SwiftData uniqueness violation) leaves zero created entities")
     @MainActor
     func genuineSaveFailureLeavesZeroEntities() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        // FIX: originally forced a genuine save failure via a
+        // uniqueness collision (two ParentProfile rows with the same
+        // @Attribute(.unique) id). CI on Xcode 26.4 showed that never
+        // throws — confirmed against Apple's own documented behavior:
+        // @Attribute(.unique) is an UPSERT, not a rejecting constraint.
+        // "When you add a new object and there already exists another
+        // object that has the same value for the unique attribute,
+        // SwiftData updates the existing object... No error will be
+        // triggered." (Apple DTS engineer, developer.apple.com/forums/
+        // thread/804106). That was never a reliable way to force a
+        // throw, on any SwiftData version — not a regression to work
+        // around, a wrong premise to replace.
+        //
+        // Fix: `ModelConfiguration(allowsSave: false)` is a documented,
+        // intentional way to make `save()` genuinely throw — this is
+        // what actually exercises the coordinator's real error path,
+        // not a simulated one.
+        let schema = Schema(AppSchema.modelTypes)
+        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, allowsSave: false)
+        let container = try ModelContainer(for: schema, configurations: [configuration])
         let coordinator = FamilyOnboardingCoordinator(
             modelContext: container.mainContext,
-            parentWorkspaceRepository: parentWorkspaceRepository,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
             athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
         )
-
-        // Pre-persist a ParentProfile with a known ID, saved and
-        // committed on its own — this is NOT part of the operation
-        // under test, it exists purely to force a genuine uniqueness
-        // collision at the coordinator's save() call below.
-        let collidingId = UUID()
-        _ = parentWorkspaceRepository.stageParentAndWorkspace(parentId: collidingId, givenName: "Existing")
-        try container.mainContext.save()
 
         #expect(throws: (any Error).self) {
             try coordinator.createFamily(
@@ -248,20 +256,16 @@ struct FamilyOnboardingCoordinatorTests {
                 athleteGivenName: "Jonas",
                 athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
                 athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-                athleteDevelopmentStage: .parentLed,
-                failAt: nil,
-                forcedParentId: collidingId
+                athleteDevelopmentStage: .parentLed
             )
         }
 
-        // Only the pre-existing "Existing" parent remains — the
-        // coordinator's attempted parent, plus the athlete and grant it
-        // would have created, must all have been rolled back.
-        let parents = try container.mainContext.fetch(FetchDescriptor<ParentProfile>())
-        #expect(parents.count == 1)
-        #expect(parents.first?.givenName == "Existing")
-        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 1)
-        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 1)
+        // Nothing was ever saveable in this container — every entity
+        // the coordinator staged must have been rolled back, leaving it
+        // completely empty.
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 0)
         #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
         #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
     }
