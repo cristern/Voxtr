@@ -215,4 +215,94 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage != nil)
         #expect(viewModel.activities.first?.title == "Endurance run")
     }
+
+    @Test("Activities loaded into the ViewModel are ordered deterministically, regardless of insertion order")
+    @MainActor
+    func activitiesOrderedDeterministically() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.newActivityTitle = "Thursday"
+        viewModel.newActivityDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 8)) ?? .now
+        viewModel.addActivity()
+        viewModel.newActivityTitle = "Monday"
+        viewModel.newActivityDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.map(\.title) == ["Monday", "Thursday"])
+    }
+
+    @Test("Loading twice never creates a duplicate WeekPlan")
+    @MainActor
+    func loadingTwiceNeverDuplicates() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+
+        viewModel.loadOrCreateWeekPlan()
+        let firstId = viewModel.weekPlan?.id
+        viewModel.loadOrCreateWeekPlan()
+
+        #expect(viewModel.weekPlan?.id == firstId)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WeekPlan>()).count == 1)
+    }
+
+    @Test("statusLabel reads Committed after committing")
+    @MainActor
+    func statusLabelReflectsCommittedState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.commit()
+
+        #expect(viewModel.statusLabel == "Committed")
+    }
+
+    @Test("Documents current, deliberate behavior: adding an activity after commit is NOT restricted (only edit/delete are)")
+    @MainActor
+    func addingAfterCommitIsCurrentlyAllowed() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.commit()
+
+        viewModel.newActivityTitle = "Added after commit"
+        viewModel.addActivity()
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.activities.contains { $0.title == "Added after commit" })
+    }
 }

@@ -6,12 +6,23 @@ import VoxtrPlanningDomain
 /// design polish is explicitly out of scope. All state changes go
 /// through `WeeklyPlanningViewModel`, which itself only calls
 /// `PlanningService` — this view holds no business logic.
+///
+/// S2.5: added the activity-type picker to both the add form and the
+/// edit sheet. `WeeklyPlanningViewModel.newActivityType` and
+/// `editActivity(...activityType:)` already existed since S2.4 — the
+/// view simply never exposed a control for them (the add form silently
+/// used the default, and edit always passed the unchanged type back).
+/// This completes existing declared capability; it doesn't add any.
+/// Also completed accessibility identifiers on every control that was
+/// missing one (delete/cancel buttons, per-row identifiers, both
+/// activity-type pickers).
 public struct WeeklyPlanningView: View {
     @State private var viewModel: WeeklyPlanningViewModel
     @State private var isEditingActivity: Bool = false
     @State private var editingActivity: PlannedActivity?
     @State private var editTitle: String = ""
     @State private var editDate: Date = .now
+    @State private var editActivityType: ActivityType = .individualTraining
 
     public init(viewModel: WeeklyPlanningViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -52,10 +63,12 @@ public struct WeeklyPlanningView: View {
                             .foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
+                    .accessibilityIdentifier("planning.activityRow.\(activity.id.uuidString)")
                     .onTapGesture {
                         guard !viewModel.isCommitted else { return }
                         editingActivity = activity
                         editTitle = activity.title
+                        editActivityType = activity.activityType
                         editDate = Calendar.current.date(
                             from: DateComponents(
                                 year: activity.localDate.year,
@@ -70,6 +83,7 @@ public struct WeeklyPlanningView: View {
                             Button("Delete", role: .destructive) {
                                 viewModel.deleteActivity(activity)
                             }
+                            .accessibilityIdentifier("planning.deleteActivityButton.\(activity.id.uuidString)")
                         }
                     }
                 }
@@ -82,6 +96,8 @@ public struct WeeklyPlanningView: View {
                         .accessibilityIdentifier("planning.newActivityTitleField")
                     DatePicker("Date", selection: $viewModel.newActivityDate, displayedComponents: .date)
                         .accessibilityIdentifier("planning.newActivityDatePicker")
+                    activityTypePicker(selection: $viewModel.newActivityType)
+                        .accessibilityIdentifier("planning.newActivityTypePicker")
                     Button("Add activity") {
                         viewModel.addActivity()
                     }
@@ -101,6 +117,8 @@ public struct WeeklyPlanningView: View {
                             .accessibilityIdentifier("planning.editActivityTitleField")
                         DatePicker("Date", selection: $editDate, displayedComponents: .date)
                             .accessibilityIdentifier("planning.editActivityDatePicker")
+                        activityTypePicker(selection: $editActivityType)
+                            .accessibilityIdentifier("planning.editActivityTypePicker")
                     }
                     .navigationTitle("Edit activity")
                     .toolbar {
@@ -116,7 +134,7 @@ public struct WeeklyPlanningView: View {
                                     activity,
                                     title: editTitle,
                                     localDate: localDate,
-                                    activityType: activity.activityType
+                                    activityType: editActivityType
                                 )
                                 isEditingActivity = false
                             }
@@ -124,10 +142,26 @@ public struct WeeklyPlanningView: View {
                         }
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancel") { isEditingActivity = false }
+                                .accessibilityIdentifier("planning.cancelEditButton")
                         }
                     }
                 }
             }
+        }
+    }
+
+    /// Shared between the add form and the edit sheet — same set of
+    /// cases either way, so this avoids two copies drifting apart.
+    private func activityTypePicker(selection: Binding<ActivityType>) -> some View {
+        Picker("Activity type", selection: selection) {
+            Text("Team training").tag(ActivityType.teamTraining)
+            Text("Match").tag(ActivityType.match)
+            Text("Competition").tag(ActivityType.competition)
+            Text("Individual training").tag(ActivityType.individualTraining)
+            Text("Physical training").tag(ActivityType.physicalTraining)
+            Text("Recovery").tag(ActivityType.recovery)
+            Text("Test").tag(ActivityType.test)
+            Text("Other").tag(ActivityType.other)
         }
     }
 }
