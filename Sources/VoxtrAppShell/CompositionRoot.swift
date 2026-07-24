@@ -3,6 +3,8 @@ import SwiftData
 import VoxtrCore
 import VoxtrParentDomain
 import VoxtrAthleteDomain
+import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -81,6 +83,16 @@ public final class CompositionRoot {
         )
         container.register(FamilyRestorationService.self) { restorationService }
         let restorationState = try restorationService.restoreState()
+
+        // S3.2: the one place both Planning and Training repositories
+        // are used together — see TrainingPlanningCoordinationService's
+        // own doc comment for why this can't live in either domain
+        // package.
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: container.resolve(PlanningRepository.self),
+            trainingRepository: container.resolve(TrainingRepository.self)
+        )
+        container.register(TrainingPlanningCoordinationService.self) { trainingPlanningCoordinationService }
 
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")

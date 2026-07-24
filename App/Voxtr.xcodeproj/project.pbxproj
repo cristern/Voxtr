@@ -25,6 +25,9 @@
 		B753C265C4B075F90ACC2E06 /* PlanningServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */; };
 		F7DE05E4BB8A9646B8A6072E /* WeeklyPlanningViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5B149D09FB498DBFE019349 /* WeeklyPlanningViewModelTests.swift */; };
 		15A31A1D7CE7737A3E1453EE /* EndToEndPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89D20E37A36C45865663D2EF /* EndToEndPlanningTests.swift */; };
+		25022AB50F9F9AE42655BEF2 /* TrainingRepositoryAndServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */; };
+		4C7A0E98A6309BB0B4F017A8 /* TrainingPlanningCoordinationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */; };
+		4455557A52FC485A0457491F /* DailyTrainingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -58,6 +61,9 @@
 		8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningServiceTests.swift; sourceTree = "<group>"; };
 		E5B149D09FB498DBFE019349 /* WeeklyPlanningViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyPlanningViewModelTests.swift; sourceTree = "<group>"; };
 		89D20E37A36C45865663D2EF /* EndToEndPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndToEndPlanningTests.swift; sourceTree = "<group>"; };
+		422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingRepositoryAndServiceTests.swift; sourceTree = "<group>"; };
+		36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingPlanningCoordinationServiceTests.swift; sourceTree = "<group>"; };
+		E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyTrainingViewModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -150,6 +156,9 @@
 				8356378BC33E5A1CB30B8278 /* PlanningServiceTests.swift */,
 				E5B149D09FB498DBFE019349 /* WeeklyPlanningViewModelTests.swift */,
 				89D20E37A36C45865663D2EF /* EndToEndPlanningTests.swift */,
+				422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */,
+				36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */,
+				E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -332,6 +341,9 @@
 				B753C265C4B075F90ACC2E06 /* PlanningServiceTests.swift in Sources */,
 				F7DE05E4BB8A9646B8A6072E /* WeeklyPlanningViewModelTests.swift in Sources */,
 				15A31A1D7CE7737A3E1453EE /* EndToEndPlanningTests.swift in Sources */,
+				25022AB50F9F9AE42655BEF2 /* TrainingRepositoryAndServiceTests.swift in Sources */,
+				4C7A0E98A6309BB0B4F017A8 /* TrainingPlanningCoordinationServiceTests.swift in Sources */,
+				4455557A52FC485A0457491F /* DailyTrainingViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
