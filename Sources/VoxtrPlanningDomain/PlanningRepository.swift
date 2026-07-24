@@ -123,4 +123,13 @@ public final class PlanningRepository {
     public func save() throws {
         try modelContext.save()
     }
+
+    /// S2.4: deletes an already-fetched `PlannedActivity`. Whether this
+    /// is allowed (e.g. only while the `WeekPlan` is still draft) is
+    /// `PlanningService`'s decision, not this repository's — this is
+    /// pure persistence, same as every other method here.
+    public func deletePlannedActivity(_ activity: PlannedActivity) throws {
+        modelContext.delete(activity)
+        try modelContext.save()
+    }
 }

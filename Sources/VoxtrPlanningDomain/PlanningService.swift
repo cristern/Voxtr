@@ -194,4 +194,35 @@ public final class PlanningService {
             throw PlanningServiceError.invalidField("notes must be 0-500 characters")
         }
     }
+
+    /// S2.4: passthrough so UI code only ever depends on
+    /// `PlanningService`, never `PlanningRepository` directly (same
+    /// "reuse PlanningService" boundary every other UI-facing method
+    /// here already follows).
+    public func fetchPlannedActivities(forWeekPlan weekPlanId: WeekPlanId) throws -> [PlannedActivity] {
+        try repository.fetchPlannedActivities(forWeekPlan: weekPlanId)
+    }
+
+    /// S2.4: deletes a `PlannedActivity`, only while its `WeekPlan` is
+    /// still draft — the same two existence/ownership guards
+    /// `editPlannedActivity` already uses, plus the explicitly-requested
+    /// draft-only restriction.
+    public func deletePlannedActivity(
+        _ plannedActivityId: PlannedActivityId,
+        expectedWeekPlanId weekPlanId: WeekPlanId
+    ) throws {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        guard weekPlan.status == .draft else {
+            throw PlanningServiceError.weekPlanNotDraft
+        }
+        guard let activity = try repository.fetchPlannedActivity(byId: plannedActivityId) else {
+            throw PlanningServiceError.plannedActivityNotFound
+        }
+        guard activity.weekPlanId == weekPlanId.rawValue else {
+            throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
+        }
+        try repository.deletePlannedActivity(activity)
+    }
 }
