@@ -1,5 +1,5 @@
-import Foundation
 import Testing
+import Foundation
 import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
@@ -224,49 +224,68 @@ struct FamilyOnboardingCoordinatorTests {
     @Test("A genuine save failure (SwiftData uniqueness violation) leaves zero created entities")
     @MainActor
     func genuineSaveFailureLeavesZeroEntities() throws {
-        // FIX: originally forced a genuine save failure via a
-        // uniqueness collision (two ParentProfile rows with the same
-        // @Attribute(.unique) id). CI on Xcode 26.4 showed that never
-        // throws — confirmed against Apple's own documented behavior:
-        // @Attribute(.unique) is an UPSERT, not a rejecting constraint.
-        // "When you add a new object and there already exists another
-        // object that has the same value for the unique attribute,
-        // SwiftData updates the existing object... No error will be
-        // triggered." (Apple DTS engineer, developer.apple.com/forums/
-        // thread/804106). That was never a reliable way to force a
-        // throw, on any SwiftData version — not a regression to work
-        // around, a wrong premise to replace.
-        //
-        // Fix: `ModelConfiguration(allowsSave: false)` is a documented,
-        // intentional way to make `save()` genuinely throw — this is
-        // what actually exercises the coordinator's real error path,
-        // not a simulated one.
-        let schema = Schema(AppSchema.modelTypes)
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true, allowsSave: false)
-        let container = try ModelContainer(for: schema, configurations: [configuration])
+        // FIX HISTORY:
+        // 1st attempt: forced a save failure via a uniqueness collision
+        // (two ParentProfile rows with the same @Attribute(.unique) id).
+        // Never throws — confirmed against Apple's own documented
+        // behavior: @Attribute(.unique) is UPSERT, not a rejecting
+        // constraint. "When you add a new object and there already
+        // exists another object that has the same value for the unique
+        // attribute, SwiftData updates the existing object... No error
+        // will be triggered." (Apple DTS engineer, developer.apple.com/
+        // forums/thread/804106).
+        // 2nd attempt: pointed the SQLite store at /dev/null to force a
+        // failure. On Codemagic/Xcode 26.4 this fails at ModelContainer
+        // CREATION (SwiftDataError.loadIssueModelContainer) — before the
+        // coordinated transaction ever starts, so it tests container
+        // setup, not rollback.
+        // FIX: neither approach reliably puts the failure INSIDE the
+        // coordinated save. `FamilyOnboardingCoordinator` now accepts an
+        // internal-only `saveOverride` (default nil — every production
+        // call and every other test is unaffected), which replaces the
+        // `try modelContext.save()` call with an injected throw at
+        // exactly that point — the failure is guaranteed to occur during
+        // the coordinated transaction, deterministically, without
+        // depending on any particular SwiftData failure mode.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
         let coordinator = FamilyOnboardingCoordinator(
             modelContext: container.mainContext,
-            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
             athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
         )
 
-        #expect(throws: (any Error).self) {
+        // Pre-existing record, saved independently of the operation
+        // under test — proves it survives an unrelated failed attempt
+        // (requirement: preserve pre-existing records).
+        _ = try parentWorkspaceRepository.createParentAndWorkspace(givenName: "Existing")
+
+        struct InjectedSaveFailure: Error {}
+
+        #expect(throws: InjectedSaveFailure.self) {
             try coordinator.createFamily(
                 parentGivenName: "Kari",
                 athleteGivenName: "Jonas",
                 athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
                 athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-                athleteDevelopmentStage: .parentLed
+                athleteDevelopmentStage: .parentLed,
+                failAt: nil,
+                saveOverride: { throw InjectedSaveFailure() }
             )
         }
 
-        // Nothing was ever saveable in this container — every entity
-        // the coordinator staged must have been rolled back, leaving it
-        // completely empty.
-        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
-        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 0)
-        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 0)
+        // Only the pre-existing "Existing" parent/workspace/participant
+        // remain — the coordinator's attempted parent, workspace,
+        // participant, plus the athlete and grant it would have
+        // created, must all have been rolled back. No NEW records of
+        // any kind remain.
+        let parents = try container.mainContext.fetch(FetchDescriptor<ParentProfile>())
+        #expect(parents.count == 1)
+        #expect(parents.first?.givenName == "Existing")
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 1)
         #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
         #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
     }

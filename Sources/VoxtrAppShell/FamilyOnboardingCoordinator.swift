@@ -109,7 +109,8 @@ public final class FamilyOnboardingCoordinator {
         athleteTimeZoneId: TimeZoneId,
         athleteDevelopmentStage: DevelopmentStage,
         failAt: FailurePoint?,
-        forcedParentId: UUID? = nil
+        forcedParentId: UUID? = nil,
+        saveOverride: (() throws -> Void)? = nil
     ) throws -> Result {
         // Requirement 7: no autosave flush can persist a partial graph
         // while we're mid-operation. Restored on every exit path.
@@ -158,7 +159,17 @@ public final class FamilyOnboardingCoordinator {
             )
             if failAt == .afterGrantStaged { throw SimulatedFailure() }
 
-            try modelContext.save()
+            // Test-only seam (default nil — real save() runs unchanged
+            // for every production call and every existing test): lets
+            // a test inject a deterministic failure AT the exact point
+            // save() would run, rather than relying on SwiftData's own
+            // failure modes (which turned out not to be reliably
+            // reproducible — see AthleteAndFamilyOnboardingTests.swift).
+            if let saveOverride {
+                try saveOverride()
+            } else {
+                try modelContext.save()
+            }
 
             return Result(
                 parent: staged.parent,
