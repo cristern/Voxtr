@@ -2,7 +2,7 @@ import Foundation
 import VoxtrCore
 import VoxtrCoreContracts
 
-/// S3.0 scope only: the domain-level use case for logging completed
+/// S3.0/S3.1: the domain-level use case for logging completed
 /// activities. Lives in `VoxtrTrainingDomain` itself (not
 /// `VoxtrAppShell`) since it only ever touches Training's own entity via
 /// `TrainingRepository` — no cross-domain concern here, same reasoning
@@ -12,6 +12,17 @@ import VoxtrCoreContracts
 /// `LoggedActivity`'s own `precondition`s already enforce at
 /// construction — nothing in the approved scope asked for more, and
 /// inventing any would go beyond it.
+///
+/// S3.1 FLAGGED DECISION: scope asks for "optional duration," but
+/// `LoggedActivity.durationMinutes` is a non-optional `Int` with its own
+/// precondition (1–1440) — the v1.3 schema has no concept of "unknown
+/// duration." Rather than inventing a derivation (e.g. from an
+/// unrequested `endedAt`) or a meaningless placeholder, `durationMinutes`
+/// below defaults to `1` — the schema's OWN minimum valid value, not a
+/// new rule. `status` defaults to `.completed` and `source` to
+/// `"manual"`, since something being logged after the fact, by a
+/// person, is what those values already mean — both remain fully
+/// overridable, not hidden.
 @MainActor
 public final class TrainingService {
     private let repository: TrainingRepository
@@ -31,10 +42,10 @@ public final class TrainingService {
         title: String,
         startedAt: Date,
         endedAt: Date? = nil,
-        durationMinutes: Int,
-        status: ActivityStatus,
+        durationMinutes: Int = 1,
+        status: ActivityStatus = .completed,
         perceivedExertion: Int? = nil,
-        source: String,
+        source: String = "manual",
         notes: String? = nil
     ) throws -> LoggedActivity {
         try repository.insertLoggedActivity(
@@ -64,5 +75,19 @@ public final class TrainingService {
         to endDate: Date
     ) throws -> [LoggedActivity] {
         try repository.fetchLoggedActivities(forAthlete: athleteId, from: startDate, to: endDate)
+    }
+
+    /// S3.1: convenience for "today's" activities — computes the
+    /// device's current calendar-day bounds and reuses the existing
+    /// date-range fetch (same deterministic ordering, no new query
+    /// capability, just a convenience wrapper).
+    public func fetchTodaysLoggedActivities(
+        forAthlete athleteId: AthleteId,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) throws -> [LoggedActivity] {
+        let startOfDay = calendar.startOfDay(for: referenceDate)
+        let endOfDay = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay) ?? referenceDate
+        return try repository.fetchLoggedActivities(forAthlete: athleteId, from: startOfDay, to: endOfDay)
     }
 }

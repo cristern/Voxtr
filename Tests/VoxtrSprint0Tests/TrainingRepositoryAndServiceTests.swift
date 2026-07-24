@@ -131,4 +131,112 @@ struct TrainingRepositoryAndServiceTests {
         #expect(inRange.count == 1)
         #expect(inRange.first?.title == "In range")
     }
+
+    @Test("S3.1: logging with just the essential fields (no planned activity) succeeds using the documented defaults")
+    @MainActor
+    func simplifiedLogActivityWithNoPlannedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+
+        let logged = try service.logActivity(
+            athleteId: AthleteId(),
+            activityType: .individualTraining,
+            title: "Easy jog",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            perceivedExertion: 4,
+            notes: "Felt good"
+        )
+
+        #expect(logged.plannedActivityId == nil)
+        #expect(logged.durationMinutes == 1)
+        #expect(logged.status == .completed)
+        #expect(logged.source == "manual")
+        #expect(logged.perceivedExertion == 4)
+        #expect(logged.notes == "Felt good")
+    }
+
+    @Test("S3.1: logging with just the essential fields, linked to a PlannedActivity ID, succeeds")
+    @MainActor
+    func simplifiedLogActivityLinkedToPlannedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let plannedActivityId = PlannedActivityId()
+
+        let logged = try service.logActivity(
+            athleteId: AthleteId(),
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Easy jog",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 40
+        )
+
+        #expect(logged.plannedActivityId == plannedActivityId.rawValue)
+        #expect(logged.durationMinutes == 40)
+    }
+
+    @Test("Fetching today's activities returns only those started today, scoped to the athlete")
+    @MainActor
+    func fetchTodaysActivitiesScopesToTodayAndAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let calendar = Calendar.current
+        let today = Date.now
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today) ?? today
+
+        _ = try service.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Today's run",
+            startedAt: today
+        )
+        _ = try service.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Yesterday's run",
+            startedAt: yesterday
+        )
+        _ = try service.logActivity(
+            athleteId: otherAthleteId, activityType: .individualTraining, title: "Other athlete, today",
+            startedAt: today
+        )
+
+        let todays = try service.fetchTodaysLoggedActivities(forAthlete: athleteId, referenceDate: today, calendar: calendar)
+
+        #expect(todays.count == 1)
+        #expect(todays.first?.title == "Today's run")
+    }
+
+    @Test("Today's activities are returned in deterministic order")
+    @MainActor
+    func fetchTodaysActivitiesOrderedDeterministically() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let calendar = Calendar.current
+        let today = Date.now
+        let startOfDay = calendar.startOfDay(for: today)
+
+        // Inserted out of chronological order deliberately.
+        _ = try service.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Evening",
+            startedAt: startOfDay.addingTimeInterval(18 * 3_600)
+        )
+        _ = try service.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning",
+            startedAt: startOfDay.addingTimeInterval(7 * 3_600)
+        )
+
+        let first = try service.fetchTodaysLoggedActivities(forAthlete: athleteId, referenceDate: today, calendar: calendar)
+        let second = try service.fetchTodaysLoggedActivities(forAthlete: athleteId, referenceDate: today, calendar: calendar)
+
+        #expect(first.map(\.title) == ["Morning", "Evening"])
+        #expect(first.map(\.id) == second.map(\.id))
+    }
 }
