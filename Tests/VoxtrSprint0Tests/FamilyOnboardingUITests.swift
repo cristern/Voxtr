@@ -156,4 +156,67 @@ struct CreateFamilyViewModelTests {
         #expect(viewModel.parentGivenNameError != nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
     }
+
+    @Test("A reentrant submit() call while the first is still in progress is a no-op, preventing duplicate creation")
+    @MainActor
+    func reentrantSubmitIsPrevented() throws {
+        // onFamilyCreated fires before isSubmitting is cleared (submit()
+        // clears it via `defer`, which runs after onFamilyCreated is
+        // called) — so setting onFamilyCreated to call submit() again is
+        // a genuine, naturally-occurring reentrancy scenario, not an
+        // artificial one.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+        let viewModel = CreateFamilyViewModel(coordinator: coordinator)
+        viewModel.parentGivenName = "Kari"
+        viewModel.athleteGivenName = "Jonas"
+        viewModel.athleteBirthDate = Date.now.addingTimeInterval(-60 * 60 * 24 * 365 * 12)
+
+        var callCount = 0
+        viewModel.onFamilyCreated = {
+            callCount += 1
+            if callCount == 1 {
+                viewModel.submit()
+            }
+        }
+
+        viewModel.submit()
+
+        #expect(callCount == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 1)
+    }
+
+    @Test("A coordinator failure is surfaced as a submission error, not a crash")
+    @MainActor
+    func coordinatorFailureSurfacedAsSubmissionError() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+        let viewModel = CreateFamilyViewModel(coordinator: coordinator)
+        viewModel.parentGivenName = "Kari"
+        viewModel.athleteGivenName = "Jonas"
+        viewModel.athleteBirthDate = Date.now.addingTimeInterval(-60 * 60 * 24 * 365 * 12)
+
+        struct InjectedFailure: Error {}
+        viewModel.testSaveOverride = { throw InjectedFailure() }
+
+        viewModel.submit()
+
+        #expect(viewModel.submissionError != nil)
+        #expect(!viewModel.isSubmitting)
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
+    }
 }

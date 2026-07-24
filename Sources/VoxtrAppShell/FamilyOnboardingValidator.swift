@@ -13,15 +13,15 @@ public enum FamilyOnboardingValidator {
 
     public static func validateParentGivenName(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Enter your name." }
-        guard trimmed.count <= 80 else { return "Name must be 80 characters or fewer." }
+        guard !trimmed.isEmpty else { return OnboardingStrings.enterYourName }
+        guard trimmed.count <= 80 else { return OnboardingStrings.nameTooLong }
         return nil
     }
 
     public static func validateAthleteGivenName(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return "Enter the athlete's name." }
-        guard trimmed.count <= 80 else { return "Name must be 80 characters or fewer." }
+        guard !trimmed.isEmpty else { return OnboardingStrings.enterAthleteName }
+        guard trimmed.count <= 80 else { return OnboardingStrings.nameTooLong }
         return nil
     }
 
@@ -30,7 +30,7 @@ public enum FamilyOnboardingValidator {
     /// a universal fact about birth dates, not a product-specific
     /// business rule being invented here.
     public static func validateBirthDate(_ date: Date) -> String? {
-        if date > Date.now { return "Birth date can't be in the future." }
+        if date > Date.now { return OnboardingStrings.birthDateInFuture }
         return nil
     }
 }

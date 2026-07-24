@@ -47,7 +47,7 @@ public struct RootView: View {
             restorationState = try service.restoreState()
         } catch {
             restorationState = .inconsistentGraph(
-                reason: "Couldn't reload family data after creating it: \(error.localizedDescription)"
+                reason: "\(OnboardingStrings.couldNotReloadAfterCreation) \(error.localizedDescription)"
             )
         }
     }
@@ -65,13 +65,15 @@ private struct InconsistentFamilyView: View {
             Image(systemName: "exclamationmark.triangle")
                 .font(.largeTitle)
                 .foregroundStyle(.orange)
-            Text("Something needs attention")
+            Text(OnboardingStrings.inconsistentGraphTitle)
                 .font(.headline)
+                .accessibilityIdentifier("onboarding.inconsistentGraph.title")
             Text(reason)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
+                .accessibilityIdentifier("onboarding.inconsistentGraph.reason")
         }
         .padding()
     }

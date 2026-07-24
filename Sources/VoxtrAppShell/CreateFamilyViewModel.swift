@@ -18,6 +18,12 @@ import VoxtrCoreContracts
 /// current time zone (`TimeZone.current`). Asking a parent to pick a
 /// time zone during onboarding is unnecessary friction for something
 /// the device already knows.
+///
+/// S1.5: `submit()` now guards against reentrant calls while a previous
+/// call is still in progress (see the `isSubmitting` guard below) —
+/// `onFamilyCreated` fires before that flag is cleared, so a callback
+/// that (directly or indirectly) triggers another `submit()` would
+/// otherwise create the family twice.
 @MainActor
 @Observable
 public final class CreateFamilyViewModel {
@@ -34,6 +40,15 @@ public final class CreateFamilyViewModel {
 
     private let coordinator: FamilyOnboardingCoordinator
 
+    /// Test-only seam (S1.5), default nil — every real call from
+    /// `submit()` behaves exactly as before. Lets a test inject a
+    /// deterministic save failure to verify `submit()` surfaces a
+    /// coordinator failure as `submissionError` rather than crashing,
+    /// without depending on any particular SwiftData failure mode (see
+    /// `FamilyOnboardingCoordinator.saveOverride` for the same pattern
+    /// and the history of why that approach was chosen).
+    var testSaveOverride: (() throws -> Void)?
+
     /// Called after a successful `createFamily`. `RootView` uses this to
     /// re-query `FamilyRestorationState` (requirement 1) rather than
     /// this view model owning any navigation state itself.
@@ -44,6 +59,11 @@ public final class CreateFamilyViewModel {
     }
 
     public func submit() {
+        // S1.5: prevents a reentrant call (e.g. from onFamilyCreated,
+        // which fires before isSubmitting is cleared) from running the
+        // whole flow a second time and creating a duplicate family.
+        guard !isSubmitting else { return }
+
         parentGivenNameError = FamilyOnboardingValidator.validateParentGivenName(parentGivenName)
         athleteGivenNameError = FamilyOnboardingValidator.validateAthleteGivenName(athleteGivenName)
         athleteBirthDateError = FamilyOnboardingValidator.validateBirthDate(athleteBirthDate)
@@ -58,7 +78,7 @@ public final class CreateFamilyViewModel {
 
         let components = Calendar.current.dateComponents([.year, .month, .day], from: athleteBirthDate)
         guard let year = components.year, let month = components.month, let day = components.day else {
-            submissionError = "Couldn't read the selected birth date. Please try again."
+            submissionError = OnboardingStrings.couldNotReadBirthDate
             return
         }
         let localBirthDate = LocalDate(year: year, month: month, day: day)
@@ -70,7 +90,9 @@ public final class CreateFamilyViewModel {
                 athleteGivenName: athleteGivenName.trimmingCharacters(in: .whitespacesAndNewlines),
                 athleteBirthDate: localBirthDate,
                 athleteTimeZoneId: timeZoneId,
-                athleteDevelopmentStage: athleteDevelopmentStage
+                athleteDevelopmentStage: athleteDevelopmentStage,
+                failAt: nil,
+                saveOverride: testSaveOverride
             )
             onFamilyCreated?()
         } catch {
@@ -79,7 +101,7 @@ public final class CreateFamilyViewModel {
             // have caught (e.g. a genuine persistence error) — shown as
             // one submission-level message rather than attributed to a
             // specific field it isn't about.
-            submissionError = "Something went wrong creating the family. Please try again."
+            submissionError = OnboardingStrings.genericSubmissionError
         }
     }
 }
