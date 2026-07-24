@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// The set of `@Model` types the running app persists locally.
 ///
@@ -18,16 +19,15 @@ import VoxtrTrainingDomain
 /// `AthleteProfile`, `ParentProfile`, `FamilyWorkspace`,
 /// `WorkspaceParticipant`, `AthleteAccessGrant` — plus
 /// `AppDiagnosticsRecord` from Sprint 0. S2.0 added `WeekPlan` and
-/// `PlannedActivity`. S3.0 adds `LoggedActivity` and `ActivityLoad`
-/// (Training domain persistence infrastructure only — no calculations
-/// create or persist an `ActivityLoad` yet; it's registered because
-/// scope explicitly asked for it, not because anything writes to it).
-/// `PlanningDecision` and `TrainingAttachment` are NOT added here —
-/// nothing creates or persists them yet, and registering an unused type
-/// wouldn't be wrong but would misstate what's actually implemented. Do
-/// NOT add Reflection/Development/DecisionSupport/Notifications model
-/// types here until a sprint that actually creates them, per the same
-/// principle.
+/// `PlannedActivity`. S3.0 added `LoggedActivity` and `ActivityLoad`.
+/// S4.0 adds `ActivityReflection` and `ParentObservation` (Reflection
+/// domain persistence infrastructure only). `DailyStatus`,
+/// `WeeklyReflection`, `MonthlyReflection`, `PlanningDecision`, and
+/// `TrainingAttachment` are NOT added here — nothing creates or persists
+/// them yet, and registering an unused type wouldn't be wrong but would
+/// misstate what's actually implemented. Do NOT add Development/
+/// DecisionSupport/Notifications model types here until a sprint that
+/// actually creates them, per the same principle.
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -41,6 +41,8 @@ public enum AppSchema {
             PlannedActivity.self,
             LoggedActivity.self,
             ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
         ]
     }
 }

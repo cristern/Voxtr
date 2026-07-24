@@ -28,6 +28,7 @@
 		25022AB50F9F9AE42655BEF2 /* TrainingRepositoryAndServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */; };
 		4C7A0E98A6309BB0B4F017A8 /* TrainingPlanningCoordinationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */; };
 		4455557A52FC485A0457491F /* DailyTrainingViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */; };
+		4590F31FB627E98832F62194 /* ReflectionRepositoryAndServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA341308E1C7CB54110BB413 /* ReflectionRepositoryAndServiceTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -64,6 +65,7 @@
 		422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingRepositoryAndServiceTests.swift; sourceTree = "<group>"; };
 		36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingPlanningCoordinationServiceTests.swift; sourceTree = "<group>"; };
 		E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyTrainingViewModelTests.swift; sourceTree = "<group>"; };
+		FA341308E1C7CB54110BB413 /* ReflectionRepositoryAndServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReflectionRepositoryAndServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -159,6 +161,7 @@
 				422D1077522B7A8770609D8D /* TrainingRepositoryAndServiceTests.swift */,
 				36C4B5924AE98D422F818D04 /* TrainingPlanningCoordinationServiceTests.swift */,
 				E1B564C7F1FC96E38494301E /* DailyTrainingViewModelTests.swift */,
+				FA341308E1C7CB54110BB413 /* ReflectionRepositoryAndServiceTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -344,6 +347,7 @@
 				25022AB50F9F9AE42655BEF2 /* TrainingRepositoryAndServiceTests.swift in Sources */,
 				4C7A0E98A6309BB0B4F017A8 /* TrainingPlanningCoordinationServiceTests.swift in Sources */,
 				4455557A52FC485A0457491F /* DailyTrainingViewModelTests.swift in Sources */,
+				4590F31FB627E98832F62194 /* ReflectionRepositoryAndServiceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCore
 
 /// Reflection domain module descriptor (02_Architecture_v1_0).
@@ -8,8 +9,21 @@ import VoxtrCore
 /// (Section 10), each with mandatory explicit VisibilityPolicy. Weekly
 /// and monthly reflection *workflows* remain Sprint 1+ business logic —
 /// only the entities are implemented here.
+///
+/// S4.0: registers `ReflectionRepository` and `ReflectionService`
+/// (ActivityReflection/ParentObservation only — DailyStatus/
+/// WeeklyReflection/MonthlyReflection are out of scope).
 public struct ReflectionModule: VoxtrModule {
     public static let domainID = "reflection"
 
     public init() {}
+
+    @MainActor
+    public func configure(container: DIContainer, eventBus: EventBus, modelContainer: ModelContainer) async {
+        let repository = ReflectionRepository(modelContext: modelContainer.mainContext)
+        container.register(ReflectionRepository.self) { repository }
+
+        let service = ReflectionService(repository: repository)
+        container.register(ReflectionService.self) { service }
+    }
 }

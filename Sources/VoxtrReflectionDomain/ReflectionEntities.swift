@@ -243,7 +243,16 @@ public final class ParentObservation {
     public var athleteId: UUID
     public var authorId: UUID
     public var relatedLoggedActivityId: UUID?
-    public var localDate: LocalDate
+    // S4.0: stored as an ISO date String, not `LocalDate` directly —
+    // same documented SwiftData bug fixed for WeekPlan.weekStart (S2.0)
+    // and PlannedActivity.localDate (S2.2): fetching/sorting multiple
+    // rows with differing LocalDate-typed properties crashes on this
+    // Xcode/OS generation. "Deterministic ordering" for parent
+    // observations is exactly that trigger condition, so this is fixed
+    // proactively rather than waiting for the same crash a third time.
+    // `localDate` below is the same public `LocalDate` API every caller
+    // already expects — only storage format changes.
+    private var localDateRaw: String
     public var text: String
     public var visibility: VisibilityPolicy
     public var createdAt: Date
@@ -268,16 +277,19 @@ public final class ParentObservation {
         self.athleteId = athleteId.rawValue
         self.authorId = authorId.rawValue
         self.relatedLoggedActivityId = relatedLoggedActivityId?.rawValue
-        self.localDate = localDate
+        self.localDateRaw = localDate.isoString
         self.text = text
         self.visibility = visibility
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion
     }
-}
 
-// MARK: - Domain events (v1.3 Section 10.1, 16)
+    public var localDate: LocalDate {
+        get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { localDateRaw = newValue.isoString }
+    }
+}
 
 public struct ReflectionRecorded: DomainEvent {
     public static let eventName = "reflection.reflectionRecorded"
