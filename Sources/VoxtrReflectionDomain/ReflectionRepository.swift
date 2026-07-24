@@ -114,6 +114,21 @@ public final class ReflectionRepository {
             .sorted(by: Self.observationOrder)
     }
 
+    /// S4.2: same ordering as above, scoped to one `LoggedActivity`.
+    /// Unlike `ActivityReflection` (S4.1: at most one per athlete +
+    /// LoggedActivity), nothing limits how many `ParentObservation`s can
+    /// reference the same `LoggedActivity` — a parent adding several
+    /// notes over time about one session is expected, not a duplicate
+    /// to reject, and nothing in this story's scope asked for such a
+    /// restriction.
+    public func fetchParentObservations(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> [ParentObservation] {
+        let rawLoggedActivityId = loggedActivityId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<ParentObservation>())
+        return all
+            .filter { $0.relatedLoggedActivityId == rawLoggedActivityId }
+            .sorted(by: Self.observationOrder)
+    }
+
     private static func reflectionOrder(_ lhs: ActivityReflection, _ rhs: ActivityReflection) -> Bool {
         if lhs.createdAt != rhs.createdAt {
             return lhs.createdAt < rhs.createdAt

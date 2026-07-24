@@ -110,4 +110,9 @@ public final class ReflectionService {
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {
         try repository.fetchParentObservations(forAthlete: athleteId)
     }
+
+    /// S4.2: fetch observations for one LoggedActivity.
+    public func fetchParentObservations(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> [ParentObservation] {
+        try repository.fetchParentObservations(forLoggedActivity: loggedActivityId)
+    }
 }

@@ -277,4 +277,122 @@ struct ReflectionRepositoryAndServiceTests {
         #expect(numeric.bodyFeeling == 5)
         #expect(numeric.energy == 1)
     }
+
+    @Test("S4.2: creating a parent observation persists it")
+    @MainActor
+    func createParentObservationPersists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+
+        let observation = try service.recordParentObservation(
+            athleteId: AthleteId(), authorId: ActorId(),
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "Great effort at practice."
+        )
+
+        #expect(observation.text == "Great effort at practice.")
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentObservation>()).count == 1)
+    }
+
+    @Test("S4.2: the optional LoggedActivity link can be present or absent")
+    @MainActor
+    func optionalLoggedActivityLinkagePresentOrAbsent() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let loggedActivityId = LoggedActivityId()
+
+        let linked = try service.recordParentObservation(
+            athleteId: AthleteId(), authorId: ActorId(), relatedLoggedActivityId: loggedActivityId,
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "About today's session."
+        )
+        let unlinked = try service.recordParentObservation(
+            athleteId: AthleteId(), authorId: ActorId(),
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "General note."
+        )
+
+        #expect(linked.relatedLoggedActivityId == loggedActivityId.rawValue)
+        #expect(unlinked.relatedLoggedActivityId == nil)
+    }
+
+    @Test("S4.2: observations for one athlete never include another athlete's observations")
+    @MainActor
+    func athleteScopingForParentObservations() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        _ = try service.recordParentObservation(
+            athleteId: athleteId, authorId: ActorId(),
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "For this athlete."
+        )
+        _ = try service.recordParentObservation(
+            athleteId: otherAthleteId, authorId: ActorId(),
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "For the other athlete."
+        )
+
+        let results = try service.fetchParentObservations(forAthlete: athleteId)
+
+        #expect(results.count == 1)
+        #expect(results.allSatisfy { $0.athleteId == athleteId.rawValue })
+    }
+
+    @Test("S4.2: fetching observations for one LoggedActivity returns only those linked to it, deterministically ordered, and multiple are allowed")
+    @MainActor
+    func fetchObservationsForOneLoggedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let targetLoggedActivity = LoggedActivityId()
+        let otherLoggedActivity = LoggedActivityId()
+
+        // Two observations on the same LoggedActivity — allowed,
+        // unlike ActivityReflection's one-per-pair rule.
+        _ = try service.recordParentObservation(
+            athleteId: athleteId, authorId: ActorId(), relatedLoggedActivityId: targetLoggedActivity,
+            localDate: LocalDate(year: 2026, month: 1, day: 8), text: "Second note"
+        )
+        _ = try service.recordParentObservation(
+            athleteId: athleteId, authorId: ActorId(), relatedLoggedActivityId: targetLoggedActivity,
+            localDate: LocalDate(year: 2026, month: 1, day: 5), text: "First note"
+        )
+        _ = try service.recordParentObservation(
+            athleteId: athleteId, authorId: ActorId(), relatedLoggedActivityId: otherLoggedActivity,
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "Unrelated"
+        )
+
+        let first = try service.fetchParentObservations(forLoggedActivity: targetLoggedActivity)
+        let second = try service.fetchParentObservations(forLoggedActivity: targetLoggedActivity)
+
+        #expect(first.map(\.text) == ["First note", "Second note"])
+        #expect(first.map(\.id) == second.map(\.id))
+    }
+
+    @Test("S4.2: existing entity invariants still hold — visibility can never be privateToAthlete for a parent-authored note")
+    @MainActor
+    func parentObservationVisibilityInvariantStillHolds() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+
+        // Confirms the default stays .sharedWithGuardians (never
+        // .privateToAthlete) — the entity's own precondition already
+        // forbids .privateToAthlete outright; this exercises the
+        // legitimate default rather than attempting to trigger that
+        // (uncatchable) precondition.
+        let observation = try service.recordParentObservation(
+            athleteId: AthleteId(), authorId: ActorId(),
+            localDate: LocalDate(year: 2026, month: 1, day: 6), text: "Default visibility check."
+        )
+
+        #expect(observation.visibility == .sharedWithGuardians)
+        #expect(observation.visibility != .privateToAthlete)
+    }
 }
