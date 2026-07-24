@@ -9,7 +9,17 @@ import VoxtrCoreContracts
 public final class WeekPlan {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
-    public var weekStart: LocalDate
+    // CRASH FIX: stored as an ISO date String, not `LocalDate` directly.
+    // SwiftData on this Xcode/OS generation has a documented bug
+    // ("Could not cast value of type '__NSCFNumber' to 'NSString'")
+    // persisting custom Codable struct properties directly on a
+    // @Model, reproduced by multiple independent Apple Developer Forum
+    // reports of this exact message on Xcode 26 — triggered here when
+    // fetching multiple WeekPlan rows with differing `weekStart`
+    // values. `weekStart` below is the same public `LocalDate` API
+    // every caller (repository, tests) already uses — nothing about
+    // storage format is business behavior.
+    private var weekStartRaw: String
     public var status: WeekPlanStatus
     public var revision: Int
     public var focusNote: String?
@@ -41,7 +51,7 @@ public final class WeekPlan {
         precondition(status != .closed || closedAt != nil, "closedAt required when status is closed (v1.3 Section 8.1)")
         self.id = id.rawValue
         self.athleteId = athleteId.rawValue
-        self.weekStart = weekStart
+        self.weekStartRaw = weekStart.isoString
         self.status = status
         self.revision = revision
         self.focusNote = focusNote
@@ -54,6 +64,15 @@ public final class WeekPlan {
     }
 
     public var weekPlanId: WeekPlanId { WeekPlanId(rawValue: id) }
+
+    /// Same public type every caller already uses — see the storage
+    /// note above. Falls back to the epoch only if `weekStartRaw` were
+    /// ever externally corrupted; every write through this property
+    /// itself always produces a valid ISO string.
+    public var weekStart: LocalDate {
+        get { LocalDate(isoString: weekStartRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { weekStartRaw = newValue.isoString }
+    }
 }
 
 // MARK: - PlannedActivity (v1.3 Section 8.2)
