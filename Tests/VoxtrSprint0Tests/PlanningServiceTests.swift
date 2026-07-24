@@ -90,4 +90,205 @@ struct PlanningServiceTests {
         #expect(b.id != c.id)
         #expect(try container.mainContext.fetch(FetchDescriptor<WeekPlan>()).count == 3)
     }
+
+    @Test("Adding a PlannedActivity to an existing WeekPlan persists it")
+    @MainActor
+    func addPlannedActivityPersists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(activity.title == "Endurance run")
+        #expect(activity.weekPlanId == weekPlan.id)
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    @Test("Adding a PlannedActivity to a nonexistent WeekPlan is rejected")
+    @MainActor
+    func addPlannedActivityRejectsMissingWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: WeekPlanId(),
+                athleteId: AthleteId(),
+                activityType: .individualTraining,
+                title: "Endurance run",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
+    }
+
+    @Test("Editing an existing PlannedActivity updates its fields")
+    @MainActor
+    func editPlannedActivityUpdatesFields() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .recovery,
+            title: "Mobility session",
+            localDate: LocalDate(year: 2026, month: 1, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            plannedDurationMinutes: 30
+        )
+
+        #expect(edited.title == "Mobility session")
+        #expect(edited.activityType == .recovery)
+        #expect(edited.localDate == LocalDate(year: 2026, month: 1, day: 7))
+        #expect(edited.plannedDurationMinutes == 30)
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
+    }
+
+    @Test("Editing a PlannedActivity against a nonexistent WeekPlan is rejected")
+    @MainActor
+    func editPlannedActivityRejectsMissingWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: WeekPlanId(),
+                activityType: .recovery,
+                title: "Mobility session",
+                localDate: LocalDate(year: 2026, month: 1, day: 7),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+    }
+
+    @Test("Editing a PlannedActivity that doesn't belong to the supplied WeekPlan is rejected")
+    @MainActor
+    func editPlannedActivityRejectsMismatchedWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let firstWeekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let secondWeekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 12))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: firstWeekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: secondWeekPlan.weekPlanId,
+                activityType: .recovery,
+                title: "Mobility session",
+                localDate: LocalDate(year: 2026, month: 1, day: 7),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        // Unchanged — the rejected edit must not have applied.
+        let stillOriginal = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(stillOriginal?.title == "Endurance run")
+    }
+
+    @Test("Adding a PlannedActivity with an invalid title is rejected without persisting")
+    @MainActor
+    func addPlannedActivityRejectsInvalidTitle() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .individualTraining,
+                title: "",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
+    }
+
+    @Test("Fetching PlannedActivity records returns them ordered deterministically by localDate")
+    @MainActor
+    func fetchPlannedActivitiesOrderedDeterministically() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        // Inserted out of date order deliberately.
+        _ = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Thursday", localDate: LocalDate(year: 2026, month: 1, day: 8),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Monday", localDate: LocalDate(year: 2026, month: 1, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Wednesday", localDate: LocalDate(year: 2026, month: 1, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let first = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        let second = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(first.map(\.title) == ["Monday", "Wednesday", "Thursday"])
+        #expect(first.map(\.id) == second.map(\.id))
+    }
 }

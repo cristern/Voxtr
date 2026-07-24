@@ -86,7 +86,10 @@ public final class PlannedActivity {
     public var categoryIds: [UUID]
     public var activityType: ActivityType
     public var title: String
-    public var localDate: LocalDate
+    // Same fix as WeekPlan.weekStart above, applied proactively here:
+    // fetching/sorting multiple PlannedActivity rows with differing
+    // `localDate` values hits the identical documented SwiftData bug.
+    private var localDateRaw: String
     public var startLocalTime: LocalTime?
     public var timeZoneId: TimeZoneId
     public var plannedDurationMinutes: Int?
@@ -135,7 +138,7 @@ public final class PlannedActivity {
         self.categoryIds = categoryIds.map(\.rawValue)
         self.activityType = activityType
         self.title = title
-        self.localDate = localDate
+        self.localDateRaw = localDate.isoString
         self.startLocalTime = startLocalTime
         self.timeZoneId = timeZoneId
         self.plannedDurationMinutes = plannedDurationMinutes
@@ -149,6 +152,11 @@ public final class PlannedActivity {
     }
 
     public var plannedActivityId: PlannedActivityId { PlannedActivityId(rawValue: id) }
+
+    public var localDate: LocalDate {
+        get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { localDateRaw = newValue.isoString }
+    }
 }
 
 // MARK: - PlanningDecision (v1.3 Section 8.3)

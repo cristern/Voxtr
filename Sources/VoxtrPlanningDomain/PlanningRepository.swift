@@ -85,9 +85,42 @@ public final class PlanningRepository {
         return all.first { $0.athleteId == rawAthleteId && $0.weekStart == weekStart }
     }
 
+    /// Fetch `WeekPlan` by its own ID. S2.2: used to check a `WeekPlan`
+    /// actually exists before an edit is allowed to proceed against it.
+    public func fetchWeekPlan(byId weekPlanId: WeekPlanId) throws -> WeekPlan? {
+        let rawId = weekPlanId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<WeekPlan>())
+        return all.first { $0.id == rawId }
+    }
+
+    /// S2.2: ordered deterministically by `localDate`, then `id` as a
+    /// stable tiebreaker for same-day activities — not a business rule,
+    /// just making repeated fetches return the same order every time.
     public func fetchPlannedActivities(forWeekPlan weekPlanId: WeekPlanId) throws -> [PlannedActivity] {
         let rawWeekPlanId = weekPlanId.rawValue
         let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
-        return all.filter { $0.weekPlanId == rawWeekPlanId }
+        return all
+            .filter { $0.weekPlanId == rawWeekPlanId }
+            .sorted { lhs, rhs in
+                if lhs.localDate != rhs.localDate {
+                    return lhs.localDate < rhs.localDate
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
+    /// S2.2: fetch a single `PlannedActivity` by ID, used by
+    /// `PlanningService`'s edit path.
+    public func fetchPlannedActivity(byId plannedActivityId: PlannedActivityId) throws -> PlannedActivity? {
+        let rawId = plannedActivityId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
+        return all.first { $0.id == rawId }
+    }
+
+    /// S2.2: persists in-place mutations to an already-fetched,
+    /// already-managed instance (used by `PlanningService.
+    /// editPlannedActivity`, which doesn't go through `insert...`).
+    public func save() throws {
+        try modelContext.save()
     }
 }
