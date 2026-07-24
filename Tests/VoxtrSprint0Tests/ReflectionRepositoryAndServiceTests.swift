@@ -162,4 +162,119 @@ struct ReflectionRepositoryAndServiceTests {
         #expect(first.map(\.text) == ["Monday", "Thursday"])
         #expect(first.map(\.id) == second.map(\.id))
     }
+
+    @Test("S4.1: recording an activity reflection succeeds for a not-yet-reflected-on LoggedActivity")
+    @MainActor
+    func recordActivityReflectionSucceedsWhenNoneExistsYet() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let loggedActivityId = LoggedActivityId()
+
+        let reflection = try service.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: loggedActivityId, authorId: ActorId(),
+            visibility: .privateToAthlete, satisfaction: 4
+        )
+
+        #expect(reflection.athleteId == athleteId.rawValue)
+        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReflection>()).count == 1)
+    }
+
+    @Test("S4.1: fetching the reflection for one LoggedActivity returns it (singular convenience)")
+    @MainActor
+    func fetchSingularReflectionForLoggedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let loggedActivityId = LoggedActivityId()
+        _ = try service.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: loggedActivityId, authorId: ActorId(),
+            visibility: .privateToAthlete, satisfaction: 4
+        )
+
+        let found = try service.fetchActivityReflection(forLoggedActivity: loggedActivityId)
+        let notFound = try service.fetchActivityReflection(forLoggedActivity: LoggedActivityId())
+
+        #expect(found != nil)
+        #expect(found?.loggedActivityId == loggedActivityId.rawValue)
+        #expect(notFound == nil)
+    }
+
+    @Test("S4.1: reflection history for one athlete does not include another athlete's reflections")
+    @MainActor
+    func athleteScopingExcludesOtherAthletes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        _ = try service.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: LoggedActivityId(), authorId: ActorId(),
+            visibility: .privateToAthlete, satisfaction: 3
+        )
+        _ = try service.recordActivityReflection(
+            athleteId: otherAthleteId, loggedActivityId: LoggedActivityId(), authorId: ActorId(),
+            visibility: .privateToAthlete, satisfaction: 5
+        )
+
+        let results = try service.fetchActivityReflections(forAthlete: athleteId)
+
+        #expect(results.count == 1)
+        #expect(results.allSatisfy { $0.athleteId == athleteId.rawValue })
+    }
+
+    @Test("S4.1: recording a second reflection for the same athlete and LoggedActivity is rejected")
+    @MainActor
+    func duplicateReflectionForSameAthleteAndLoggedActivityRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+        let athleteId = AthleteId()
+        let loggedActivityId = LoggedActivityId()
+        _ = try service.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: loggedActivityId, authorId: ActorId(),
+            visibility: .privateToAthlete, satisfaction: 3
+        )
+
+        #expect(throws: ReflectionServiceError.activityReflectionAlreadyExists) {
+            try service.recordActivityReflection(
+                athleteId: athleteId, loggedActivityId: loggedActivityId, authorId: ActorId(),
+                visibility: .privateToAthlete, satisfaction: 5
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReflection>()).count == 1)
+    }
+
+    @Test("S4.1: existing entity invariants still hold — a text-only reflection is valid, and numeric fields stay within 1-5")
+    @MainActor
+    func existingEntityInvariantsStillHold() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+
+        // v1.3 Section 10.1: at least one numeric OR text response is
+        // required — a text-only reflection (no numeric fields at all)
+        // must still be valid.
+        let textOnly = try service.recordActivityReflection(
+            athleteId: AthleteId(), loggedActivityId: LoggedActivityId(), authorId: ActorId(),
+            visibility: .privateToAthlete, learningNote: "Pushed through the last interval."
+        )
+        #expect(textOnly.bodyFeeling == nil)
+        #expect(textOnly.learningNote == "Pushed through the last interval.")
+
+        // bodyFeeling/energy/satisfaction are documented as 1-5.
+        let numeric = try service.recordActivityReflection(
+            athleteId: AthleteId(), loggedActivityId: LoggedActivityId(), authorId: ActorId(),
+            visibility: .privateToAthlete, bodyFeeling: 5, energy: 1, satisfaction: 3
+        )
+        #expect(numeric.bodyFeeling == 5)
+        #expect(numeric.energy == 1)
+    }
 }

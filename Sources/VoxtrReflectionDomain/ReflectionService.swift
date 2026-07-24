@@ -2,6 +2,12 @@ import Foundation
 import VoxtrCore
 import VoxtrCoreContracts
 
+/// S4.1: thrown by `ReflectionService.recordActivityReflection` when
+/// one already exists for the same athlete and `LoggedActivity`.
+public enum ReflectionServiceError: Error, Equatable {
+    case activityReflectionAlreadyExists
+}
+
 /// S4.0 scope only: the domain-level use case for recording reflections
 /// and parent observations. Lives in `VoxtrReflectionDomain` itself (not
 /// `VoxtrAppShell`) since it only ever touches Reflection's own entities
@@ -39,7 +45,17 @@ public final class ReflectionService {
         learningNote: String? = nil,
         nextTimeNote: String? = nil
     ) throws -> ActivityReflection {
-        try repository.insertActivityReflection(
+        // S4.1: reject a second reflection for the same athlete and
+        // LoggedActivity — checked before any insert is attempted.
+        // Checking both fields (not just loggedActivityId alone) is a
+        // literal, defensive match to "the same athlete and
+        // LoggedActivity," even though a LoggedActivity already belongs
+        // to exactly one athlete in practice.
+        let existing = try repository.fetchActivityReflections(forLoggedActivity: loggedActivityId)
+        guard !existing.contains(where: { $0.athleteId == athleteId.rawValue }) else {
+            throw ReflectionServiceError.activityReflectionAlreadyExists
+        }
+        return try repository.insertActivityReflection(
             athleteId: athleteId,
             loggedActivityId: loggedActivityId,
             authorId: authorId,
@@ -78,6 +94,17 @@ public final class ReflectionService {
 
     public func fetchActivityReflections(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> [ActivityReflection] {
         try repository.fetchActivityReflections(forLoggedActivity: loggedActivityId)
+    }
+
+    /// S4.1: convenience for the common case — after this story's
+    /// duplicate-reflection rule, there's at most one reflection per
+    /// `LoggedActivity`, so callers that only care about "the"
+    /// reflection (not a list) don't need to unwrap an array
+    /// themselves. Not a new query capability — reuses the existing
+    /// deterministically-ordered fetch above and takes its first
+    /// result.
+    public func fetchActivityReflection(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> ActivityReflection? {
+        try repository.fetchActivityReflections(forLoggedActivity: loggedActivityId).first
     }
 
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {
