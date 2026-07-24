@@ -2,7 +2,7 @@ import Testing
 import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
-import VoxtrAppShell
+@testable import VoxtrAppShell
 import VoxtrParentDomain
 import VoxtrAthleteDomain
 
@@ -98,24 +98,20 @@ struct AthleteAccessGrantRepositoryTests {
     }
 }
 
-@Suite("FamilyOnboardingCoordinator (S1.2)", .serialized)
+@Suite("FamilyOnboardingCoordinator (S1.2a: atomicity)", .serialized)
 struct FamilyOnboardingCoordinatorTests {
 
+    @Test("Successful onboarding persists all five entities")
     @MainActor
-    private func makeCoordinator(in container: ModelContainer) -> FamilyOnboardingCoordinator {
-        FamilyOnboardingCoordinator(
+    func successfulOnboardingPersistsAllFive() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
             parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
             athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
         )
-    }
-
-    @Test("Creating a family produces a parent, workspace, participant, athlete, and grant that reference each other correctly")
-    @MainActor
-    func createFamilyProducesConsistentResult() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let coordinator = makeCoordinator(in: container)
 
         let result = try coordinator.createFamily(
             parentGivenName: "Kari",
@@ -131,6 +127,12 @@ struct FamilyOnboardingCoordinatorTests {
         #expect(result.grant.athleteId == result.athlete.id)
         #expect(result.grant.participantId == result.participant.id)
         #expect(result.grant.canViewSchedule)
+
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 1)
     }
 
     @Test("No WorkspaceParticipant is created for the athlete — only the parent gets one")
@@ -138,7 +140,12 @@ struct FamilyOnboardingCoordinatorTests {
     func onlyParentGetsWorkspaceParticipant() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
-        let coordinator = makeCoordinator(in: container)
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
         _ = try coordinator.createFamily(
             parentGivenName: "Kari",
             athleteGivenName: "Jonas",
@@ -151,5 +158,152 @@ struct FamilyOnboardingCoordinatorTests {
 
         #expect(allParticipants.count == 1)
         #expect(allParticipants.first?.role == .workspaceOwner)
+    }
+
+    @Test("Failure before athlete insertion leaves zero created entities")
+    @MainActor
+    func failureBeforeAthleteInsertionLeavesZeroEntities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+
+        #expect(throws: FamilyOnboardingCoordinator.SimulatedFailure.self) {
+            try coordinator.createFamily(
+                parentGivenName: "Kari",
+                athleteGivenName: "Jonas",
+                athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+                athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                athleteDevelopmentStage: .parentLed,
+                failAt: .afterParentAndWorkspaceStaged
+            )
+        }
+
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
+    }
+
+    @Test("Failure before grant insertion leaves zero created entities")
+    @MainActor
+    func failureBeforeGrantInsertionLeavesZeroEntities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+
+        #expect(throws: FamilyOnboardingCoordinator.SimulatedFailure.self) {
+            try coordinator.createFamily(
+                parentGivenName: "Kari",
+                athleteGivenName: "Jonas",
+                athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+                athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                athleteDevelopmentStage: .parentLed,
+                failAt: .afterAthleteStaged
+            )
+        }
+
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
+    }
+
+    @Test("A genuine save failure (SwiftData uniqueness violation) leaves zero created entities")
+    @MainActor
+    func genuineSaveFailureLeavesZeroEntities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+
+        // Pre-persist a ParentProfile with a known ID, saved and
+        // committed on its own — this is NOT part of the operation
+        // under test, it exists purely to force a genuine uniqueness
+        // collision at the coordinator's save() call below.
+        let collidingId = UUID()
+        _ = parentWorkspaceRepository.stageParentAndWorkspace(parentId: collidingId, givenName: "Existing")
+        try container.mainContext.save()
+
+        #expect(throws: (any Error).self) {
+            try coordinator.createFamily(
+                parentGivenName: "Kari",
+                athleteGivenName: "Jonas",
+                athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+                athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                athleteDevelopmentStage: .parentLed,
+                failAt: nil,
+                forcedParentId: collidingId
+            )
+        }
+
+        // Only the pre-existing "Existing" parent remains — the
+        // coordinator's attempted parent, plus the athlete and grant it
+        // would have created, must all have been rolled back.
+        let parents = try container.mainContext.fetch(FetchDescriptor<ParentProfile>())
+        #expect(parents.count == 1)
+        #expect(parents.first?.givenName == "Existing")
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
+    }
+
+    @Test("Retry after a rolled-back failure succeeds, with no duplicate records left behind")
+    @MainActor
+    func retryAfterRollbackSucceedsWithNoDuplicates() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: container.mainContext),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            athleteAccessGrantRepository: AthleteAccessGrantRepository(modelContext: container.mainContext)
+        )
+
+        #expect(throws: FamilyOnboardingCoordinator.SimulatedFailure.self) {
+            try coordinator.createFamily(
+                parentGivenName: "Kari",
+                athleteGivenName: "Jonas",
+                athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+                athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                athleteDevelopmentStage: .parentLed,
+                failAt: .afterGrantStaged
+            )
+        }
+
+        // Retry with the same coordinator instance, same context — the
+        // failed attempt's staged-but-rolled-back objects must not
+        // interfere with this succeeding.
+        let result = try coordinator.createFamily(
+            parentGivenName: "Kari",
+            athleteGivenName: "Jonas",
+            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            athleteDevelopmentStage: .parentLed
+        )
+
+        #expect(result.parent.givenName == "Kari")
+        #expect(try container.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<FamilyWorkspace>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<WorkspaceParticipant>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 1)
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 1)
     }
 }

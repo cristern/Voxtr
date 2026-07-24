@@ -10,9 +10,8 @@ import VoxtrCore
 /// not a persisted entity, per the document's stated preference
 /// (Section 7.4).
 ///
-/// S1.1: registers `ParentWorkspaceRepository`. `AthleteAccessGrant`
-/// persistence is explicitly out of scope for S1.1 (S1.2 work) — no
-/// repository for it is registered here yet.
+/// S1.1: registers `ParentWorkspaceRepository`. S1.2: also registers
+/// `AthleteAccessGrantRepository` (Parent-owned per v1.3 Section 7.5).
 public struct ParentModule: VoxtrModule {
     public static let domainID = "parent"
 
@@ -20,7 +19,10 @@ public struct ParentModule: VoxtrModule {
 
     @MainActor
     public func configure(container: DIContainer, eventBus: EventBus, modelContainer: ModelContainer) async {
-        let repository = ParentWorkspaceRepository(modelContext: modelContainer.mainContext)
-        container.register(ParentWorkspaceRepository.self) { repository }
+        let workspaceRepository = ParentWorkspaceRepository(modelContext: modelContainer.mainContext)
+        container.register(ParentWorkspaceRepository.self) { workspaceRepository }
+
+        let grantRepository = AthleteAccessGrantRepository(modelContext: modelContainer.mainContext)
+        container.register(AthleteAccessGrantRepository.self) { grantRepository }
     }
 }

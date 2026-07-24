@@ -22,7 +22,40 @@ Open `App/Voxtr.xcodeproj` in Xcode. Both schemes (`AthleteApp`, `ParentApp`) ar
 
 ---
 
-## Codemagic Setup Requirements
+## Automatic CI Triggers
+
+These four workflows are defined in `codemagic.yaml`. All of them can still be started manually at any time from the Codemagic dashboard (**Start new build** → pick the workflow), regardless of what triggered them automatically, or if nothing did.
+
+### On push to `develop`
+
+- **`package-tests`**
+- **`athlete-simulator-build`**
+- **`parent-simulator-build`**
+
+### On pull request
+
+- **`package-tests`** — runs for any PR targeting **either** `develop` or `main`.
+- **`athlete-simulator-build`** — runs for any PR targeting `main`, or any PR whose *source* branch is `develop`.
+- **`parent-simulator-build`** — same as `athlete-simulator-build`.
+
+### On release tag
+
+- **`testflight-release`** — runs only when a tag matching `release/*` is pushed (e.g. `release/1.0.0`). Never runs on an ordinary push or pull request.
+
+### Starting a workflow manually in Codemagic
+
+1. Open the app in the Codemagic dashboard.
+2. Click **Start new build**.
+3. Choose the branch (or tag, for `testflight-release`) and the workflow from the dropdowns.
+4. Click **Start build**.
+
+This works regardless of the automatic triggers above — useful for re-running a workflow without pushing a new commit, or running `testflight-release` against a specific existing tag.
+
+### A known limitation of this setup, worth knowing about
+
+Codemagic's `branch_patterns` can't restrict a branch match to *only* push events or *only* pull-request events within the same workflow — a pattern that's needed for "PR targeting `main`" also applies to a plain push. Practical effect: a **direct push to `main`** will also trigger `package-tests`, `athlete-simulator-build`, and `parent-simulator-build`, even though only pushes to `develop` were requested. If `main` is protected against direct pushes on GitHub (recommended for this branching model regardless), this has no practical effect. Not fixable purely in YAML without splitting into additional workflows.
+
+
 
 The three simulator/test workflows (`package-tests`, `athlete-simulator-build`, `parent-simulator-build`) need **no setup** — they run with `CODE_SIGNING_ALLOWED=NO` against the iOS Simulator and work immediately on any Codemagic account.
 

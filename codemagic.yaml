@@ -29,9 +29,25 @@ workflows:
       events:
         - push
         - pull_request
+      # push: matches develop only (source/target is ignored for push events
+      # per Codemagic's own docs — "Applicable only to Pull Request
+      # triggers" — so this list is evaluated as a plain branch-name match
+      # for push).
+      # pull_request: source:false means "match the PR's TARGET branch" —
+      # so this fires for any PR targeting develop OR targeting main,
+      # regardless of where the PR comes from.
+      # '*'/include:false first means nothing matches by default — only
+      # the two branches explicitly listed below can trigger this at all.
       branch_patterns:
         - pattern: "*"
+          include: false
+        - pattern: develop
           include: true
+          source: false
+        - pattern: main
+          include: true
+          source: false
+      cancel_previous_builds: true
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -142,9 +158,22 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
+      # push: matches develop only (source is ignored for push events).
+      # pull_request: source:true on "develop" means this only matches a
+      # PR whose SOURCE branch is develop — NOT "PR targeting develop",
+      # which was deliberately excluded per the spec for this workflow.
+      # "main" with source:false matches any PR targeting main.
       branch_patterns:
+        - pattern: "*"
+          include: false
+        - pattern: develop
+          include: true
+          source: true
         - pattern: main
           include: true
+          source: false
+      cancel_previous_builds: true
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -188,9 +217,22 @@ workflows:
     triggering:
       events:
         - push
+        - pull_request
+      # push: matches develop only (source is ignored for push events).
+      # pull_request: source:true on "develop" means this only matches a
+      # PR whose SOURCE branch is develop — NOT "PR targeting develop",
+      # which was deliberately excluded per the spec for this workflow.
+      # "main" with source:false matches any PR targeting main.
       branch_patterns:
+        - pattern: "*"
+          include: false
+        - pattern: develop
+          include: true
+          source: true
         - pattern: main
           include: true
+          source: false
+      cancel_previous_builds: true
     scripts:
       - name: Validate project (schemes, packages, Xcode version, bundle IDs)
         script: |
@@ -233,11 +275,17 @@ workflows:
     max_build_duration: 60
     instance_type: mac_mini_m2
 
+    # Reference to a Codemagic "App Store Connect" integration, configured
+    # under Team settings → Integrations in the Codemagic UI. The actual
+    # Issuer ID, Key ID, and .p8 private key live only there — this is a
+    # NAME, not a credential.
     integrations:
       app_store_connect: voxtr_app_store_connect
 
     environment:
       xcode: latest
+      # Codemagic environment variable group, configured in the Codemagic
+      # UI under this workflow/app's Environment variables. See README.
       groups:
         - voxtr_ios_signing
       vars:
@@ -246,6 +294,10 @@ workflows:
         PARENT_SCHEME: "ParentApp"
         ATHLETE_BUNDLE_ID: "app.voxtr.athlete"
         PARENT_BUNDLE_ID: "app.voxtr.parent"
+      # Automatic code signing through Codemagic: distribution_type +
+      # bundle_identifier is enough for Codemagic to resolve the signing
+      # identity via the app_store_connect integration above — no manual
+      # certificate/profile files anywhere in this repo.
       ios_signing:
         distribution_type: app_store
         bundle_identifier: $ATHLETE_BUNDLE_ID
@@ -261,7 +313,7 @@ workflows:
       - name: Fail clearly if required signing configuration is missing
         script: |
           set -e
-          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID — configure the '${CM_INTEGRATION_NAME:-voxtr_app_store_connect}' App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
           : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
           : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
           echo "App Store Connect signing configuration present — proceeding."
@@ -318,6 +370,9 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
+      # Publishes every IPA produced above to App Store Connect/TestFlight,
+      # authenticating via the same named integration — no key material
+      # in this file.
       app_store_connect:
         auth: integration
         submit_to_testflight: true

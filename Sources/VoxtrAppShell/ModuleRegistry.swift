@@ -10,11 +10,13 @@ import VoxtrDecisionSupportDomain
 import VoxtrNotificationsDomain
 import VoxtrSettings
 
-/// The single place in the entire codebase allowed to import every
-/// domain module. This is intentional and load-bearing: if a second file
-/// anywhere else ever needs to import two domain modules at once, that's
-/// a sign business logic is leaking outside its module, or that two
-/// modules need a Core-level interface between them instead.
+/// One of a small number of files inside `VoxtrAppShell` allowed to
+/// import every domain module — this is where cross-domain composition
+/// legitimately lives (see also `CompositionRoot.swift` and
+/// `FamilyOnboardingCoordinator.swift` as of S1.2). The rule is "only
+/// inside `VoxtrAppShell`," not "only in this one file": if a domain
+/// module package itself ever needs to import a sibling domain module,
+/// that's the violation to watch for.
 public enum ModuleRegistry {
 
     public static func allModules() -> [any VoxtrModule] {

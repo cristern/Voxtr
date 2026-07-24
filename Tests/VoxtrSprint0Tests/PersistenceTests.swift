@@ -9,7 +9,10 @@ import VoxtrAthleteDomain
 // therefore require the Xcode/macOS SwiftData runtime to actually run —
 // written but not executed in this sandbox.
 
-@Suite("Local persistence")
+// S1.1 FIX (round 2): same reasoning as ParentWorkspaceRepositoryTests —
+// see the comment there. This suite also constructs a ModelContainer
+// per test and was involved in the same crash pattern.
+@Suite("Local persistence", .serialized)
 struct PersistenceTests {
 
     @Test("Writing and fetching an AppDiagnosticsRecord round-trips locally")
