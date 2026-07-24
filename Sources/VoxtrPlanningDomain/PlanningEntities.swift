@@ -9,9 +9,19 @@ import VoxtrCoreContracts
 public final class WeekPlan {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
-    public var weekStart: LocalDate
+    // CRASH FIX: stored as an ISO date String, not `LocalDate` directly.
+    // SwiftData on this Xcode/OS generation has a documented bug
+    // ("Could not cast value of type '__NSCFNumber' to 'NSString'")
+    // persisting custom Codable struct properties directly on a
+    // @Model, reproduced by multiple independent Apple Developer Forum
+    // reports of this exact message on Xcode 26 — triggered here when
+    // fetching multiple WeekPlan rows with differing `weekStart`
+    // values. `weekStart` below is the same public `LocalDate` API
+    // every caller (repository, tests) already uses — nothing about
+    // storage format is business behavior.
+    private var weekStartRaw: String
     public var status: WeekPlanStatus
-    public var revision: Int
+    public private(set) var revision: Int
     public var focusNote: String?
     public var committedAt: Date?
     public var committedBy: UUID?
@@ -41,7 +51,7 @@ public final class WeekPlan {
         precondition(status != .closed || closedAt != nil, "closedAt required when status is closed (v1.3 Section 8.1)")
         self.id = id.rawValue
         self.athleteId = athleteId.rawValue
-        self.weekStart = weekStart
+        self.weekStartRaw = weekStart.isoString
         self.status = status
         self.revision = revision
         self.focusNote = focusNote
@@ -54,6 +64,57 @@ public final class WeekPlan {
     }
 
     public var weekPlanId: WeekPlanId { WeekPlanId(rawValue: id) }
+
+    /// Same public type every caller already uses — see the storage
+    /// note above. Falls back to the epoch only if `weekStartRaw` were
+    /// ever externally corrupted; every write through this property
+    /// itself always produces a valid ISO string.
+    public var weekStart: LocalDate {
+        get { LocalDate(isoString: weekStartRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { weekStartRaw = newValue.isoString }
+    }
+}
+
+// MARK: - WeekPlan commit (S2.3) — mirrors AthleteProfile.applyMutation
+// (Domain & Data Model v1.4) exactly: the same optimistic-concurrency
+// model the entity's own doc comment already said WeekPlan.revision
+// follows (v1.3 Section 8.1/DDM-009), just not yet implemented as a
+// callable method before this story.
+
+/// Thrown by `WeekPlan.commit`. `staleRevision` mirrors
+/// `AthleteProfileConflictError` exactly — someone else committed or
+/// otherwise mutated the plan first. `alreadyCommitted` is the
+/// duplicate-commit case, checked separately so callers can tell the
+/// two situations apart.
+public enum WeekPlanConflictError: Error, Sendable, Equatable {
+    case staleRevision(expected: Int, actual: Int)
+    case alreadyCommitted
+}
+
+public extension WeekPlan {
+    /// The ONLY sanctioned way to transition a WeekPlan from `.draft` to
+    /// `.committed`. `expectedRevision` must be the revision the caller
+    /// last read; a mismatch throws `.staleRevision` and leaves the plan
+    /// completely untouched — no partial mutation. A plan that isn't
+    /// `.draft` throws `.alreadyCommitted` instead, checked first so the
+    /// two failure cases stay distinguishable. On success, `status`,
+    /// `committedAt`, `committedBy` are set and `revision` incremented
+    /// by exactly 1, together, before this returns.
+    @discardableResult
+    func commit(expectedRevision: Int, committedBy: ActorId) throws -> WeekPlanCommitted {
+        guard status == .draft else {
+            throw WeekPlanConflictError.alreadyCommitted
+        }
+        guard revision == expectedRevision else {
+            throw WeekPlanConflictError.staleRevision(expected: expectedRevision, actual: revision)
+        }
+        status = .committed
+        committedAt = .now
+        self.committedBy = committedBy.rawValue
+        revision += 1
+        updatedAt = .now
+        return WeekPlanCommitted(weekPlanId: weekPlanId, athleteId: AthleteId(rawValue: athleteId), revision: revision)
+    }
 }
 
 // MARK: - PlannedActivity (v1.3 Section 8.2)
@@ -67,7 +128,10 @@ public final class PlannedActivity {
     public var categoryIds: [UUID]
     public var activityType: ActivityType
     public var title: String
-    public var localDate: LocalDate
+    // Same fix as WeekPlan.weekStart above, applied proactively here:
+    // fetching/sorting multiple PlannedActivity rows with differing
+    // `localDate` values hits the identical documented SwiftData bug.
+    private var localDateRaw: String
     public var startLocalTime: LocalTime?
     public var timeZoneId: TimeZoneId
     public var plannedDurationMinutes: Int?
@@ -116,7 +180,7 @@ public final class PlannedActivity {
         self.categoryIds = categoryIds.map(\.rawValue)
         self.activityType = activityType
         self.title = title
-        self.localDate = localDate
+        self.localDateRaw = localDate.isoString
         self.startLocalTime = startLocalTime
         self.timeZoneId = timeZoneId
         self.plannedDurationMinutes = plannedDurationMinutes
@@ -130,6 +194,11 @@ public final class PlannedActivity {
     }
 
     public var plannedActivityId: PlannedActivityId { PlannedActivityId(rawValue: id) }
+
+    public var localDate: LocalDate {
+        get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { localDateRaw = newValue.isoString }
+    }
 }
 
 // MARK: - PlanningDecision (v1.3 Section 8.3)

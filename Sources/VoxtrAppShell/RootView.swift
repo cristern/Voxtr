@@ -2,6 +2,7 @@ import SwiftUI
 import VoxtrCore
 import VoxtrParentDomain
 import VoxtrAthleteDomain
+import VoxtrPlanningDomain
 
 /// S1.4 requirement 1: `FamilyRestorationState` is the ONLY thing this
 /// view switches on — there is no separate "just finished onboarding"
@@ -26,7 +27,10 @@ public struct RootView: View {
                 CreateFamilyView(viewModel: makeOnboardingViewModel())
             }
         case .existingFamily(let family):
-            FamilyHomeView(family: family)
+            FamilyHomeView(
+                family: family,
+                planningService: root.container.resolve(PlanningService.self)
+            )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)
         }

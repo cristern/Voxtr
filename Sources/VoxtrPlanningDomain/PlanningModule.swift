@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCore
 
 /// Planning domain module descriptor (02_Architecture_v1_0).
@@ -9,8 +10,21 @@ import VoxtrCore
 /// WeekPlanCommitted / WeekPlanClosed / WeekPlanConflictDetected /
 /// PlannedActivityCreated / PlannedActivityChanged /
 /// PlannedActivityDeleted (Section 16).
+///
+/// S2.0: registers `PlanningRepository` (WeekPlan/PlannedActivity
+/// persistence only — no `PlanningDecision` handling yet). S2.1: also
+/// registers `PlanningService` (get-or-create draft WeekPlan).
 public struct PlanningModule: VoxtrModule {
     public static let domainID = "planning"
 
     public init() {}
+
+    @MainActor
+    public func configure(container: DIContainer, eventBus: EventBus, modelContainer: ModelContainer) async {
+        let repository = PlanningRepository(modelContext: modelContainer.mainContext)
+        container.register(PlanningRepository.self) { repository }
+
+        let service = PlanningService(repository: repository)
+        container.register(PlanningService.self) { service }
+    }
 }
