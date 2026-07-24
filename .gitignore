@@ -1,0 +1,5 @@
+# Local files
+incoming/
+
+# macOS
+.DS_Store
