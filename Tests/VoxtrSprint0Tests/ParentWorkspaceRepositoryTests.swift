@@ -9,27 +9,26 @@ import VoxtrParentDomain
 // types and require the Xcode/macOS SwiftData runtime — written but not
 // executed in this sandbox.
 
-// S1.1 FIX (round 2): the crash pattern across two CI runs consistently
-// involved every suite that constructs a ModelContainer, and never the
-// pure-logic suites. Swift Testing parallelizes tests by default, and
-// concurrent ModelContainer construction is a documented SwiftData crash
-// source. `.serialized` forces this suite's tests to run one at a time
-// rather than racing each other to build a container simultaneously.
+// ROOT CAUSE (re-confirmed): this file had regressed to an older,
+// pre-fix version that reintroduced a shared private `makeRepository()`
+// helper called from multiple `@Test` functions to build the
+// ModelContainer/repository. That exact pattern — not `#Predicate`, not
+// parallel test execution, not `.serialized` — is what caused
+// "Restarting after unexpected exit, crash, or test timeout" during this
+// suite previously; removing the shared helper and inlining construction
+// in every test (the same pattern already used in every other test file
+// in this project) resolved it then and is reapplied here. `.serialized`
+// is kept as a harmless belt-and-braces measure but was not, by itself,
+// the fix.
 @Suite("ParentWorkspaceRepository (S1.1)", .serialized)
 struct ParentWorkspaceRepositoryTests {
-
-    @MainActor
-    private func makeRepository() throws -> (ParentWorkspaceRepository, ModelContext) {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let context = container.mainContext
-        return (ParentWorkspaceRepository(modelContext: context), context)
-    }
 
     @Test("Creating a parent and workspace persists all three records together")
     @MainActor
     func createsParentWorkspaceAndParticipant() throws {
-        let (repository, _) = try makeRepository()
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
 
         let result = try repository.createParentAndWorkspace(givenName: "Kari", familyName: "Hansen")
 
@@ -43,7 +42,9 @@ struct ParentWorkspaceRepositoryTests {
     @Test("Fetched parent profile matches what was created")
     @MainActor
     func fetchAllParentProfilesReturnsCreatedParent() throws {
-        let (repository, _) = try makeRepository()
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
         _ = try repository.createParentAndWorkspace(givenName: "Kari")
 
         let parents = try repository.fetchAllParentProfiles()
@@ -55,7 +56,9 @@ struct ParentWorkspaceRepositoryTests {
     @Test("Fetched workspace matches what was created")
     @MainActor
     func fetchAllWorkspacesReturnsCreatedWorkspace() throws {
-        let (repository, _) = try makeRepository()
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
         let result = try repository.createParentAndWorkspace(givenName: "Kari")
 
         let workspaces = try repository.fetchAllWorkspaces()
@@ -67,7 +70,9 @@ struct ParentWorkspaceRepositoryTests {
     @Test("Fetching participants by workspace ID returns only that workspace's participant")
     @MainActor
     func fetchParticipantsForWorkspaceScopesCorrectly() throws {
-        let (repository, _) = try makeRepository()
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
         let first = try repository.createParentAndWorkspace(givenName: "Kari")
         let second = try repository.createParentAndWorkspace(givenName: "Ola")
 
@@ -87,9 +92,9 @@ struct ParentWorkspaceRepositoryTests {
         // approximate "close and reopen the app" within one process,
         // the same way PersistenceTests.swift's Sprint 0 test proved a
         // basic round-trip. A full close/relaunch is what S1.3 (family
-        // restoration) will test end-to-end; this confirms the
-        // repository layer itself has no in-memory-only state hiding
-        // the fact that persistence actually happened.
+        // restoration) tests end-to-end; this confirms the repository
+        // layer itself has no in-memory-only state hiding the fact that
+        // persistence actually happened.
         let schema = Schema(AppSchema.modelTypes)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(for: schema, configurations: [configuration])
