@@ -21,13 +21,22 @@ import VoxtrReflectionDomain
 /// `AppDiagnosticsRecord` from Sprint 0. S2.0 added `WeekPlan` and
 /// `PlannedActivity`. S3.0 added `LoggedActivity` and `ActivityLoad`.
 /// S4.0 adds `ActivityReflection` and `ParentObservation` (Reflection
-/// domain persistence infrastructure only). `DailyStatus`,
-/// `WeeklyReflection`, `MonthlyReflection`, `PlanningDecision`, and
-/// `TrainingAttachment` are NOT added here — nothing creates or persists
-/// them yet, and registering an unused type wouldn't be wrong but would
-/// misstate what's actually implemented. Do NOT add Development/
-/// DecisionSupport/Notifications model types here until a sprint that
-/// actually creates them, per the same principle.
+/// domain persistence infrastructure only). A2 (Architecture Decisions
+/// v1) adds `PlannedActivityDeletionTombstone` — this is what makes the
+/// current schema version V2 (see `AppSchemaVersioning.swift`).
+/// `DailyStatus`, `WeeklyReflection`, `MonthlyReflection`,
+/// `PlanningDecision`, and `TrainingAttachment` are NOT added here —
+/// nothing creates or persists them yet, and registering an unused type
+/// wouldn't be wrong but would misstate what's actually implemented. Do
+/// NOT add Development/DecisionSupport/Notifications model types here
+/// until a sprint that actually creates them, per the same principle.
+///
+/// IMPORTANT: any change to this list is a schema version change — see
+/// `AppSchemaVersioning.swift`'s "HOW TO ADD" instructions before
+/// editing this array. Changing this array alone, without also adding a
+/// new frozen `VersionedSchema` + migration stage, would silently
+/// change what the CURRENT (latest) versioned schema resolves to, but
+/// would not correctly version the change.
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -43,6 +52,7 @@ public enum AppSchema {
             ActivityLoad.self,
             ActivityReflection.self,
             ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
         ]
     }
 }

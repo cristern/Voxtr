@@ -39,10 +39,10 @@ struct SchemaVersioningTests {
             configurations: [configuration]
         )
 
-        // Every currently-registered entity is present — none dropped,
-        // none added, by construction (AppSchemaV1.models IS
-        // AppSchema.modelTypes).
-        #expect(container.schema.entities.count == AppSchema.modelTypes.count)
+        // AppSchemaV1's own model list is what's under test here — it
+        // was frozen in A2 and no longer tracks AppSchema.modelTypes
+        // (which has since grown to include AppSchemaV2's addition).
+        #expect(container.schema.entities.count == AppSchemaV1.models.count)
     }
 
     @Test("Current entities can still be written and fetched through the versioned schema")

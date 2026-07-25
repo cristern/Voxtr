@@ -207,9 +207,14 @@ public final class PlanningService {
     /// still draft — the same two existence/ownership guards
     /// `editPlannedActivity` already uses, plus the explicitly-requested
     /// draft-only restriction.
+    ///
+    /// A2: `deletedBy` attributes the resulting tombstone — required,
+    /// not defaulted, matching how `WeekPlan.commit(committedBy:)`
+    /// already requires an explicit actor rather than fabricating one.
     public func deletePlannedActivity(
         _ plannedActivityId: PlannedActivityId,
-        expectedWeekPlanId weekPlanId: WeekPlanId
+        expectedWeekPlanId weekPlanId: WeekPlanId,
+        deletedBy: ActorId
     ) throws {
         guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
@@ -223,6 +228,6 @@ public final class PlanningService {
         guard activity.weekPlanId == weekPlanId.rawValue else {
             throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
         }
-        try repository.deletePlannedActivity(activity)
+        try repository.deletePlannedActivity(activity, deletedBy: deletedBy)
     }
 }

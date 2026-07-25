@@ -125,7 +125,11 @@ public final class WeeklyPlanningViewModel {
         guard let weekPlan else { return }
         errorMessage = nil
         do {
-            try service.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId)
+            try service.deletePlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                deletedBy: committedByActorId
+            )
             try reloadActivities(for: weekPlan)
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)

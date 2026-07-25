@@ -128,7 +128,20 @@ public final class PlanningRepository {
     /// is allowed (e.g. only while the `WeekPlan` is still draft) is
     /// `PlanningService`'s decision, not this repository's — this is
     /// pure persistence, same as every other method here.
-    public func deletePlannedActivity(_ activity: PlannedActivity) throws {
+    ///
+    /// A2: also creates and persists a `PlannedActivityDeletionTombstone`
+    /// recording the deletion, using `DeletionTombstone.now(...)`'s
+    /// existing documented 30-day retention rule unchanged. Both the
+    /// delete and the tombstone insert happen before the same
+    /// `save()` — one atomic write, not two.
+    public func deletePlannedActivity(_ activity: PlannedActivity, deletedBy: ActorId) throws {
+        let tombstoneValue = DeletionTombstone.now(
+            entityId: activity.id,
+            entityType: "PlannedActivity",
+            deletedBy: deletedBy
+        )
+        let tombstone = PlannedActivityDeletionTombstone(from: tombstoneValue)
+        modelContext.insert(tombstone)
         modelContext.delete(activity)
         try modelContext.save()
     }
