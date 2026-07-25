@@ -45,7 +45,10 @@ public final class CompositionRoot {
     }
 
     public static func build(
-        persistence: PersistenceProviding = SwiftDataPersistenceController(modelTypes: AppSchema.modelTypes),
+        persistence: PersistenceProviding = SwiftDataPersistenceController(
+            versionedSchema: AppSchemaV1.self,
+            migrationPlan: AppSchemaMigrationPlan.self
+        ),
         sync: SyncProviding = NoopSyncProvider(),
         featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider()
     ) async throws -> CompositionRoot {
