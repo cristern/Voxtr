@@ -18,6 +18,18 @@ import VoxtrReflectionDomain
 @Suite("WeeklyReviewViewModel (Sprint 5.2)", .serialized)
 struct WeeklyReviewViewModelTests {
 
+    /// Deterministic throwing double for `WeeklyReviewProviding` — lets
+    /// the failure-path test assert `WeeklyReviewViewModel`'s own
+    /// contract (any thrown error becomes `.failed`) without depending
+    /// on any particular SwiftData failure mode.
+    @MainActor
+    private struct ThrowingWeeklyReviewProvider: WeeklyReviewProviding {
+        struct TestError: Error {}
+        func weeklyReview(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyReviewResult {
+            throw TestError()
+        }
+    }
+
     private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
     private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
 
@@ -94,31 +106,14 @@ struct WeeklyReviewViewModelTests {
     @Test("A coordination failure produces a controlled error state")
     @MainActor
     func coordinationFailureProducesControlledErrorState() throws {
-        // Deliberately narrow schema — missing WeekPlan/PlannedActivity/
-        // LoggedActivity/WeeklyReflection entirely — so any fetch
-        // against it genuinely throws, using only existing capability
-        // (no injected test seam needed for this).
-        let container = try InMemoryPersistenceController(modelTypes: [AppDiagnosticsRecord.self]).makeModelContainer()
-        let planningRepository = PlanningRepository(modelContext: container.mainContext)
-        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
-        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
-        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
-            planningRepository: planningRepository, trainingRepository: trainingRepository
-        )
-        let coordinationService = WeeklyReviewCoordinationService(
-            planningRepository: planningRepository,
-            trainingRepository: trainingRepository,
-            weeklyReflectionRepository: weeklyReflectionRepository,
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService
-        )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, athleteId: AthleteId(), weekStart: Self.weekStart
+            coordinationService: ThrowingWeeklyReviewProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
         )
 
         viewModel.load()
 
         guard case .failed = viewModel.loadState else {
-            Issue.record("Expected .failed when the underlying fetch genuinely throws")
+            Issue.record("Expected .failed when the coordination service throws")
             return
         }
     }

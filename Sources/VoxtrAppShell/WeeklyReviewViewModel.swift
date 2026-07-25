@@ -23,12 +23,12 @@ public enum WeeklyReviewLoadState {
 }
 
 /// Sprint 5.2: backs `WeeklyReviewView`. Every read goes through
-/// `WeeklyReviewCoordinationService` — this type never touches
-/// `PlanningService`/`TrainingService`/`WeeklyReflectionService`
-/// directly (the coordination result already supplies everything this
-/// screen shows), never imports SwiftData, and recomputes nothing —
-/// completion state, ordering, and date-range scoping are exactly what
-/// the coordination service already returned.
+/// `WeeklyReviewProviding` (in production, `WeeklyReviewCoordinationService`)
+/// — this type never touches `PlanningService`/`TrainingService`/
+/// `WeeklyReflectionService` directly (the coordination result already
+/// supplies everything this screen shows), never imports SwiftData, and
+/// recomputes nothing — completion state, ordering, and date-range
+/// scoping are exactly what the coordination service already returned.
 @MainActor
 @Observable
 public final class WeeklyReviewViewModel {
@@ -37,10 +37,10 @@ public final class WeeklyReviewViewModel {
     public let athleteId: AthleteId
     public let weekStart: LocalDate
 
-    private let coordinationService: WeeklyReviewCoordinationService
+    private let coordinationService: any WeeklyReviewProviding
 
     public init(
-        coordinationService: WeeklyReviewCoordinationService,
+        coordinationService: any WeeklyReviewProviding,
         athleteId: AthleteId,
         weekStart: LocalDate
     ) {

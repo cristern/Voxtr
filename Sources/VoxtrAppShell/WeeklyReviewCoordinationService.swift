@@ -109,3 +109,15 @@ public final class WeeklyReviewCoordinationService {
         return (start, end)
     }
 }
+
+/// The minimal protocol `WeeklyReviewViewModel` actually depends on —
+/// its one read operation. `WeeklyReviewCoordinationService` is the
+/// only production conformer; this exists so tests can substitute a
+/// deterministic throwing double instead of forcing a genuine SwiftData
+/// failure, without changing production behavior.
+@MainActor
+public protocol WeeklyReviewProviding {
+    func weeklyReview(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyReviewResult
+}
+
+extension WeeklyReviewCoordinationService: WeeklyReviewProviding {}
