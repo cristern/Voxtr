@@ -78,4 +78,31 @@ public final class WeeklyReflectionRepository {
                 return lhs.id.uuidString < rhs.id.uuidString
             }
     }
+
+    /// Sprint 5.2: updates an already-fetched `WeeklyReflection` in
+    /// place — mirrors the mutation shape `PlanningRepository`'s
+    /// `save()`-after-in-place-edit pattern already uses for
+    /// `PlannedActivity`. `athleteId`/`weekStart`/`authorId` are not
+    /// editable through this method — identity/attribution fields, same
+    /// principle `PlanningService.editPlannedActivity` already applies
+    /// to `id`/`weekPlanId`/`athleteId`/`createdAt`.
+    public func updateWeeklyReflection(
+        _ reflection: WeeklyReflection,
+        overallSatisfaction: Int?,
+        loadFelt: Int?,
+        whatWorked: String?,
+        whatWasDifficult: String?,
+        learning: String?,
+        nextWeekConsideration: String?
+    ) throws -> WeeklyReflection {
+        reflection.overallSatisfaction = overallSatisfaction
+        reflection.loadFelt = loadFelt
+        reflection.whatWorked = whatWorked
+        reflection.whatWasDifficult = whatWasDifficult
+        reflection.learning = learning
+        reflection.nextWeekConsideration = nextWeekConsideration
+        reflection.updatedAt = .now
+        try modelContext.save()
+        return reflection
+    }
 }

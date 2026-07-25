@@ -5,6 +5,7 @@ import VoxtrCoreContracts
 /// Sprint 5.0: thrown by `WeeklyReflectionService`.
 public enum WeeklyReflectionServiceError: Error, Equatable {
     case weeklyReflectionAlreadyExists
+    case weeklyReflectionNotFound
     case invalidField(String)
 }
 
@@ -77,6 +78,45 @@ public final class WeeklyReflectionService {
 
     public func fetchWeeklyReflections(forAthlete athleteId: AthleteId) throws -> [WeeklyReflection] {
         try repository.fetchWeeklyReflections(forAthlete: athleteId)
+    }
+
+    /// Sprint 5.2: updates an existing weekly reflection — needed for
+    /// the UI's "edit" action, since `WeeklyReflection` intentionally
+    /// allows only one per athlete/week (S4.1/Sprint 5.0's rule),
+    /// meaning editing (not re-recording) is the only way to change one
+    /// after the fact. Same validation as `recordWeeklyReflection`;
+    /// `athleteId`/`weekStart`/`authorId`/`visibility` are not
+    /// editable through this method.
+    public func updateWeeklyReflection(
+        forAthlete athleteId: AthleteId,
+        weekStart: LocalDate,
+        overallSatisfaction: Int? = nil,
+        loadFelt: Int? = nil,
+        whatWorked: String? = nil,
+        whatWasDifficult: String? = nil,
+        learning: String? = nil,
+        nextWeekConsideration: String? = nil
+    ) throws -> WeeklyReflection {
+        guard let existing = try repository.fetchWeeklyReflection(forAthlete: athleteId, weekStart: weekStart) else {
+            throw WeeklyReflectionServiceError.weeklyReflectionNotFound
+        }
+        try Self.validate(
+            overallSatisfaction: overallSatisfaction,
+            loadFelt: loadFelt,
+            whatWorked: whatWorked,
+            whatWasDifficult: whatWasDifficult,
+            learning: learning,
+            nextWeekConsideration: nextWeekConsideration
+        )
+        return try repository.updateWeeklyReflection(
+            existing,
+            overallSatisfaction: overallSatisfaction,
+            loadFelt: loadFelt,
+            whatWorked: whatWorked,
+            whatWasDifficult: whatWasDifficult,
+            learning: learning,
+            nextWeekConsideration: nextWeekConsideration
+        )
     }
 
     /// Mirrors — does not add to — `WeeklyReflection`'s own
