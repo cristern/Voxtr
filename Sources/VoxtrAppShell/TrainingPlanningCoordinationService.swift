@@ -74,7 +74,21 @@ public final class TrainingPlanningCoordinationService {
             .fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
             .filter { $0.localDate == today }
 
-        return try todaysActivities.map { activity in
+        return try plannedActivitiesWithCompletion(todaysActivities)
+    }
+
+    /// Sprint 5.1: the completion-derivation primitive, extracted so
+    /// `WeeklyReviewCoordinationService` can reuse it for a whole week's
+    /// planned activities instead of duplicating this check — the
+    /// derivation itself (a `PlannedActivity` counts as completed
+    /// purely because a `LoggedActivity` already references it) doesn't
+    /// change; only its scope (today vs. a whole week) varies by
+    /// caller. `todaysPlannedActivitiesWithCompletion` above now
+    /// delegates here too, so there is exactly one copy of this check
+    /// in the codebase. Order is preserved from the input array — pass
+    /// already-ordered activities in, get them back in the same order.
+    public func plannedActivitiesWithCompletion(_ plannedActivities: [PlannedActivity]) throws -> [PlannedActivityCompletion] {
+        try plannedActivities.map { activity in
             let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
             return PlannedActivityCompletion(plannedActivity: activity, isCompleted: !links.isEmpty)
         }

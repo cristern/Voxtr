@@ -5,6 +5,7 @@ import VoxtrParentDomain
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -96,6 +97,16 @@ public final class CompositionRoot {
             trainingRepository: container.resolve(TrainingRepository.self)
         )
         container.register(TrainingPlanningCoordinationService.self) { trainingPlanningCoordinationService }
+
+        // Sprint 5.1: reuses the same repositories/coordination service
+        // already resolved above — no new resolution paths needed.
+        let weeklyReviewCoordinationService = WeeklyReviewCoordinationService(
+            planningRepository: container.resolve(PlanningRepository.self),
+            trainingRepository: container.resolve(TrainingRepository.self),
+            weeklyReflectionRepository: container.resolve(WeeklyReflectionRepository.self),
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        container.register(WeeklyReviewCoordinationService.self) { weeklyReviewCoordinationService }
 
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
