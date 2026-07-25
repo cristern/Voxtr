@@ -12,7 +12,9 @@ import VoxtrReflectionDomain
 /// Sprint 5.2: also links to `WeeklyReviewView`, for the current
 /// calendar week — the most natural existing weekly context to launch
 /// it from, matching where the other weekly-scoped screen already
-/// lives.
+/// lives. Sprint 9: also threads `WeeklyCoachingContextService` through
+/// to `WeeklyReviewViewModel` — the coaching pipeline's one integration
+/// point with this screen.
 public struct FamilyHomeView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
@@ -20,6 +22,7 @@ public struct FamilyHomeView: View {
     public let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
+    public let weeklyCoachingContextService: WeeklyCoachingContextService
 
     public init(
         family: RestoredFamily,
@@ -27,7 +30,8 @@ public struct FamilyHomeView: View {
         trainingService: TrainingService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
-        weeklyReflectionService: WeeklyReflectionService
+        weeklyReflectionService: WeeklyReflectionService,
+        weeklyCoachingContextService: WeeklyCoachingContextService
     ) {
         self.family = family
         self.planningService = planningService
@@ -35,6 +39,7 @@ public struct FamilyHomeView: View {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
+        self.weeklyCoachingContextService = weeklyCoachingContextService
     }
 
     public var body: some View {
@@ -73,6 +78,7 @@ public struct FamilyHomeView: View {
                         WeeklyReviewView(
                             viewModel: WeeklyReviewViewModel(
                                 coordinationService: weeklyReviewCoordinationService,
+                                coachingContextService: weeklyCoachingContextService,
                                 athleteId: family.athlete.athleteId,
                                 weekStart: WeeklyPlanningViewModel.currentWeekStart()
                             ),

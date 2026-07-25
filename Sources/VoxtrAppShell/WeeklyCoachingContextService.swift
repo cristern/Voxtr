@@ -18,6 +18,21 @@ public protocol ParentObservationProviding {
 
 extension ReflectionService: ParentObservationProviding {}
 
+/// Sprint 9: the minimal protocol for `WeeklyCoachingContextService`'s
+/// one read operation. Same pattern as `WeeklyReviewProviding`/
+/// `ParentObservationProviding` above: lets `WeeklyReviewViewModel`'s
+/// coaching-integration tests substitute a deterministic double instead
+/// of requiring a full repository/`ModelContainer` setup for scenarios
+/// (empty presentation, technical failure) that have nothing to do with
+/// persistence mechanics. `WeeklyCoachingContextService` is the only
+/// production conformer.
+@MainActor
+public protocol WeeklyCoachingContextProviding {
+    func weeklyCoachingContext(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyCoachingContext
+}
+
+extension WeeklyCoachingContextService: WeeklyCoachingContextProviding {}
+
 /// Sprint 6 (revised): assembles `WeeklyCoachingContext` for one
 /// athlete/week. Read-only — nothing here inserts, updates, or deletes
 /// anything.
