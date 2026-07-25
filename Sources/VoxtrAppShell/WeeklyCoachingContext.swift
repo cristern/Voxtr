@@ -6,7 +6,14 @@ import VoxtrCoreContracts
 /// Field-for-field mirror of what `WeeklyReflection` stores, minus its
 /// identity/attribution/visibility fields, which future coaching logic
 /// has no stated need for.
-public struct WeeklyReflectionSummary {
+///
+/// `Sendable`: every stored property is already a `Sendable` value type
+/// (`Int?`, `String?`) and the whole type is immutable (`let` only) —
+/// this conformance was simply missing, not something requiring a
+/// workaround. Explicit conformance (not automatic inference) matters
+/// here because this is a `public` type; Swift 6 doesn't infer
+/// `Sendable` across a module boundary on its own.
+public struct WeeklyReflectionSummary: Sendable {
     public let overallSatisfaction: Int?
     public let loadFelt: Int?
     public let whatWorked: String?
@@ -36,7 +43,11 @@ public struct WeeklyReflectionSummary {
 /// minimal (date + text only) — nothing in the approved scope asks for
 /// authorship or linkage detail here, and adding fields speculatively
 /// is exactly the kind of unnecessary coupling this revision removes.
-public struct ParentObservationSummary {
+///
+/// `Sendable`: `LocalDate` and `String` are both already `Sendable`,
+/// and this type is fully immutable — same reasoning as
+/// `WeeklyReflectionSummary` above.
+public struct ParentObservationSummary: Sendable {
     public let localDate: LocalDate
     public let text: String
 
@@ -70,7 +81,14 @@ public struct ParentObservationSummary {
 /// mistake (`EventBus`, built and wired with zero real consumers). A
 /// future trend-analysis story can add it once something actually needs
 /// it.
-public struct WeeklyCoachingContext {
+///
+/// `Sendable`: every stored property is a `Sendable` value type
+/// (`AthleteId`, `LocalDate`, `WeekPlanStatus`, `Int`, plus the two
+/// summary structs above, both `Sendable` for the same reason) — this
+/// is the type that actually crosses `CoachingEngine`'s boundary (see
+/// `CoachingEngine.analyse`), so it needs this conformance itself, not
+/// just its members.
+public struct WeeklyCoachingContext: Sendable {
     public let athleteId: AthleteId
     public let weekStart: LocalDate
     public let previousWeekStart: LocalDate
