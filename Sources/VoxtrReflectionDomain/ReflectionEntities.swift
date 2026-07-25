@@ -134,7 +134,20 @@ public final class DailyStatus {
 public final class WeeklyReflection {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
-    public var weekStart: LocalDate
+    // Sprint 5.0: stored as an ISO date String, not `LocalDate` directly
+    // — same documented SwiftData bug fixed for WeekPlan.weekStart,
+    // PlannedActivity.localDate, and ParentObservation.localDate:
+    // fetching/sorting multiple rows with differing LocalDate-typed
+    // properties crashes on this Xcode/OS generation. WeeklyReflection
+    // was never previously registered in AppSchema (no persisted data
+    // ever existed under the old shape), so fixing this now — as part
+    // of registering it for the first time — is not a change to any
+    // frozen schema version, just implementing it correctly from the
+    // start, the same way this fix was already applied proactively to
+    // PlannedActivity.localDate and ParentObservation.localDate before
+    // either was ever persisted. `weekStart` below is the same public
+    // `LocalDate` API every caller expects.
+    private var weekStartRaw: String
     public var authorId: UUID
     public var overallSatisfaction: Int?
     public var loadFelt: Int?
@@ -171,7 +184,7 @@ public final class WeeklyReflection {
         }
         self.id = id
         self.athleteId = athleteId.rawValue
-        self.weekStart = weekStart
+        self.weekStartRaw = weekStart.isoString
         self.authorId = authorId.rawValue
         self.overallSatisfaction = overallSatisfaction
         self.loadFelt = loadFelt
@@ -183,6 +196,11 @@ public final class WeeklyReflection {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion
+    }
+
+    public var weekStart: LocalDate {
+        get { LocalDate(isoString: weekStartRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { weekStartRaw = newValue.isoString }
     }
 }
 

@@ -12,7 +12,10 @@ import VoxtrCore
 ///
 /// S4.0: registers `ReflectionRepository` and `ReflectionService`
 /// (ActivityReflection/ParentObservation only — DailyStatus/
-/// WeeklyReflection/MonthlyReflection are out of scope).
+/// WeeklyReflection/MonthlyReflection are out of scope). Sprint 5.0:
+/// also registers `WeeklyReflectionRepository`/`WeeklyReflectionService`
+/// (WeeklyReflection only — DailyStatus/MonthlyReflection remain out of
+/// scope).
 public struct ReflectionModule: VoxtrModule {
     public static let domainID = "reflection"
 
@@ -25,5 +28,11 @@ public struct ReflectionModule: VoxtrModule {
 
         let service = ReflectionService(repository: repository)
         container.register(ReflectionService.self) { service }
+
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: modelContainer.mainContext)
+        container.register(WeeklyReflectionRepository.self) { weeklyReflectionRepository }
+
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        container.register(WeeklyReflectionService.self) { weeklyReflectionService }
     }
 }
