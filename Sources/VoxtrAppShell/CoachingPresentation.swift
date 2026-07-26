@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoachingDomain
 
 /// Sprint 8: semantic emphasis only — not a color, font, or SF Symbol.
 /// Deliberately just three cases, matching the coaching architecture's

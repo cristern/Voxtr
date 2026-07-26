@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
+@testable import VoxtrCoachingDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain

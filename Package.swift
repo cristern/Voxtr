@@ -40,6 +40,7 @@ let package = Package(
         .library(name: "VoxtrPlanningDomain", targets: ["VoxtrPlanningDomain"]),
         .library(name: "VoxtrTrainingDomain", targets: ["VoxtrTrainingDomain"]),
         .library(name: "VoxtrReflectionDomain", targets: ["VoxtrReflectionDomain"]),
+        .library(name: "VoxtrCoachingDomain", targets: ["VoxtrCoachingDomain"]),
         .library(name: "VoxtrDevelopmentDomain", targets: ["VoxtrDevelopmentDomain"]),
         .library(name: "VoxtrDecisionSupportDomain", targets: ["VoxtrDecisionSupportDomain"]),
         .library(name: "VoxtrNotificationsDomain", targets: ["VoxtrNotificationsDomain"]),
@@ -62,6 +63,16 @@ let package = Package(
         .target(name: "VoxtrPlanningDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrTrainingDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrReflectionDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
+
+        // Sprint 14: extracted from VoxtrAppShell — the pure coaching
+        // decision core (CoachingEngine, CoachingResult/CoachingInsight)
+        // and its neutral input model (WeeklyCoachingContext). Depends
+        // only on VoxtrCoreContracts, not VoxtrCore — unlike the other
+        // *Domain targets above, nothing here needs VoxtrCore's DI
+        // container, EventBus, or persistence/logging infrastructure;
+        // this is pure decision logic over already-flattened value
+        // types, with no need for any of that.
+        .target(name: "VoxtrCoachingDomain", dependencies: ["VoxtrCoreContracts"]),
         .target(name: "VoxtrDevelopmentDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrDecisionSupportDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrNotificationsDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
@@ -73,7 +84,7 @@ let package = Package(
             dependencies: [
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
-                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrDevelopmentDomain",
+                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrDevelopmentDomain",
                 "VoxtrDecisionSupportDomain", "VoxtrNotificationsDomain", "VoxtrSettings",
             ]
         ),
@@ -84,7 +95,7 @@ let package = Package(
             dependencies: [
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData", "VoxtrAppShell",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
-                "VoxtrTrainingDomain", "VoxtrReflectionDomain",
+                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain",
             ]
         ),
     ]

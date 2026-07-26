@@ -1,98 +1,95 @@
 import Testing
 import Foundation
 import VoxtrCoreContracts
-@testable import VoxtrAppShell
+@testable import VoxtrCoachingDomain
 
 /// A shared fixture-construction helper here is safe, unlike the
 /// project-wide "no shared helper across @Test functions" lesson
 /// established for `ModelContainer`/repository construction: that
 /// lesson traced a real crash to SwiftData's interaction with shared
-/// test setup specifically. `WeeklyCoachingContext` is a plain value
+/// test setup specifically. `CoachingAnalysisInput` is a plain value
 /// type with no SwiftData/`ModelContext` involvement anywhere in this
 /// file, so that failure mode cannot occur here.
+///
+/// Sprint 14 (revised): this file used to construct `WeeklyCoachingContext`
+/// (with `weeklyReflection`/`parentObservations` as full summary
+/// values) — after the architecture review moved that type back to
+/// `VoxtrAppShell` and introduced `CoachingAnalysisInput` as the
+/// engine's actual, coaching-owned input, tests exercise domain rules
+/// through `CoachingAnalysisInput` directly, never through
+/// `WeeklyCoachingContext`. `hasWeeklyReflection`/`hasParentObservations`
+/// replace the old `weeklyReflection: WeeklyReflectionSummary?`/
+/// `parentObservations: [ParentObservationSummary]` parameters — the
+/// engine only ever checked presence/absence, never the summaries'
+/// own content, so no test coverage is lost by this simplification.
 @Suite("CoachingEngine (Sprint 7)", .serialized)
 struct CoachingEngineTests {
 
     private static let athleteId = AthleteId()
     private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
 
-    private static func makeContext(
-        weekPlanStatus: WeekPlanStatus? = .committed,
+    private static func makeInput(
         plannedActivityCount: Int = 0,
-        completedPlannedActivityCount: Int = 0,
         uncompletedPlannedActivityCount: Int = 0,
-        unplannedLoggedActivityCount: Int = 0,
-        totalLoggedActivityCount: Int = 0,
-        weeklyReflection: WeeklyReflectionSummary? = nil,
-        parentObservations: [ParentObservationSummary] = []
-    ) -> WeeklyCoachingContext {
-        WeeklyCoachingContext(
+        hasWeeklyReflection: Bool = false,
+        hasParentObservations: Bool = false
+    ) -> CoachingAnalysisInput {
+        CoachingAnalysisInput(
             athleteId: athleteId,
             weekStart: weekStart,
-            previousWeekStart: LocalDate(year: 2025, month: 12, day: 29),
-            weekPlanStatus: weekPlanStatus,
             plannedActivityCount: plannedActivityCount,
-            completedPlannedActivityCount: completedPlannedActivityCount,
             uncompletedPlannedActivityCount: uncompletedPlannedActivityCount,
-            unplannedLoggedActivityCount: unplannedLoggedActivityCount,
-            totalLoggedActivityCount: totalLoggedActivityCount,
-            weeklyReflection: weeklyReflection,
-            parentObservations: parentObservations
+            hasWeeklyReflection: hasWeeklyReflection,
+            hasParentObservations: hasParentObservations
         )
     }
-
-    private static let sampleReflection = WeeklyReflectionSummary(
-        overallSatisfaction: 4, loadFelt: 3, whatWorked: "Consistency",
-        whatWasDifficult: nil, learning: nil, nextWeekConsideration: nil
-    )
-    private static let sampleObservation = ParentObservationSummary(localDate: weekStart, text: "Looked strong.")
 
     // MARK: - Every rule, individually
 
     @Test("allPlannedActivitiesCompleted fires when every planned activity is completed")
     func allPlannedActivitiesCompletedFires() {
-        let context = Self.makeContext(plannedActivityCount: 3, completedPlannedActivityCount: 3, uncompletedPlannedActivityCount: 0)
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(plannedActivityCount: 3, uncompletedPlannedActivityCount: 0)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.allPlannedActivitiesCompleted))
         #expect(!result.insights.contains(.somePlannedActivitiesMissed))
     }
 
     @Test("somePlannedActivitiesMissed fires when at least one planned activity is uncompleted")
     func somePlannedActivitiesMissedFires() {
-        let context = Self.makeContext(plannedActivityCount: 3, completedPlannedActivityCount: 2, uncompletedPlannedActivityCount: 1)
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(plannedActivityCount: 3, uncompletedPlannedActivityCount: 1)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.somePlannedActivitiesMissed))
         #expect(!result.insights.contains(.allPlannedActivitiesCompleted))
     }
 
-    @Test("noWeeklyReflection fires when weeklyReflection is nil")
+    @Test("noWeeklyReflection fires when hasWeeklyReflection is false")
     func noWeeklyReflectionFires() {
-        let context = Self.makeContext(weeklyReflection: nil)
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(hasWeeklyReflection: false)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.noWeeklyReflection))
         #expect(!result.insights.contains(.weeklyReflectionCompleted))
     }
 
-    @Test("weeklyReflectionCompleted fires when weeklyReflection is present")
+    @Test("weeklyReflectionCompleted fires when hasWeeklyReflection is true")
     func weeklyReflectionCompletedFires() {
-        let context = Self.makeContext(weeklyReflection: Self.sampleReflection)
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(hasWeeklyReflection: true)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.weeklyReflectionCompleted))
         #expect(!result.insights.contains(.noWeeklyReflection))
     }
 
-    @Test("noParentObservations fires when parentObservations is empty")
+    @Test("noParentObservations fires when hasParentObservations is false")
     func noParentObservationsFires() {
-        let context = Self.makeContext(parentObservations: [])
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(hasParentObservations: false)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.noParentObservations))
         #expect(!result.insights.contains(.parentObservationsPresent))
     }
 
-    @Test("parentObservationsPresent fires when at least one observation exists")
+    @Test("parentObservationsPresent fires when hasParentObservations is true")
     func parentObservationsPresentFires() {
-        let context = Self.makeContext(parentObservations: [Self.sampleObservation])
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(hasParentObservations: true)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.parentObservationsPresent))
         #expect(!result.insights.contains(.noParentObservations))
     }
@@ -101,8 +98,8 @@ struct CoachingEngineTests {
 
     @Test("Zero planned activities produces neither of the two completion-related insights")
     func zeroPlannedActivitiesSkipsCompletionRules() {
-        let context = Self.makeContext(plannedActivityCount: 0, completedPlannedActivityCount: 0, uncompletedPlannedActivityCount: 0)
-        let result = CoachingEngine().analyse(context)
+        let input = Self.makeInput(plannedActivityCount: 0, uncompletedPlannedActivityCount: 0)
+        let result = CoachingEngine().analyse(input)
         #expect(!result.insights.contains(.allPlannedActivitiesCompleted))
         #expect(!result.insights.contains(.somePlannedActivitiesMissed))
     }
@@ -111,28 +108,25 @@ struct CoachingEngineTests {
 
     @Test("An inactive week with a reflection and observations already recorded produces no completion-related findings — only the two unavoidable presence findings")
     func noFindingsFromCompletionRuleGroup() {
-        let context = Self.makeContext(
+        let input = Self.makeInput(
             plannedActivityCount: 0,
-            weeklyReflection: Self.sampleReflection,
-            parentObservations: [Self.sampleObservation]
+            hasWeeklyReflection: true,
+            hasParentObservations: true
         )
-        let result = CoachingEngine().analyse(context)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights == [.weeklyReflectionCompleted, .parentObservationsPresent])
     }
 
-    @Test("A fully empty context (nothing planned, no reflection, no observations) produces only the two unavoidable absence findings")
-    func emptyContextProducesOnlyAbsenceFindings() {
-        let context = Self.makeContext(
+    @Test("A fully empty input (nothing planned, no reflection, no observations) produces only the two unavoidable absence findings")
+    func emptyInputProducesOnlyAbsenceFindings() {
+        let input = Self.makeInput(
             plannedActivityCount: 0,
-            completedPlannedActivityCount: 0,
             uncompletedPlannedActivityCount: 0,
-            unplannedLoggedActivityCount: 0,
-            totalLoggedActivityCount: 0,
-            weeklyReflection: nil,
-            parentObservations: []
+            hasWeeklyReflection: false,
+            hasParentObservations: false
         )
 
-        let result = CoachingEngine().analyse(context)
+        let result = CoachingEngine().analyse(input)
 
         #expect(result.insights == [.noWeeklyReflection, .noParentObservations])
     }
@@ -141,14 +135,13 @@ struct CoachingEngineTests {
 
     @Test("Multiple independent findings can co-occur in one result")
     func multipleSimultaneousFindings() {
-        let context = Self.makeContext(
+        let input = Self.makeInput(
             plannedActivityCount: 5,
-            completedPlannedActivityCount: 5,
             uncompletedPlannedActivityCount: 0,
-            weeklyReflection: nil,
-            parentObservations: [Self.sampleObservation]
+            hasWeeklyReflection: false,
+            hasParentObservations: true
         )
-        let result = CoachingEngine().analyse(context)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights.contains(.allPlannedActivitiesCompleted))
         #expect(result.insights.contains(.noWeeklyReflection))
         #expect(result.insights.contains(.parentObservationsPresent))
@@ -159,14 +152,13 @@ struct CoachingEngineTests {
 
     @Test("Insights are always returned in the same fixed evaluation order")
     func ruleOrderingIsFixed() {
-        let context = Self.makeContext(
+        let input = Self.makeInput(
             plannedActivityCount: 4,
-            completedPlannedActivityCount: 4,
             uncompletedPlannedActivityCount: 0,
-            weeklyReflection: Self.sampleReflection,
-            parentObservations: [Self.sampleObservation]
+            hasWeeklyReflection: true,
+            hasParentObservations: true
         )
-        let result = CoachingEngine().analyse(context)
+        let result = CoachingEngine().analyse(input)
         #expect(result.insights == [
             .allPlannedActivitiesCompleted,
             .weeklyReflectionCompleted,
@@ -176,30 +168,29 @@ struct CoachingEngineTests {
 
     // MARK: - Deterministic repeated execution
 
-    @Test("Analysing the same context repeatedly always produces an identical result")
+    @Test("Analysing the same input repeatedly always produces an identical result")
     func deterministicRepeatedExecution() {
-        let context = Self.makeContext(
+        let input = Self.makeInput(
             plannedActivityCount: 3,
-            completedPlannedActivityCount: 1,
             uncompletedPlannedActivityCount: 2,
-            weeklyReflection: Self.sampleReflection,
-            parentObservations: []
+            hasWeeklyReflection: true,
+            hasParentObservations: false
         )
         let engine = CoachingEngine()
 
-        let first = engine.analyse(context)
-        let second = engine.analyse(context)
-        let third = engine.analyse(context)
+        let first = engine.analyse(input)
+        let second = engine.analyse(input)
+        let third = engine.analyse(input)
 
         #expect(first == second)
         #expect(second == third)
     }
 
-    @Test("The engine result carries the same athleteId and weekStart as the input context")
+    @Test("The engine result carries the same athleteId and weekStart as the input")
     func resultCarriesAthleteAndWeekIdentity() {
-        let context = Self.makeContext()
-        let result = CoachingEngine().analyse(context)
-        #expect(result.athleteId == context.athleteId)
-        #expect(result.weekStart == context.weekStart)
+        let input = Self.makeInput()
+        let result = CoachingEngine().analyse(input)
+        #expect(result.athleteId == input.athleteId)
+        #expect(result.weekStart == input.weekStart)
     }
 }

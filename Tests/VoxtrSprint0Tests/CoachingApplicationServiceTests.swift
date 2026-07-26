@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
+@testable import VoxtrCoachingDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -184,9 +185,12 @@ struct CoachingApplicationServiceTests {
 
         // The pre-Sprint-11 sequence, called directly — exactly what
         // WeeklyReviewViewModel.loadCoachingPresentation() used to do
-        // itself before this sprint's extraction.
+        // itself before this sprint's extraction. Sprint 14 (revised):
+        // now includes the explicit CoachingAnalysisInputMapper step
+        // too, matching CoachingApplicationService's actual sequence.
         let directContext = try stubProvider.weeklyCoachingContext(forAthlete: Self.athleteId, weekStart: Self.weekStart)
-        let directResult = CoachingEngine().analyse(directContext)
+        let directInput = CoachingAnalysisInputMapper().map(directContext)
+        let directResult = CoachingEngine().analyse(directInput)
         let directPresentation = CoachingPresentationMapper().map(directResult)
 
         // The post-Sprint-11 path.

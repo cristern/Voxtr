@@ -1,6 +1,18 @@
 import Foundation
 import VoxtrCoreContracts
 
+/// Sprint 14 (revised): moved back to `VoxtrAppShell` after an
+/// architecture review determined this type is an application-layer
+/// aggregation DTO, not a Coaching domain model — every field
+/// originates in Planning, Training, or Reflection; Coaching only
+/// consumes them, never defines or validates them.
+/// `WeeklyCoachingContextService` (also in this package) is what
+/// actually assembles it; `CoachingAnalysisInputMapper` (also here)
+/// converts it into `VoxtrCoachingDomain.CoachingAnalysisInput` — the
+/// type `CoachingEngine` actually owns and consumes — immediately
+/// before analysis. Content and behavior of this type are unchanged
+/// by the move.
+///
 /// Sprint 6 (revised): the factual content of one weekly reflection,
 /// as plain values — never the `WeeklyReflection` `@Model` itself.
 /// Field-for-field mirror of what `WeeklyReflection` stores, minus its
@@ -84,10 +96,10 @@ public struct ParentObservationSummary: Sendable {
 ///
 /// `Sendable`: every stored property is a `Sendable` value type
 /// (`AthleteId`, `LocalDate`, `WeekPlanStatus`, `Int`, plus the two
-/// summary structs above, both `Sendable` for the same reason) — this
-/// is the type that actually crosses `CoachingEngine`'s boundary (see
-/// `CoachingEngine.analyse`), so it needs this conformance itself, not
-/// just its members.
+/// summary structs above, both `Sendable` for the same reason) —
+/// `CoachingApplicationService` passes this across its own boundary
+/// into `CoachingAnalysisInputMapper`, so this conformance is needed
+/// here too, not just on its members.
 public struct WeeklyCoachingContext: Sendable {
     public let athleteId: AthleteId
     public let weekStart: LocalDate

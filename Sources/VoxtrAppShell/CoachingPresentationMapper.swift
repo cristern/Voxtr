@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoachingDomain
 
 /// Sprint 8: converts a `CoachingResult` into a `CoachingPresentation`.
 /// Pure and stateless — a `struct` with no stored properties, same

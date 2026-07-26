@@ -35,6 +35,7 @@
 		AA412522CDED5F1E9088A755 /* WeeklyReviewCoordinationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 081236A10AC7D161CBC8D6EB /* WeeklyReviewCoordinationServiceTests.swift */; };
 		4871765DB1DAA5BBD632920B /* WeeklyReviewViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B500508B1003D3580B1901D1 /* WeeklyReviewViewModelTests.swift */; };
 		62D4D3B663153AA494C29520 /* WeeklyCoachingContextServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 54B2A98FDFCADD2FAF18D9AA /* WeeklyCoachingContextServiceTests.swift */; };
+		A63FA0E64C8FECB717065885 /* CoachingAnalysisInputMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 891111A9A580660B07AB8C96 /* CoachingAnalysisInputMapperTests.swift */; };
 		E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */; };
 		BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */; };
 		43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */; };
@@ -50,6 +51,7 @@
 		3DA4CA50866E7CA13CB4D5CB /* VoxtrPlanningDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7382AD2285D7F7BCC8BD960B /* VoxtrPlanningDomain */; };
 		428ED6B83B67EC7BD19706F2 /* VoxtrTrainingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = CB2EB5C7AAE8789198E9AAC9 /* VoxtrTrainingDomain */; };
 		F832ABEB73635723829B17D7 /* VoxtrReflectionDomain in Frameworks */ = {isa = PBXBuildFile; productRef = F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */; };
+		16D53890E8ADCBE63BB7F4F5 /* VoxtrCoachingDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 335E17C6FA68E37AE01F9A2F /* VoxtrCoachingDomain */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -84,6 +86,7 @@
 		081236A10AC7D161CBC8D6EB /* WeeklyReviewCoordinationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoordinationServiceTests.swift; sourceTree = "<group>"; };
 		B500508B1003D3580B1901D1 /* WeeklyReviewViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewViewModelTests.swift; sourceTree = "<group>"; };
 		54B2A98FDFCADD2FAF18D9AA /* WeeklyCoachingContextServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyCoachingContextServiceTests.swift; sourceTree = "<group>"; };
+		891111A9A580660B07AB8C96 /* CoachingAnalysisInputMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingAnalysisInputMapperTests.swift; sourceTree = "<group>"; };
 		642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingPresentationMapperTests.swift; sourceTree = "<group>"; };
 		A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoachingIntegrationTests.swift; sourceTree = "<group>"; };
@@ -122,6 +125,7 @@
 				3DA4CA50866E7CA13CB4D5CB /* VoxtrPlanningDomain in Frameworks */,
 				428ED6B83B67EC7BD19706F2 /* VoxtrTrainingDomain in Frameworks */,
 				F832ABEB73635723829B17D7 /* VoxtrReflectionDomain in Frameworks */,
+				16D53890E8ADCBE63BB7F4F5 /* VoxtrCoachingDomain in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -192,6 +196,7 @@
 				081236A10AC7D161CBC8D6EB /* WeeklyReviewCoordinationServiceTests.swift */,
 				B500508B1003D3580B1901D1 /* WeeklyReviewViewModelTests.swift */,
 				54B2A98FDFCADD2FAF18D9AA /* WeeklyCoachingContextServiceTests.swift */,
+				891111A9A580660B07AB8C96 /* CoachingAnalysisInputMapperTests.swift */,
 				642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */,
 				19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */,
 				A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */,
@@ -278,6 +283,7 @@
 				7382AD2285D7F7BCC8BD960B /* VoxtrPlanningDomain */,
 				CB2EB5C7AAE8789198E9AAC9 /* VoxtrTrainingDomain */,
 				F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */,
+				335E17C6FA68E37AE01F9A2F /* VoxtrCoachingDomain */,
 			);
 			productName = VoxtrSprint0Tests;
 			productReference = 6A6BF721CDCD53F76E3CAB39 /* VoxtrSprint0Tests.xctest */;
@@ -390,6 +396,7 @@
 				AA412522CDED5F1E9088A755 /* WeeklyReviewCoordinationServiceTests.swift in Sources */,
 				4871765DB1DAA5BBD632920B /* WeeklyReviewViewModelTests.swift in Sources */,
 				62D4D3B663153AA494C29520 /* WeeklyCoachingContextServiceTests.swift in Sources */,
+				A63FA0E64C8FECB717065885 /* CoachingAnalysisInputMapperTests.swift in Sources */,
 				E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */,
 				BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */,
 				43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */,
@@ -675,6 +682,10 @@
 		F8FB50A322E1071B349F7035 /* VoxtrReflectionDomain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoxtrReflectionDomain;
+		};
+		335E17C6FA68E37AE01F9A2F /* VoxtrCoachingDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrCoachingDomain;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

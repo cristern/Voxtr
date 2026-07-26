@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
+@testable import VoxtrCoachingDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 
