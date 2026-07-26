@@ -111,4 +111,19 @@ public protocol TodaysTrainingProviding {
     func todaysPlannedActivitiesWithCompletion(forAthlete athleteId: AthleteId) throws -> [PlannedActivityCompletion]
 }
 
-extension TrainingPlanningCoordinationService: TodaysTrainingProviding {}
+extension TrainingPlanningCoordinationService: TodaysTrainingProviding {
+    /// FIX: default arguments (`referenceDate`/`calendar` on the
+    /// existing `todaysPlannedActivitiesWithCompletion(forAthlete:
+    /// referenceDate:calendar:)` above) do not satisfy Swift protocol
+    /// conformance — a protocol requirement with a single parameter is
+    /// a distinct method signature from one with three parameters,
+    /// defaults or not. This is a pure forwarding adapter, not a
+    /// second implementation: it calls the existing method with its
+    /// existing defaults (`.now`/`.current`) and changes no existing
+    /// public API. The existing three-parameter method is untouched —
+    /// callers that need to pass a specific `referenceDate`/`calendar`
+    /// (none currently do, but the capability remains) still can.
+    public func todaysPlannedActivitiesWithCompletion(forAthlete athleteId: AthleteId) throws -> [PlannedActivityCompletion] {
+        try todaysPlannedActivitiesWithCompletion(forAthlete: athleteId, referenceDate: .now, calendar: .current)
+    }
+}
