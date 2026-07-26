@@ -72,25 +72,24 @@ public struct HomeDashboardView: View {
         }
     }
 
-    /// Sprint 13: constructs its own `DailyFocusViewModel` from
-    /// dependencies this view already holds — no new dependency needed
-    /// to be threaded through `FamilyHomeView`/`RootView`/
-    /// `CompositionRoot`. `DailyFocusCardView` itself owns no
-    /// navigation container; it renders as a `Section` inside this
-    /// view's existing `NavigationStack`.
+    /// Sprint 13 (architecture correction): passes
+    /// `viewModel.dailyFocusState` — a value already fully derived by
+    /// `HomeDashboardViewModel` from `todaysTrainingState`/
+    /// `coachingSummaryState` — directly to `DailyFocusCardView`. No
+    /// `DailyFocusViewModel` is constructed here anymore (that type no
+    /// longer exists); no third loading call is triggered anywhere in
+    /// this file. `HomeDashboardViewModel`'s own `loadTodaysTraining()`/
+    /// `loadCoachingSummary()` calls below are still the only two
+    /// loading entry points this screen has ever had.
     private var dailyFocusCard: some View {
         DailyFocusCardView(
-            viewModel: DailyFocusViewModel(
-                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                coachingPresentationProvider: coachingApplicationService,
-                athleteId: athleteId,
-                weekStart: viewModel.weekStart
-            ),
+            dailyFocusState: viewModel.dailyFocusState,
             athleteDisplayName: athleteDisplayName,
             weeklyReviewCoordinationService: weeklyReviewCoordinationService,
             weeklyReflectionService: weeklyReflectionService,
             coachingApplicationService: coachingApplicationService,
             athleteId: athleteId,
+            weekStart: viewModel.weekStart,
             committedByActorId: committedByActorId
         )
     }

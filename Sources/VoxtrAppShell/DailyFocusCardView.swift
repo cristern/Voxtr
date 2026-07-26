@@ -2,64 +2,71 @@ import SwiftUI
 import VoxtrCoreContracts
 import VoxtrReflectionDomain
 
-/// Sprint 13: renders one `DailyFocusPresentation` (or an empty/hidden
-/// state). Meant to be embedded as a `Section` inside a parent `Form`
-/// already wrapped in its own `NavigationStack` — `HomeDashboardView`,
-/// in practice — so this view owns no navigation container of its own.
+/// Sprint 13 (architecture correction): renders one already-derived
+/// `DailyFocusLoadState`, passed in as a plain value by
+/// `HomeDashboardView` — this type performs no loading of its own.
+/// `HomeDashboardViewModel` is the single owner of dashboard data
+/// loading; this view has no `@State`, holds no `ViewModel`, and calls
+/// no application service. Meant to be embedded as a `Section` inside a
+/// parent `Form` already wrapped in its own `NavigationStack` —
+/// `HomeDashboardView`, in practice — so this view owns no navigation
+/// container of its own.
 ///
 /// Reuses `WeeklyReviewView` for `.startWeeklyReflection` navigation —
-/// no new screen is created here. `.addParentObservation` mirrors
-/// `WeeklyReviewView.actionButton(for:)`'s existing Sprint 10 treatment
-/// exactly: a visible but disabled button, since no creation UI exists
-/// for it anywhere in this project (unchanged since Sprint 10 — still
-/// true, not re-verified by inventing a workflow here).
+/// no new screen is created here.
+///
+/// CORRECTION: `.addParentObservation` no longer renders a disabled
+/// button. No parent-observation creation flow exists anywhere in this
+/// project, and a disabled control implying one is coming was flagged
+/// as inconsistent with product intent. The underlying
+/// `CoachingPresentationAction` value is still preserved on
+/// `DailyFocusPresentation.action` for traceability — only the control
+/// this view renders for it changed, to none at all, same as `.none`.
 public struct DailyFocusCardView: View {
-    @State private var viewModel: DailyFocusViewModel
-    private let athleteDisplayName: String
-    private let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
-    private let weeklyReflectionService: WeeklyReflectionService
-    private let coachingApplicationService: CoachingApplicationService
-    private let athleteId: AthleteId
-    private let committedByActorId: ActorId
+    let dailyFocusState: DailyFocusLoadState
+    let athleteDisplayName: String
+    let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
+    let weeklyReflectionService: WeeklyReflectionService
+    let coachingApplicationService: CoachingApplicationService
+    let athleteId: AthleteId
+    let weekStart: LocalDate
+    let committedByActorId: ActorId
 
     public init(
-        viewModel: DailyFocusViewModel,
+        dailyFocusState: DailyFocusLoadState,
         athleteDisplayName: String,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteId: AthleteId,
+        weekStart: LocalDate,
         committedByActorId: ActorId
     ) {
-        _viewModel = State(initialValue: viewModel)
+        self.dailyFocusState = dailyFocusState
         self.athleteDisplayName = athleteDisplayName
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
         self.coachingApplicationService = coachingApplicationService
         self.athleteId = athleteId
+        self.weekStart = weekStart
         self.committedByActorId = committedByActorId
     }
 
     public var body: some View {
-        Group {
-            switch viewModel.loadState {
-            case .loading:
-                EmptyView()
-            case .failed:
-                // Both underlying loads failed — hide the card
-                // entirely, per this sprint's explicit requirement. No
-                // fallback content is invented.
-                EmptyView()
-            case .loaded(let focus):
-                if let focus {
-                    focusSection(focus)
-                } else {
-                    emptyStateSection
-                }
+        switch dailyFocusState {
+        case .loading:
+            EmptyView()
+        case .failed:
+            // Both underlying sources failed — hide the card entirely,
+            // per this feature's explicit requirement. No fallback
+            // content is invented.
+            EmptyView()
+        case .loaded(let focus):
+            if let focus {
+                focusSection(focus)
+            } else {
+                emptyStateSection
             }
-        }
-        .onAppear {
-            viewModel.load()
         }
     }
 
@@ -95,7 +102,7 @@ public struct DailyFocusCardView: View {
                         coordinationService: weeklyReviewCoordinationService,
                         coachingPresentationProvider: coachingApplicationService,
                         athleteId: athleteId,
-                        weekStart: viewModel.weekStart
+                        weekStart: weekStart
                     ),
                     athleteDisplayName: athleteDisplayName,
                     reflectionService: weeklyReflectionService,
@@ -104,9 +111,9 @@ public struct DailyFocusCardView: View {
             }
             .accessibilityIdentifier("dailyFocus.action.startWeeklyReflection")
         case .addParentObservation:
-            Button(CoachingPresentationStrings.addParentObservationAction) {}
-                .disabled(true)
-                .accessibilityIdentifier("dailyFocus.action.addParentObservation")
+            // No creation flow exists — render no control at all,
+            // rather than a disabled one implying otherwise.
+            EmptyView()
         }
     }
 }
