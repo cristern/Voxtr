@@ -45,7 +45,8 @@ struct DailyQuoteApplicationServiceTests {
         let provider = DailyQuoteProvider(dateProvider: FixedDateProvider(now: Self.utcDate(year: 2026, month: 4, day: 10)))
         let service = DailyQuoteApplicationService(repository: repository, provider: provider)
 
-        let result = try #require(service.todaysQuote())
+        let quote = try service.todaysQuote()
+        let result = try #require(quote)
         #expect(try repository.quotes().contains(result))
     }
 
