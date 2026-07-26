@@ -184,7 +184,7 @@ struct CoachingPresentationMapperTests {
     }
 
     @Test("Every other insight is assigned no action — a valid, intentional outcome")
-    func otherInsightsAssignNoAction() {
+    func otherInsightsAssignNoAction() throws {
         let noActionInsights: [CoachingInsight] = [
             .allPlannedActivitiesCompleted,
             .somePlannedActivitiesMissed,
@@ -193,7 +193,23 @@ struct CoachingPresentationMapperTests {
         ]
         for insight in noActionInsights {
             let presentation = CoachingPresentationMapper().map(Self.makeResult([insight]))
-            #expect(presentation.sections.first?.items.first?.action == .none)
+            // FIX: `presentation.sections.first?.items.first?.action` is
+            // `CoachingPresentationAction?` because of the double
+            // optional chain above — comparing that directly against
+            // `.none` is ambiguous in Swift: `CoachingPresentationAction`
+            // itself has a case literally named `none` (Sprint 10's
+            // explicit action model), and `Optional` also has its own
+            // `.none` meaning nil. Swift resolves the bare `.none`
+            // against the *optional's* `.none` (nil) here, not the
+            // enum's — so this assertion was silently checking "the
+            // chain produced nothing" rather than "the action is
+            // `.none`", and failed once the item was reliably present
+            // with a real `.none` value. Unwrapping via `#require`
+            // first makes `item.action` a non-optional
+            // `CoachingPresentationAction`, so `== .none` can only mean
+            // the enum case.
+            let item = try #require(presentation.sections.first?.items.first)
+            #expect(item.action == .none)
         }
     }
 
