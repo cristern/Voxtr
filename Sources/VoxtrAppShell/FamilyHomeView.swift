@@ -7,16 +7,21 @@ import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
 /// S1.4: shown when `FamilyRestorationState` is `.existingFamily`.
-/// Deliberately minimal — this is not a dashboard. S2.4: also links to
-/// `WeeklyPlanningView`. S3.3: also links to `DailyTrainingView`.
-/// Sprint 5.2: also links to `WeeklyReviewView`, for the current
-/// calendar week — the most natural existing weekly context to launch
-/// it from, matching where the other weekly-scoped screen already
-/// lives. Sprint 9: also threads the coaching pipeline through to
-/// `WeeklyReviewViewModel`. Sprint 11: that dependency is now
-/// `CoachingApplicationService` (was `WeeklyCoachingContextService`
-/// directly) — this view still only passes the dependency through, it
-/// doesn't orchestrate anything itself either way.
+/// S2.4: also links to `WeeklyPlanningView`. S3.3: also links to
+/// `DailyTrainingView`. Sprint 5.2: also links to `WeeklyReviewView`.
+/// Sprint 9: also threads the coaching pipeline through. Sprint 11:
+/// that dependency is `CoachingApplicationService`.
+///
+/// Sprint 12 (refactored): this view's own content (the previous
+/// `List` of Parent/Athlete text and three navigation links) has been
+/// replaced — this is now purely the container that receives the
+/// family/services from `RootView` and hosts `HomeDashboardView`,
+/// restoring `RootView → FamilyHomeView → HomeDashboardView` as the
+/// actual navigation hierarchy. `RootView` no longer reaches past this
+/// type directly to `HomeDashboardView`. `HomeDashboardView` itself is
+/// unchanged by this refactor — it remains focused solely on the
+/// dashboard UI and has no awareness of `FamilyHomeView` at all; this
+/// type is the only thing that changed.
 public struct FamilyHomeView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
@@ -45,54 +50,22 @@ public struct FamilyHomeView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            List {
-                Section("Parent") {
-                    Text(family.parent.givenName)
-                }
-                Section("Athlete") {
-                    Text(family.athlete.givenName)
-                }
-                Section {
-                    NavigationLink("Weekly Plan") {
-                        WeeklyPlanningView(
-                            viewModel: WeeklyPlanningViewModel(
-                                service: planningService,
-                                athleteId: family.athlete.athleteId,
-                                committedByActorId: ActorId(rawValue: family.participant.id)
-                            )
-                        )
-                    }
-                    .accessibilityIdentifier("familyHome.weeklyPlanLink")
-
-                    NavigationLink("Daily Training") {
-                        DailyTrainingView(
-                            viewModel: DailyTrainingViewModel(
-                                trainingService: trainingService,
-                                coordinationService: trainingPlanningCoordinationService,
-                                athleteId: family.athlete.athleteId
-                            )
-                        )
-                    }
-                    .accessibilityIdentifier("familyHome.dailyTrainingLink")
-
-                    NavigationLink("Weekly Review") {
-                        WeeklyReviewView(
-                            viewModel: WeeklyReviewViewModel(
-                                coordinationService: weeklyReviewCoordinationService,
-                                coachingPresentationProvider: coachingApplicationService,
-                                athleteId: family.athlete.athleteId,
-                                weekStart: WeeklyPlanningViewModel.currentWeekStart()
-                            ),
-                            athleteDisplayName: family.athlete.givenName,
-                            reflectionService: weeklyReflectionService,
-                            authorId: ActorId(rawValue: family.participant.id)
-                        )
-                    }
-                    .accessibilityIdentifier("familyHome.weeklyReviewLink")
-                }
-            }
-            .navigationTitle(family.workspace.displayName)
-        }
+        HomeDashboardView(
+            viewModel: HomeDashboardViewModel(
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                coachingPresentationProvider: coachingApplicationService,
+                athleteId: family.athlete.athleteId,
+                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+            ),
+            athleteDisplayName: family.athlete.givenName,
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
+            weeklyReflectionService: weeklyReflectionService,
+            coachingApplicationService: coachingApplicationService,
+            athleteId: family.athlete.athleteId,
+            committedByActorId: ActorId(rawValue: family.participant.id)
+        )
     }
 }
