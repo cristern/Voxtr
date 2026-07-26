@@ -65,6 +65,39 @@ struct HomeDashboardViewModelTests {
         }
     }
 
+    /// Sprint 13 (architecture correction): `TrainingPlanningCoordinationService`
+    /// is now protocol-injected (`TodaysTrainingProviding`) specifically
+    /// so these two doubles can exist — deterministic call-count and
+    /// independent-failure control were not possible against the
+    /// concrete type.
+    @MainActor
+    private final class RecordingTodaysTrainingProvider: TodaysTrainingProviding {
+        private(set) var callCount = 0
+        let activitiesToReturn: [PlannedActivityCompletion]
+        init(activitiesToReturn: [PlannedActivityCompletion]) {
+            self.activitiesToReturn = activitiesToReturn
+        }
+        func todaysPlannedActivitiesWithCompletion(forAthlete athleteId: AthleteId) throws -> [PlannedActivityCompletion] {
+            callCount += 1
+            return activitiesToReturn
+        }
+    }
+
+    @MainActor
+    private struct ThrowingTodaysTrainingProvider: TodaysTrainingProviding {
+        struct TestError: Error {}
+        func todaysPlannedActivitiesWithCompletion(forAthlete athleteId: AthleteId) throws -> [PlannedActivityCompletion] {
+            throw TestError()
+        }
+    }
+
+    private static func makePlannedActivity(title: String) -> PlannedActivity {
+        PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: athleteId, activityType: .individualTraining,
+            title: title, localDate: weekStart, timeZoneId: oslo
+        )
+    }
+
     @Test("Today's training loads successfully from existing services, with completion already derived")
     @MainActor
     func todaysTrainingLoadsSuccessfully() throws {
@@ -266,5 +299,168 @@ struct HomeDashboardViewModelTests {
             return
         }
         #expect(fromViewModel == directlyFromService)
+    }
+
+    // MARK: - Sprint 13 (architecture correction): dailyFocusState derivation
+
+    @Test("Neither source finished loading yet — dailyFocusState is .loading")
+    @MainActor
+    func dailyFocusStateLoadingWhileNeitherSourceFinished() throws {
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: []),
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
+            ),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        // Neither loadTodaysTraining() nor loadCoachingSummary() called yet.
+        guard case .loading = viewModel.dailyFocusState else {
+            Issue.record("Expected .loading before either source has settled")
+            return
+        }
+    }
+
+    @Test("Both sources loaded — Daily Focus is composed from both")
+    @MainActor
+    func dailyFocusStateBothLoadedComposesFromBoth() throws {
+        let activities = [PlannedActivityCompletion(plannedActivity: Self.makePlannedActivity(title: "Endurance run"), isCompleted: false)]
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: activities),
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
+            ),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        guard case .loaded(let focus) = viewModel.dailyFocusState, let focus else {
+            Issue.record("Expected .loaded with a non-nil focus")
+            return
+        }
+        #expect(focus.source == .todaysTraining)
+        #expect(focus.title == "Endurance run")
+    }
+
+    @Test("Training loaded, coaching failed — Daily Focus is still composed from training")
+    @MainActor
+    func dailyFocusStateTrainingLoadedCoachingFailed() throws {
+        let activities = [PlannedActivityCompletion(plannedActivity: Self.makePlannedActivity(title: "Endurance run"), isCompleted: false)]
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: activities),
+            coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        guard case .loaded(let focus) = viewModel.dailyFocusState, let focus else {
+            Issue.record("A coaching failure must not prevent a training-based Daily Focus")
+            return
+        }
+        #expect(focus.source == .todaysTraining)
+    }
+
+    @Test("Coaching loaded, training failed — Daily Focus is still composed from coaching")
+    @MainActor
+    func dailyFocusStateCoachingLoadedTrainingFailed() throws {
+        let actionableCoaching = CoachingPresentation(
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            sections: [CoachingPresentationSection(title: "Weekly Reflection", items: [
+                CoachingPresentationItem(insight: .noWeeklyReflection, text: "No weekly reflection was recorded.", emphasis: .attention, action: .startWeeklyReflection),
+            ])]
+        )
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: ThrowingTodaysTrainingProvider(),
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(presentationToReturn: actionableCoaching),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        guard case .loaded(let focus) = viewModel.dailyFocusState, let focus else {
+            Issue.record("A training failure must not prevent a coaching-based Daily Focus")
+            return
+        }
+        #expect(focus.source == .coaching)
+    }
+
+    @Test("Both sources failed — dailyFocusState is .failed, hiding the card")
+    @MainActor
+    func dailyFocusStateBothFailedHidesCard() throws {
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: ThrowingTodaysTrainingProvider(),
+            coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        guard case .failed = viewModel.dailyFocusState else {
+            Issue.record("Expected .failed when both sources fail")
+            return
+        }
+    }
+
+    @Test("Both loaded but nothing qualifies — dailyFocusState is .loaded(nil), not .failed")
+    @MainActor
+    func dailyFocusStateNoQualifyingFocus() throws {
+        let completedActivity = [PlannedActivityCompletion(plannedActivity: Self.makePlannedActivity(title: "Endurance run"), isCompleted: true)]
+        let noActionCoaching = CoachingPresentation(
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            sections: [CoachingPresentationSection(title: "Weekly Reflection", items: [
+                CoachingPresentationItem(insight: .weeklyReflectionCompleted, text: "A weekly reflection was recorded.", emphasis: .positive, action: .none),
+            ])]
+        )
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: completedActivity),
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(presentationToReturn: noActionCoaching),
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        guard case .loaded(let focus) = viewModel.dailyFocusState else {
+            Issue.record("Expected .loaded, not .failed")
+            return
+        }
+        #expect(focus == nil)
+    }
+
+    @Test("HomeDashboardViewModel performs exactly one training load and one coaching load per requested dashboard load — Daily Focus composition triggers zero additional service calls")
+    @MainActor
+    func singleLoadingOwnerNoDuplicateServiceCalls() throws {
+        let activities = [PlannedActivityCompletion(plannedActivity: Self.makePlannedActivity(title: "Endurance run"), isCompleted: false)]
+        let trainingProvider = RecordingTodaysTrainingProvider(activitiesToReturn: activities)
+        let coachingProvider = RecordingCoachingPresentationProvider(
+            presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
+        )
+        let viewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingProvider,
+            coachingPresentationProvider: coachingProvider,
+            athleteId: Self.athleteId, weekStart: Self.weekStart
+        )
+
+        viewModel.loadTodaysTraining()
+        viewModel.loadCoachingSummary()
+
+        #expect(trainingProvider.callCount == 1)
+        #expect(coachingProvider.callCount == 1)
+
+        // Reading dailyFocusState — including repeatedly — must not
+        // call either service again. Composition is a pure derivation
+        // over already-loaded state.
+        _ = viewModel.dailyFocusState
+        _ = viewModel.dailyFocusState
+        _ = viewModel.dailyFocusState
+
+        #expect(trainingProvider.callCount == 1)
+        #expect(coachingProvider.callCount == 1)
     }
 }

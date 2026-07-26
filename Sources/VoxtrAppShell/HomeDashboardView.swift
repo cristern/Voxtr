@@ -57,6 +57,7 @@ public struct HomeDashboardView: View {
     public var body: some View {
         NavigationStack {
             Form {
+                dailyFocusCard
                 welcomeSection
                 coachingSection
                 planningSection
@@ -69,6 +70,29 @@ public struct HomeDashboardView: View {
                 viewModel.loadCoachingSummary()
             }
         }
+    }
+
+    /// Sprint 13: constructs its own `DailyFocusViewModel` from
+    /// dependencies this view already holds — no new dependency needed
+    /// to be threaded through `FamilyHomeView`/`RootView`/
+    /// `CompositionRoot`. `DailyFocusCardView` itself owns no
+    /// navigation container; it renders as a `Section` inside this
+    /// view's existing `NavigationStack`.
+    private var dailyFocusCard: some View {
+        DailyFocusCardView(
+            viewModel: DailyFocusViewModel(
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                coachingPresentationProvider: coachingApplicationService,
+                athleteId: athleteId,
+                weekStart: viewModel.weekStart
+            ),
+            athleteDisplayName: athleteDisplayName,
+            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
+            weeklyReflectionService: weeklyReflectionService,
+            coachingApplicationService: coachingApplicationService,
+            athleteId: athleteId,
+            committedByActorId: committedByActorId
+        )
     }
 
     private var welcomeSection: some View {

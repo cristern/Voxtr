@@ -94,3 +94,21 @@ public final class TrainingPlanningCoordinationService {
         }
     }
 }
+
+/// Sprint 13 (architecture correction): the narrowest protocol around
+/// `TrainingPlanningCoordinationService`'s one method
+/// `HomeDashboardViewModel` needs — same pattern as
+/// `WeeklyReviewProviding`/`WeeklyCoachingContextProviding`/
+/// `CoachingPresentationProviding`. Introduced only now, because only
+/// now does something (`HomeDashboardViewModel`'s tests, specifically
+/// deterministic call-count and independent-failure scenarios) actually
+/// need it — `DailyTrainingViewModel` still takes the concrete type
+/// directly, unchanged, since it has no such need.
+/// `TrainingPlanningCoordinationService` is the only production
+/// conformer.
+@MainActor
+public protocol TodaysTrainingProviding {
+    func todaysPlannedActivitiesWithCompletion(forAthlete athleteId: AthleteId) throws -> [PlannedActivityCompletion]
+}
+
+extension TrainingPlanningCoordinationService: TodaysTrainingProviding {}

@@ -40,6 +40,7 @@
 		43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */; };
 		C593119F30B5ED9DE7B8011B /* CoachingApplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */; };
 		062C778F5E2A19CD67EBD0B6 /* HomeDashboardViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */; };
+		A75D996B997FE73B6FBA7CA5 /* DailyFocusViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CF251529FCE5A9CFEC8B89 /* DailyFocusViewModelTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -88,6 +89,7 @@
 		A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoachingIntegrationTests.swift; sourceTree = "<group>"; };
 		3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingApplicationServiceTests.swift; sourceTree = "<group>"; };
 		5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDashboardViewModelTests.swift; sourceTree = "<group>"; };
+		50CF251529FCE5A9CFEC8B89 /* DailyFocusViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyFocusViewModelTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -195,6 +197,7 @@
 				A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */,
 				3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */,
 				5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */,
+				50CF251529FCE5A9CFEC8B89 /* DailyFocusViewModelTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -392,6 +395,7 @@
 				43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */,
 				C593119F30B5ED9DE7B8011B /* CoachingApplicationServiceTests.swift in Sources */,
 				062C778F5E2A19CD67EBD0B6 /* HomeDashboardViewModelTests.swift in Sources */,
+				A75D996B997FE73B6FBA7CA5 /* DailyFocusViewModelTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

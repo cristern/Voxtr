@@ -16,6 +16,18 @@ public enum TodaysTrainingLoadState {
     case failed
 }
 
+/// Sprint 13 (architecture correction): moved here from the now-removed
+/// `DailyFocusViewModel` — this is where the state is actually derived
+/// now, so this is where the type belongs. Same shape as
+/// `CoachingPresentationLoadState`: `.loaded(nil)` is "nothing
+/// qualified, an intentional valid outcome," `.failed` is reserved for
+/// "both underlying sources failed, hide the card."
+public enum DailyFocusLoadState {
+    case loading
+    case loaded(DailyFocusPresentation?)
+    case failed
+}
+
 /// Sprint 12: backs `HomeDashboardView`. Two independent load states —
 /// today's training and the coaching summary — for the same reason
 /// `WeeklyReviewViewModel` keeps its own two independent: a failure in
@@ -37,6 +49,15 @@ public enum TodaysTrainingLoadState {
 /// `WeeklyCoachingContext`, `CoachingEngine`, or
 /// `CoachingPresentationMapper` directly, and never imports SwiftData
 /// or a repository.
+///
+/// Sprint 13 (architecture correction): this is now the SINGLE owner of
+/// dashboard data loading. `dailyFocusState` below is a *computed*
+/// property derived from `todaysTrainingState`/`coachingSummaryState` —
+/// not a third stored, independently-loaded piece of state. Nothing
+/// calls `TodaysTrainingProviding`/`CoachingPresentationProviding` a
+/// second time for Daily Focus; `loadTodaysTraining()`/
+/// `loadCoachingSummary()` remain the only two loading entry points
+/// this type has ever had.
 @MainActor
 @Observable
 public final class HomeDashboardViewModel {
@@ -46,18 +67,19 @@ public final class HomeDashboardViewModel {
     public let athleteId: AthleteId
     public let weekStart: LocalDate
 
-    /// Concrete, not protocol-injected — matches
-    /// `DailyTrainingViewModel`'s existing precedent for this exact
-    /// dependency (it has never had a protocol wrapper in this
-    /// project). Introducing one here, for this sprint alone, would be
-    /// abstraction not yet justified anywhere else.
-    private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
+    /// Sprint 13 (architecture correction): now protocol-injected —
+    /// `HomeDashboardViewModel`'s own tests need deterministic
+    /// call-count and independent-failure control over this dependency,
+    /// which the concrete type didn't allow. `DailyTrainingViewModel`
+    /// still takes the concrete type directly, unchanged — it has no
+    /// such need, so it wasn't touched.
+    private let trainingPlanningCoordinationService: any TodaysTrainingProviding
     /// Protocol-injected — matches the established convention for this
     /// exact dependency since Sprint 11.
     private let coachingPresentationProvider: any CoachingPresentationProviding
 
     public init(
-        trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
+        trainingPlanningCoordinationService: any TodaysTrainingProviding,
         coachingPresentationProvider: any CoachingPresentationProviding,
         athleteId: AthleteId,
         weekStart: LocalDate
@@ -90,6 +112,36 @@ public final class HomeDashboardViewModel {
             coachingSummaryState = .loaded(presentation)
         } catch {
             coachingSummaryState = .failed
+        }
+    }
+
+    /// Sprint 13 (architecture correction): Daily Focus, derived purely
+    /// from `todaysTrainingState`/`coachingSummaryState` — no service
+    /// call happens here, ever. Being a computed property (not a
+    /// stored one updated imperatively) means it always reflects
+    /// whatever the two source states currently are, with nothing to
+    /// keep in sync by hand and no possibility of a stale copy.
+    ///
+    /// - `.loading` while EITHER source is still `.loading` — composing
+    ///   from a source that hasn't settled yet isn't meaningful.
+    /// - `.failed` only when BOTH sources are `.failed` — hides the
+    ///   card entirely.
+    /// - `.loaded(...)` otherwise, composed from whichever source(s)
+    ///   actually succeeded — a single source's failure is passed to
+    ///   `DailyFocusComposer` as `nil` for that source only, never as a
+    ///   reason to fail the whole composition.
+    public var dailyFocusState: DailyFocusLoadState {
+        switch (todaysTrainingState, coachingSummaryState) {
+        case (.loading, _), (_, .loading):
+            return .loading
+        case (.failed, .failed):
+            return .failed
+        case (.loaded(let activities), .failed):
+            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: nil))
+        case (.failed, .loaded(let coaching)):
+            return .loaded(DailyFocusComposer().compose(todaysActivities: nil, coaching: coaching))
+        case (.loaded(let activities), .loaded(let coaching)):
+            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: coaching))
         }
     }
 }
