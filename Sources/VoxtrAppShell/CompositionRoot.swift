@@ -108,6 +108,19 @@ public final class CompositionRoot {
         )
         container.register(WeeklyReviewCoordinationService.self) { weeklyReviewCoordinationService }
 
+        // Sprint 6: reuses the coordination service resolved above and
+        // the already-registered ReflectionService — no new resolution
+        // paths, no direct repository access.
+        let weeklyCoachingContextService = WeeklyCoachingContextService(
+            weeklyReviewProvider: weeklyReviewCoordinationService,
+            parentObservationProvider: container.resolve(ReflectionService.self)
+        )
+        container.register(WeeklyCoachingContextService.self) { weeklyCoachingContextService }
+
+        // Sprint 11: reuses the already-constructed weeklyCoachingContextService above.
+        let coachingApplicationService = CoachingApplicationService(coachingContextService: weeklyCoachingContextService)
+        container.register(CoachingApplicationService.self) { coachingApplicationService }
+
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 

@@ -58,20 +58,22 @@ public final class WeeklyReviewViewModel {
     public let weekStart: LocalDate
 
     private let coordinationService: any WeeklyReviewProviding
-    /// Sprint 9: the one new dependency this sprint adds. Reuses the
-    /// already-existing `WeeklyCoachingContextService` (Sprint 6) —
-    /// this type does not assemble `WeeklyCoachingContext` itself, call
-    /// any repository, or touch SwiftData.
-    private let coachingContextService: any WeeklyCoachingContextProviding
+    /// Sprint 9: the one new dependency that sprint added. Sprint 11:
+    /// now the whole pipeline call sequence (previously three calls
+    /// made directly in `loadCoachingPresentation` below) lives in
+    /// `CoachingApplicationService` — this ViewModel only requests the
+    /// finished result. It still never touches `WeeklyCoachingContext`,
+    /// `CoachingEngine`, or `CoachingPresentationMapper` directly.
+    private let coachingPresentationProvider: any CoachingPresentationProviding
 
     public init(
         coordinationService: any WeeklyReviewProviding,
-        coachingContextService: any WeeklyCoachingContextProviding,
+        coachingPresentationProvider: any CoachingPresentationProviding,
         athleteId: AthleteId,
         weekStart: LocalDate
     ) {
         self.coordinationService = coordinationService
-        self.coachingContextService = coachingContextService
+        self.coachingPresentationProvider = coachingPresentationProvider
         self.athleteId = athleteId
         self.weekStart = weekStart
     }
@@ -90,15 +92,11 @@ public final class WeeklyReviewViewModel {
         }
     }
 
-    /// Sprint 9: runs the complete deterministic coaching pipeline —
-    /// `WeeklyCoachingContext` assembly → `CoachingEngine` →
-    /// `CoachingPresentationMapper` — and exposes only the final
-    /// `CoachingPresentation` via `coachingPresentationState`. This
-    /// method is the entire integration boundary: it duplicates no
-    /// logic already owned by those three components (it does not
-    /// evaluate a `CoachingInsight`, does not choose presentation text,
-    /// does not group items into sections) — it only calls each stage
-    /// once, in order, and stores what came out.
+    /// Sprint 11: this ViewModel no longer orchestrates the coaching
+    /// pipeline — it delegates to `CoachingApplicationService` (via
+    /// `CoachingPresentationProviding`) and stores what comes back. The
+    /// pipeline sequence itself (context assembly → engine → mapper)
+    /// lives in exactly one place now, not here.
     ///
     /// A thrown error here (a genuine technical failure fetching the
     /// underlying data) becomes `.failed`, never a silently-empty
@@ -108,9 +106,7 @@ public final class WeeklyReviewViewModel {
     public func loadCoachingPresentation() {
         coachingPresentationState = .loading
         do {
-            let context = try coachingContextService.weeklyCoachingContext(forAthlete: athleteId, weekStart: weekStart)
-            let result = CoachingEngine().analyse(context)
-            let presentation = CoachingPresentationMapper().map(result)
+            let presentation = try coachingPresentationProvider.coachingPresentation(forAthlete: athleteId, weekStart: weekStart)
             coachingPresentationState = .loaded(presentation)
         } catch {
             coachingPresentationState = .failed

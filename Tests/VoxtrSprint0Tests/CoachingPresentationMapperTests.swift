@@ -157,9 +157,9 @@ struct CoachingPresentationMapperTests {
 
     @Test("Presentation types support equality comparison as expected for deterministic testing")
     func presentationTypesSupportEquatable() {
-        let itemA = CoachingPresentationItem(insight: .allPlannedActivitiesCompleted, text: "Same text", emphasis: .positive)
-        let itemB = CoachingPresentationItem(insight: .allPlannedActivitiesCompleted, text: "Same text", emphasis: .positive)
-        let itemC = CoachingPresentationItem(insight: .somePlannedActivitiesMissed, text: "Different", emphasis: .attention)
+        let itemA = CoachingPresentationItem(insight: .allPlannedActivitiesCompleted, text: "Same text", emphasis: .positive, action: .none)
+        let itemB = CoachingPresentationItem(insight: .allPlannedActivitiesCompleted, text: "Same text", emphasis: .positive, action: .none)
+        let itemC = CoachingPresentationItem(insight: .somePlannedActivitiesMissed, text: "Different", emphasis: .attention, action: .none)
 
         #expect(itemA == itemB)
         #expect(itemA != itemC)
@@ -167,5 +167,49 @@ struct CoachingPresentationMapperTests {
         let sectionA = CoachingPresentationSection(title: "Planned Activities", items: [itemA])
         let sectionB = CoachingPresentationSection(title: "Planned Activities", items: [itemB])
         #expect(sectionA == sectionB)
+    }
+
+    // MARK: - Sprint 10: action assignment
+
+    @Test("noWeeklyReflection is assigned the startWeeklyReflection action")
+    func noWeeklyReflectionAssignsStartWeeklyReflectionAction() {
+        let presentation = CoachingPresentationMapper().map(Self.makeResult([.noWeeklyReflection]))
+        #expect(presentation.sections.first?.items.first?.action == .startWeeklyReflection)
+    }
+
+    @Test("noParentObservations is assigned the addParentObservation action")
+    func noParentObservationsAssignsAddParentObservationAction() {
+        let presentation = CoachingPresentationMapper().map(Self.makeResult([.noParentObservations]))
+        #expect(presentation.sections.first?.items.first?.action == .addParentObservation)
+    }
+
+    @Test("Every other insight is assigned no action — a valid, intentional outcome")
+    func otherInsightsAssignNoAction() {
+        let noActionInsights: [CoachingInsight] = [
+            .allPlannedActivitiesCompleted,
+            .somePlannedActivitiesMissed,
+            .weeklyReflectionCompleted,
+            .parentObservationsPresent,
+        ]
+        for insight in noActionInsights {
+            let presentation = CoachingPresentationMapper().map(Self.makeResult([insight]))
+            #expect(presentation.sections.first?.items.first?.action == .none)
+        }
+    }
+
+    @Test("Action assignment is deterministic across repeated mapping of the same result")
+    func actionAssignmentIsDeterministicAcrossRepeatedMapping() {
+        let result = Self.makeResult([.noWeeklyReflection, .noParentObservations, .allPlannedActivitiesCompleted])
+        let mapper = CoachingPresentationMapper()
+
+        let first = mapper.map(result)
+        let second = mapper.map(result)
+
+        let firstActions = first.sections.flatMap { $0.items.map(\.action) }
+        let secondActions = second.sections.flatMap { $0.items.map(\.action) }
+        #expect(firstActions == secondActions)
+        // Fixed section order is Planned Activities → Weekly Reflection →
+        // Parent Observations, regardless of the input insight order.
+        #expect(firstActions == [.none, .startWeeklyReflection, .addParentObservation])
     }
 }

@@ -40,6 +40,15 @@ import VoxtrCoreContracts
 /// drives learning"), while the presence or absence of optional parent
 /// observations is marked `.neutral` either way, since neither state is
 /// established anywhere as more or less desirable than the other.
+///
+/// Sprint 10: ACTION ASSIGNMENT is this mapper's responsibility too —
+/// deciding which `CoachingPresentationAction` (if any) belongs to
+/// which insight is presentation mapping, the same category of decision
+/// as choosing text or emphasis, not a new business rule. Only two
+/// insights get a real action (`noWeeklyReflection` →
+/// `.startWeeklyReflection`, `noParentObservations` →
+/// `.addParentObservation`); every other insight gets `.none` — a
+/// finding not needing an action is a normal, valid outcome, not a gap.
 public struct CoachingPresentationMapper: Sendable {
     public init() {}
 
@@ -54,37 +63,43 @@ public struct CoachingPresentationMapper: Sendable {
                 plannedActivityItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "All planned activities were completed this week.",
-                    emphasis: .positive
+                    emphasis: .positive,
+                    action: .none
                 ))
             case .somePlannedActivitiesMissed:
                 plannedActivityItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "Some planned activities were not completed this week.",
-                    emphasis: .attention
+                    emphasis: .attention,
+                    action: .none
                 ))
             case .noWeeklyReflection:
                 weeklyReflectionItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "No weekly reflection was recorded.",
-                    emphasis: .attention
+                    emphasis: .attention,
+                    action: .startWeeklyReflection
                 ))
             case .weeklyReflectionCompleted:
                 weeklyReflectionItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "A weekly reflection was recorded.",
-                    emphasis: .positive
+                    emphasis: .positive,
+                    action: .none
                 ))
             case .noParentObservations:
                 parentObservationItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "No parent observations were recorded this week.",
-                    emphasis: .neutral
+                    emphasis: .neutral,
+                    action: .addParentObservation
                 ))
             case .parentObservationsPresent:
                 parentObservationItems.append(CoachingPresentationItem(
                     insight: insight,
                     text: "Parent observations were recorded this week.",
-                    emphasis: .neutral
+                    emphasis: .neutral,
+                    action: .none
                 ))
             }
         }

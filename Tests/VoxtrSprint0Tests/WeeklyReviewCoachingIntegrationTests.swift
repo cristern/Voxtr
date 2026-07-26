@@ -14,139 +14,79 @@ import VoxtrReflectionDomain
 //
 // Following the S1.1 lesson: no shared private helper methods for
 // container/repository construction — every test builds its own inline.
+//
+// Sprint 11: this file used to test the full coaching pipeline's
+// correctness (context assembly → engine → mapper) by driving it
+// through `WeeklyReviewViewModel`. That orchestration now lives only in
+// `CoachingApplicationService` — its correctness (findings, ordering,
+// determinism, failure propagation) is tested directly in
+// `CoachingApplicationServiceTests.swift`, closer to where the logic
+// actually lives. What belongs here now is narrower and different:
+// does `WeeklyReviewViewModel` correctly DELEGATE to whatever
+// `CoachingPresentationProviding` it was given, without re-deriving or
+// altering anything itself. Testing both at the ViewModel level would
+// have meant testing the same orchestration logic twice.
 
-@Suite("WeeklyReviewViewModel coaching integration (Sprint 9)", .serialized)
-struct WeeklyReviewCoachingIntegrationTests {
+@Suite("WeeklyReviewViewModel coaching delegation (Sprint 11)", .serialized)
+struct WeeklyReviewCoachingDelegationTests {
 
     private static let athleteId = AthleteId()
     private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
-    private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
 
-    /// Deterministic throwing double — a genuine technical failure,
-    /// distinct from "nothing found."
-    @MainActor
-    private struct ThrowingCoachingContextProvider: WeeklyCoachingContextProviding {
-        struct TestError: Error {}
-        func weeklyCoachingContext(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyCoachingContext {
-            throw TestError()
-        }
-    }
-
-    /// A minimal, hand-built context — no persistence involved. Used
-    /// for tests that only care about how the ViewModel handles the
-    /// pipeline's output, not about assembling real data.
-    @MainActor
-    private struct StubCoachingContextProvider: WeeklyCoachingContextProviding {
-        let context: WeeklyCoachingContext
-        func weeklyCoachingContext(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyCoachingContext {
-            context
-        }
-    }
-
-    /// Not used by `loadCoachingPresentation` (which doesn't need
-    /// `WeeklyReviewProviding` at all), only present to satisfy
+    /// Not used by any test in this file (delegation tests don't need
+    /// the main Weekly Review data at all), only present to satisfy
     /// `WeeklyReviewViewModel.init`'s other required parameter.
     @MainActor
-    private struct ThrowingProvider: WeeklyReviewProviding {
+    private struct ThrowingWeeklyReviewProvider: WeeklyReviewProviding {
         struct TestError: Error {}
         func weeklyReview(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyReviewResult {
             throw TestError()
         }
     }
 
-    @Test("coachingPresentationState carries CoachingPresentation, not CoachingInsight, at the type level")
+    /// Records exactly what it was called with and returns a
+    /// pre-built `CoachingPresentation` unchanged — lets these tests
+    /// assert pure delegation without needing any real pipeline stage.
     @MainActor
-    func stateCarriesPresentationNotInsight() throws {
-        let context = WeeklyCoachingContext(
-            athleteId: Self.athleteId, weekStart: Self.weekStart, previousWeekStart: Self.weekStart,
-            weekPlanStatus: nil, plannedActivityCount: 0, completedPlannedActivityCount: 0,
-            uncompletedPlannedActivityCount: 0, unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 0,
-            weeklyReflection: nil, parentObservations: []
-        )
-        let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: StubCoachingContextProvider(context: context),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
-        )
+    private final class RecordingCoachingPresentationProvider: CoachingPresentationProviding {
+        private(set) var receivedAthleteId: AthleteId?
+        private(set) var receivedWeekStart: LocalDate?
+        private(set) var callCount = 0
+        let presentationToReturn: CoachingPresentation
 
-        viewModel.loadCoachingPresentation()
-
-        // The type system already enforces this — .loaded's associated
-        // value is CoachingPresentation, never CoachingInsight — this
-        // assertion exercises that the state is actually reachable and
-        // holds the type it's declared to hold.
-        guard case .loaded(let presentation) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
+        init(presentationToReturn: CoachingPresentation) {
+            self.presentationToReturn = presentationToReturn
         }
-        let _: CoachingPresentation = presentation
+
+        func coachingPresentation(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> CoachingPresentation {
+            receivedAthleteId = athleteId
+            receivedWeekStart = weekStart
+            callCount += 1
+            return presentationToReturn
+        }
     }
 
-    @Test("Existing weekly data flows through the complete deterministic pipeline end to end")
     @MainActor
-    func completeDataFlowsThroughFullPipeline() throws {
-        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
-        let planningRepository = PlanningRepository(modelContext: container.mainContext)
-        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
-        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
-        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
-            planningRepository: planningRepository, trainingRepository: trainingRepository
-        )
-        let weeklyReviewCoordinationService = WeeklyReviewCoordinationService(
-            planningRepository: planningRepository,
-            trainingRepository: trainingRepository,
-            weeklyReflectionRepository: weeklyReflectionRepository,
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService
-        )
-        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
-        let reflectionService = ReflectionService(repository: reflectionRepository)
-        let coachingContextService = WeeklyCoachingContextService(
-            weeklyReviewProvider: weeklyReviewCoordinationService,
-            parentObservationProvider: reflectionService
-        )
-        let planning = PlanningService(repository: planningRepository)
-        let training = TrainingService(repository: trainingRepository)
-        let athleteId = AthleteId()
-
-        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
-        let plannedActivity = try planning.addPlannedActivity(
-            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Endurance run", localDate: Self.weekStart, timeZoneId: Self.oslo
-        )
-        _ = try training.logActivity(
-            athleteId: athleteId, plannedActivityId: plannedActivity.plannedActivityId,
-            activityType: .individualTraining, title: "Endurance run",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
-        )
-
-        let viewModel = WeeklyReviewViewModel(
-            coordinationService: weeklyReviewCoordinationService,
-            coachingContextService: coachingContextService,
-            athleteId: athleteId, weekStart: Self.weekStart
-        )
-
-        viewModel.loadCoachingPresentation()
-
-        guard case .loaded(let presentation) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
+    private struct ThrowingCoachingPresentationProvider: CoachingPresentationProviding {
+        struct TestError: Error {}
+        func coachingPresentation(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> CoachingPresentation {
+            throw TestError()
         }
-        let plannedSection = presentation.sections.first { $0.title == "Planned Activities" }
-        #expect(plannedSection?.items.first?.insight == .allPlannedActivitiesCompleted)
     }
 
-    @Test("A result with findings produces the expected presentation state")
+    @Test("coachingPresentationState carries exactly the CoachingPresentation the provider returned — no transformation")
     @MainActor
-    func findingsProduceExpectedPresentationState() throws {
-        let context = WeeklyCoachingContext(
-            athleteId: Self.athleteId, weekStart: Self.weekStart, previousWeekStart: Self.weekStart,
-            weekPlanStatus: .draft, plannedActivityCount: 3, completedPlannedActivityCount: 1,
-            uncompletedPlannedActivityCount: 2, unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 1,
-            weeklyReflection: nil, parentObservations: []
+    func viewModelDelegatesResultUnchanged() throws {
+        let expected = CoachingPresentation(
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            sections: [CoachingPresentationSection(title: "Weekly Reflection", items: [
+                CoachingPresentationItem(insight: .noWeeklyReflection, text: "No weekly reflection was recorded.", emphasis: .attention, action: .startWeeklyReflection),
+            ])]
         )
+        let provider = RecordingCoachingPresentationProvider(presentationToReturn: expected)
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: StubCoachingContextProvider(context: context),
+            coordinationService: ThrowingWeeklyReviewProvider(),
+            coachingPresentationProvider: provider,
             athleteId: Self.athleteId, weekStart: Self.weekStart
         )
 
@@ -156,113 +96,51 @@ struct WeeklyReviewCoachingIntegrationTests {
             Issue.record("Expected .loaded")
             return
         }
-        #expect(presentation.sections.map(\.title) == ["Planned Activities", "Weekly Reflection", "Parent Observations"])
-        #expect(presentation.sections[0].items.first?.insight == .somePlannedActivitiesMissed)
-        #expect(presentation.sections[1].items.first?.insight == .noWeeklyReflection)
-        #expect(presentation.sections[2].items.first?.insight == .noParentObservations)
+        #expect(presentation == expected)
     }
 
-    @Test("A minimal context (nothing planned) still produces a valid, non-empty presentation — a literally empty CoachingResult is not reachable through the real CoachingEngine by design; see CoachingPresentationMapperTests for that case tested directly against the mapper")
+    @Test("athleteId and weekStart are forwarded to the provider unchanged")
     @MainActor
-    func minimalContextProducesSparsePresentationNotAnInventedMessage() throws {
-        let context = WeeklyCoachingContext(
-            athleteId: Self.athleteId, weekStart: Self.weekStart, previousWeekStart: Self.weekStart,
-            weekPlanStatus: nil, plannedActivityCount: 0, completedPlannedActivityCount: 0,
-            uncompletedPlannedActivityCount: 0, unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 0,
-            weeklyReflection: nil, parentObservations: []
+    func viewModelForwardsAthleteIdAndWeekStartUnchanged() throws {
+        let provider = RecordingCoachingPresentationProvider(
+            presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
         )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: StubCoachingContextProvider(context: context),
+            coordinationService: ThrowingWeeklyReviewProvider(),
+            coachingPresentationProvider: provider,
             athleteId: Self.athleteId, weekStart: Self.weekStart
         )
 
         viewModel.loadCoachingPresentation()
 
-        guard case .loaded(let presentation) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
-        }
-        // No "Planned Activities" section at all — that category
-        // genuinely has nothing to report, and nothing was invented for
-        // it.
-        #expect(!presentation.sections.contains { $0.title == "Planned Activities" })
-        // No item anywhere contains invented success language.
-        let allText = presentation.sections.flatMap { $0.items.map(\.text) }
-        #expect(!allText.contains { $0.lowercased().contains("everything looks good") })
-        #expect(!allText.contains { $0.lowercased().contains("great job") })
+        #expect(provider.receivedAthleteId == Self.athleteId)
+        #expect(provider.receivedWeekStart == Self.weekStart)
     }
 
-    @Test("Stable section ordering is preserved in the state consumed by the UI")
+    @Test("Each call to loadCoachingPresentation delegates exactly once — orchestration is not duplicated in the ViewModel")
     @MainActor
-    func stableOrderingPreservedInState() throws {
-        let context = WeeklyCoachingContext(
-            athleteId: Self.athleteId, weekStart: Self.weekStart, previousWeekStart: Self.weekStart,
-            weekPlanStatus: .committed, plannedActivityCount: 2, completedPlannedActivityCount: 2,
-            uncompletedPlannedActivityCount: 0, unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 2,
-            weeklyReflection: WeeklyReflectionSummary(
-                overallSatisfaction: 4, loadFelt: nil, whatWorked: nil,
-                whatWasDifficult: nil, learning: nil, nextWeekConsideration: nil
-            ),
-            parentObservations: [ParentObservationSummary(localDate: Self.weekStart, text: "Note")]
+    func loadCoachingPresentationDelegatesExactlyOnce() throws {
+        let provider = RecordingCoachingPresentationProvider(
+            presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
         )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: StubCoachingContextProvider(context: context),
+            coordinationService: ThrowingWeeklyReviewProvider(),
+            coachingPresentationProvider: provider,
             athleteId: Self.athleteId, weekStart: Self.weekStart
         )
 
         viewModel.loadCoachingPresentation()
-        guard case .loaded(let first) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
-        }
-
         viewModel.loadCoachingPresentation()
-        guard case .loaded(let second) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
-        }
 
-        #expect(first.sections.map(\.title) == ["Planned Activities", "Weekly Reflection", "Parent Observations"])
-        #expect(first.sections.map(\.title) == second.sections.map(\.title))
+        #expect(provider.callCount == 2)
     }
 
-    @Test("Repeated processing of equivalent input produces equal presentation state")
+    @Test("A genuine technical failure from the provider is represented as .failed, never as a successful empty presentation")
     @MainActor
-    func repeatedProcessingProducesEqualState() throws {
-        let context = WeeklyCoachingContext(
-            athleteId: Self.athleteId, weekStart: Self.weekStart, previousWeekStart: Self.weekStart,
-            weekPlanStatus: .draft, plannedActivityCount: 1, completedPlannedActivityCount: 0,
-            uncompletedPlannedActivityCount: 1, unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 0,
-            weeklyReflection: nil, parentObservations: []
-        )
+    func providerFailureNotConflatedWithEmptySuccess() throws {
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: StubCoachingContextProvider(context: context),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
-        )
-
-        viewModel.loadCoachingPresentation()
-        guard case .loaded(let first) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
-        }
-        viewModel.loadCoachingPresentation()
-        guard case .loaded(let second) = viewModel.coachingPresentationState else {
-            Issue.record("Expected .loaded")
-            return
-        }
-
-        #expect(first == second)
-    }
-
-    @Test("A genuine technical failure is represented as .failed, never as a successful empty presentation")
-    @MainActor
-    func technicalFailureNotConflatedWithEmptySuccess() throws {
-        let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingProvider(),
-            coachingContextService: ThrowingCoachingContextProvider(),
+            coordinationService: ThrowingWeeklyReviewProvider(),
+            coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
             athleteId: Self.athleteId, weekStart: Self.weekStart
         )
 
@@ -292,7 +170,7 @@ struct WeeklyReviewCoachingIntegrationTests {
         )
         let viewModel = WeeklyReviewViewModel(
             coordinationService: weeklyReviewCoordinationService,
-            coachingContextService: ThrowingCoachingContextProvider(),
+            coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
             athleteId: Self.athleteId, weekStart: Self.weekStart
         )
 

@@ -183,6 +183,12 @@ public struct WeeklyReviewView: View {
     /// and an empty `.loaded` presentation renders nothing at all — no
     /// section, no placeholder text — per the explicit rule against
     /// inventing a success message `CoachingResult` never represented.
+    ///
+    /// Sprint 10: each item may also render one action button. This
+    /// view decides nothing about WHICH action belongs to an item — it
+    /// only reads `item.action`, already assigned by
+    /// `CoachingPresentationMapper`, and switches on THAT (three cases,
+    /// `CoachingPresentationAction`) rather than on `CoachingInsight`.
     @ViewBuilder
     private var coachingSection: some View {
         switch viewModel.coachingPresentationState {
@@ -201,13 +207,46 @@ public struct WeeklyReviewView: View {
                 ForEach(presentation.sections, id: \.title) { section in
                     Section(section.title) {
                         ForEach(section.items, id: \.insight) { item in
-                            Text(item.text)
-                                .foregroundStyle(Self.color(for: item.emphasis))
-                                .accessibilityIdentifier("weeklyReview.coaching.item.\(item.insight.rawValue)")
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.text)
+                                    .foregroundStyle(Self.color(for: item.emphasis))
+                                actionButton(for: item)
+                            }
+                            .accessibilityIdentifier("weeklyReview.coaching.item.\(item.insight.rawValue)")
                         }
                     }
                 }
             }
+        }
+    }
+
+    /// The ONLY place `CoachingPresentationAction` is translated into an
+    /// actual control. `.none` renders nothing extra.
+    /// `.startWeeklyReflection` reuses the SAME existing reflection form
+    /// already wired above (`isShowingReflectionForm`) — a real,
+    /// already-functional workflow, not a new one.
+    /// `.addParentObservation` has no creation flow anywhere in this
+    /// project yet (verified before implementing); per Sprint 10's own
+    /// instruction to expose the action while keeping the UI minimal
+    /// rather than inventing the missing workflow, this renders a
+    /// visible but disabled button — the action's existence is shown,
+    /// nothing is pretended to work that doesn't yet.
+    @ViewBuilder
+    private func actionButton(for item: CoachingPresentationItem) -> some View {
+        switch item.action {
+        case .none:
+            EmptyView()
+        case .startWeeklyReflection:
+            Button(WeeklyReviewStrings.startReflectionAction) {
+                isShowingReflectionForm = true
+            }
+            .font(.caption)
+            .accessibilityIdentifier("weeklyReview.coaching.action.startWeeklyReflection")
+        case .addParentObservation:
+            Button(CoachingPresentationStrings.addParentObservationAction) {}
+                .font(.caption)
+                .disabled(true)
+                .accessibilityIdentifier("weeklyReview.coaching.action.addParentObservation")
         }
     }
 

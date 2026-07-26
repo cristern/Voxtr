@@ -18,23 +18,19 @@ import VoxtrReflectionDomain
 @Suite("WeeklyReviewViewModel (Sprint 5.2)", .serialized)
 struct WeeklyReviewViewModelTests {
 
-    /// Sprint 9: none of these tests exercise coaching behavior — they
+    /// Sprint 11: none of these tests exercise coaching behavior — they
     /// predate the coaching pipeline. A minimal stub satisfies
-    /// `WeeklyReviewViewModel`'s now-required `coachingContextService:`
-    /// parameter without pulling coaching setup into tests that aren't
-    /// about it.
+    /// `WeeklyReviewViewModel`'s required `coachingPresentationProvider:`
+    /// parameter (previously `coachingContextService:`, before Sprint
+    /// 11 extracted orchestration into `CoachingApplicationService`)
+    /// without pulling coaching setup into tests that aren't about it.
     @MainActor
-    private struct EmptyWeeklyCoachingContextProvider: WeeklyCoachingContextProviding {
-        func weeklyCoachingContext(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeeklyCoachingContext {
-            WeeklyCoachingContext(
-                athleteId: athleteId, weekStart: weekStart,
-                previousWeekStart: weekStart, weekPlanStatus: nil,
-                plannedActivityCount: 0, completedPlannedActivityCount: 0, uncompletedPlannedActivityCount: 0,
-                unplannedLoggedActivityCount: 0, totalLoggedActivityCount: 0,
-                weeklyReflection: nil, parentObservations: []
-            )
+    private struct EmptyCoachingPresentationProvider: CoachingPresentationProviding {
+        func coachingPresentation(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> CoachingPresentation {
+            CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
         }
     }
+
 
     /// Deterministic throwing double for `WeeklyReviewProviding` — lets
     /// the failure-path test assert `WeeklyReviewViewModel`'s own
@@ -75,7 +71,7 @@ struct WeeklyReviewViewModelTests {
             title: "Endurance run", localDate: Self.weekStart, timeZoneId: Self.oslo
         )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: athleteId, weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: athleteId, weekStart: Self.weekStart
         )
 
         viewModel.load()
@@ -105,7 +101,7 @@ struct WeeklyReviewViewModelTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService
         )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
         )
 
         guard case .loading = viewModel.loadState else {
@@ -125,7 +121,7 @@ struct WeeklyReviewViewModelTests {
     @MainActor
     func coordinationFailureProducesControlledErrorState() throws {
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: ThrowingWeeklyReviewProvider(), coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
+            coordinationService: ThrowingWeeklyReviewProvider(), coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
         )
 
         viewModel.load()
@@ -153,7 +149,7 @@ struct WeeklyReviewViewModelTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService
         )
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: AthleteId(), weekStart: Self.weekStart
         )
 
         viewModel.load()
@@ -186,7 +182,7 @@ struct WeeklyReviewViewModelTests {
         let athleteId = AthleteId()
         _ = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: athleteId, weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: athleteId, weekStart: Self.weekStart
         )
 
         viewModel.load()
@@ -219,7 +215,7 @@ struct WeeklyReviewViewModelTests {
         let athleteId = AthleteId()
         _ = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: athleteId, weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: athleteId, weekStart: Self.weekStart
         )
         viewModel.load()
         guard case .loaded(let before) = viewModel.loadState else {
@@ -262,7 +258,7 @@ struct WeeklyReviewViewModelTests {
         )
         let athleteId = AthleteId()
         let viewModel = WeeklyReviewViewModel(
-            coordinationService: coordinationService, coachingContextService: EmptyWeeklyCoachingContextProvider(), athleteId: athleteId, weekStart: Self.weekStart
+            coordinationService: coordinationService, coachingPresentationProvider: EmptyCoachingPresentationProvider(), athleteId: athleteId, weekStart: Self.weekStart
         )
 
         viewModel.load()
