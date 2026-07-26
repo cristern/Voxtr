@@ -41,6 +41,7 @@ let package = Package(
         .library(name: "VoxtrTrainingDomain", targets: ["VoxtrTrainingDomain"]),
         .library(name: "VoxtrReflectionDomain", targets: ["VoxtrReflectionDomain"]),
         .library(name: "VoxtrCoachingDomain", targets: ["VoxtrCoachingDomain"]),
+        .library(name: "VoxtrMotivationDomain", targets: ["VoxtrMotivationDomain"]),
         .library(name: "VoxtrDevelopmentDomain", targets: ["VoxtrDevelopmentDomain"]),
         .library(name: "VoxtrDecisionSupportDomain", targets: ["VoxtrDecisionSupportDomain"]),
         .library(name: "VoxtrNotificationsDomain", targets: ["VoxtrNotificationsDomain"]),
@@ -73,6 +74,21 @@ let package = Package(
         // this is pure decision logic over already-flattened value
         // types, with no need for any of that.
         .target(name: "VoxtrCoachingDomain", dependencies: ["VoxtrCoreContracts"]),
+
+        // Sprint 15 (revised): Motivation domain — Quote and
+        // DailyQuoteProvider. Athlete-agnostic (every user sees the
+        // same quote on a given day, no AthleteId/LocalDate needed
+        // anywhere in its API) but depends on VoxtrCoreContracts for
+        // `DateProvider` — DailyQuoteProvider's injected clock
+        // abstraction. That's a real, justified need, not speculative
+        // coupling; VoxtrCoreContracts is the shared foundational
+        // layer every domain already depends on, not another feature
+        // domain, so this still doesn't introduce a domain-to-domain
+        // dependency. Designed to be extended in place — Daily
+        // Challenge, Weekly Theme, Reflection Prompts, Celebrations,
+        // Motivation Timeline are all expected to live here later, per
+        // this sprint's explicit future-proofing goal.
+        .target(name: "VoxtrMotivationDomain", dependencies: ["VoxtrCoreContracts"]),
         .target(name: "VoxtrDevelopmentDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrDecisionSupportDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrNotificationsDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
@@ -84,9 +100,14 @@ let package = Package(
             dependencies: [
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
-                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrDevelopmentDomain",
+                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain", "VoxtrDevelopmentDomain",
                 "VoxtrDecisionSupportDomain", "VoxtrNotificationsDomain", "VoxtrSettings",
-            ]
+            ],
+            // Sprint 15 (revised): the first resource this target has
+            // ever declared — StaticQuoteRepository's bundled
+            // Quotes.json. Declaring this generates the `Bundle.module`
+            // extension StaticQuoteRepository.swift uses to locate it.
+            resources: [.process("Resources/Quotes.json")]
         ),
 
         // MARK: - Verification tests
@@ -95,7 +116,7 @@ let package = Package(
             dependencies: [
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData", "VoxtrAppShell",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
-                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain",
+                "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain",
             ]
         ),
     ]

@@ -1,6 +1,7 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrCoachingDomain
+import VoxtrMotivationDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -11,6 +12,15 @@ import VoxtrReflectionDomain
 /// sprint establishes the architecture (ViewModel → existing
 /// application services → domain), not a finished dashboard
 /// experience.
+///
+/// Sprint 15: reordered to Welcome → Daily Quote → Daily Focus →
+/// existing cards, per that sprint's explicit recommended order.
+/// `DailyQuoteView()` is self-contained — it owns its own
+/// `DailyQuoteViewModel` (default-constructed, no dependency threaded
+/// through `FamilyHomeView`/`RootView`/`CompositionRoot` needed) since
+/// Daily Quote has no overlap with anything `HomeDashboardViewModel`
+/// already loads. Coaching logic and Daily Focus are unmodified by
+/// this sprint — only their position in this list changed.
 ///
 /// Every section here reuses an already-existing destination or
 /// service — `WeeklyPlanningView`/`DailyTrainingView`/`WeeklyReviewView`
@@ -58,8 +68,9 @@ public struct HomeDashboardView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                dailyFocusCard
                 welcomeSection
+                DailyQuoteView()
+                dailyFocusCard
                 coachingSection
                 planningSection
                 trainingSection
