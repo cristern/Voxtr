@@ -3,10 +3,14 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 
-/// S1.1 scope only: creates and fetches `ParentProfile`, `FamilyWorkspace`,
-/// and `WorkspaceParticipant`. Athlete creation and `AthleteAccessGrant`
-/// are explicitly out of scope for this story (S1.2) — this repository
-/// does not touch either.
+/// Persists and fetches `ParentProfile`, `FamilyWorkspace`, and
+/// `WorkspaceParticipant` records. As of ADR-0001, `WorkspaceParticipant`
+/// records are created for both guardian roles (`.workspaceOwner`) and,
+/// via `createInvitedAthleteParticipant`, the `.athlete` role. This
+/// repository does not create `AthleteProfile` (owned by
+/// `AthleteRepository`, `VoxtrAthleteDomain`) or `AthleteAccessGrant`
+/// (owned by `AthleteAccessGrantRepository`) — both remain other
+/// repositories' responsibility, unchanged by ADR-0001.
 ///
 /// `@MainActor` because `ModelContext` is not `Sendable` and this
 /// repository is built from `ModelContainer.mainContext` — all Sprint 1
@@ -95,6 +99,95 @@ public final class ParentWorkspaceRepository {
         let staged = stageParentAndWorkspace(givenName: givenName, familyName: familyName, preferredName: preferredName)
         try modelContext.save()
         return staged
+    }
+
+    /// ADR-0001: creates a `WorkspaceParticipant` with `role: .athlete`,
+    /// linked to `linkedAthleteId` — the mechanism ADR-0001 approves for
+    /// representing an athlete acting on their own behalf. Nothing else:
+    /// no invitation UI, no acceptance flow, no session binding — see
+    /// the scope note below.
+    ///
+    /// STATE: always created in `.invited`, never `.active` — hence this
+    /// method's name. Matching `createParentAndWorkspace`'s own doc
+    /// comment above, which already establishes that `.invited` is the
+    /// v1.3-intended default for inviting a *second* participant (unlike
+    /// the self-creating parent's own participant, which has no one to
+    /// invite them). Transitioning `.invited` → `.active` is acceptance,
+    /// which this method never performs and which ADR-0001 explicitly
+    /// defers, along with restoration/lifecycle rules for `.invited`,
+    /// `.active`, `.declined`, and `.revoked` participants — none of
+    /// that is decided or implemented here.
+    ///
+    /// `invitedBy`: the inviting guardian's own `ActorId`, derived from
+    /// their existing `WorkspaceParticipant` by the caller — this method
+    /// never derives an `ActorId` from `AthleteId` itself, per ADR-0001.
+    ///
+    /// SCOPE NOTE — the caller is responsible for, and this method does
+    /// NOT verify:
+    /// - that `linkedAthleteId` actually belongs to `workspaceId` (this
+    ///   method persists whatever `AthleteId` it is given, unchecked);
+    /// - that the inviting actor (`invitedBy`) itself belongs to, and
+    ///   may act in, `workspaceId` (no authorization check is performed);
+    /// - that no athlete participant already exists for this athlete
+    ///   (this method does not check for or prevent duplicates).
+    /// None of these policies are implemented in this task — they are
+    /// named here so a future caller cannot mistake their absence for an
+    /// oversight.
+    ///
+    /// Atomic (insert + save in one call), matching
+    /// `PlanningRepository.deletePlannedActivity`'s established
+    /// precedent for a single, self-contained repository operation —
+    /// this is one entity, not the five-entity graph
+    /// `FamilyOnboardingCoordinator` exists to coordinate, so no
+    /// separate coordinator is introduced for it.
+    public func createInvitedAthleteParticipant(
+        id: UUID = UUID(),
+        workspaceId: WorkspaceId,
+        linkedAthleteId: AthleteId,
+        invitedBy: ActorId
+    ) throws -> WorkspaceParticipant {
+        try createInvitedAthleteParticipant(
+            id: id,
+            workspaceId: workspaceId,
+            linkedAthleteId: linkedAthleteId,
+            invitedBy: invitedBy,
+            saveOverride: nil
+        )
+    }
+
+    /// Test-only seam, mirroring `FamilyOnboardingCoordinator`'s own
+    /// established `saveOverride` pattern exactly: `@Attribute(.unique)`
+    /// is upsert, not a rejecting constraint, in this project (a known,
+    /// previously-documented fact), so a genuine SwiftData save failure
+    /// cannot be reliably forced by a duplicate-id trick — this lets a
+    /// test inject a deterministic failure at the exact point `save()`
+    /// would run instead. Not `public` — reachable only via
+    /// `@testable import`. Every production call site goes through the
+    /// public overload above, which always passes `nil`.
+    func createInvitedAthleteParticipant(
+        id: UUID = UUID(),
+        workspaceId: WorkspaceId,
+        linkedAthleteId: AthleteId,
+        invitedBy: ActorId,
+        saveOverride: (() throws -> Void)?
+    ) throws -> WorkspaceParticipant {
+        let participant = WorkspaceParticipant(
+            id: id,
+            workspaceId: workspaceId,
+            accountId: .pending,
+            role: .athlete,
+            state: .invited,
+            linkedAthleteId: linkedAthleteId,
+            invitedBy: invitedBy,
+            invitedAt: .now
+        )
+        modelContext.insert(participant)
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
+        return participant
     }
 
     public func fetchAllParentProfiles() throws -> [ParentProfile] {

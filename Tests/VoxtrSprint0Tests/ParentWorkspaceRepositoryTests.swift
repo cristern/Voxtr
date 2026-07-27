@@ -111,4 +111,177 @@ struct ParentWorkspaceRepositoryTests {
         #expect(parents.count == 1)
         #expect(parents.first?.givenName == "Kari")
     }
+
+    // MARK: - createInvitedAthleteParticipant (ADR-0001)
+
+    @Test("Creates a participant with role .athlete")
+    @MainActor
+    func createInvitedAthleteParticipantSetsAthleteRole() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.role == .athlete)
+    }
+
+    @Test("Creates the participant in state .invited, never .active")
+    @MainActor
+    func createInvitedAthleteParticipantSetsInvitedState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.state == .invited)
+    }
+
+    @Test("linkedAthleteId is preserved exactly as supplied")
+    @MainActor
+    func createInvitedAthleteParticipantPreservesLinkedAthleteId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let athleteId = AthleteId()
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: athleteId,
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.linkedAthleteId == athleteId.rawValue)
+    }
+
+    @Test("invitedBy is preserved exactly as supplied")
+    @MainActor
+    func createInvitedAthleteParticipantPreservesInvitedBy() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.invitedBy == ownerActorId.rawValue)
+    }
+
+    @Test("invitedAt is populated")
+    @MainActor
+    func createInvitedAthleteParticipantPopulatesInvitedAt() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.invitedAt != nil)
+    }
+
+    @Test("acceptedAt is absent — this method never performs acceptance")
+    @MainActor
+    func createInvitedAthleteParticipantLeavesAcceptedAtNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        #expect(athleteParticipant.acceptedAt == nil)
+    }
+
+    @Test("The participant is actually persisted — fetchable via fetchAllParticipants")
+    @MainActor
+    func createInvitedAthleteParticipantIsPersisted() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        let athleteParticipant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId,
+            linkedAthleteId: AthleteId(),
+            invitedBy: ownerActorId
+        )
+
+        let allParticipants = try repository.fetchAllParticipants()
+
+        #expect(allParticipants.count == 2)
+        #expect(allParticipants.contains { $0.id == athleteParticipant.id })
+    }
+
+    @Test("A save failure propagates rather than being swallowed")
+    @MainActor
+    func createInvitedAthleteParticipantPropagatesSaveFailure() throws {
+        struct InjectedSaveFailure: Error {}
+
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+
+        // Test-only overload — see this method's own doc comment in
+        // ParentWorkspaceRepository.swift for why a duplicate-id trick
+        // cannot be used here (@Attribute(.unique) is upsert, not a
+        // rejecting constraint, in this project).
+        #expect(throws: InjectedSaveFailure.self) {
+            try repository.createInvitedAthleteParticipant(
+                workspaceId: family.workspace.workspaceId,
+                linkedAthleteId: AthleteId(),
+                invitedBy: ownerActorId,
+                saveOverride: { throw InjectedSaveFailure() }
+            )
+        }
+    }
+
+    @Test("Existing parent/workspace creation behaviour is unchanged by createInvitedAthleteParticipant existing")
+    @MainActor
+    func existingParentAndWorkspaceCreationBehaviourIsUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+
+        let result = try repository.createParentAndWorkspace(givenName: "Kari", familyName: "Hansen")
+
+        #expect(result.parent.givenName == "Kari")
+        #expect(result.workspace.technicalOwnerAccountId == AccountId.pending.rawValue)
+        #expect(result.participant.role == .workspaceOwner)
+        #expect(result.participant.state == .active)
+        #expect(result.participant.workspaceId == result.workspace.id)
+    }
 }
