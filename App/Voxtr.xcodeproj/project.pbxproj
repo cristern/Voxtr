@@ -40,6 +40,8 @@
 		3C6880D8CCF7BD7808CFB0CD /* StaticQuoteRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7331B00BAB8E1D23058D5ABA /* StaticQuoteRepositoryTests.swift */; };
 		044626734D41F8623174A90B /* DailyQuoteApplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */; };
 		8B12E4A9E3AF3C64A3B822E3 /* DailyQuoteViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */; };
+		1689582744E809532D10A1EB /* AthleteParticipantEligibilityServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */; };
+		5B9307320B31352107199DDA /* AthleteParticipantActivationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantActivationServiceTests.swift */; };
 		E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */; };
 		BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */; };
 		43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */; };
@@ -96,6 +98,8 @@
 		7331B00BAB8E1D23058D5ABA /* StaticQuoteRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StaticQuoteRepositoryTests.swift; sourceTree = "<group>"; };
 		3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyQuoteApplicationServiceTests.swift; sourceTree = "<group>"; };
 		833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyQuoteViewModelTests.swift; sourceTree = "<group>"; };
+		338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteParticipantEligibilityServiceTests.swift; sourceTree = "<group>"; };
+		6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantActivationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteParticipantActivationServiceTests.swift; sourceTree = "<group>"; };
 		642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingPresentationMapperTests.swift; sourceTree = "<group>"; };
 		A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoachingIntegrationTests.swift; sourceTree = "<group>"; };
@@ -211,6 +215,8 @@
 				7331B00BAB8E1D23058D5ABA /* StaticQuoteRepositoryTests.swift */,
 				3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */,
 				833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */,
+				338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */,
+				6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantActivationServiceTests.swift */,
 				642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */,
 				19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */,
 				A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */,
@@ -416,6 +422,8 @@
 				3C6880D8CCF7BD7808CFB0CD /* StaticQuoteRepositoryTests.swift in Sources */,
 				044626734D41F8623174A90B /* DailyQuoteApplicationServiceTests.swift in Sources */,
 				8B12E4A9E3AF3C64A3B822E3 /* DailyQuoteViewModelTests.swift in Sources */,
+				1689582744E809532D10A1EB /* AthleteParticipantEligibilityServiceTests.swift in Sources */,
+				5B9307320B31352107199DDA /* AthleteParticipantActivationServiceTests.swift in Sources */,
 				E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */,
 				BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */,
 				43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */,
