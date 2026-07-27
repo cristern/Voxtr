@@ -1,25 +1,33 @@
 import Foundation
 import VoxtrCoreContracts
 
+/// Bundles the athlete being activated with the eligibility facts
+/// evaluated for them, so a caller cannot supply facts for one athlete
+/// while activating a different one — the two values only ever travel
+/// together, through this one type.
+public struct AthleteParticipantActivationCandidate: Sendable, Equatable {
+    public let athleteId: AthleteId
+    public let eligibilityFacts: AthleteEligibilityFacts
+
+    public init(athleteId: AthleteId, eligibilityFacts: AthleteEligibilityFacts) {
+        self.athleteId = athleteId
+        self.eligibilityFacts = eligibilityFacts
+    }
+}
+
 /// The outcome of an activation attempt.
 public enum AthleteParticipantActivationResult {
     /// Activation succeeded — the newly created `WorkspaceParticipant`.
     case activated(WorkspaceParticipant)
     /// Eligibility failed. Carries the same reason values
-    /// `AthleteParticipantEligibilityService` itself produced — not a
-    /// new reason vocabulary, and not the whole
-    /// `AthleteParticipantEligibilityResult` (which would allow the
-    /// impossible state of an `.eligible` value appearing inside a
-    /// failure case).
+    /// `AthleteParticipantEligibilityService` produced.
     case eligibilityFailed(
         primaryReason: AthleteParticipantIneligibilityReason,
         additionalReasons: [AthleteParticipantIneligibilityReason]
     )
-    /// The repository threw while creating the participant. Carries a
-    /// description of the underlying error, not the raw `Error` value
-    /// itself, to avoid this type's `Sendable`-adjacent surface
-    /// depending on error types this service doesn't control.
-    case repositoryFailed(String)
+    /// The repository failed to create the participant. No raw
+    /// `Error` or `String` is exposed as public domain state.
+    case repositoryFailed
 }
 
 /// Orchestrates activating an eligible athlete as a
@@ -43,16 +51,14 @@ public final class AthleteParticipantActivationService {
     }
 
     public func activate(
-        athlete: AthleteEligibilityFacts?,
+        candidate: AthleteParticipantActivationCandidate?,
         workspaceId: WorkspaceId,
-        linkedAthleteId: AthleteId,
         invitedBy: ActorId,
         hasExistingParticipant: Bool
     ) -> AthleteParticipantActivationResult {
         activate(
-            athlete: athlete,
+            candidate: candidate,
             workspaceId: workspaceId,
-            linkedAthleteId: linkedAthleteId,
             invitedBy: invitedBy,
             hasExistingParticipant: hasExistingParticipant,
             saveOverride: nil
@@ -61,37 +67,44 @@ public final class AthleteParticipantActivationService {
 
     /// Test-only seam — not `public`, reachable only via `@testable
     /// import`, mirroring `ParentWorkspaceRepository`'s own
-    /// `saveOverride` pattern exactly (this service is in the same
-    /// module, so it can already see that repository overload without
-    /// any new access-level exception). Every production call site
-    /// goes through the public overload above, which always passes
-    /// `nil`.
+    /// `saveOverride` pattern (this service is in the same module, so
+    /// it can already see that repository overload). Every production
+    /// call site goes through the public overload above, which always
+    /// passes `nil`.
     func activate(
-        athlete: AthleteEligibilityFacts?,
+        candidate: AthleteParticipantActivationCandidate?,
         workspaceId: WorkspaceId,
-        linkedAthleteId: AthleteId,
         invitedBy: ActorId,
         hasExistingParticipant: Bool,
         saveOverride: (() throws -> Void)?
     ) -> AthleteParticipantActivationResult {
         switch eligibilityService.evaluate(
-            athlete: athlete,
+            athlete: candidate?.eligibilityFacts,
             workspaceId: workspaceId,
             hasExistingParticipant: hasExistingParticipant
         ) {
         case .notEligible(let primaryReason, let additionalReasons):
             return .eligibilityFailed(primaryReason: primaryReason, additionalReasons: additionalReasons)
         case .eligible:
+            // Unreachable when candidate is nil: evaluate(athlete: nil, ...)
+            // always returns .notEligible(.athleteNotFound, []), never
+            // .eligible. This guard exists only because the type
+            // system can't express that; the "missing athlete" rule
+            // itself is evaluated exactly once, above, not duplicated
+            // here.
+            guard let candidate else {
+                return .eligibilityFailed(primaryReason: .athleteNotFound, additionalReasons: [])
+            }
             do {
                 let participant = try repository.createInvitedAthleteParticipant(
                     workspaceId: workspaceId,
-                    linkedAthleteId: linkedAthleteId,
+                    linkedAthleteId: candidate.athleteId,
                     invitedBy: invitedBy,
                     saveOverride: saveOverride
                 )
                 return .activated(participant)
             } catch {
-                return .repositoryFailed("\(error)")
+                return .repositoryFailed
             }
         }
     }

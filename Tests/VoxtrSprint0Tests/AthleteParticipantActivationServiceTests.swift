@@ -5,26 +5,34 @@ import VoxtrCoreContracts
 import VoxtrAppShell
 @testable import VoxtrParentDomain
 
-/// Invocation counts ("exactly once" / "never") are verified by
-/// checking the real repository's own persisted state after the call,
-/// not by a call-counting mock — this proves the side effect actually
-/// did or didn't happen, rather than only that a method was called,
-/// and avoids introducing a protocol abstraction purely for
-/// testability.
+/// Every test constructs its own `ModelContainer`/repository/service
+/// inline — no shared helper method — matching this project's own
+/// established rule (see `ParentWorkspaceRepositoryTests.swift`)
+/// against a private helper shared across `@Test` functions for
+/// `ModelContainer`/repository construction.
+///
+/// Every test is `@MainActor`: `AthleteParticipantActivationService`
+/// is `@MainActor` (it wraps `ParentWorkspaceRepository`, which is),
+/// so calling `activate(...)` from a non-isolated test context is a
+/// compile error — "Call to main actor-isolated instance method
+/// 'activate(...)' in a synchronous nonisolated context." This is the
+/// production actor model, not a workaround for it.
+///
+/// Invocation counts ("exactly once" / "never") are verified against
+/// the real repository's own persisted state, not a call-counting
+/// mock — proving the side effect actually did or didn't happen.
 ///
 /// `AthleteParticipantActivationResult` is not `Equatable` (it carries
 /// `WorkspaceParticipant`, a `@Model` class with no Equatable
-/// conformance of its own), so every assertion here pattern-matches
-/// the case directly rather than comparing with `==`.
-@Suite("AthleteParticipantActivationService (VX-036)", .serialized)
+/// conformance), so every assertion pattern-matches the case directly.
+@Suite("AthleteParticipantActivationService (VX-036, revised)", .serialized)
 struct AthleteParticipantActivationServiceTests {
 
-    private static func makeSetup() throws -> (
-        repository: ParentWorkspaceRepository,
-        activationService: AthleteParticipantActivationService,
-        workspaceId: WorkspaceId,
-        ownerActorId: ActorId
-    ) {
+    // MARK: - Successful activation
+
+    @Test("An eligible candidate is activated, producing a participant with role .athlete, state .invited, and the correct linkedAthleteId/invitedBy")
+    @MainActor
+    func successfulActivation() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
@@ -33,22 +41,17 @@ struct AthleteParticipantActivationServiceTests {
             eligibilityService: AthleteParticipantEligibilityService(),
             repository: repository
         )
-        return (repository, activationService, family.workspace.workspaceId, ActorId(rawValue: family.participant.id))
-    }
-
-    // MARK: - Successful activation
-
-    @Test("An eligible athlete is activated, producing a participant with role .athlete, state .invited, and the correct linkedAthleteId/invitedBy")
-    func successfulActivation() throws {
-        let setup = try Self.makeSetup()
+        let ownerActorId = ActorId(rawValue: family.participant.id)
         let athleteId = AthleteId()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: false)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: athleteId,
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: false)
+        )
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: athleteId,
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
@@ -59,20 +62,28 @@ struct AthleteParticipantActivationServiceTests {
         #expect(participant.role == .athlete)
         #expect(participant.state == .invited)
         #expect(participant.linkedAthleteId == athleteId.rawValue)
-        #expect(participant.invitedBy == setup.ownerActorId.rawValue)
+        #expect(participant.invitedBy == ownerActorId.rawValue)
     }
 
     // MARK: - Missing athlete
 
-    @Test("A missing athlete results in .eligibilityFailed with .athleteNotFound")
+    @Test("A nil candidate results in .eligibilityFailed with .athleteNotFound")
+    @MainActor
     func missingAthlete() throws {
-        let setup = try Self.makeSetup()
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
 
-        let result = setup.activationService.activate(
-            athlete: nil,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: nil,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
@@ -86,16 +97,27 @@ struct AthleteParticipantActivationServiceTests {
 
     // MARK: - Archived athlete
 
-    @Test("An archived athlete results in .eligibilityFailed with .athleteArchived")
+    @Test("An archived candidate results in .eligibilityFailed with .athleteArchived")
+    @MainActor
     func archivedAthlete() throws {
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: true)
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: true)
+        )
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
@@ -109,16 +131,27 @@ struct AthleteParticipantActivationServiceTests {
 
     // MARK: - Workspace mismatch
 
-    @Test("An athlete in a different workspace results in .eligibilityFailed with .athleteNotInWorkspace")
+    @Test("A candidate whose eligibility facts reference a different workspace results in .eligibilityFailed with .athleteNotInWorkspace")
+    @MainActor
     func workspaceMismatch() throws {
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: WorkspaceId(), isArchived: false)
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(), isArchived: false)
+        )
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
@@ -132,16 +165,27 @@ struct AthleteParticipantActivationServiceTests {
 
     // MARK: - Duplicate participant
 
-    @Test("An athlete who already has a participant results in .eligibilityFailed with .participantAlreadyExists")
+    @Test("A candidate who already has a participant results in .eligibilityFailed with .participantAlreadyExists")
+    @MainActor
     func duplicateParticipant() throws {
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: false)
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: false)
+        )
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: true
         )
 
@@ -155,18 +199,29 @@ struct AthleteParticipantActivationServiceTests {
 
     // MARK: - Repository failure
 
-    @Test("A repository save failure results in .repositoryFailed")
+    @Test("A repository save failure results in .repositoryFailed, with no raw error or string exposed")
+    @MainActor
     func repositoryFailure() throws {
         struct InjectedSaveFailure: Error {}
 
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: false)
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: false)
+        )
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false,
             saveOverride: { throw InjectedSaveFailure() }
         )
@@ -180,20 +235,31 @@ struct AthleteParticipantActivationServiceTests {
     // MARK: - Repository invocation counting
 
     @Test("The repository is invoked exactly once when activation succeeds")
+    @MainActor
     func repositoryInvokedExactlyOnceOnSuccess() throws {
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: false)
-        let participantsBefore = try setup.repository.fetchAllParticipants().count
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: false)
+        )
+        let participantsBefore = try repository.fetchAllParticipants().count
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
-        let participantsAfter = try setup.repository.fetchAllParticipants().count
+        let participantsAfter = try repository.fetchAllParticipants().count
         #expect(participantsAfter == participantsBefore + 1)
         guard case .activated = result else {
             Issue.record("Expected .activated")
@@ -202,24 +268,70 @@ struct AthleteParticipantActivationServiceTests {
     }
 
     @Test("The repository is never invoked when eligibility fails")
+    @MainActor
     func repositoryNeverInvokedWhenEligibilityFails() throws {
-        let setup = try Self.makeSetup()
-        let facts = AthleteEligibilityFacts(workspaceId: setup.workspaceId, isArchived: true)
-        let participantsBefore = try setup.repository.fetchAllParticipants().count
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: AthleteId(),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: true)
+        )
+        let participantsBefore = try repository.fetchAllParticipants().count
 
-        let result = setup.activationService.activate(
-            athlete: facts,
-            workspaceId: setup.workspaceId,
-            linkedAthleteId: AthleteId(),
-            invitedBy: setup.ownerActorId,
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
             hasExistingParticipant: false
         )
 
-        let participantsAfter = try setup.repository.fetchAllParticipants().count
+        let participantsAfter = try repository.fetchAllParticipants().count
         #expect(participantsAfter == participantsBefore)
         guard case .eligibilityFailed = result else {
             Issue.record("Expected .eligibilityFailed")
             return
         }
+    }
+
+    // MARK: - Candidate identity always matches evaluated eligibility facts
+
+    @Test("The repository always creates the participant using candidate.athleteId, never a separately-supplied id")
+    @MainActor
+    func repositoryAlwaysUsesCandidateAthleteId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let activationService = AthleteParticipantActivationService(
+            eligibilityService: AthleteParticipantEligibilityService(),
+            repository: repository
+        )
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let athleteId = AthleteId()
+        let candidate = AthleteParticipantActivationCandidate(
+            athleteId: athleteId,
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: family.workspace.workspaceId, isArchived: false)
+        )
+
+        let result = activationService.activate(
+            candidate: candidate,
+            workspaceId: family.workspace.workspaceId,
+            invitedBy: ownerActorId,
+            hasExistingParticipant: false
+        )
+
+        guard case .activated(let participant) = result else {
+            Issue.record("Expected .activated")
+            return
+        }
+        #expect(participant.linkedAthleteId == athleteId.rawValue)
+        #expect(participant.linkedAthleteId == candidate.athleteId.rawValue)
     }
 }
