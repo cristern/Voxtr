@@ -142,4 +142,62 @@ struct AthleteParticipantEligibilityServiceTests {
         #expect(first == second)
         #expect(second == third)
     }
+
+    // MARK: - evaluateForAcceptance (VX-037, ADR-0002)
+
+    @Test("evaluateForAcceptance: an eligible athlete is eligible")
+    func evaluateForAcceptanceEligibleAthleteIsEligible() {
+        let service = AthleteParticipantEligibilityService()
+        let facts = Self.makeFacts()
+
+        let result = service.evaluateForAcceptance(athlete: facts, workspaceId: Self.workspaceId)
+
+        #expect(result == .eligible)
+    }
+
+    @Test("evaluateForAcceptance: a nil athlete is not eligible, with .athleteNotFound only")
+    func evaluateForAcceptanceMissingAthleteIsNotEligible() {
+        let service = AthleteParticipantEligibilityService()
+
+        let result = service.evaluateForAcceptance(athlete: nil, workspaceId: Self.workspaceId)
+
+        #expect(result == .notEligible(primaryReason: .athleteNotFound, additionalReasons: []))
+    }
+
+    @Test("evaluateForAcceptance: an archived athlete is not eligible, with .athleteArchived")
+    func evaluateForAcceptanceArchivedAthleteIsNotEligible() {
+        let service = AthleteParticipantEligibilityService()
+        let facts = Self.makeFacts(isArchived: true)
+
+        let result = service.evaluateForAcceptance(athlete: facts, workspaceId: Self.workspaceId)
+
+        #expect(result == .notEligible(primaryReason: .athleteArchived, additionalReasons: []))
+    }
+
+    @Test("evaluateForAcceptance: a workspace mismatch is not eligible, with .athleteNotInWorkspace")
+    func evaluateForAcceptanceWorkspaceMismatchIsNotEligible() {
+        let service = AthleteParticipantEligibilityService()
+        let otherWorkspaceId = WorkspaceId()
+        let facts = Self.makeFacts(workspaceId: otherWorkspaceId)
+
+        let result = service.evaluateForAcceptance(athlete: facts, workspaceId: Self.workspaceId)
+
+        #expect(result == .notEligible(primaryReason: .athleteNotInWorkspace, additionalReasons: []))
+    }
+
+    @Test("evaluateForAcceptance has no way to report .participantAlreadyExists — it takes no hasExistingParticipant input at all, unlike evaluate(_:)")
+    func evaluateForAcceptanceNeverReportsParticipantAlreadyExists() {
+        // This test exists to make the design decision explicit and
+        // regression-proof: evaluateForAcceptance's signature itself
+        // (no hasExistingParticipant parameter) makes reporting this
+        // reason structurally impossible here, not just behaviorally
+        // avoided — the existence of the participant being accepted is
+        // the precondition, never a disqualifier, at this call site.
+        let service = AthleteParticipantEligibilityService()
+        let facts = Self.makeFacts()
+
+        let result = service.evaluateForAcceptance(athlete: facts, workspaceId: Self.workspaceId)
+
+        #expect(result == .eligible)
+    }
 }

@@ -226,4 +226,44 @@ public final class ParentWorkspaceRepository {
         let all = try modelContext.fetch(FetchDescriptor<WorkspaceParticipant>())
         return all.filter { $0.workspaceId == rawId }
     }
+
+    /// VX-037 (ADR-0002): locates the current `WorkspaceParticipant`
+    /// record for a specific athlete in a specific workspace,
+    /// regardless of its `state`. Deliberately state-agnostic, for the
+    /// same reason `fetchInvitation` was in the reverted design:
+    /// distinguishing "no record at all" from "record exists but is
+    /// `.active`/`.revoked`/`.declined`" is `AcceptWorkspaceInvitationService`'s
+    /// job, not this repository's — it needs all of those facts to
+    /// produce different results.
+    public func findParticipant(forAthlete athleteId: AthleteId, workspaceId: WorkspaceId) throws -> WorkspaceParticipant? {
+        let rawAthleteId = athleteId.rawValue
+        let rawWorkspaceId = workspaceId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<WorkspaceParticipant>())
+        return all.first { $0.role == .athlete && $0.linkedAthleteId == rawAthleteId && $0.workspaceId == rawWorkspaceId }
+    }
+
+    /// VX-037 (ADR-0002): transitions an existing `WorkspaceParticipant`
+    /// from `.invited` to `.active` — a single mutation of the one
+    /// aggregate that already represents the invitation, not a second
+    /// entity's creation. Precondition: the caller has already
+    /// confirmed `participant.state == .invited` — interpreting state
+    /// is the orchestration service's responsibility, matching
+    /// `markAccepted`'s precedent in the reverted design.
+    public func acceptInvitation(_ participant: WorkspaceParticipant) throws {
+        try acceptInvitation(participant, saveOverride: nil)
+    }
+
+    /// Test-only seam, mirroring `createInvitedAthleteParticipant`'s
+    /// own `saveOverride` pattern exactly — not `public`, reachable
+    /// only via `@testable import`. Every production call site goes
+    /// through the public overload above, which always passes `nil`.
+    func acceptInvitation(_ participant: WorkspaceParticipant, saveOverride: (() throws -> Void)?) throws {
+        participant.state = .active
+        participant.acceptedAt = .now
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
+    }
 }

@@ -284,4 +284,166 @@ struct ParentWorkspaceRepositoryTests {
         #expect(result.participant.state == .active)
         #expect(result.participant.workspaceId == result.workspace.id)
     }
+
+    // MARK: - findParticipant (VX-037, ADR-0002)
+
+    @Test("findParticipant finds an existing athlete participant")
+    @MainActor
+    func findParticipantFindsExistingParticipant() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let athleteId = AthleteId()
+        let created = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: athleteId, invitedBy: ownerActorId
+        )
+
+        let found = try repository.findParticipant(forAthlete: athleteId, workspaceId: family.workspace.workspaceId)
+
+        #expect(found?.id == created.id)
+    }
+
+    @Test("findParticipant returns nil when no participant exists for that athlete")
+    @MainActor
+    func findParticipantReturnsNilWhenNoneExists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+
+        let found = try repository.findParticipant(forAthlete: AthleteId(), workspaceId: family.workspace.workspaceId)
+
+        #expect(found == nil)
+    }
+
+    @Test("findParticipant finds a participant regardless of its state")
+    @MainActor
+    func findParticipantFindsRegardlessOfState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let athleteId = AthleteId()
+        let created = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: athleteId, invitedBy: ownerActorId
+        )
+        try repository.acceptInvitation(created)
+
+        let found = try repository.findParticipant(forAthlete: athleteId, workspaceId: family.workspace.workspaceId)
+
+        #expect(found?.state == .active)
+    }
+
+    @Test("findParticipant does not find a guardian participant when searching for an athlete")
+    @MainActor
+    func findParticipantDoesNotFindGuardianParticipant() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+
+        // The owner participant exists in this workspace, but has role
+        // .workspaceOwner, not .athlete — searching for an athlete
+        // that was never invited must not accidentally match it.
+        let found = try repository.findParticipant(forAthlete: AthleteId(), workspaceId: family.workspace.workspaceId)
+
+        #expect(found == nil)
+    }
+
+    // MARK: - acceptInvitation (VX-037, ADR-0002)
+
+    @Test("acceptInvitation transitions state from .invited to .active")
+    @MainActor
+    func acceptInvitationTransitionsState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.acceptInvitation(participant)
+
+        #expect(participant.state == .active)
+    }
+
+    @Test("acceptInvitation sets acceptedAt")
+    @MainActor
+    func acceptInvitationSetsAcceptedAt() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.acceptInvitation(participant)
+
+        #expect(participant.acceptedAt != nil)
+    }
+
+    @Test("acceptInvitation does not create a second WorkspaceParticipant — the same record transitions in place")
+    @MainActor
+    func acceptInvitationDoesNotCreateSecondParticipant() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        let participantsBefore = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+
+        try repository.acceptInvitation(participant)
+
+        let participantsAfter = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+        #expect(participantsAfter == participantsBefore)
+    }
+
+    @Test("acceptInvitation's change persists and is visible on re-fetch")
+    @MainActor
+    func acceptInvitationPersistsAcrossRefetch() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let athleteId = AthleteId()
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: athleteId, invitedBy: ownerActorId
+        )
+        try repository.acceptInvitation(participant)
+
+        let refetched = try repository.findParticipant(forAthlete: athleteId, workspaceId: family.workspace.workspaceId)
+
+        #expect(refetched?.state == .active)
+        #expect(refetched?.acceptedAt != nil)
+    }
+
+    @Test("A save failure during acceptInvitation propagates")
+    @MainActor
+    func acceptInvitationPropagatesSaveFailure() throws {
+        struct InjectedSaveFailure: Error {}
+
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        #expect(throws: InjectedSaveFailure.self) {
+            try repository.acceptInvitation(participant, saveOverride: { throw InjectedSaveFailure() })
+        }
+    }
 }

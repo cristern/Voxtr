@@ -32,6 +32,11 @@ import VoxtrReflectionDomain
 /// Notifications model types here until a sprint that actually creates
 /// them, per the same principle.
 ///
+/// NOTE (VX-037): `AthleteInvitationRequest` was briefly added here and
+/// then removed — ADR-0002 concluded workspace invitation lifecycle
+/// belongs on `WorkspaceParticipant.state`, not a separate persisted
+/// entity. Do not re-add it.
+///
 /// IMPORTANT: any change to this list is a schema version change — see
 /// `AppSchemaVersioning.swift`'s "HOW TO ADD" instructions before
 /// editing this array. Changing this array alone, without also adding a

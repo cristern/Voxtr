@@ -1,6 +1,15 @@
 import Foundation
 import VoxtrCoreContracts
 
+/// VX-037 (ADR-0002): "activation" in this file means creating a new
+/// `WorkspaceParticipant` in `.invited` state — the *invitation* use
+/// case, in ADR-0002's vocabulary — not transitioning an existing one
+/// to `.active`, which is a separate use case handled by
+/// `AcceptWorkspaceInvitationService`. This service's behavior is
+/// unchanged by that ADR; only this note is new, to prevent the name
+/// "activation" from being misread as covering acceptance too, which
+/// is exactly the terminology conflation ADR-0002 flagged.
+///
 /// Bundles the athlete being activated with the eligibility facts
 /// evaluated for them, so a caller cannot supply facts for one athlete
 /// while activating a different one — the two values only ever travel

@@ -91,6 +91,13 @@ public enum AppSchemaV2: VersionedSchema {
 /// is the current latest version. When V4 is added, freeze this list
 /// too (the same way V1 and V2 were frozen) and move the passthrough
 /// role to `AppSchemaV4`.
+///
+/// NOTE: a `AppSchemaV4`/`AthleteInvitationRequest` was introduced and
+/// then reverted (ADR-0002 concluded the invitation lifecycle belongs
+/// on the existing `WorkspaceParticipant` state machine, not a
+/// separate persisted entity — see VX-037). V3 remains the latest
+/// version; no schema change was ultimately required for the
+/// corrected design.
 public enum AppSchemaV3: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(3, 0, 0)
@@ -133,6 +140,11 @@ public enum AppSchemaV3: VersionedSchema {
 ///    change gets its own version and its own stage, in order, the same
 ///    way this project's sprint-by-sprint entity additions actually
 ///    happened.
+///
+/// NOTE (VX-037): a V4 was previously added for `AthleteInvitationRequest`
+/// and then fully reverted after ADR-0002 concluded that entity should
+/// not exist. V3 remains the latest version — do not re-add a V4 for
+/// that reverted work; only add one for a genuinely new schema change.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
         [AppSchemaV1.self, AppSchemaV2.self, AppSchemaV3.self]
