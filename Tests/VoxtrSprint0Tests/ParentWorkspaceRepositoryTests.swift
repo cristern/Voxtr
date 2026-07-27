@@ -3,7 +3,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAppShell
-import VoxtrParentDomain
+@testable import VoxtrParentDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
