@@ -257,7 +257,21 @@ public final class ParentWorkspaceRepository {
     /// own `saveOverride` pattern exactly — not `public`, reachable
     /// only via `@testable import`. Every production call site goes
     /// through the public overload above, which always passes `nil`.
+    ///
+    /// VX-039: the leading `precondition` is the actual, minimal
+    /// enforcement of `WorkspaceParticipant`'s own documented
+    /// invariant — never more than one of
+    /// `acceptedAt`/`declinedAt`/`revokedAt` populated at once. Every
+    /// service that calls this already checks `state == .invited`
+    /// first (so this never fires for any existing, correct caller);
+    /// this precondition exists specifically so a caller that bypassed
+    /// that check — calling this repository method directly — cannot
+    /// silently corrupt the aggregate. Crashes rather than throws,
+    /// matching this type's own `role != .athlete || linkedAthleteId
+    /// != nil` precondition precedent: this represents a caller error,
+    /// not a runtime/environment failure.
     func acceptInvitation(_ participant: WorkspaceParticipant, saveOverride: (() throws -> Void)?) throws {
+        precondition(participant.state == .invited, "acceptInvitation requires state == .invited; got \(participant.state)")
         participant.state = .active
         participant.acceptedAt = .now
         if let saveOverride {
@@ -265,5 +279,80 @@ public final class ParentWorkspaceRepository {
         } else {
             try modelContext.save()
         }
+    }
+
+    /// VX-038/VX-039: transitions an existing `WorkspaceParticipant`
+    /// from `.invited` to `.declined` — a single mutation of the one
+    /// aggregate that already represents the invitation, matching
+    /// `acceptInvitation`'s established shape. Precondition: the
+    /// caller has already confirmed `participant.state == .invited` —
+    /// interpreting state is the orchestration service's
+    /// responsibility, not this repository's.
+    ///
+    /// VX-039: sets `declinedAt`, a real field on `WorkspaceParticipant`
+    /// as of this change — correcting an earlier version of this
+    /// method that reused the generic `updatedAt` field because no
+    /// dedicated one existed yet. That absence was determined to be a
+    /// gap in the aggregate, not a deliberate omission, so it was
+    /// closed rather than worked around.
+    public func declineInvitation(_ participant: WorkspaceParticipant) throws {
+        try declineInvitation(participant, saveOverride: nil)
+    }
+
+    /// Test-only seam, mirroring `acceptInvitation`'s own
+    /// `saveOverride` pattern exactly. See `acceptInvitation`'s own
+    /// doc comment for why the leading `precondition` exists.
+    func declineInvitation(_ participant: WorkspaceParticipant, saveOverride: (() throws -> Void)?) throws {
+        precondition(participant.state == .invited, "declineInvitation requires state == .invited; got \(participant.state)")
+        participant.state = .declined
+        participant.declinedAt = .now
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
+    }
+
+    /// VX-038: transitions an existing `WorkspaceParticipant` from
+    /// `.invited` to `.revoked` — a single mutation of the one
+    /// aggregate that already represents the invitation, matching
+    /// `acceptInvitation`'s established shape. Precondition: the
+    /// caller has already confirmed `participant.state == .invited` —
+    /// interpreting state is the orchestration service's
+    /// responsibility, not this repository's.
+    public func revokeInvitation(_ participant: WorkspaceParticipant) throws {
+        try revokeInvitation(participant, saveOverride: nil)
+    }
+
+    /// Test-only seam, mirroring `acceptInvitation`'s own
+    /// `saveOverride` pattern exactly. See `acceptInvitation`'s own
+    /// doc comment for why the leading `precondition` exists.
+    func revokeInvitation(_ participant: WorkspaceParticipant, saveOverride: (() throws -> Void)?) throws {
+        precondition(participant.state == .invited, "revokeInvitation requires state == .invited; got \(participant.state)")
+        participant.state = .revoked
+        participant.revokedAt = .now
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
+    }
+
+    /// VX-038: returns every `WorkspaceParticipant` in a workspace
+    /// currently `.invited` — the pending invitations awaiting a
+    /// response. Built on `fetchParticipants(forWorkspace:)`, the
+    /// existing unscoped-by-state fetch, filtered in Swift — matching
+    /// this repository's own established fetch-then-filter convention
+    /// (see that method's own doc comment on why `#Predicate` is
+    /// avoided here).
+    public func fetchPendingParticipants(forWorkspace workspaceId: WorkspaceId) throws -> [WorkspaceParticipant] {
+        try fetchParticipants(forWorkspace: workspaceId).filter { $0.state == .invited }
+    }
+
+    /// VX-038: returns every `WorkspaceParticipant` in a workspace
+    /// currently `.active` — standing membership, as opposed to
+    /// pending invitations or resolved (declined/revoked) ones.
+    public func fetchActiveParticipants(forWorkspace workspaceId: WorkspaceId) throws -> [WorkspaceParticipant] {
+        try fetchParticipants(forWorkspace: workspaceId).filter { $0.state == .active }
     }
 }

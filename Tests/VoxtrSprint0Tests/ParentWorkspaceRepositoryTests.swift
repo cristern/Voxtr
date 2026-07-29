@@ -389,6 +389,25 @@ struct ParentWorkspaceRepositoryTests {
         #expect(participant.acceptedAt != nil)
     }
 
+    @Test("acceptInvitation (VX-039): declinedAt and revokedAt remain nil — only acceptedAt is populated")
+    @MainActor
+    func acceptInvitationLeavesOtherTerminalTimestampsNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.acceptInvitation(participant)
+
+        #expect(participant.acceptedAt != nil)
+        #expect(participant.declinedAt == nil)
+        #expect(participant.revokedAt == nil)
+    }
+
     @Test("acceptInvitation does not create a second WorkspaceParticipant — the same record transitions in place")
     @MainActor
     func acceptInvitationDoesNotCreateSecondParticipant() throws {
@@ -445,5 +464,334 @@ struct ParentWorkspaceRepositoryTests {
         #expect(throws: InjectedSaveFailure.self) {
             try repository.acceptInvitation(participant, saveOverride: { throw InjectedSaveFailure() })
         }
+    }
+
+    // MARK: - declineInvitation (VX-038)
+
+    @Test("declineInvitation transitions state from .invited to .declined")
+    @MainActor
+    func declineInvitationTransitionsState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.declineInvitation(participant)
+
+        #expect(participant.state == .declined)
+        #expect(participant.declinedAt != nil)
+    }
+
+    @Test("declineInvitation (VX-039): acceptedAt and revokedAt remain nil — only declinedAt is populated")
+    @MainActor
+    func declineInvitationLeavesOtherTerminalTimestampsNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.declineInvitation(participant)
+
+        #expect(participant.declinedAt != nil)
+        #expect(participant.acceptedAt == nil)
+        #expect(participant.revokedAt == nil)
+    }
+
+    @Test("declineInvitation does not create a second WorkspaceParticipant")
+    @MainActor
+    func declineInvitationDoesNotCreateSecondParticipant() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        let participantsBefore = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+
+        try repository.declineInvitation(participant)
+
+        let participantsAfter = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+        #expect(participantsAfter == participantsBefore)
+    }
+
+    @Test("A save failure during declineInvitation propagates")
+    @MainActor
+    func declineInvitationPropagatesSaveFailure() throws {
+        struct InjectedSaveFailure: Error {}
+
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        #expect(throws: InjectedSaveFailure.self) {
+            try repository.declineInvitation(participant, saveOverride: { throw InjectedSaveFailure() })
+        }
+    }
+
+    // MARK: - revokeInvitation (VX-038)
+
+    @Test("revokeInvitation transitions state from .invited to .revoked")
+    @MainActor
+    func revokeInvitationTransitionsState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.revokeInvitation(participant)
+
+        #expect(participant.state == .revoked)
+    }
+
+    @Test("revokeInvitation sets revokedAt")
+    @MainActor
+    func revokeInvitationSetsRevokedAt() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.revokeInvitation(participant)
+
+        #expect(participant.revokedAt != nil)
+    }
+
+    @Test("revokeInvitation (VX-039): acceptedAt and declinedAt remain nil — only revokedAt is populated")
+    @MainActor
+    func revokeInvitationLeavesOtherTerminalTimestampsNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        try repository.revokeInvitation(participant)
+
+        #expect(participant.revokedAt != nil)
+        #expect(participant.acceptedAt == nil)
+        #expect(participant.declinedAt == nil)
+    }
+
+    @Test("revokeInvitation does not create a second WorkspaceParticipant")
+    @MainActor
+    func revokeInvitationDoesNotCreateSecondParticipant() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        let participantsBefore = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+
+        try repository.revokeInvitation(participant)
+
+        let participantsAfter = try repository.fetchParticipants(forWorkspace: family.workspace.workspaceId).count
+        #expect(participantsAfter == participantsBefore)
+    }
+
+    @Test("A save failure during revokeInvitation propagates")
+    @MainActor
+    func revokeInvitationPropagatesSaveFailure() throws {
+        struct InjectedSaveFailure: Error {}
+
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+
+        #expect(throws: InjectedSaveFailure.self) {
+            try repository.revokeInvitation(participant, saveOverride: { throw InjectedSaveFailure() })
+        }
+    }
+
+    // MARK: - fetchPendingParticipants (VX-038)
+
+    @Test("fetchPendingParticipants returns only .invited participants")
+    @MainActor
+    func fetchPendingParticipantsReturnsOnlyInvited() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let pending = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        let active = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.acceptInvitation(active)
+
+        let result = try repository.fetchPendingParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.count == 1)
+        #expect(result.first?.id == pending.id)
+    }
+
+    @Test("fetchPendingParticipants excludes the workspace owner (never .invited)")
+    @MainActor
+    func fetchPendingParticipantsExcludesOwner() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+
+        let result = try repository.fetchPendingParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.isEmpty)
+    }
+
+    @Test("fetchPendingParticipants returns an empty array, not an error, when nothing is pending")
+    @MainActor
+    func fetchPendingParticipantsReturnsEmptyArrayWhenNonePending() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let participant = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.acceptInvitation(participant)
+
+        let result = try repository.fetchPendingParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.isEmpty)
+    }
+
+    @Test("fetchPendingParticipants excludes declined and revoked participants")
+    @MainActor
+    func fetchPendingParticipantsExcludesDeclinedAndRevoked() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let declined = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.declineInvitation(declined)
+        let revoked = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.revokeInvitation(revoked)
+
+        let result = try repository.fetchPendingParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.isEmpty)
+    }
+
+    @Test("fetchPendingParticipants scopes to the requested workspace only")
+    @MainActor
+    func fetchPendingParticipantsScopesToWorkspace() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let firstFamily = try repository.createParentAndWorkspace(givenName: "Kari")
+        let secondFamily = try repository.createParentAndWorkspace(givenName: "Ola")
+        let firstOwnerActorId = ActorId(rawValue: firstFamily.participant.id)
+        _ = try repository.createInvitedAthleteParticipant(
+            workspaceId: firstFamily.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: firstOwnerActorId
+        )
+
+        let result = try repository.fetchPendingParticipants(forWorkspace: secondFamily.workspace.workspaceId)
+
+        #expect(result.isEmpty)
+    }
+
+    // MARK: - fetchActiveParticipants (VX-038)
+
+    @Test("fetchActiveParticipants returns only .active participants, including the workspace owner")
+    @MainActor
+    func fetchActiveParticipantsReturnsOnlyActive() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let pending = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        let athlete = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.acceptInvitation(athlete)
+
+        let result = try repository.fetchActiveParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.count == 2)
+        #expect(result.contains { $0.id == family.participant.id })
+        #expect(result.contains { $0.id == athlete.id })
+        #expect(!result.contains { $0.id == pending.id })
+    }
+
+    @Test("fetchActiveParticipants excludes declined and revoked participants")
+    @MainActor
+    func fetchActiveParticipantsExcludesDeclinedAndRevoked() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let family = try repository.createParentAndWorkspace(givenName: "Kari")
+        let ownerActorId = ActorId(rawValue: family.participant.id)
+        let declined = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.declineInvitation(declined)
+        let revoked = try repository.createInvitedAthleteParticipant(
+            workspaceId: family.workspace.workspaceId, linkedAthleteId: AthleteId(), invitedBy: ownerActorId
+        )
+        try repository.revokeInvitation(revoked)
+
+        let result = try repository.fetchActiveParticipants(forWorkspace: family.workspace.workspaceId)
+
+        #expect(result.count == 1)
+        #expect(result.first?.id == family.participant.id)
+    }
+
+    @Test("fetchActiveParticipants scopes to the requested workspace only")
+    @MainActor
+    func fetchActiveParticipantsScopesToWorkspace() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let firstFamily = try repository.createParentAndWorkspace(givenName: "Kari")
+        _ = try repository.createParentAndWorkspace(givenName: "Ola")
+
+        let result = try repository.fetchActiveParticipants(forWorkspace: firstFamily.workspace.workspaceId)
+
+        #expect(result.count == 1)
+        #expect(result.first?.id == firstFamily.participant.id)
     }
 }
