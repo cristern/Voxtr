@@ -86,11 +86,18 @@ public final class WorkspaceParticipant {
     public var invitedBy: UUID?
     public var invitedAt: Date?
     public var acceptedAt: Date?
+    public var declinedAt: Date?
     public var revokedAt: Date?
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
 
+    /// INVARIANT: after a participant leaves `.invited`, exactly one
+    /// of `acceptedAt`/`declinedAt`/`revokedAt` is populated — never
+    /// more than one, and never a stale value left over from an
+    /// earlier transition. Each of the three terminal states
+    /// (`.active`, `.declined`, `.revoked`) corresponds to exactly one
+    /// of these three fields.
     public init(
         id: UUID = UUID(),
         workspaceId: WorkspaceId,
@@ -101,6 +108,7 @@ public final class WorkspaceParticipant {
         invitedBy: ActorId? = nil,
         invitedAt: Date? = nil,
         acceptedAt: Date? = nil,
+        declinedAt: Date? = nil,
         revokedAt: Date? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -116,6 +124,7 @@ public final class WorkspaceParticipant {
         self.invitedBy = invitedBy?.rawValue
         self.invitedAt = invitedAt
         self.acceptedAt = acceptedAt
+        self.declinedAt = declinedAt
         self.revokedAt = revokedAt
         self.createdAt = createdAt
         self.updatedAt = updatedAt
