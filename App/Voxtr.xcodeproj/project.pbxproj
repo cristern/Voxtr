@@ -41,10 +41,7 @@
 		044626734D41F8623174A90B /* DailyQuoteApplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */; };
 		8B12E4A9E3AF3C64A3B822E3 /* DailyQuoteViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */; };
 		1689582744E809532D10A1EB /* AthleteParticipantEligibilityServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */; };
-		5B9307320B31352107199DDA /* AthleteParticipantInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantInvitationServiceTests.swift */; };
 		10096932FCA5A4B31A729473 /* AcceptWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */; };
-		88D10FC1CA99267D9D0F1027 /* DeclineWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */; };
-		D19974FB5C081481C168C166 /* RevokeWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */; };
 		E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */; };
 		BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */; };
 		43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */; };
@@ -102,10 +99,7 @@
 		3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyQuoteApplicationServiceTests.swift; sourceTree = "<group>"; };
 		833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyQuoteViewModelTests.swift; sourceTree = "<group>"; };
 		338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteParticipantEligibilityServiceTests.swift; sourceTree = "<group>"; };
-		6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteParticipantInvitationServiceTests.swift; sourceTree = "<group>"; };
 		68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcceptWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
-		2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeclineWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
-		5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevokeWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
 		642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingPresentationMapperTests.swift; sourceTree = "<group>"; };
 		A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoachingIntegrationTests.swift; sourceTree = "<group>"; };
@@ -222,10 +216,7 @@
 				3A8EE9351CC9AF6FAF694116 /* DailyQuoteApplicationServiceTests.swift */,
 				833F03BD2FEF0E1DFD28B29C /* DailyQuoteViewModelTests.swift */,
 				338027003527F006F5D906F7 /* AthleteParticipantEligibilityServiceTests.swift */,
-				6DE32F71E3F3B14BDF71F8FD /* AthleteParticipantInvitationServiceTests.swift */,
 				68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */,
-				2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */,
-				5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */,
 				642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */,
 				19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */,
 				A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */,
@@ -432,10 +423,7 @@
 				044626734D41F8623174A90B /* DailyQuoteApplicationServiceTests.swift in Sources */,
 				8B12E4A9E3AF3C64A3B822E3 /* DailyQuoteViewModelTests.swift in Sources */,
 				1689582744E809532D10A1EB /* AthleteParticipantEligibilityServiceTests.swift in Sources */,
-				5B9307320B31352107199DDA /* AthleteParticipantInvitationServiceTests.swift in Sources */,
 				10096932FCA5A4B31A729473 /* AcceptWorkspaceInvitationServiceTests.swift in Sources */,
-				88D10FC1CA99267D9D0F1027 /* DeclineWorkspaceInvitationServiceTests.swift in Sources */,
-				D19974FB5C081481C168C166 /* RevokeWorkspaceInvitationServiceTests.swift in Sources */,
 				E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */,
 				BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */,
 				43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */,
