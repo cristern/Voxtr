@@ -45,7 +45,6 @@
 		10096932FCA5A4B31A729473 /* AcceptWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */; };
 		88D10FC1CA99267D9D0F1027 /* DeclineWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */; };
 		D19974FB5C081481C168C166 /* RevokeWorkspaceInvitationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */; };
-		66436138923157BB90846E2E /* WorkspaceInvitationApplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 975DC76DA0611073AD71EBAD /* WorkspaceInvitationApplicationServiceTests.swift */; };
 		E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */; };
 		BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */; };
 		43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */; };
@@ -107,7 +106,6 @@
 		68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AcceptWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
 		2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeclineWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
 		5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevokeWorkspaceInvitationServiceTests.swift; sourceTree = "<group>"; };
-		975DC76DA0611073AD71EBAD /* WorkspaceInvitationApplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceInvitationApplicationServiceTests.swift; sourceTree = "<group>"; };
 		642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingEngineTests.swift; sourceTree = "<group>"; };
 		19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingPresentationMapperTests.swift; sourceTree = "<group>"; };
 		A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyReviewCoachingIntegrationTests.swift; sourceTree = "<group>"; };
@@ -228,7 +226,6 @@
 				68BE4CE75E202807104B5399 /* AcceptWorkspaceInvitationServiceTests.swift */,
 				2194EEE653EE1B1BF67E535B /* DeclineWorkspaceInvitationServiceTests.swift */,
 				5A525D0478B2B36CC6E5C6C5 /* RevokeWorkspaceInvitationServiceTests.swift */,
-				975DC76DA0611073AD71EBAD /* WorkspaceInvitationApplicationServiceTests.swift */,
 				642EC3A7EBE40D85850DF0D9 /* CoachingEngineTests.swift */,
 				19C6559B15382C73BB9BFED1 /* CoachingPresentationMapperTests.swift */,
 				A08EC56F3F4E7E63DB68CBE1 /* WeeklyReviewCoachingIntegrationTests.swift */,
@@ -439,7 +436,6 @@
 				10096932FCA5A4B31A729473 /* AcceptWorkspaceInvitationServiceTests.swift in Sources */,
 				88D10FC1CA99267D9D0F1027 /* DeclineWorkspaceInvitationServiceTests.swift in Sources */,
 				D19974FB5C081481C168C166 /* RevokeWorkspaceInvitationServiceTests.swift in Sources */,
-				66436138923157BB90846E2E /* WorkspaceInvitationApplicationServiceTests.swift in Sources */,
 				E4679BF4F71C956941E48B41 /* CoachingEngineTests.swift in Sources */,
 				BC2B35538C7B356A54FE9215 /* CoachingPresentationMapperTests.swift in Sources */,
 				43D6D4ECFF656AAB53E32631 /* WeeklyReviewCoachingIntegrationTests.swift in Sources */,
