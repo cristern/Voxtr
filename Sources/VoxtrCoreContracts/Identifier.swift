@@ -33,6 +33,12 @@ public typealias WeekPlanId = Identifier<WeekPlanTag>
 public enum PlannedActivityTag {}
 public typealias PlannedActivityId = Identifier<PlannedActivityTag>
 
+/// Added for Recurring Planned Activities — a new domain concept this
+/// work package introduces, following the same pattern as every other
+/// typed ID above.
+public enum RecurringPlannedActivityTag {}
+public typealias RecurringPlannedActivityId = Identifier<RecurringPlannedActivityTag>
+
 public enum LoggedActivityTag {}
 public typealias LoggedActivityId = Identifier<LoggedActivityTag>
 

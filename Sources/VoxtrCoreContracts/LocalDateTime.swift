@@ -42,6 +42,68 @@ public struct LocalDate: Hashable, Codable, Sendable, Comparable {
         var container = encoder.singleValueContainer()
         try container.encode(isoString)
     }
+
+    /// UTC-anchored `Calendar` used only for pure calendar arithmetic on
+    /// a `LocalDate`'s own (year, month, day) — deliberately never tied
+    /// to `Calendar.current`/`TimeZone.current`, so `weekday` and
+    /// `adding(days:)` below never depend on, or shift with, the
+    /// device's current time zone or "now."
+    private static var arithmeticCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return calendar
+    }
+
+    /// The day of the week this date falls on, computed purely from
+    /// (year, month, day) — see `arithmeticCalendar` above for why this
+    /// is safe from device-local midnight/timezone drift.
+    public var weekday: Weekday {
+        let components = DateComponents(year: year, month: month, day: day)
+        let date = Self.arithmeticCalendar.date(from: components) ?? Date(timeIntervalSince1970: 0)
+        let rawWeekday = Self.arithmeticCalendar.component(.weekday, from: date)
+        return Weekday(rawValue: rawWeekday) ?? .sunday
+    }
+
+    /// Returns a new `LocalDate` offset by the given number of days
+    /// (negative moves earlier). Pure calendar arithmetic — see
+    /// `arithmeticCalendar` above.
+    public func adding(days: Int) -> LocalDate {
+        let components = DateComponents(year: year, month: month, day: day)
+        let date = Self.arithmeticCalendar.date(from: components) ?? Date(timeIntervalSince1970: 0)
+        let shifted = Self.arithmeticCalendar.date(byAdding: .day, value: days, to: date) ?? date
+        let shiftedComponents = Self.arithmeticCalendar.dateComponents([.year, .month, .day], from: shifted)
+        return LocalDate(
+            year: shiftedComponents.year ?? year,
+            month: shiftedComponents.month ?? month,
+            day: shiftedComponents.day ?? day
+        )
+    }
+}
+
+/// Day of the week, independent of any specific `Calendar`/locale
+/// week-start convention. Raw values match `Foundation`'s own
+/// `Calendar.Component.weekday` numbering (1 = Sunday ... 7 =
+/// Saturday) so `LocalDate.weekday` above can convert directly,
+/// without a separate mapping table to keep in sync.
+///
+/// Deliberately NOT added to `SharedEnums.swift` — that file's own doc
+/// comment states its enum list is closed for v1.3 per the Domain &
+/// Data Model document. `Weekday` is a general calendar primitive, the
+/// same category as `LocalDate`/`LocalTime`/`TimeZoneId` already in
+/// this file, not a v1.3 domain concept — it belongs alongside them,
+/// not in that closed list.
+public enum Weekday: Int, Codable, Sendable, CaseIterable, Comparable {
+    case sunday = 1
+    case monday = 2
+    case tuesday = 3
+    case wednesday = 4
+    case thursday = 5
+    case friday = 6
+    case saturday = 7
+
+    public static func < (lhs: Weekday, rhs: Weekday) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
 }
 
 /// v1.3 Section 3: "HH:mm value. No timezone. Combined with time zone at

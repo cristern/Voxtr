@@ -306,3 +306,457 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.activities.contains { $0.title == "Added after commit" })
     }
 }
+
+// MARK: - Recurring Planned Activities
+
+@Suite("WeeklyPlanningViewModel — Recurring Planned Activities", .serialized)
+struct WeeklyPlanningViewModelRecurringActivityTests {
+
+    private static let fixedWeekStart = LocalDate(year: 2026, month: 1, day: 5) // a Monday
+    private static let rangeStart = LocalDate(year: 2026, month: 1, day: 1)
+    private static let rangeEnd = LocalDate(year: 2026, month: 1, day: 31)
+
+    @Test("Recurring suggestions load alongside the WeekPlan")
+    @MainActor
+    func suggestionsLoadWithWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+
+        viewModel.loadOrCreateWeekPlan()
+
+        #expect(viewModel.recurringSuggestions.count == 1)
+        #expect(viewModel.recurringSuggestions.first?.title == "Football")
+    }
+
+    @Test("Accepting a suggestion removes it from recurringSuggestions and adds a matching activity")
+    @MainActor
+    func acceptSuggestionRemovesItAndAddsActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        let suggestion = try #require(viewModel.recurringSuggestions.first)
+
+        viewModel.acceptSuggestion(suggestion)
+
+        #expect(viewModel.recurringSuggestions.isEmpty)
+        #expect(viewModel.activities.contains { $0.title == "Football" })
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("Dismissing a suggestion removes only that suggestion, leaving others untouched")
+    @MainActor
+    func dismissRemovesOnlyThatSuggestion() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Swimming", activityType: .individualTraining, weekday: .wednesday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        #expect(viewModel.recurringSuggestions.count == 2)
+        let toDismiss = try #require(viewModel.recurringSuggestions.first { $0.title == "Football" })
+
+        viewModel.dismissSuggestion(toDismiss)
+
+        #expect(viewModel.recurringSuggestions.count == 1)
+        #expect(viewModel.recurringSuggestions.first?.title == "Swimming")
+    }
+
+    @Test("Dismissal is session-only: a fresh ViewModel loading from persistence still shows the dismissed occurrence")
+    @MainActor
+    func dismissalIsSessionOnly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let firstViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        firstViewModel.loadOrCreateWeekPlan()
+        let suggestion = try #require(firstViewModel.recurringSuggestions.first)
+        firstViewModel.dismissSuggestion(suggestion)
+        #expect(firstViewModel.recurringSuggestions.isEmpty)
+
+        // A brand-new ViewModel instance — "reloading from persistence"
+        // — has no memory of the dismissal, since it was never stored.
+        let secondViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        secondViewModel.loadOrCreateWeekPlan()
+
+        #expect(secondViewModel.recurringSuggestions.count == 1)
+        #expect(secondViewModel.recurringSuggestions.first?.title == "Football")
+    }
+
+    @Test("An accepted occurrence remains absent after a fresh ViewModel reloads from persistence")
+    @MainActor
+    func acceptedOccurrenceRemainsAbsentAfterReload() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let firstViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        firstViewModel.loadOrCreateWeekPlan()
+        let suggestion = try #require(firstViewModel.recurringSuggestions.first)
+        firstViewModel.acceptSuggestion(suggestion)
+
+        let secondViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        secondViewModel.loadOrCreateWeekPlan()
+
+        #expect(secondViewModel.recurringSuggestions.isEmpty)
+        #expect(secondViewModel.activities.contains { $0.title == "Football" })
+    }
+
+    @Test("Committed WeekPlans cannot accept recurring suggestions — the attempt surfaces an error and creates nothing")
+    @MainActor
+    func committedWeekPlansCannotAcceptSuggestions() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        let suggestion = try #require(viewModel.recurringSuggestions.first)
+        viewModel.commit()
+
+        viewModel.acceptSuggestion(suggestion)
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.activities.isEmpty)
+    }
+
+    @Test("Existing manual add/edit/delete/commit behavior is unchanged by the presence of recurring suggestions")
+    @MainActor
+    func existingManualBehaviorUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.newActivityTitle = "Manual entry"
+        viewModel.addActivity()
+        let manualActivity = try #require(viewModel.activities.first { $0.title == "Manual entry" })
+
+        viewModel.editActivity(manualActivity, title: "Manual entry (edited)", localDate: Self.fixedWeekStart, activityType: .recovery)
+        #expect(viewModel.activities.first { $0.id == manualActivity.id }?.title == "Manual entry (edited)")
+
+        viewModel.deleteActivity(manualActivity)
+        #expect(!viewModel.activities.contains { $0.id == manualActivity.id })
+
+        viewModel.commit()
+        #expect(viewModel.isCommitted)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    // MARK: Management flow
+
+    @Test("loadRecurringActivities populates the management list, scoped to the athlete")
+    @MainActor
+    func loadRecurringActivitiesPopulatesList() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+
+        viewModel.loadRecurringActivities()
+
+        #expect(viewModel.recurringPlannedActivities.count == 1)
+        #expect(viewModel.recurringPlannedActivities.first?.title == "Football")
+    }
+
+    @Test("createRecurringActivity persists a new definition from the form fields and resets the form")
+    @MainActor
+    func createRecurringActivityPersistsFromForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.recurringFormTitle = "Football"
+        viewModel.recurringFormActivityType = .teamTraining
+        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
+        viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
+
+        viewModel.createRecurringActivity()
+
+        #expect(viewModel.recurringPlannedActivities.contains { $0.title == "Football" })
+        #expect(viewModel.recurringFormTitle.isEmpty)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("Creating a recurring activity while the current week's WeekPlan is loaded refreshes its suggestions")
+    @MainActor
+    func creatingRecurringActivityRefreshesCurrentWeekSuggestions() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        #expect(viewModel.recurringSuggestions.isEmpty)
+
+        viewModel.recurringFormTitle = "Football"
+        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
+        viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
+        viewModel.createRecurringActivity()
+
+        #expect(viewModel.recurringSuggestions.contains { $0.title == "Football" })
+    }
+
+    @Test("editRecurringActivity updates an existing definition")
+    @MainActor
+    func editRecurringActivityUpdatesDefinition() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.beginEditingRecurringActivity(created)
+        viewModel.recurringFormTitle = "Football (updated)"
+
+        viewModel.editRecurringActivity(created)
+
+        #expect(viewModel.recurringPlannedActivities.contains { $0.title == "Football (updated)" })
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("toggleRecurringActivityEnabled flips the enabled state")
+    @MainActor
+    func toggleRecurringActivityEnabledFlipsState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadRecurringActivities()
+        #expect(viewModel.recurringPlannedActivities.first?.isEnabled == true)
+
+        viewModel.toggleRecurringActivityEnabled(created)
+
+        #expect(viewModel.recurringPlannedActivities.first?.isEnabled == false)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("beginEditingRecurringActivity populates the form fields from the existing definition")
+    @MainActor
+    func beginEditingPopulatesFormFields() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            startLocalTime: LocalTime(hour: 17, minute: 30), plannedDurationMinutes: 150,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+
+        viewModel.beginEditingRecurringActivity(created)
+
+        #expect(viewModel.recurringFormTitle == "Football")
+        #expect(viewModel.recurringFormWeekday == .monday)
+        #expect(viewModel.recurringFormHasStartTime == true)
+        #expect(viewModel.recurringFormHasDuration == true)
+        #expect(viewModel.recurringFormDurationMinutes == 150)
+    }
+
+    // MARK: Create/edit report success/failure (correctness revision)
+
+    @Test("A successful creation reports success (true)")
+    @MainActor
+    func successfulCreationReportsSuccess() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.recurringFormTitle = "Football"
+        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
+        viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
+
+        let succeeded = viewModel.createRecurringActivity()
+
+        #expect(succeeded == true)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("A failed creation reports failure (false) and preserves the entered form values")
+    @MainActor
+    func failedCreationReportsFailureAndPreservesFormValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        // Empty title — genuinely invalid, rejected by PlanningService's
+        // own validation, a real reachable failure rather than a forced
+        // one.
+        viewModel.recurringFormTitle = ""
+        viewModel.recurringFormWeekday = .wednesday
+        viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
+        viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
+
+        let succeeded = viewModel.createRecurringActivity()
+
+        #expect(succeeded == false)
+        #expect(viewModel.errorMessage != nil)
+        // Entered values remain available — the form was not reset.
+        #expect(viewModel.recurringFormTitle == "")
+        #expect(viewModel.recurringFormWeekday == .wednesday)
+    }
+
+    @Test("A successful edit reports success (true)")
+    @MainActor
+    func successfulEditReportsSuccess() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.beginEditingRecurringActivity(created)
+        viewModel.recurringFormTitle = "Football (updated)"
+
+        let succeeded = viewModel.editRecurringActivity(created)
+
+        #expect(succeeded == true)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("A failed edit reports failure (false) and preserves the entered form values")
+    @MainActor
+    func failedEditReportsFailureAndPreservesFormValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
+        )
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.beginEditingRecurringActivity(created)
+        // Empty title — genuinely invalid.
+        viewModel.recurringFormTitle = ""
+        viewModel.recurringFormWeekday = .friday
+
+        let succeeded = viewModel.editRecurringActivity(created)
+
+        #expect(succeeded == false)
+        #expect(viewModel.errorMessage != nil)
+        // Entered values remain available — the form was not reset.
+        #expect(viewModel.recurringFormTitle == "")
+        #expect(viewModel.recurringFormWeekday == .friday)
+    }
+}

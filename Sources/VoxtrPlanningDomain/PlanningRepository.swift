@@ -41,6 +41,13 @@ public final class PlanningRepository {
     /// Does not verify the `WeekPlan` exists — S2.0 is persistence
     /// infrastructure only; enforcing that relationship is a later
     /// story's concern, not invented here.
+    ///
+    /// `externalSourceId`/`externalSourceType` added for Recurring
+    /// Planned Activities: both default to `nil`, so every existing
+    /// call site is unaffected. When a caller supplies them (see
+    /// `PlanningService.acceptSuggestion`), they're the mechanism that
+    /// prevents the same recurring occurrence from being accepted
+    /// twice — see `RecurringPlannedActivity`'s own doc comment.
     public func insertPlannedActivity(
         weekPlanId: WeekPlanId,
         athleteId: AthleteId,
@@ -53,7 +60,53 @@ public final class PlanningRepository {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         plannedIntensity: Int? = nil,
+        externalSourceId: String? = nil,
+        externalSourceType: String? = nil,
         notes: String? = nil
+    ) throws -> PlannedActivity {
+        try insertPlannedActivity(
+            weekPlanId: weekPlanId,
+            athleteId: athleteId,
+            activityType: activityType,
+            title: title,
+            localDate: localDate,
+            timeZoneId: timeZoneId,
+            sportId: sportId,
+            categoryIds: categoryIds,
+            startLocalTime: startLocalTime,
+            plannedDurationMinutes: plannedDurationMinutes,
+            plannedIntensity: plannedIntensity,
+            externalSourceId: externalSourceId,
+            externalSourceType: externalSourceType,
+            notes: notes,
+            saveOverride: nil
+        )
+    }
+
+    /// Test-only seam, added for Recurring Planned Activities'
+    /// `PlanningService.acceptSuggestion` — mirrors
+    /// `insertRecurringPlannedActivity`'s own `saveOverride` pattern
+    /// exactly, and the same pattern already established elsewhere in
+    /// this project (e.g. `VoxtrParentDomain.ParentWorkspaceRepository`).
+    /// Not `public`, reachable only via `@testable import`. Every
+    /// production call site goes through the public overload above,
+    /// which always passes `nil`.
+    func insertPlannedActivity(
+        weekPlanId: WeekPlanId,
+        athleteId: AthleteId,
+        activityType: ActivityType,
+        title: String,
+        localDate: LocalDate,
+        timeZoneId: TimeZoneId,
+        sportId: SportId? = nil,
+        categoryIds: [ActivityCategoryId] = [],
+        startLocalTime: LocalTime? = nil,
+        plannedDurationMinutes: Int? = nil,
+        plannedIntensity: Int? = nil,
+        externalSourceId: String? = nil,
+        externalSourceType: String? = nil,
+        notes: String? = nil,
+        saveOverride: (() throws -> Void)?
     ) throws -> PlannedActivity {
         let activity = PlannedActivity(
             weekPlanId: weekPlanId,
@@ -67,10 +120,16 @@ public final class PlanningRepository {
             timeZoneId: timeZoneId,
             plannedDurationMinutes: plannedDurationMinutes,
             plannedIntensity: plannedIntensity,
+            externalSourceId: externalSourceId,
+            externalSourceType: externalSourceType,
             notes: notes
         )
         modelContext.insert(activity)
-        try modelContext.save()
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
         return activity
     }
 
@@ -143,6 +202,125 @@ public final class PlanningRepository {
         let tombstone = PlannedActivityDeletionTombstone(from: tombstoneValue)
         modelContext.insert(tombstone)
         modelContext.delete(activity)
+        try modelContext.save()
+    }
+
+    /// Recurring Planned Activities: finds a `PlannedActivity` already
+    /// stamped with the given `externalSourceId` within a specific
+    /// `WeekPlan` — the duplicate-prevention check
+    /// `PlanningService.acceptSuggestion` uses. Reuses
+    /// `fetchPlannedActivities(forWeekPlan:)` rather than a separate
+    /// fetch — no duplicated fetch/filter logic.
+    public func fetchPlannedActivity(forExternalSourceId externalSourceId: String, weekPlanId: WeekPlanId) throws -> PlannedActivity? {
+        try fetchPlannedActivities(forWeekPlan: weekPlanId).first { $0.externalSourceId == externalSourceId }
+    }
+
+    // MARK: - RecurringPlannedActivity
+
+    /// Inserts a new `RecurringPlannedActivity` definition.
+    public func insertRecurringPlannedActivity(
+        athleteId: AthleteId,
+        title: String,
+        activityType: ActivityType,
+        sportId: SportId? = nil,
+        categoryIds: [ActivityCategoryId] = [],
+        weekday: Weekday,
+        startLocalTime: LocalTime? = nil,
+        plannedDurationMinutes: Int? = nil,
+        timeZoneId: TimeZoneId,
+        effectiveStartDate: LocalDate,
+        effectiveEndDate: LocalDate
+    ) throws -> RecurringPlannedActivity {
+        try insertRecurringPlannedActivity(
+            athleteId: athleteId,
+            title: title,
+            activityType: activityType,
+            sportId: sportId,
+            categoryIds: categoryIds,
+            weekday: weekday,
+            startLocalTime: startLocalTime,
+            plannedDurationMinutes: plannedDurationMinutes,
+            timeZoneId: timeZoneId,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate,
+            saveOverride: nil
+        )
+    }
+
+    /// Test-only seam, mirroring the `saveOverride` pattern already
+    /// established elsewhere in this project (e.g.
+    /// `VoxtrParentDomain.ParentWorkspaceRepository`) for deterministic
+    /// save-failure testing — not `public`, reachable only via
+    /// `@testable import`. Every production call site goes through the
+    /// public overload above, which always passes `nil`.
+    func insertRecurringPlannedActivity(
+        athleteId: AthleteId,
+        title: String,
+        activityType: ActivityType,
+        sportId: SportId? = nil,
+        categoryIds: [ActivityCategoryId] = [],
+        weekday: Weekday,
+        startLocalTime: LocalTime? = nil,
+        plannedDurationMinutes: Int? = nil,
+        timeZoneId: TimeZoneId,
+        effectiveStartDate: LocalDate,
+        effectiveEndDate: LocalDate,
+        saveOverride: (() throws -> Void)?
+    ) throws -> RecurringPlannedActivity {
+        let recurringActivity = RecurringPlannedActivity(
+            athleteId: athleteId,
+            title: title,
+            activityType: activityType,
+            sportId: sportId,
+            categoryIds: categoryIds,
+            weekday: weekday,
+            startLocalTime: startLocalTime,
+            plannedDurationMinutes: plannedDurationMinutes,
+            timeZoneId: timeZoneId,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate
+        )
+        modelContext.insert(recurringActivity)
+        if let saveOverride {
+            try saveOverride()
+        } else {
+            try modelContext.save()
+        }
+        return recurringActivity
+    }
+
+    /// Fetch a single `RecurringPlannedActivity` by ID, used by
+    /// `PlanningService`'s edit/enable/disable paths.
+    public func fetchRecurringPlannedActivity(byId recurringPlannedActivityId: RecurringPlannedActivityId) throws -> RecurringPlannedActivity? {
+        let rawId = recurringPlannedActivityId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<RecurringPlannedActivity>())
+        return all.first { $0.id == rawId }
+    }
+
+    /// Every recurring definition (enabled or disabled) belonging to an
+    /// athlete — the management flow's own listing, and the source
+    /// `PlanningService.deriveSuggestions` filters down to enabled-only
+    /// occurrences within a specific week. Ordered deterministically by
+    /// weekday then title, matching this repository's existing
+    /// convention of never leaving fetch order to fetch-call chance.
+    public func fetchRecurringPlannedActivities(forAthlete athleteId: AthleteId) throws -> [RecurringPlannedActivity] {
+        let rawAthleteId = athleteId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<RecurringPlannedActivity>())
+        return all
+            .filter { $0.athleteId == rawAthleteId }
+            .sorted { lhs, rhs in
+                if lhs.weekday != rhs.weekday {
+                    return lhs.weekday < rhs.weekday
+                }
+                return lhs.title < rhs.title
+            }
+    }
+
+    /// Enables or disables an already-fetched `RecurringPlannedActivity`
+    /// — a named domain transition, not a generic field-update API.
+    public func setRecurringPlannedActivityEnabled(_ recurringActivity: RecurringPlannedActivity, isEnabled: Bool) throws {
+        recurringActivity.isEnabled = isEnabled
+        recurringActivity.updatedAt = .now
         try modelContext.save()
     }
 }

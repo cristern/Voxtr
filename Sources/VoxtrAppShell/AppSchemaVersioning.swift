@@ -132,13 +132,47 @@ public enum AppSchemaV3: VersionedSchema {
 /// behavior — the entity *type* list is unchanged from V3; only one
 /// existing type's own shape changed.
 ///
-/// This IS currently a passthrough to `AppSchema.modelTypes`, since V4
-/// is the current latest version. When V5 is added, freeze this list
-/// too (the same way V1/V2/V3 were frozen) and move the passthrough
-/// role to `AppSchemaV5`.
+/// FROZEN as of Recurring Planned Activities — do not edit this list
+/// again, for the same reason `AppSchemaV1`/`AppSchemaV2`/`AppSchemaV3`
+/// were frozen previously. This is a hardcoded snapshot of exactly the
+/// 14 entity types that existed before this work package added
+/// `RecurringPlannedActivity`.
 public enum AppSchemaV4: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(4, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+        ]
+    }
+}
+
+/// Recurring Planned Activities: adds `RecurringPlannedActivity` — a
+/// purely additive change (a new model type only; no existing model's
+/// properties changed), so the migration from V4 is `.lightweight`.
+///
+/// This IS currently a passthrough to `AppSchema.modelTypes`, since V5
+/// is the current latest version. When V6 is added, freeze this list
+/// too (the same way V1/V2/V3/V4 were frozen) and move the passthrough
+/// role to `AppSchemaV6`.
+public enum AppSchemaV5: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(5, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -146,43 +180,43 @@ public enum AppSchemaV4: VersionedSchema {
     }
 }
 
-/// The migration plan. Three stages so far: V1 → V2, V2 → V3, and
-/// V3 → V4, all purely additive.
+/// The migration plan. Four stages so far: V1 → V2, V2 → V3, V3 → V4,
+/// and V4 → V5, all purely additive.
 ///
-/// HOW TO ADD V5 (read this before adding, renaming, or removing any
+/// HOW TO ADD V6 (read this before adding, renaming, or removing any
 /// `@Model` property or type in `AppSchema.modelTypes`):
 ///
-/// 1. Freeze `AppSchemaV4.models` to a hardcoded list (the same way
-///    `AppSchemaV1`/`AppSchemaV2`/`AppSchemaV3` were frozen previously)
-///    — copy its current passthrough result as a literal array before
-///    changing anything.
-/// 2. Add a new `AppSchemaV5: VersionedSchema` enum in this file, with
-///    `versionIdentifier: Schema.Version(5, 0, 0)` and `models`
-///    passthrough to `AppSchema.modelTypes` (V5 becomes the new latest).
+/// 1. Freeze `AppSchemaV5.models` to a hardcoded list (the same way
+///    `AppSchemaV1`/`AppSchemaV2`/`AppSchemaV3`/`AppSchemaV4` were
+///    frozen previously) — copy its current passthrough result as a
+///    literal array before changing anything.
+/// 2. Add a new `AppSchemaV6: VersionedSchema` enum in this file, with
+///    `versionIdentifier: Schema.Version(6, 0, 0)` and `models`
+///    passthrough to `AppSchema.modelTypes` (V6 becomes the new latest).
 /// 3. Update `AppSchema.modelTypes` (in `AppSchema.swift`) — only if a
 ///    model *type* is actually being added/removed. A field-level
-///    change to an already-listed type (like this version's own
-///    `declinedAt` addition) does not touch this array at all.
-/// 4. Add `AppSchemaV5.self` to `schemas` below, alongside every
+///    change to an already-listed type does not touch this array at
+///    all.
+/// 4. Add `AppSchemaV6.self` to `schemas` below, alongside every
 ///    earlier version (old versions are never removed, only appended
 ///    to).
-/// 5. Add a `MigrationStage` to `stages` describing V4 → V5. Use
+/// 5. Add a `MigrationStage` to `stages` describing V5 → V6. Use
 ///    `.lightweight(fromVersion:toVersion:)` for anything SwiftData can
 ///    infer automatically (a new model type, a new optional property
 ///    with a default). Use
 ///    `.custom(fromVersion:toVersion:willMigrate:didMigrate:)` for
 ///    anything needing real data transformation.
-/// 6. Do not skip straight to a "V6" — each actually-shipped schema
+/// 6. Do not skip straight to a "V7" — each actually-shipped schema
 ///    change gets its own version and its own stage, in order, the same
 ///    way this project's sprint-by-sprint entity additions actually
 ///    happened.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppSchemaV1.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self]
+        [AppSchemaV1.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self]
     }
 
     public static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3, migrateV3toV4]
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4, migrateV4toV5]
     }
 
     static let migrateV1toV2 = MigrationStage.lightweight(
@@ -198,5 +232,10 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     static let migrateV3toV4 = MigrationStage.lightweight(
         fromVersion: AppSchemaV3.self,
         toVersion: AppSchemaV4.self
+    )
+
+    static let migrateV4toV5 = MigrationStage.lightweight(
+        fromVersion: AppSchemaV4.self,
+        toVersion: AppSchemaV5.self
     )
 }

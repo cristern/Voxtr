@@ -4,7 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAppShell
-import VoxtrPlanningDomain
+@testable import VoxtrPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -375,5 +375,847 @@ struct PlanningServiceTests {
         }
         #expect(weekPlan.status == .draft)
         #expect(weekPlan.revision == 1)
+    }
+}
+
+// MARK: - Recurring Planned Activities
+
+@Suite("PlanningService — Recurring Planned Activities", .serialized)
+struct PlanningServiceRecurringActivityTests {
+
+    private static let mondayWeekStart = LocalDate(year: 2026, month: 1, day: 5)
+    private static let rangeStart = LocalDate(year: 2026, month: 1, day: 1)
+    private static let rangeEnd = LocalDate(year: 2026, month: 1, day: 31)
+
+    // MARK: Management
+
+    @Test("createRecurringPlannedActivity persists a new definition")
+    @MainActor
+    func createRecurringPlannedActivityPersists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId,
+            title: "Football",
+            activityType: .teamTraining,
+            weekday: .monday,
+            startLocalTime: LocalTime(hour: 17, minute: 30),
+            plannedDurationMinutes: 150,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        #expect(try repository.fetchRecurringPlannedActivities(forAthlete: athleteId).map(\.id) == [created.id])
+    }
+
+    @Test("createRecurringPlannedActivity rejects an invalid title")
+    @MainActor
+    func createRecurringPlannedActivityRejectsInvalidTitle() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.createRecurringPlannedActivity(
+                athleteId: AthleteId(),
+                title: "",
+                activityType: .teamTraining,
+                weekday: .monday,
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                effectiveStartDate: Self.rangeStart,
+                effectiveEndDate: Self.rangeEnd
+            )
+        }
+    }
+
+    @Test("editRecurringPlannedActivity updates fields on the existing definition")
+    @MainActor
+    func editRecurringPlannedActivityUpdatesFields() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let edited = try service.editRecurringPlannedActivity(
+            created.recurringPlannedActivityId,
+            title: "Football (updated)",
+            activityType: .match,
+            weekday: .wednesday,
+            plannedDurationMinutes: 90,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        #expect(edited.title == "Football (updated)")
+        #expect(edited.activityType == .match)
+        #expect(edited.weekday == .wednesday)
+        #expect(edited.plannedDurationMinutes == 90)
+    }
+
+    @Test("editRecurringPlannedActivity rejects a nonexistent definition")
+    @MainActor
+    func editRecurringPlannedActivityRejectsMissingDefinition() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.recurringPlannedActivityNotFound) {
+            try service.editRecurringPlannedActivity(
+                RecurringPlannedActivityId(),
+                title: "Football",
+                activityType: .teamTraining,
+                weekday: .monday,
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                effectiveStartDate: Self.rangeStart,
+                effectiveEndDate: Self.rangeEnd
+            )
+        }
+    }
+
+    @Test("setRecurringPlannedActivityEnabled toggles the enabled state")
+    @MainActor
+    func setRecurringPlannedActivityEnabledToggles() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        try service.setRecurringPlannedActivityEnabled(created.recurringPlannedActivityId, isEnabled: false)
+
+        let refetched = try repository.fetchRecurringPlannedActivity(byId: created.recurringPlannedActivityId)
+        #expect(refetched?.isEnabled == false)
+    }
+
+    @Test("setRecurringPlannedActivityEnabled rejects a nonexistent definition")
+    @MainActor
+    func setRecurringPlannedActivityEnabledRejectsMissingDefinition() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.recurringPlannedActivityNotFound) {
+            try service.setRecurringPlannedActivityEnabled(RecurringPlannedActivityId(), isEnabled: false)
+        }
+    }
+
+    // MARK: Suggestion generation
+
+    @Test("A recurring activity matching the week's weekday produces exactly one suggestion")
+    @MainActor
+    func matchingWeekdayProducesOneSuggestion() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.count == 1)
+        #expect(suggestions.first?.occurrenceDate == Self.mondayWeekStart)
+        #expect(suggestions.first?.title == "Football")
+    }
+
+    @Test("A recurring activity for a non-matching weekday produces no suggestions")
+    @MainActor
+    func nonMatchingWeekdayProducesNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // The week is Jan 5 (Mon) - Jan 11 (Sun), which includes a
+        // Saturday (Jan 10) — so to prove a genuine weekday mismatch,
+        // not just an out-of-range date, this definition's own
+        // effective range deliberately excludes this week's Saturday.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .saturday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2026, month: 1, day: 17),
+            effectiveEndDate: LocalDate(year: 2026, month: 1, day: 31)
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.isEmpty)
+    }
+
+    @Test("The effective start date is inclusive — an occurrence exactly on it produces a suggestion")
+    @MainActor
+    func startDateIsInclusive() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // Monday Jan 5 is both the week's first day and the
+        // definition's own effectiveStartDate.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.mondayWeekStart,
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.count == 1)
+    }
+
+    @Test("The effective end date is inclusive — an occurrence exactly on it produces a suggestion")
+    @MainActor
+    func endDateIsInclusive() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // Monday Jan 5 is the definition's own effectiveEndDate.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.mondayWeekStart
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.count == 1)
+    }
+
+    @Test("A date one day before the effective start date produces no suggestion for that occurrence")
+    @MainActor
+    func dateBeforeRangeProducesNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // effectiveStartDate is the day AFTER this week's only Monday.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.mondayWeekStart.adding(days: 1),
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.isEmpty)
+    }
+
+    @Test("A date one day after the effective end date produces no suggestion for that occurrence")
+    @MainActor
+    func dateAfterRangeProducesNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // effectiveEndDate is the day BEFORE this week's only Monday.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.mondayWeekStart.adding(days: -1)
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.isEmpty)
+    }
+
+    @Test("A disabled recurring activity produces no suggestions")
+    @MainActor
+    func disabledRecurringActivityProducesNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        try service.setRecurringPlannedActivityEnabled(created.recurringPlannedActivityId, isEnabled: false)
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.isEmpty)
+    }
+
+    @Test("Suggestions are limited to the current WeekPlan's own 7-day week")
+    @MainActor
+    func suggestionsLimitedToCurrentWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let thisWeek = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let nextWeek = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart.adding(days: 7))
+        // Matches every Monday across the whole range — both weeks
+        // should each get exactly one suggestion, not the whole range's
+        // worth in one call.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let thisWeekSuggestions = try service.deriveSuggestions(forWeekPlan: thisWeek.weekPlanId)
+        let nextWeekSuggestions = try service.deriveSuggestions(forWeekPlan: nextWeek.weekPlanId)
+
+        #expect(thisWeekSuggestions.count == 1)
+        #expect(thisWeekSuggestions.first?.occurrenceDate == Self.mondayWeekStart)
+        #expect(nextWeekSuggestions.count == 1)
+        #expect(nextWeekSuggestions.first?.occurrenceDate == Self.mondayWeekStart.adding(days: 7))
+    }
+
+    @Test("Multiple recurring activities produce suggestions ordered by occurrence date")
+    @MainActor
+    func multipleRecurringActivitiesOrderedCorrectly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // Created deliberately out of weekday order.
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Friday swim", activityType: .individualTraining, weekday: .friday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Monday football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Wednesday gym", activityType: .physicalTraining, weekday: .wednesday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.map(\.title) == ["Monday football", "Wednesday gym", "Friday swim"])
+    }
+
+    @Test("Repeated evaluation with unchanged data is deterministic")
+    @MainActor
+    func repeatedEvaluationIsDeterministic() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let first = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let second = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(first.map(\.id) == second.map(\.id))
+    }
+
+    @Test("An already-accepted occurrence is excluded from future derivation")
+    @MainActor
+    func alreadyAcceptedOccurrenceIsExcluded() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let firstSuggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(firstSuggestions.first)
+        try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        let secondSuggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(secondSuggestions.isEmpty)
+    }
+
+    @Test("A manually created activity with no matching recurring source does not suppress a genuine suggestion")
+    @MainActor
+    func manualActivityWithNoRecurringSourceDoesNotSuppressSuggestion() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        // A manually-added activity on the SAME date/title, but with no
+        // externalSourceId at all — must not be mistaken for an
+        // already-accepted occurrence.
+        _ = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Football", localDate: Self.mondayWeekStart, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let suggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(suggestions.count == 1)
+    }
+
+    // MARK: Acceptance
+
+    @Test("Accepting a suggestion creates exactly one PlannedActivity")
+    @MainActor
+    func acceptingSuggestionCreatesOnePlannedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    @Test("The created activity uses the recurring definition's own values")
+    @MainActor
+    func createdActivityUsesRecurringDefinitionValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            startLocalTime: LocalTime(hour: 17, minute: 30), plannedDurationMinutes: 150,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        let created = try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(created.title == "Football")
+        #expect(created.activityType == .teamTraining)
+        #expect(created.startLocalTime == LocalTime(hour: 17, minute: 30))
+        #expect(created.plannedDurationMinutes == 150)
+    }
+
+    @Test("The created activity belongs to the current WeekPlan and athlete")
+    @MainActor
+    func createdActivityBelongsToWeekPlanAndAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        let created = try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(created.weekPlanId == weekPlan.id)
+        #expect(created.athleteId == athleteId.rawValue)
+    }
+
+    @Test("Accepting the same occurrence twice cannot create a duplicate")
+    @MainActor
+    func acceptingSameOccurrenceTwiceCannotDuplicate() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceAlreadyAccepted) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    @Test("Accepting one occurrence does not mutate or disable the recurring definition")
+    @MainActor
+    func acceptingOccurrenceDoesNotMutateDefinition() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        let refetchedDefinition = try repository.fetchRecurringPlannedActivity(byId: created.recurringPlannedActivityId)
+        #expect(refetchedDefinition?.isEnabled == true)
+        #expect(refetchedDefinition?.title == "Football")
+    }
+
+    @Test("A repository failure during acceptance does not report success")
+    @MainActor
+    func repositoryFailureDuringAcceptanceDoesNotReportSuccess() throws {
+        struct InjectedSaveFailure: Error {}
+
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        #expect(throws: InjectedSaveFailure.self) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId, saveOverride: { throw InjectedSaveFailure() })
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("Accepting a suggestion for a committed WeekPlan is rejected")
+    @MainActor
+    func acceptingSuggestionForCommittedWeekPlanRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(throws: PlanningServiceError.weekPlanNotDraft) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    // MARK: Acceptance — authoritative validation (correctness revision)
+
+    @Test("A suggestion whose claimed athlete differs from the WeekPlan's athlete is rejected")
+    @MainActor
+    func suggestionAthleteMismatchIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let genuine = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        let tampered = RecurringActivitySuggestion(
+            id: genuine.id, recurringPlannedActivityId: genuine.recurringPlannedActivityId,
+            athleteId: otherAthleteId, occurrenceDate: genuine.occurrenceDate, title: genuine.title,
+            activityType: genuine.activityType, sportId: genuine.sportId, categoryIds: genuine.categoryIds,
+            startLocalTime: genuine.startLocalTime, plannedDurationMinutes: genuine.plannedDurationMinutes,
+            timeZoneId: genuine.timeZoneId
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceAthleteMismatch) {
+            try service.acceptSuggestion(tampered, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("A recurring definition whose own athlete differs from the WeekPlan's athlete is rejected")
+    @MainActor
+    func recurringDefinitionAthleteMismatchIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // Belongs to a DIFFERENT athlete than the WeekPlan.
+        let otherAthletesDefinition = try service.createRecurringPlannedActivity(
+            athleteId: otherAthleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        // Hand-constructed — deriveSuggestions for weekPlan's own
+        // athlete would never surface another athlete's definition.
+        // athleteId here matches the WeekPlan, isolating the
+        // definition-side mismatch specifically.
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: otherAthletesDefinition.recurringPlannedActivityId,
+            athleteId: athleteId, occurrenceDate: Self.mondayWeekStart, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceAthleteMismatch) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("An occurrence date before the WeekPlan's own 7-day week is rejected")
+    @MainActor
+    func occurrenceBeforeWeekPlanIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2025, month: 12, day: 1), effectiveEndDate: Self.rangeEnd
+        )
+        // One week before weekStart — still a Monday, still within the
+        // definition's own effective range, but outside this WeekPlan.
+        let outsideDate = Self.mondayWeekStart.adding(days: -7)
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: definition.recurringPlannedActivityId,
+            athleteId: athleteId, occurrenceDate: outsideDate, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceOutsideWeekPlan) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("An occurrence date after the WeekPlan's own 7-day week is rejected")
+    @MainActor
+    func occurrenceAfterWeekPlanIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        // One week after weekStart — still a Monday, still within the
+        // definition's own effective range, but outside this WeekPlan.
+        let outsideDate = Self.mondayWeekStart.adding(days: 7)
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: definition.recurringPlannedActivityId,
+            athleteId: athleteId, occurrenceDate: outsideDate, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceOutsideWeekPlan) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("An occurrence date whose actual weekday doesn't match the definition's weekday is rejected")
+    @MainActor
+    func occurrenceWeekdayMismatchIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        // Tuesday within the same week — inside the WeekPlan and inside
+        // the definition's effective range, but the definition's own
+        // weekday is Monday.
+        let wrongWeekdayDate = Self.mondayWeekStart.adding(days: 1)
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: definition.recurringPlannedActivityId,
+            athleteId: athleteId, occurrenceDate: wrongWeekdayDate, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceWeekdayMismatch) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("An occurrence date outside the definition's own inclusive effective range is rejected")
+    @MainActor
+    func occurrenceOutsideEffectiveRangeIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        // Effective range deliberately excludes this week's Monday.
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2026, month: 1, day: 12), effectiveEndDate: Self.rangeEnd
+        )
+        // Inside the WeekPlan, matches the weekday, but before the
+        // definition's own effectiveStartDate.
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: definition.recurringPlannedActivityId,
+            athleteId: athleteId, occurrenceDate: Self.mondayWeekStart, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringOccurrenceOutsideEffectiveRange) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("A suggestion for a since-disabled recurring definition is rejected")
+    @MainActor
+    func disabledDefinitionSuggestionIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        // Derived while still enabled — genuinely valid at the moment
+        // of derivation.
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        try service.setRecurringPlannedActivityEnabled(definition.recurringPlannedActivityId, isEnabled: false)
+
+        #expect(throws: PlanningServiceError.recurringPlannedActivityDisabled) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("A suggestion referencing a recurring definition that no longer exists is rejected")
+    @MainActor
+    func missingRecurringDefinitionIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let suggestion = RecurringActivitySuggestion(
+            id: "irrelevant", recurringPlannedActivityId: RecurringPlannedActivityId(),
+            athleteId: athleteId, occurrenceDate: Self.mondayWeekStart, title: "Football",
+            activityType: .teamTraining, sportId: nil, categoryIds: [], startLocalTime: nil,
+            plannedDurationMinutes: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.recurringPlannedActivityNotFound) {
+            try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("A stale suggestion's descriptive values are ignored — the created activity uses the definition's current values")
+    @MainActor
+    func staleSuggestionValuesAreIgnored() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        let definition = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            plannedDurationMinutes: 90,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+        let staleSuggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        #expect(staleSuggestion.title == "Football")
+        #expect(staleSuggestion.plannedDurationMinutes == 90)
+
+        // The definition changes AFTER the suggestion was derived —
+        // the suggestion in hand still reflects the OLD values.
+        try service.editRecurringPlannedActivity(
+            definition.recurringPlannedActivityId,
+            title: "Football (renamed)",
+            activityType: .match,
+            weekday: .monday,
+            plannedDurationMinutes: 120,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        let created = try service.acceptSuggestion(staleSuggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(created.title == "Football (renamed)")
+        #expect(created.activityType == .match)
+        #expect(created.plannedDurationMinutes == 120)
     }
 }

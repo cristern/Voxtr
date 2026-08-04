@@ -23,14 +23,17 @@ import VoxtrReflectionDomain
 /// S4.0 adds `ActivityReflection` and `ParentObservation` (Reflection
 /// domain persistence infrastructure only). A2 (Architecture Decisions
 /// v1) adds `PlannedActivityDeletionTombstone`. Sprint 5.0 adds
-/// `WeeklyReflection` — this is what makes the current schema version
-/// V3 (see `AppSchemaVersioning.swift`). `DailyStatus`,
-/// `MonthlyReflection`, `PlanningDecision`, and `TrainingAttachment` are
-/// NOT added here — nothing creates or persists them yet, and
-/// registering an unused type wouldn't be wrong but would misstate
-/// what's actually implemented. Do NOT add Development/DecisionSupport/
-/// Notifications model types here until a sprint that actually creates
-/// them, per the same principle.
+/// `WeeklyReflection`. Recurring Planned Activities adds
+/// `RecurringPlannedActivity` — this is what makes the current schema
+/// version V5 (see `AppSchemaVersioning.swift`; that file's own history
+/// shows V4 already existed for a field-level change before this
+/// addition — this comment previously read "V3", which had fallen out
+/// of sync with that file). `DailyStatus`, `MonthlyReflection`,
+/// `PlanningDecision`, and `TrainingAttachment` are NOT added here —
+/// nothing creates or persists them yet, and registering an unused type
+/// wouldn't be wrong but would misstate what's actually implemented. Do
+/// NOT add Development/DecisionSupport/Notifications model types here
+/// until a sprint that actually creates them, per the same principle.
 ///
 /// NOTE (VX-037): `AthleteInvitationRequest` was briefly added here and
 /// then removed — ADR-0002 concluded workspace invitation lifecycle
@@ -60,6 +63,7 @@ public enum AppSchema {
             ParentObservation.self,
             PlannedActivityDeletionTombstone.self,
             WeeklyReflection.self,
+            RecurringPlannedActivity.self,
         ]
     }
 }

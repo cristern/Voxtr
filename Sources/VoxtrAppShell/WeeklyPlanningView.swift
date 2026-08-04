@@ -23,6 +23,7 @@ public struct WeeklyPlanningView: View {
     @State private var editTitle: String = ""
     @State private var editDate: Date = .now
     @State private var editActivityType: ActivityType = .individualTraining
+    @State private var isManagingRecurringActivities: Bool = false
 
     public init(viewModel: WeeklyPlanningViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -52,6 +53,31 @@ public struct WeeklyPlanningView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("planning.errorMessage")
                 }
+            }
+
+            if !viewModel.isCommitted && !viewModel.recurringSuggestions.isEmpty {
+                Section("Recurring suggestions") {
+                    ForEach(viewModel.recurringSuggestions) { suggestion in
+                        VStack(alignment: .leading) {
+                            Text(suggestion.title)
+                            Text(Self.suggestionSubtitle(for: suggestion))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            HStack {
+                                Button("Add to week") {
+                                    viewModel.acceptSuggestion(suggestion)
+                                }
+                                .accessibilityIdentifier("planning.acceptSuggestionButton.\(suggestion.id)")
+                                Button("Dismiss") {
+                                    viewModel.dismissSuggestion(suggestion)
+                                }
+                                .accessibilityIdentifier("planning.dismissSuggestionButton.\(suggestion.id)")
+                            }
+                        }
+                        .accessibilityIdentifier("planning.suggestionRow.\(suggestion.id)")
+                    }
+                }
+                .accessibilityIdentifier("planning.suggestionList")
             }
 
             Section("Planned activities") {
@@ -106,8 +132,20 @@ public struct WeeklyPlanningView: View {
             }
         }
         .navigationTitle("Weekly Plan")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Manage recurring activities") {
+                    viewModel.loadRecurringActivities()
+                    isManagingRecurringActivities = true
+                }
+                .accessibilityIdentifier("planning.manageRecurringActivitiesButton")
+            }
+        }
         .onAppear {
             viewModel.loadOrCreateWeekPlan()
+        }
+        .sheet(isPresented: $isManagingRecurringActivities) {
+            RecurringActivityManagementView(viewModel: viewModel)
         }
         .sheet(isPresented: $isEditingActivity) {
             if let activity = editingActivity {
@@ -162,6 +200,203 @@ public struct WeeklyPlanningView: View {
             Text("Recovery").tag(ActivityType.recovery)
             Text("Test").tag(ActivityType.test)
             Text("Other").tag(ActivityType.other)
+        }
+    }
+
+    /// Weekday/date, start time (if present), and duration (if present)
+    /// for one suggestion — everything the suggestion row displays
+    /// besides its title.
+    private static func suggestionSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
+        var parts: [String] = [weekdayLabel(for: suggestion.occurrenceDate.weekday), suggestion.occurrenceDate.isoString]
+        if let startLocalTime = suggestion.startLocalTime {
+            parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
+        }
+        if let duration = suggestion.plannedDurationMinutes {
+            parts.append("\(duration) min")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Shared with `RecurringActivityManagementView` below — same
+    /// labels either way.
+    static func weekdayLabel(for weekday: Weekday) -> String {
+        switch weekday {
+        case .sunday: return "Sunday"
+        case .monday: return "Monday"
+        case .tuesday: return "Tuesday"
+        case .wednesday: return "Wednesday"
+        case .thursday: return "Thursday"
+        case .friday: return "Friday"
+        case .saturday: return "Saturday"
+        }
+    }
+}
+
+/// Simple management flow for recurring activities: list existing
+/// definitions (with an enable/disable toggle and tap-to-edit), and a
+/// form to create a new one or edit the tapped one. Deliberately plain
+/// — a single sheet, no additional navigation structure, matching this
+/// work package's own "keep the UI functional and simple" instruction.
+struct RecurringActivityManagementView: View {
+    @Bindable var viewModel: WeeklyPlanningViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var isPresentingForm: Bool = false
+    @State private var editingRecurringActivity: RecurringPlannedActivity?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(viewModel.recurringPlannedActivities) { recurringActivity in
+                    VStack(alignment: .leading) {
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(recurringActivity.title)
+                                Text(WeeklyPlanningView.weekdayLabel(for: recurringActivity.weekday))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Toggle(
+                                "Enabled",
+                                isOn: Binding(
+                                    get: { recurringActivity.isEnabled },
+                                    set: { _ in viewModel.toggleRecurringActivityEnabled(recurringActivity) }
+                                )
+                            )
+                            .labelsHidden()
+                            .accessibilityIdentifier("planning.recurringEnabledToggle.\(recurringActivity.id.uuidString)")
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("planning.recurringActivityRow.\(recurringActivity.id.uuidString)")
+                    .onTapGesture {
+                        editingRecurringActivity = recurringActivity
+                        viewModel.beginEditingRecurringActivity(recurringActivity)
+                        isPresentingForm = true
+                    }
+                }
+            }
+            .accessibilityIdentifier("planning.recurringActivityList")
+            .navigationTitle("Recurring activities")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Add") {
+                        editingRecurringActivity = nil
+                        viewModel.resetRecurringForm()
+                        isPresentingForm = true
+                    }
+                    .accessibilityIdentifier("planning.addRecurringActivityButton")
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("planning.doneManagingRecurringActivitiesButton")
+                }
+            }
+            .sheet(isPresented: $isPresentingForm) {
+                RecurringActivityFormView(viewModel: viewModel, editingRecurringActivity: editingRecurringActivity)
+            }
+        }
+    }
+}
+
+/// The create/edit form itself — one form, reused for both, matching
+/// how `WeeklyPlanningView`'s own edit sheet already reuses its form
+/// fields for add vs. edit.
+struct RecurringActivityFormView: View {
+    @Bindable var viewModel: WeeklyPlanningViewModel
+    let editingRecurringActivity: RecurringPlannedActivity?
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let errorMessage = viewModel.errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("planning.recurringFormErrorMessage")
+                    }
+                }
+
+                TextField("Title", text: $viewModel.recurringFormTitle)
+                    .accessibilityIdentifier("planning.recurringFormTitleField")
+
+                Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
+                    Text("Team training").tag(ActivityType.teamTraining)
+                    Text("Match").tag(ActivityType.match)
+                    Text("Competition").tag(ActivityType.competition)
+                    Text("Individual training").tag(ActivityType.individualTraining)
+                    Text("Physical training").tag(ActivityType.physicalTraining)
+                    Text("Recovery").tag(ActivityType.recovery)
+                    Text("Test").tag(ActivityType.test)
+                    Text("Other").tag(ActivityType.other)
+                }
+                .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
+
+                Picker("Weekday", selection: $viewModel.recurringFormWeekday) {
+                    ForEach(Weekday.allCases, id: \.self) { weekday in
+                        Text(WeeklyPlanningView.weekdayLabel(for: weekday)).tag(weekday)
+                    }
+                }
+                .accessibilityIdentifier("planning.recurringFormWeekdayPicker")
+
+                DatePicker(
+                    "Start date",
+                    selection: $viewModel.recurringFormStartDate,
+                    displayedComponents: .date
+                )
+                .accessibilityIdentifier("planning.recurringFormStartDatePicker")
+
+                DatePicker(
+                    "End date",
+                    selection: $viewModel.recurringFormEndDate,
+                    displayedComponents: .date
+                )
+                .accessibilityIdentifier("planning.recurringFormEndDatePicker")
+
+                Toggle("Has start time", isOn: $viewModel.recurringFormHasStartTime)
+                    .accessibilityIdentifier("planning.recurringFormHasStartTimeToggle")
+                if viewModel.recurringFormHasStartTime {
+                    DatePicker(
+                        "Start time",
+                        selection: $viewModel.recurringFormStartTime,
+                        displayedComponents: .hourAndMinute
+                    )
+                    .accessibilityIdentifier("planning.recurringFormStartTimePicker")
+                }
+
+                Toggle("Has duration", isOn: $viewModel.recurringFormHasDuration)
+                    .accessibilityIdentifier("planning.recurringFormHasDurationToggle")
+                if viewModel.recurringFormHasDuration {
+                    Stepper(
+                        "Duration: \(viewModel.recurringFormDurationMinutes) min",
+                        value: $viewModel.recurringFormDurationMinutes,
+                        in: 1...1440
+                    )
+                    .accessibilityIdentifier("planning.recurringFormDurationStepper")
+                }
+            }
+            .navigationTitle(editingRecurringActivity == nil ? "Add recurring activity" : "Edit recurring activity")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        let succeeded: Bool
+                        if let editingRecurringActivity {
+                            succeeded = viewModel.editRecurringActivity(editingRecurringActivity)
+                        } else {
+                            succeeded = viewModel.createRecurringActivity()
+                        }
+                        if succeeded {
+                            dismiss()
+                        }
+                    }
+                    .accessibilityIdentifier("planning.saveRecurringActivityButton")
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("planning.cancelRecurringActivityButton")
+                }
+            }
         }
     }
 }

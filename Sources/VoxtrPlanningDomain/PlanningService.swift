@@ -11,6 +11,13 @@ public enum PlanningServiceError: Error, Equatable {
     case plannedActivityDoesNotBelongToWeekPlan
     case weekPlanNotDraft
     case invalidField(String)
+    case recurringPlannedActivityNotFound
+    case recurringOccurrenceAlreadyAccepted
+    case recurringOccurrenceAthleteMismatch
+    case recurringOccurrenceOutsideWeekPlan
+    case recurringOccurrenceWeekdayMismatch
+    case recurringOccurrenceOutsideEffectiveRange
+    case recurringPlannedActivityDisabled
 }
 
 /// S2.1 scope only: one use case — get-or-create a draft `WeekPlan` for
@@ -229,5 +236,327 @@ public final class PlanningService {
             throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
         }
         try repository.deletePlannedActivity(activity, deletedBy: deletedBy)
+    }
+
+    // MARK: - Recurring Planned Activities
+
+    /// Creates a new recurring activity definition. Validation mirrors
+    /// `RecurringPlannedActivity`'s own `precondition` bounds, the same
+    /// way `Self.validate` already mirrors `PlannedActivity`'s — so
+    /// invalid input is a catchable error here, not a crash.
+    public func createRecurringPlannedActivity(
+        athleteId: AthleteId,
+        title: String,
+        activityType: ActivityType,
+        sportId: SportId? = nil,
+        categoryIds: [ActivityCategoryId] = [],
+        weekday: Weekday,
+        startLocalTime: LocalTime? = nil,
+        plannedDurationMinutes: Int? = nil,
+        timeZoneId: TimeZoneId,
+        effectiveStartDate: LocalDate,
+        effectiveEndDate: LocalDate
+    ) throws -> RecurringPlannedActivity {
+        try Self.validateRecurringActivity(
+            title: title,
+            plannedDurationMinutes: plannedDurationMinutes,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate
+        )
+        return try repository.insertRecurringPlannedActivity(
+            athleteId: athleteId,
+            title: title,
+            activityType: activityType,
+            sportId: sportId,
+            categoryIds: categoryIds,
+            weekday: weekday,
+            startLocalTime: startLocalTime,
+            plannedDurationMinutes: plannedDurationMinutes,
+            timeZoneId: timeZoneId,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate
+        )
+    }
+
+    /// Edits an existing recurring activity definition in place.
+    /// Editing it does not retroactively touch any `PlannedActivity`
+    /// already accepted from an earlier occurrence — only future
+    /// derivation (`deriveSuggestions`) sees the new values.
+    @discardableResult
+    public func editRecurringPlannedActivity(
+        _ recurringPlannedActivityId: RecurringPlannedActivityId,
+        title: String,
+        activityType: ActivityType,
+        sportId: SportId? = nil,
+        categoryIds: [ActivityCategoryId] = [],
+        weekday: Weekday,
+        startLocalTime: LocalTime? = nil,
+        plannedDurationMinutes: Int? = nil,
+        timeZoneId: TimeZoneId,
+        effectiveStartDate: LocalDate,
+        effectiveEndDate: LocalDate
+    ) throws -> RecurringPlannedActivity {
+        guard let recurringActivity = try repository.fetchRecurringPlannedActivity(byId: recurringPlannedActivityId) else {
+            throw PlanningServiceError.recurringPlannedActivityNotFound
+        }
+        try Self.validateRecurringActivity(
+            title: title,
+            plannedDurationMinutes: plannedDurationMinutes,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate
+        )
+        recurringActivity.title = title
+        recurringActivity.activityType = activityType
+        recurringActivity.sportId = sportId?.rawValue
+        recurringActivity.categoryIds = categoryIds.map(\.rawValue)
+        recurringActivity.weekday = weekday
+        recurringActivity.startLocalTime = startLocalTime
+        recurringActivity.plannedDurationMinutes = plannedDurationMinutes
+        recurringActivity.timeZoneId = timeZoneId
+        recurringActivity.effectiveStartDate = effectiveStartDate
+        recurringActivity.effectiveEndDate = effectiveEndDate
+        recurringActivity.updatedAt = .now
+        try repository.save()
+        return recurringActivity
+    }
+
+    /// Enables or disables a recurring activity definition. A disabled
+    /// definition produces no suggestions (see `deriveSuggestions`)
+    /// until re-enabled; it is never deleted, and accepting one
+    /// occurrence never disables the definition itself.
+    public func setRecurringPlannedActivityEnabled(
+        _ recurringPlannedActivityId: RecurringPlannedActivityId,
+        isEnabled: Bool
+    ) throws {
+        guard let recurringActivity = try repository.fetchRecurringPlannedActivity(byId: recurringPlannedActivityId) else {
+            throw PlanningServiceError.recurringPlannedActivityNotFound
+        }
+        try repository.setRecurringPlannedActivityEnabled(recurringActivity, isEnabled: isEnabled)
+    }
+
+    /// S2.4-style passthrough: UI code depends only on `PlanningService`.
+    public func fetchRecurringPlannedActivities(forAthlete athleteId: AthleteId) throws -> [RecurringPlannedActivity] {
+        try repository.fetchRecurringPlannedActivities(forAthlete: athleteId)
+    }
+
+    /// Derives this week's recurring-activity suggestions for the given
+    /// `WeekPlan` — never persisted, computed fresh on every call.
+    ///
+    /// A suggestion is produced only when, for some day within the
+    /// `WeekPlan`'s 7-day week (`weekStart` through `weekStart` +6,
+    /// computed via `LocalDate.adding(days:)` — pure calendar
+    /// arithmetic, never device-local `Date` math): the day's
+    /// `LocalDate.weekday` matches the recurring definition's weekday;
+    /// the day falls within the definition's inclusive effective date
+    /// range; the definition is enabled; and no `PlannedActivity`
+    /// already exists in this `WeekPlan` for that exact occurrence
+    /// (checked via the deterministic `externalSourceId` — see
+    /// `RecurringPlannedActivity.occurrenceExternalSourceId`).
+    ///
+    /// Ordered deterministically (by occurrence date, then by
+    /// recurring-activity id as a stable tiebreaker) so repeated calls
+    /// with unchanged underlying data always return the same list in
+    /// the same order.
+    public func deriveSuggestions(forWeekPlan weekPlanId: WeekPlanId) throws -> [RecurringActivitySuggestion] {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        let athleteId = AthleteId(rawValue: weekPlan.athleteId)
+
+        let recurringActivities = try repository.fetchRecurringPlannedActivities(forAthlete: athleteId).filter(\.isEnabled)
+        guard !recurringActivities.isEmpty else { return [] }
+
+        let existingActivities = try repository.fetchPlannedActivities(forWeekPlan: weekPlanId)
+        let acceptedExternalSourceIds = Set(existingActivities.compactMap { activity -> String? in
+            guard activity.externalSourceType == RecurringPlannedActivity.externalSourceType else { return nil }
+            return activity.externalSourceId
+        })
+
+        let weekDates = (0..<7).map { weekPlan.weekStart.adding(days: $0) }
+
+        var suggestions: [RecurringActivitySuggestion] = []
+        for recurringActivity in recurringActivities {
+            for date in weekDates {
+                guard date.weekday == recurringActivity.weekday else { continue }
+                guard recurringActivity.effectiveStartDate <= date, date <= recurringActivity.effectiveEndDate else { continue }
+                let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
+                    recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
+                    occurrenceDate: date,
+                    athleteId: athleteId
+                )
+                guard !acceptedExternalSourceIds.contains(externalSourceId) else { continue }
+                suggestions.append(
+                    RecurringActivitySuggestion(
+                        id: externalSourceId,
+                        recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
+                        athleteId: athleteId,
+                        occurrenceDate: date,
+                        title: recurringActivity.title,
+                        activityType: recurringActivity.activityType,
+                        sportId: recurringActivity.sportId.map(SportId.init(rawValue:)),
+                        categoryIds: recurringActivity.categoryIds.map(ActivityCategoryId.init(rawValue:)),
+                        startLocalTime: recurringActivity.startLocalTime,
+                        plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
+                        timeZoneId: recurringActivity.timeZoneId
+                    )
+                )
+            }
+        }
+
+        return suggestions.sorted { lhs, rhs in
+            if lhs.occurrenceDate != rhs.occurrenceDate {
+                return lhs.occurrenceDate < rhs.occurrenceDate
+            }
+            return lhs.recurringPlannedActivityId.rawValue.uuidString < rhs.recurringPlannedActivityId.rawValue.uuidString
+        }
+    }
+
+    /// Accepts one suggestion, creating exactly one `PlannedActivity` in
+    /// the given `WeekPlan`. `suggestion` is treated as untrusted,
+    /// caller-suppliable presentation data, not authoritative domain
+    /// input — it could be stale (the definition changed since it was
+    /// derived) or outright hand-constructed, since
+    /// `RecurringActivitySuggestion` is a public, freely-constructible
+    /// value type. Only two of its fields are trusted as *lookup keys*
+    /// (`recurringPlannedActivityId`, used to re-fetch the actual
+    /// definition; `occurrenceDate`, itself independently re-validated
+    /// below) — every descriptive field (title, type, sport,
+    /// categories, time, duration, time zone) is ignored in favor of
+    /// the freshly-fetched `RecurringPlannedActivity`'s own current
+    /// values, and `athleteId` is checked against, never trusted over,
+    /// the `WeekPlan`'s own athlete.
+    ///
+    /// Validated in order, each against freshly-fetched, authoritative
+    /// state — never against anything the suggestion itself asserts:
+    /// the `WeekPlan` exists and is `.draft`; the referenced
+    /// `RecurringPlannedActivity` exists; that definition's own athlete
+    /// matches the `WeekPlan`'s athlete; the suggestion's claimed
+    /// athlete also matches the `WeekPlan`'s athlete; the occurrence
+    /// date falls within the `WeekPlan`'s own 7-day week; the
+    /// occurrence date's actual weekday matches the definition's
+    /// weekday; the occurrence date falls within the definition's own
+    /// current inclusive effective range; the definition is currently
+    /// enabled; and, using an occurrence identity recomputed here (not
+    /// `suggestion.id`), that this occurrence hasn't already been
+    /// accepted.
+    @discardableResult
+    public func acceptSuggestion(
+        _ suggestion: RecurringActivitySuggestion,
+        forWeekPlan weekPlanId: WeekPlanId
+    ) throws -> PlannedActivity {
+        try acceptSuggestion(suggestion, forWeekPlan: weekPlanId, saveOverride: nil)
+    }
+
+    /// Test-only seam — not `public`, reachable only via `@testable
+    /// import`, forwarded into `PlanningRepository.insertPlannedActivity`'s
+    /// own internal seam. Every production call site goes through the
+    /// public overload above, which always passes `nil`.
+    func acceptSuggestion(
+        _ suggestion: RecurringActivitySuggestion,
+        forWeekPlan weekPlanId: WeekPlanId,
+        saveOverride: (() throws -> Void)?
+    ) throws -> PlannedActivity {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        guard weekPlan.status == .draft else {
+            throw PlanningServiceError.weekPlanNotDraft
+        }
+        let weekPlanAthleteId = AthleteId(rawValue: weekPlan.athleteId)
+
+        guard let recurringActivity = try repository.fetchRecurringPlannedActivity(byId: suggestion.recurringPlannedActivityId) else {
+            throw PlanningServiceError.recurringPlannedActivityNotFound
+        }
+
+        // Neither the definition's own recorded athlete, nor the
+        // suggestion's own claimed athlete, is trusted without
+        // checking both against the WeekPlan's actual athlete — the
+        // one fact here that cannot be a stale or tampered value,
+        // since it comes from the WeekPlan just fetched above, not
+        // from the caller-supplied suggestion.
+        guard recurringActivity.athleteId == weekPlan.athleteId else {
+            throw PlanningServiceError.recurringOccurrenceAthleteMismatch
+        }
+        guard suggestion.athleteId == weekPlanAthleteId else {
+            throw PlanningServiceError.recurringOccurrenceAthleteMismatch
+        }
+
+        let weekEnd = weekPlan.weekStart.adding(days: 6)
+        guard weekPlan.weekStart <= suggestion.occurrenceDate, suggestion.occurrenceDate <= weekEnd else {
+            throw PlanningServiceError.recurringOccurrenceOutsideWeekPlan
+        }
+
+        guard suggestion.occurrenceDate.weekday == recurringActivity.weekday else {
+            throw PlanningServiceError.recurringOccurrenceWeekdayMismatch
+        }
+
+        guard recurringActivity.effectiveStartDate <= suggestion.occurrenceDate,
+              suggestion.occurrenceDate <= recurringActivity.effectiveEndDate else {
+            throw PlanningServiceError.recurringOccurrenceOutsideEffectiveRange
+        }
+
+        guard recurringActivity.isEnabled else {
+            throw PlanningServiceError.recurringPlannedActivityDisabled
+        }
+
+        // Recomputed from validated, authoritative inputs — never
+        // trusted from `suggestion.id`.
+        let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
+            recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
+            occurrenceDate: suggestion.occurrenceDate,
+            athleteId: weekPlanAthleteId
+        )
+
+        // Defensive re-check against the recomputed identity — this,
+        // not whatever the caller's own last `deriveSuggestions` call
+        // showed, is what actually makes a duplicate accept
+        // impossible, not just unlikely.
+        guard try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlanId) == nil else {
+            throw PlanningServiceError.recurringOccurrenceAlreadyAccepted
+        }
+
+        // The definition's own CURRENT values are authoritative for
+        // every descriptive field — never the suggestion's, which may
+        // be stale relative to an edit made after it was derived.
+        return try repository.insertPlannedActivity(
+            weekPlanId: weekPlanId,
+            athleteId: weekPlanAthleteId,
+            activityType: recurringActivity.activityType,
+            title: recurringActivity.title,
+            localDate: suggestion.occurrenceDate,
+            timeZoneId: recurringActivity.timeZoneId,
+            sportId: recurringActivity.sportId.map(SportId.init(rawValue:)),
+            categoryIds: recurringActivity.categoryIds.map(ActivityCategoryId.init(rawValue:)),
+            startLocalTime: recurringActivity.startLocalTime,
+            plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
+            externalSourceId: externalSourceId,
+            externalSourceType: RecurringPlannedActivity.externalSourceType,
+            saveOverride: saveOverride
+        )
+    }
+
+    /// Mirrors `Self.validate`'s existing role for `PlannedActivity`:
+    /// `RecurringPlannedActivity`'s own initializer preconditions
+    /// already enforce these bounds on create, but `editRecurringPlannedActivity`
+    /// mutates an already-constructed instance in place, so this lets
+    /// that path reject the same invalid input with a catchable error
+    /// instead of a crash.
+    private static func validateRecurringActivity(
+        title: String,
+        plannedDurationMinutes: Int?,
+        effectiveStartDate: LocalDate,
+        effectiveEndDate: LocalDate
+    ) throws {
+        guard (1...120).contains(title.count) else {
+            throw PlanningServiceError.invalidField("title must be 1-120 characters")
+        }
+        if let duration = plannedDurationMinutes {
+            guard (1...1440).contains(duration) else {
+                throw PlanningServiceError.invalidField("plannedDurationMinutes must be 1-1440")
+            }
+        }
+        guard effectiveStartDate <= effectiveEndDate else {
+            throw PlanningServiceError.invalidField("effectiveStartDate must be on or before effectiveEndDate")
+        }
     }
 }
