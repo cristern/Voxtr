@@ -451,12 +451,6 @@ workflows:
             --type IOS_APP_STORE \
             --create
 
-      - name: Fetch or generate signing files — ParentApp
-        script: |
-          app-store-connect fetch-signing-files "$PARENT_BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
-
       - name: Add certificates to keychain and apply provisioning profiles
         script: |
           keychain add-certificates
@@ -593,12 +587,6 @@ workflows:
 
       - name: Initialize keychain for code signing
         script: keychain initialize
-
-      - name: Fetch or generate signing files — ParentApp
-        script: |
-          app-store-connect fetch-signing-files "$PARENT_BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
 
       - name: Add certificates to keychain and apply provisioning profiles
         script: |
