@@ -559,8 +559,12 @@ workflows:
           fi
           echo "Scheme '$PARENT_SCHEME' found."
           echo "== Verifying expected bundle identifier is present =="
-          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME" \
-            | grep -m1 "PRODUCT_BUNDLE_IDENTIFIER" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$PARENT_SCHEME" \
+            -destination "generic/platform=iOS" \
+            | awk -F' = ' '$1 ~ /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER$/ { print $2; exit }' \
+            | tr -d '[:space:]')
           echo "Resolved bundle identifier: $RESOLVED_BUNDLE_ID"
           if [ "$RESOLVED_BUNDLE_ID" != "$PARENT_BUNDLE_ID" ]; then
             echo "FAILING BUILD: resolved bundle identifier '$RESOLVED_BUNDLE_ID' does not match expected '$PARENT_BUNDLE_ID'."
@@ -680,8 +684,12 @@ workflows:
           fi
           echo "Scheme '$ATHLETE_SCHEME' found."
           echo "== Verifying expected bundle identifier is present =="
-          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$ATHLETE_SCHEME" \
-            | grep -m1 "PRODUCT_BUNDLE_IDENTIFIER" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "generic/platform=iOS" \
+            | awk -F' = ' '$1 ~ /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER$/ { print $2; exit }' \
+            | tr -d '[:space:]')
           echo "Resolved bundle identifier: $RESOLVED_BUNDLE_ID"
           if [ "$RESOLVED_BUNDLE_ID" != "$ATHLETE_BUNDLE_ID" ]; then
             echo "FAILING BUILD: resolved bundle identifier '$RESOLVED_BUNDLE_ID' does not match expected '$ATHLETE_BUNDLE_ID'."
