@@ -367,7 +367,7 @@ workflows:
     # Issuer ID, Key ID, and .p8 private key live only there — this is a
     # NAME, not a credential.
     integrations:
-      app_store_connect: voxtr_app_store_connect
+      app_store_connect: "Vøxtr App Store Connect"
 
     environment:
       xcode: latest
@@ -514,7 +514,7 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: voxtr_app_store_connect
+      app_store_connect: "Vøxtr App Store Connect"
 
     environment:
       xcode: latest
@@ -635,7 +635,7 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: voxtr_app_store_connect
+      app_store_connect: "Vøxtr App Store Connect"
 
     environment:
       xcode: latest
