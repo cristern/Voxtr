@@ -418,6 +418,30 @@ workflows:
           echo "AthleteApp: $ATHLETE_BUNDLE_ID"
           echo "ParentApp:  $PARENT_BUNDLE_ID"
 
+      - name: Apply Codemagic project build number via Apple Generic Versioning
+        script: |
+          set -e
+          # PROJECT_BUILD_NUMBER is a Codemagic-provided, project-level
+          # build counter that increases across builds — never hardcoded
+          # here. Applied once, before either archive: agvtool
+          # new-version -all updates CURRENT_PROJECT_VERSION for every
+          # target in the project in one call, so the same build number
+          # ends up on both AthleteApp and ParentApp — safe because they
+          # have separate bundle identifiers and separate App Store
+          # Connect records, so this is not a version collision between
+          # two different apps, just one shared counter across both.
+          : "${PROJECT_BUILD_NUMBER:?Missing PROJECT_BUILD_NUMBER — this is a Codemagic-provided variable and should always be present in a Codemagic build.}"
+          echo "Applying build number: $PROJECT_BUILD_NUMBER"
+          (cd "$(dirname "$XCODE_PROJECT")" && agvtool new-version -all "$PROJECT_BUILD_NUMBER")
+          echo "== Verifying the build number was actually applied =="
+          APPLIED_VERSION=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$ATHLETE_SCHEME" \
+            | grep -m1 "CURRENT_PROJECT_VERSION" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "CURRENT_PROJECT_VERSION now resolves to: $APPLIED_VERSION"
+          if [ "$APPLIED_VERSION" != "$PROJECT_BUILD_NUMBER" ]; then
+            echo "FAILING BUILD: agvtool did not apply the expected build number. This project may not have Apple Generic Versioning (VERSIONING_SYSTEM = apple-generic) configured for every target — see README: Codemagic Setup Requirements."
+            exit 1
+          fi
+
       - name: Initialize keychain for code signing
         script: keychain initialize
 
@@ -460,6 +484,256 @@ workflows:
       # Publishes every IPA produced above to App Store Connect/TestFlight,
       # authenticating via the same named integration — no key material
       # in this file.
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+      email:
+        recipients:
+          - cristern@hotmail.com
+        notify:
+          success: true
+          failure: true
+
+  # =======================================================================
+  # 6. testflight-parent — manual only. Builds and publishes ONLY
+  #    ParentApp to TestFlight, independently of the release-tag
+  #    workflow above — no Git tag required. No `triggering` section at
+  #    all: Codemagic still allows starting any workflow manually from
+  #    the UI/API regardless of whether it declares automatic triggers
+  #    (see `athlete-simulator-build`/`parent-simulator-build` above for
+  #    the same pattern) — omitting `triggering` here specifically means
+  #    this workflow has no automatic trigger of any kind, so it never
+  #    runs from an ordinary push to develop. Same signing approach as
+  #    testflight-release: the App Store Connect integration and
+  #    environment variable group are referenced by name only — nothing
+  #    in this file is a credential.
+  # =======================================================================
+  testflight-parent:
+    name: "Vǫxtr Parent — Manual TestFlight"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: voxtr_app_store_connect
+
+    environment:
+      xcode: latest
+      groups:
+        - voxtr_ios_signing
+      vars:
+        XCODE_PROJECT: "App/Voxtr.xcodeproj"
+        PARENT_SCHEME: "ParentApp"
+        PARENT_BUNDLE_ID: "app.voxtr.parent"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: $PARENT_BUNDLE_ID
+
+    scripts:
+      - name: Fail clearly if required signing configuration is missing
+        script: |
+          set -e
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID — configure the '${CM_INTEGRATION_NAME:-voxtr_app_store_connect}' App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          echo "App Store Connect signing configuration present — proceeding."
+
+      - name: Validate Xcode version, required scheme, and expected bundle identifier
+        script: |
+          set -e
+          mkdir -p build/reports
+          echo "== Xcode version =="
+          xcodebuild -version
+          echo "== Verifying scheme '$PARENT_SCHEME' exists in $XCODE_PROJECT =="
+          xcodebuild -list -project "$XCODE_PROJECT" -json > build/reports/schemes.json
+          SCHEME_FOUND=$(python3 -c "
+          import json
+          with open('build/reports/schemes.json') as f:
+              data = json.load(f)
+          schemes = data.get('project', {}).get('schemes', [])
+          print('yes' if '$PARENT_SCHEME' in schemes else 'no')
+          ")
+          if [ "$SCHEME_FOUND" != "yes" ]; then
+            echo "FAILING BUILD: scheme '$PARENT_SCHEME' was not found in $XCODE_PROJECT."
+            xcodebuild -list -project "$XCODE_PROJECT"
+            exit 1
+          fi
+          echo "Scheme '$PARENT_SCHEME' found."
+          echo "== Verifying expected bundle identifier is present =="
+          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME" \
+            | grep -m1 "PRODUCT_BUNDLE_IDENTIFIER" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "Resolved bundle identifier: $RESOLVED_BUNDLE_ID"
+          if [ "$RESOLVED_BUNDLE_ID" != "$PARENT_BUNDLE_ID" ]; then
+            echo "FAILING BUILD: resolved bundle identifier '$RESOLVED_BUNDLE_ID' does not match expected '$PARENT_BUNDLE_ID'."
+            exit 1
+          fi
+          echo "== Resolved Swift packages =="
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME"
+
+      - name: Apply Codemagic project build number via Apple Generic Versioning
+        script: |
+          set -e
+          # PROJECT_BUILD_NUMBER is a Codemagic-provided, project-level
+          # build counter that increases across builds — never hardcoded
+          # here.
+          : "${PROJECT_BUILD_NUMBER:?Missing PROJECT_BUILD_NUMBER — this is a Codemagic-provided variable and should always be present in a Codemagic build.}"
+          echo "Applying build number: $PROJECT_BUILD_NUMBER"
+          (cd "$(dirname "$XCODE_PROJECT")" && agvtool new-version -all "$PROJECT_BUILD_NUMBER")
+          echo "== Verifying the build number was actually applied =="
+          APPLIED_VERSION=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME" \
+            | grep -m1 "CURRENT_PROJECT_VERSION" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "CURRENT_PROJECT_VERSION now resolves to: $APPLIED_VERSION"
+          if [ "$APPLIED_VERSION" != "$PROJECT_BUILD_NUMBER" ]; then
+            echo "FAILING BUILD: agvtool did not apply the expected build number. This project may not have Apple Generic Versioning (VERSIONING_SYSTEM = apple-generic) configured — see README: Codemagic Setup Requirements."
+            exit 1
+          fi
+
+      - name: Initialize keychain for code signing
+        script: keychain initialize
+
+      - name: Fetch or generate signing files — ParentApp
+        script: |
+          app-store-connect fetch-signing-files "$PARENT_BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Add certificates to keychain and apply provisioning profiles
+        script: |
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Archive and export ParentApp (Release)
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$PARENT_SCHEME" \
+            --config Release
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+      email:
+        recipients:
+          - cristern@hotmail.com
+        notify:
+          success: true
+          failure: true
+
+  # =======================================================================
+  # 7. testflight-athlete — manual only. Same structure as
+  #    testflight-parent immediately above, scoped to AthleteApp instead.
+  #    See that workflow's own header comment for the shared rationale
+  #    (no `triggering` section, same signing approach).
+  # =======================================================================
+  testflight-athlete:
+    name: "Vǫxtr Athlete — Manual TestFlight"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: voxtr_app_store_connect
+
+    environment:
+      xcode: latest
+      groups:
+        - voxtr_ios_signing
+      vars:
+        XCODE_PROJECT: "App/Voxtr.xcodeproj"
+        ATHLETE_SCHEME: "AthleteApp"
+        ATHLETE_BUNDLE_ID: "app.voxtr.athlete"
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: $ATHLETE_BUNDLE_ID
+
+    scripts:
+      - name: Fail clearly if required signing configuration is missing
+        script: |
+          set -e
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID — configure the '${CM_INTEGRATION_NAME:-voxtr_app_store_connect}' App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          echo "App Store Connect signing configuration present — proceeding."
+
+      - name: Validate Xcode version, required scheme, and expected bundle identifier
+        script: |
+          set -e
+          mkdir -p build/reports
+          echo "== Xcode version =="
+          xcodebuild -version
+          echo "== Verifying scheme '$ATHLETE_SCHEME' exists in $XCODE_PROJECT =="
+          xcodebuild -list -project "$XCODE_PROJECT" -json > build/reports/schemes.json
+          SCHEME_FOUND=$(python3 -c "
+          import json
+          with open('build/reports/schemes.json') as f:
+              data = json.load(f)
+          schemes = data.get('project', {}).get('schemes', [])
+          print('yes' if '$ATHLETE_SCHEME' in schemes else 'no')
+          ")
+          if [ "$SCHEME_FOUND" != "yes" ]; then
+            echo "FAILING BUILD: scheme '$ATHLETE_SCHEME' was not found in $XCODE_PROJECT."
+            xcodebuild -list -project "$XCODE_PROJECT"
+            exit 1
+          fi
+          echo "Scheme '$ATHLETE_SCHEME' found."
+          echo "== Verifying expected bundle identifier is present =="
+          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$ATHLETE_SCHEME" \
+            | grep -m1 "PRODUCT_BUNDLE_IDENTIFIER" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "Resolved bundle identifier: $RESOLVED_BUNDLE_ID"
+          if [ "$RESOLVED_BUNDLE_ID" != "$ATHLETE_BUNDLE_ID" ]; then
+            echo "FAILING BUILD: resolved bundle identifier '$RESOLVED_BUNDLE_ID' does not match expected '$ATHLETE_BUNDLE_ID'."
+            exit 1
+          fi
+          echo "== Resolved Swift packages =="
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$ATHLETE_SCHEME"
+
+      - name: Apply Codemagic project build number via Apple Generic Versioning
+        script: |
+          set -e
+          # PROJECT_BUILD_NUMBER is a Codemagic-provided, project-level
+          # build counter that increases across builds — never hardcoded
+          # here.
+          : "${PROJECT_BUILD_NUMBER:?Missing PROJECT_BUILD_NUMBER — this is a Codemagic-provided variable and should always be present in a Codemagic build.}"
+          echo "Applying build number: $PROJECT_BUILD_NUMBER"
+          (cd "$(dirname "$XCODE_PROJECT")" && agvtool new-version -all "$PROJECT_BUILD_NUMBER")
+          echo "== Verifying the build number was actually applied =="
+          APPLIED_VERSION=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$ATHLETE_SCHEME" \
+            | grep -m1 "CURRENT_PROJECT_VERSION" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "CURRENT_PROJECT_VERSION now resolves to: $APPLIED_VERSION"
+          if [ "$APPLIED_VERSION" != "$PROJECT_BUILD_NUMBER" ]; then
+            echo "FAILING BUILD: agvtool did not apply the expected build number. This project may not have Apple Generic Versioning (VERSIONING_SYSTEM = apple-generic) configured — see README: Codemagic Setup Requirements."
+            exit 1
+          fi
+
+      - name: Initialize keychain for code signing
+        script: keychain initialize
+
+      - name: Fetch or generate signing files — AthleteApp
+        script: |
+          app-store-connect fetch-signing-files "$ATHLETE_BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+
+      - name: Add certificates to keychain and apply provisioning profiles
+        script: |
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Archive and export AthleteApp (Release)
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$ATHLETE_SCHEME" \
+            --config Release
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
       app_store_connect:
         auth: integration
         submit_to_testflight: true

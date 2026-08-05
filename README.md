@@ -13,7 +13,8 @@ Voxtr/
 │   ├── AthleteApp/                     — minimal @main App entry point
 │   └── ParentApp/                      — minimal @main App entry point
 └── codemagic.yaml                      — CI: package-tests, athlete-simulator-build,
-                                           parent-simulator-build, testflight-release
+                                           parent-simulator-build, testflight-release,
+                                           testflight-parent, testflight-athlete
 ```
 
 ## Local development
@@ -38,11 +39,16 @@ These workflows are defined in `codemagic.yaml`. All of them can still be starte
 
 ### On release tag
 
-- **`testflight-release`** — runs only when a tag matching `release/*` is pushed (e.g. `release/1.0.0`). Never runs on an ordinary push or pull request.
+- **`testflight-release`** — runs only when a tag matching `release/*` is pushed (e.g. `release/1.0.0`). Builds and publishes **both** AthleteApp and ParentApp. Never runs on an ordinary push or pull request.
 
 ### Manually runnable workflows
 
 `athlete-simulator-build` and `parent-simulator-build` have no automatic trigger at all (CI-01) — they exist to be run on demand (e.g. to sanity-check a simulator build outside the PR flow), not automatically on every push or PR.
+
+- **`testflight-parent`** — manual only, no automatic trigger of any kind. Builds and publishes **only** ParentApp to TestFlight, independently of `testflight-release` — no Git tag required, just start it from the Codemagic dashboard.
+- **`testflight-athlete`** — manual only, no automatic trigger of any kind. Builds and publishes **only** AthleteApp to TestFlight, the same way.
+
+Both use the same App Store Connect integration and signing setup as `testflight-release` (see "Codemagic Setup Requirements" below) — nothing extra to configure if `testflight-release` already works.
 
 ### Starting a workflow manually in Codemagic
 
@@ -58,32 +64,34 @@ This works for every workflow above, regardless of whether it has an automatic t
 
 The three simulator/test workflows (`package-tests`, `athlete-simulator-build`, `parent-simulator-build`) need **no setup** — they run with `CODE_SIGNING_ALLOWED=NO` against the iOS Simulator and work immediately on any Codemagic account.
 
-The `testflight-release` workflow needs the following configured **in the Codemagic UI**, never in this repository. Nothing below is a value — these are the names `codemagic.yaml` references; the actual secrets live only in Codemagic.
+`testflight-release`, `testflight-parent`, and `testflight-athlete` all need the following configured **in the Codemagic UI**, never in this repository. Nothing below is a value — these are the names `codemagic.yaml` references; the actual secrets live only in Codemagic. All three workflows share the same integration and environment group — configure it once.
 
 ### 1. App Store Connect integration
 
 - **Location:** Codemagic → Team settings → Integrations → App Store Connect
 - **Integration reference name expected by `codemagic.yaml`:** `voxtr_app_store_connect`
 - **What you provide there (not here):** your App Store Connect API **Issuer ID**, **Key ID**, and the `.p8` **private key file**.
-- Once configured, Codemagic automatically exposes `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, and `APP_STORE_CONNECT_PRIVATE_KEY` to the workflow — the `testflight-release` workflow's first step fails immediately with a clear message if any of these are missing.
+- Once configured, Codemagic automatically exposes `APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_KEY_IDENTIFIER`, and `APP_STORE_CONNECT_PRIVATE_KEY` to the workflow — each of `testflight-release`, `testflight-parent`, and `testflight-athlete`'s first step fails immediately with a clear message if any of these are missing.
+- All three TestFlight workflows also apply Codemagic's own project-level build number (`PROJECT_BUILD_NUMBER`, never hardcoded) via `agvtool new-version -all` before archiving, so every TestFlight upload gets an increasing, App Store-valid build number automatically.
 
 ### 2. Environment variable group
 
 - **Location:** Codemagic → your app → Environment variables → create a group named exactly:
 - **Group name expected by `codemagic.yaml`:** `voxtr_ios_signing`
-- This group is referenced (`environment.groups: [voxtr_ios_signing]`) but the workflow doesn't currently require you to put anything specific in it beyond what the App Store Connect integration already supplies — it's there as the sanctioned place to add any future signing-related variable (e.g. an explicit Apple Developer **Team ID**, if your API key ever needs disambiguation across multiple teams) without touching `codemagic.yaml` itself. Mark any variable you do add as **Secure**.
+- This group is referenced by all three TestFlight workflows (`environment.groups: [voxtr_ios_signing]`) but none of them currently requires you to put anything specific in it beyond what the App Store Connect integration already supplies — it's there as the sanctioned place to add any future signing-related variable (e.g. an explicit Apple Developer **Team ID**, if your API key ever needs disambiguation across multiple teams) without touching `codemagic.yaml` itself. Mark any variable you do add as **Secure**.
 
 ### 3. Bundle identifiers
 
 `codemagic.yaml` uses:
-- `app.voxtr.athlete` (AthleteApp)
-- `app.voxtr.parent` (ParentApp)
+- `app.voxtr.athlete` (AthleteApp) — used by `testflight-release` and `testflight-athlete`
+- `app.voxtr.parent` (ParentApp) — used by `testflight-release` and `testflight-parent`
 
-These must exist as registered App IDs in your Apple Developer account and as apps in App Store Connect before `testflight-release` can fetch signing files or publish a build. If you use different identifiers, update both `codemagic.yaml`'s `vars` block and the `PRODUCT_BUNDLE_IDENTIFIER` build setting in `App/Voxtr.xcodeproj`.
+These must exist as registered App IDs in your Apple Developer account and as apps in App Store Connect before any of the three TestFlight workflows can fetch signing files or publish a build. If you use different identifiers, update both `codemagic.yaml`'s `vars` block (in all three workflows) and the `PRODUCT_BUNDLE_IDENTIFIER` build setting in `App/Voxtr.xcodeproj`.
 
-### 4. Triggering a release build
+### 4. Triggering a build
 
-`testflight-release` triggers on a pushed git tag matching `release/*` (e.g. `release/1.0.0`) — not on every push to `main`, unlike the simulator workflows. Push a matching tag when you want to ship a TestFlight build.
+- `testflight-release` triggers on a pushed git tag matching `release/*` (e.g. `release/1.0.0`) — not on every push to `main`, unlike the simulator workflows. Push a matching tag when you want to ship a TestFlight build of both apps.
+- `testflight-parent` and `testflight-athlete` have no automatic trigger at all — start either one manually from the Codemagic dashboard whenever you want to ship just that one app to TestFlight without a tag.
 
 ### What is deliberately never in this repository
 
