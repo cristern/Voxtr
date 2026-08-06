@@ -93,14 +93,30 @@ struct EndToEndOnboardingTests {
         defer { try? FileManager.default.removeItem(at: storeURL) }
         let schema = Schema(AppSchema.modelTypes)
 
-        // Deliberately use the standalone (non-atomic) repository method
-        // to persist only parent+workspace+participant — no athlete, no
-        // grant — simulating what an older write path or manual
-        // tampering could leave on disk.
+        // Deliberately use the standalone (non-atomic) repository
+        // methods to persist parent+workspace+participant+athlete but
+        // NO matching AthleteAccessGrant — simulating what an older
+        // write path, a bug, or manual store tampering could leave on
+        // disk. (Multi-Athlete Family Foundation: parent+workspace+
+        // participant with zero athletes is now a valid, expected
+        // state — see FamilyRestorationServiceTests's own
+        // `zeroAthletesRestoresToExistingFamilyWithEmptyAthletes` — so
+        // this test no longer uses that shape; an athlete with no
+        // grant is still a genuine inconsistency under the current
+        // rules.)
         let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
         let firstContainer = try ModelContainer(for: schema, configurations: [firstConfiguration])
         let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: firstContainer.mainContext)
-        _ = try parentWorkspaceRepository.createParentAndWorkspace(givenName: "Kari")
+        let athleteRepository = AthleteRepository(modelContext: firstContainer.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        _ = athleteRepository.stageAthlete(
+            workspaceId: staged.workspace.workspaceId,
+            givenName: "Jonas",
+            birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            developmentStage: .parentLed
+        )
+        try firstContainer.mainContext.save()
 
         // Recreate the container, exactly as the lifecycle test above does.
         let secondConfiguration = ModelConfiguration(schema: schema, url: storeURL)
@@ -115,11 +131,12 @@ struct EndToEndOnboardingTests {
             Issue.record("Expected .inconsistentGraph after recreating the container against a partial graph")
             return
         }
-        #expect(reason.contains("0 athlete"))
+        #expect(reason.contains("AthleteAccessGrant per AthleteProfile"))
 
         // Nothing was silently deleted or "fixed" — the partial data is
         // still exactly what was written.
         #expect(try secondContainer.mainContext.fetch(FetchDescriptor<ParentProfile>()).count == 1)
-        #expect(try secondContainer.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 0)
+        #expect(try secondContainer.mainContext.fetch(FetchDescriptor<AthleteProfile>()).count == 1)
+        #expect(try secondContainer.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 0)
     }
 }
