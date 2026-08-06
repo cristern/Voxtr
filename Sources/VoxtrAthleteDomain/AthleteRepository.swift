@@ -78,4 +78,34 @@ public final class AthleteRepository {
     public func fetchAllAthletes() throws -> [AthleteProfile] {
         try modelContext.fetch(FetchDescriptor<AthleteProfile>())
     }
+
+    /// Multi-Athlete Family Foundation: needed for editing/archiving a
+    /// specific athlete — nothing before this work needed to fetch a
+    /// single, specific `AthleteProfile` by ID.
+    public func fetchAthlete(byId athleteId: AthleteId) throws -> AthleteProfile? {
+        let rawId = athleteId.rawValue
+        return try fetchAllAthletes().first { $0.id == rawId }
+    }
+
+    /// Scoped variant of `fetchAllAthletes`, for the family-management
+    /// UI's own list. Under Sprint 1's still-current single-family-per-
+    /// device assumption this returns the same rows as
+    /// `fetchAllAthletes`, but scoping explicitly by `workspaceId` here
+    /// (rather than relying on that assumption) is what makes this
+    /// method correct if that assumption is ever relaxed later, without
+    /// itself changing.
+    public func fetchAthletes(forWorkspace workspaceId: WorkspaceId) throws -> [AthleteProfile] {
+        let rawWorkspaceId = workspaceId.rawValue
+        return try fetchAllAthletes().filter { $0.workspaceId == rawWorkspaceId }
+    }
+
+    /// Persists whatever mutation was already applied in-memory (via
+    /// `AthleteProfile.applyMutation`, the sole sanctioned mutation
+    /// path) — this repository never mutates fields itself, matching
+    /// `PlanningRepository`'s own established split between "the
+    /// entity knows how to mutate itself" and "the repository only
+    /// persists."
+    public func save() throws {
+        try modelContext.save()
+    }
 }

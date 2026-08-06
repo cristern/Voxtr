@@ -40,6 +40,8 @@ public struct HomeDashboardView: View {
     private let coachingApplicationService: CoachingApplicationService
     private let athleteId: AthleteId
     private let committedByActorId: ActorId
+    private let athleteManagementViewModel: AthleteFamilyManagementViewModel
+    @State private var isManagingAthletes: Bool = false
 
     public init(
         viewModel: HomeDashboardViewModel,
@@ -51,7 +53,8 @@ public struct HomeDashboardView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteId: AthleteId,
-        committedByActorId: ActorId
+        committedByActorId: ActorId,
+        athleteManagementViewModel: AthleteFamilyManagementViewModel
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -63,6 +66,7 @@ public struct HomeDashboardView: View {
         self.coachingApplicationService = coachingApplicationService
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
+        self.athleteManagementViewModel = athleteManagementViewModel
     }
 
     public var body: some View {
@@ -77,6 +81,17 @@ public struct HomeDashboardView: View {
                 reflectionSection
             }
             .navigationTitle("Home")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Manage Athletes") {
+                        isManagingAthletes = true
+                    }
+                    .accessibilityIdentifier("home.manageAthletesButton")
+                }
+            }
+            .sheet(isPresented: $isManagingAthletes) {
+                AthleteFamilyManagementView(viewModel: athleteManagementViewModel)
+            }
             .onAppear {
                 viewModel.loadTodaysTraining()
                 viewModel.loadCoachingSummary()

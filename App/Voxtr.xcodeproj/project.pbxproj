@@ -21,6 +21,7 @@
 		27D68D7A2123431FE5B3A039 /* ParentWorkspaceRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */; };
 		1A21B1EBF22A573EF5B144B1 /* AthleteAndFamilyOnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B97E6E1203C85517F5108E7 /* AthleteAndFamilyOnboardingTests.swift */; };
 		7595A8C029E6336E2AED7B58 /* FamilyRestorationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23AC49B3A20AEB806B980DE8 /* FamilyRestorationServiceTests.swift */; };
+		F8C6346656A17C525945635B /* AthleteFamilyManagementServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44AB89330C687830925E5BF /* AthleteFamilyManagementServiceTests.swift */; };
 		7D01238F7EE5FD05E6ABA57A /* FamilyOnboardingUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */; };
 		59DB4C63FC17EA05B70F454E /* EndToEndOnboardingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */; };
 		89F8115A52B52562D03C5AC6 /* PlanningRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */; };
@@ -81,6 +82,7 @@
 		AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentWorkspaceRepositoryTests.swift; sourceTree = "<group>"; };
 		8B97E6E1203C85517F5108E7 /* AthleteAndFamilyOnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteAndFamilyOnboardingTests.swift; sourceTree = "<group>"; };
 		23AC49B3A20AEB806B980DE8 /* FamilyRestorationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyRestorationServiceTests.swift; sourceTree = "<group>"; };
+		A44AB89330C687830925E5BF /* AthleteFamilyManagementServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteFamilyManagementServiceTests.swift; sourceTree = "<group>"; };
 		1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyOnboardingUITests.swift; sourceTree = "<group>"; };
 		4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndToEndOnboardingTests.swift; sourceTree = "<group>"; };
 		04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanningRepositoryTests.swift; sourceTree = "<group>"; };
@@ -200,6 +202,7 @@
 				AAB574B30AE00AA354D93343 /* ParentWorkspaceRepositoryTests.swift */,
 				8B97E6E1203C85517F5108E7 /* AthleteAndFamilyOnboardingTests.swift */,
 				23AC49B3A20AEB806B980DE8 /* FamilyRestorationServiceTests.swift */,
+				A44AB89330C687830925E5BF /* AthleteFamilyManagementServiceTests.swift */,
 				1E6A8B3736BE05C84FCE419E /* FamilyOnboardingUITests.swift */,
 				4EC49A6B9997842770D01C05 /* EndToEndOnboardingTests.swift */,
 				04C9A4E5A4316E7E6206E166 /* PlanningRepositoryTests.swift */,
@@ -409,6 +412,7 @@
 				27D68D7A2123431FE5B3A039 /* ParentWorkspaceRepositoryTests.swift in Sources */,
 				1A21B1EBF22A573EF5B144B1 /* AthleteAndFamilyOnboardingTests.swift in Sources */,
 				7595A8C029E6336E2AED7B58 /* FamilyRestorationServiceTests.swift in Sources */,
+				F8C6346656A17C525945635B /* AthleteFamilyManagementServiceTests.swift in Sources */,
 				7D01238F7EE5FD05E6ABA57A /* FamilyOnboardingUITests.swift in Sources */,
 				59DB4C63FC17EA05B70F454E /* EndToEndOnboardingTests.swift in Sources */,
 				89F8115A52B52562D03C5AC6 /* PlanningRepositoryTests.swift in Sources */,

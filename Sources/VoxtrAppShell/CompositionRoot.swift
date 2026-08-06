@@ -77,6 +77,17 @@ public final class CompositionRoot {
         )
         container.register(FamilyOnboardingCoordinator.self) { coordinator }
 
+        // Multi-Athlete Family Foundation: same placement rationale as
+        // FamilyOnboardingCoordinator immediately above — needs both
+        // AthleteRepository and AthleteAccessGrantRepository, so it
+        // can't live in either domain package alone.
+        let athleteFamilyManagementService = AthleteFamilyManagementService(
+            modelContext: modelContainer.mainContext,
+            athleteRepository: container.resolve(AthleteRepository.self),
+            athleteAccessGrantRepository: container.resolve(AthleteAccessGrantRepository.self)
+        )
+        container.register(AthleteFamilyManagementService.self) { athleteFamilyManagementService }
+
         // S1.3: compute what's already on disk, once, at launch.
         // Registered so it can be re-run later too (e.g. after a future
         // CloudKit sync merges in data), not just used here.

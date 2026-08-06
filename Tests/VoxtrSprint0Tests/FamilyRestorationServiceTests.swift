@@ -69,9 +69,9 @@ struct FamilyRestorationServiceTests {
             return
         }
         #expect(restored.parent.givenName == "Kari")
-        #expect(restored.athlete.givenName == "Jonas")
+        #expect(restored.athletes.first?.givenName == "Jonas")
         #expect(restored.participant.role == .workspaceOwner)
-        #expect(restored.grant.canViewSchedule)
+        #expect(restored.grants.first?.canViewSchedule == true)
     }
 
     @Test("Restoration does not create any new records")
@@ -113,17 +113,20 @@ struct FamilyRestorationServiceTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<AthleteAccessGrant>()).count == 1)
     }
 
-    @Test("Parent, workspace, and participant with no athlete or grant is inconsistentGraph, not silently treated as valid or empty")
+    @Test("Parent, workspace, and participant with zero athletes restores to existingFamily with an empty athletes array — Multi-Athlete Family Foundation's own required behavior, not an error")
     @MainActor
-    func partialGraphMissingAthleteIsInconsistent() throws {
+    func zeroAthletesRestoresToExistingFamilyWithEmptyAthletes() throws {
+        // Before Multi-Athlete Family Foundation, this exact scenario
+        // (parent/workspace/participant present, zero athletes) was
+        // asserted as .inconsistentGraph — that assertion embodied the
+        // single-athlete assumption this work package explicitly
+        // corrects. "The family must never become locked" requires
+        // this to be a valid, working .existingFamily state instead —
+        // e.g. every athlete has been archived and deleted, or the
+        // parent has not added one yet.
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
-        // Use the standalone create method directly (not the atomic
-        // coordinator) to deliberately produce a partial graph — this
-        // simulates what an older write path, a bug, or manual store
-        // tampering could leave behind, which is exactly what
-        // requirement 6 asks restoration to handle without crashing.
         _ = try parentWorkspaceRepository.createParentAndWorkspace(givenName: "Kari")
 
         let service = FamilyRestorationService(
@@ -133,11 +136,151 @@ struct FamilyRestorationServiceTests {
         )
         let state = try service.restoreState()
 
+        guard case .existingFamily(let restored) = state else {
+            Issue.record("Expected .existingFamily, got \(state)")
+            return
+        }
+        #expect(restored.athletes.isEmpty)
+        #expect(restored.activeAthletes.isEmpty)
+        #expect(restored.grants.isEmpty)
+    }
+
+    @Test("A family with multiple athletes restores to existingFamily with every athlete and its matching grant")
+    @MainActor
+    func multipleAthletesRestoreToExistingFamily() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let created = try coordinator.createFamily(
+            parentGivenName: "Kari",
+            athleteGivenName: "Jonas",
+            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            athleteDevelopmentStage: .parentLed
+        )
+        let managementService = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        _ = try managementService.addAthlete(
+            workspaceId: created.workspace.workspaceId,
+            participantId: created.participant.id,
+            givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 6, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            developmentStage: .parentLed
+        )
+
+        let service = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let state = try service.restoreState()
+
+        guard case .existingFamily(let restored) = state else {
+            Issue.record("Expected .existingFamily, got \(state)")
+            return
+        }
+        #expect(restored.athletes.count == 2)
+        #expect(restored.activeAthletes.count == 2)
+        #expect(restored.grants.count == 2)
+        #expect(Set(restored.athletes.map(\.givenName)) == ["Jonas", "Emma"])
+    }
+
+    @Test("Athletes restore in a deterministic order (createdAt, then id as a tiebreaker) across repeated restoration calls")
+    @MainActor
+    func athletesRestoreInDeterministicOrder() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let coordinator = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let created = try coordinator.createFamily(
+            parentGivenName: "Kari",
+            athleteGivenName: "Jonas",
+            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            athleteDevelopmentStage: .parentLed
+        )
+        let managementService = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        _ = try managementService.addAthlete(
+            workspaceId: created.workspace.workspaceId, participantId: created.participant.id,
+            givenName: "Emma", birthDate: LocalDate(year: 2014, month: 6, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        _ = try managementService.addAthlete(
+            workspaceId: created.workspace.workspaceId, participantId: created.participant.id,
+            givenName: "Oliver", birthDate: LocalDate(year: 2016, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let service = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        guard case .existingFamily(let first) = try service.restoreState(),
+              case .existingFamily(let second) = try service.restoreState() else {
+            Issue.record("Expected .existingFamily on both calls")
+            return
+        }
+
+        #expect(first.athletes.map(\.givenName) == ["Jonas", "Emma", "Oliver"])
+        #expect(first.athletes.map(\.id) == second.athletes.map(\.id))
+    }
+
+    @Test("An athlete missing its grant (grant/athlete count mismatch) is inconsistentGraph")
+    @MainActor
+    func athleteMissingGrantIsInconsistent() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        // An athlete with no corresponding grant at all.
+        _ = athleteRepository.stageAthlete(
+            workspaceId: staged.workspace.workspaceId,
+            givenName: "Jonas",
+            birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            developmentStage: .parentLed
+        )
+        try container.mainContext.save()
+
+        let service = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let state = try service.restoreState()
+
         guard case .inconsistentGraph(let reason) = state else {
             Issue.record("Expected .inconsistentGraph, got \(state)")
             return
         }
-        #expect(reason.contains("0 athlete"))
+        #expect(reason.contains("AthleteAccessGrant per AthleteProfile"))
     }
 
     @Test("An athlete whose workspaceId doesn't match any workspace is inconsistentGraph")

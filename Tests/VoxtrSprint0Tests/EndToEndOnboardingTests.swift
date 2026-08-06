@@ -81,9 +81,9 @@ struct EndToEndOnboardingTests {
             return
         }
         #expect(restored.parent.givenName == "Kari")
-        #expect(restored.athlete.givenName == "Jonas")
+        #expect(restored.athletes.first?.givenName == "Jonas")
         #expect(restored.participant.role == .workspaceOwner)
-        #expect(restored.grant.canViewSchedule)
+        #expect(restored.grants.first?.canViewSchedule == true)
     }
 
     @Test("An inconsistent graph persisted before a container recreation restores as inconsistentGraph, not a crash or silent fix")

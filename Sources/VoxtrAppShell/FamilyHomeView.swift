@@ -17,11 +17,22 @@ import VoxtrReflectionDomain
 /// replaced — this is now purely the container that receives the
 /// family/services from `RootView` and hosts `HomeDashboardView`,
 /// restoring `RootView → FamilyHomeView → HomeDashboardView` as the
-/// actual navigation hierarchy. `RootView` no longer reaches past this
-/// type directly to `HomeDashboardView`. `HomeDashboardView` itself is
-/// unchanged by this refactor — it remains focused solely on the
-/// dashboard UI and has no awareness of `FamilyHomeView` at all; this
-/// type is the only thing that changed.
+/// actual navigation hierarchy.
+///
+/// Multi-Athlete Family Foundation: `family.athletes` may now hold
+/// zero, one, or several athletes — this work package explicitly does
+/// not redesign Home into a multi-athlete agenda (that is future work),
+/// so `HomeDashboardView` itself is unchanged and still shows exactly
+/// one athlete: `family.activeAthletes.first`, deterministically
+/// ordered by `FamilyRestorationService`. When there is no active
+/// athlete at all (every athlete archived, or none ever added), this
+/// shows `AthleteFamilyManagementView` directly instead of an empty
+/// dashboard — the family is never actually locked out, since the
+/// management screen it always falls back to is exactly where "add
+/// athlete" lives. A "Manage Athletes" entry point is also available
+/// from the normal dashboard case (threaded into `HomeDashboardView`),
+/// so a parent doesn't have to delete their only athlete just to reach
+/// the multi-athlete screen.
 public struct FamilyHomeView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
@@ -30,6 +41,8 @@ public struct FamilyHomeView: View {
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
     public let coachingApplicationService: CoachingApplicationService
+    public let athleteRepository: AthleteRepository
+    public let athleteFamilyManagementService: AthleteFamilyManagementService
 
     public init(
         family: RestoredFamily,
@@ -38,7 +51,9 @@ public struct FamilyHomeView: View {
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
-        coachingApplicationService: CoachingApplicationService
+        coachingApplicationService: CoachingApplicationService,
+        athleteRepository: AthleteRepository,
+        athleteFamilyManagementService: AthleteFamilyManagementService
     ) {
         self.family = family
         self.planningService = planningService
@@ -47,25 +62,41 @@ public struct FamilyHomeView: View {
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
         self.coachingApplicationService = coachingApplicationService
+        self.athleteRepository = athleteRepository
+        self.athleteFamilyManagementService = athleteFamilyManagementService
     }
 
     public var body: some View {
-        HomeDashboardView(
-            viewModel: HomeDashboardViewModel(
+        if let athlete = family.activeAthletes.first {
+            HomeDashboardView(
+                viewModel: HomeDashboardViewModel(
+                    trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                    coachingPresentationProvider: coachingApplicationService,
+                    athleteId: athlete.athleteId,
+                    weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                ),
+                athleteDisplayName: athlete.givenName,
+                planningService: planningService,
+                trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                coachingPresentationProvider: coachingApplicationService,
-                athleteId: family.athlete.athleteId,
-                weekStart: WeeklyPlanningViewModel.currentWeekStart()
-            ),
-            athleteDisplayName: family.athlete.givenName,
-            planningService: planningService,
-            trainingService: trainingService,
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
-            weeklyReflectionService: weeklyReflectionService,
-            coachingApplicationService: coachingApplicationService,
-            athleteId: family.athlete.athleteId,
-            committedByActorId: ActorId(rawValue: family.participant.id)
+                weeklyReviewCoordinationService: weeklyReviewCoordinationService,
+                weeklyReflectionService: weeklyReflectionService,
+                coachingApplicationService: coachingApplicationService,
+                athleteId: athlete.athleteId,
+                committedByActorId: ActorId(rawValue: family.participant.id),
+                athleteManagementViewModel: makeAthleteManagementViewModel()
+            )
+        } else {
+            AthleteFamilyManagementView(viewModel: makeAthleteManagementViewModel())
+        }
+    }
+
+    private func makeAthleteManagementViewModel() -> AthleteFamilyManagementViewModel {
+        AthleteFamilyManagementViewModel(
+            workspaceId: WorkspaceId(rawValue: family.workspace.id),
+            participantId: family.participant.id,
+            athleteRepository: athleteRepository,
+            athleteFamilyManagementService: athleteFamilyManagementService
         )
     }
 }

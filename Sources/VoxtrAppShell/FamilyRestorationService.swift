@@ -11,20 +11,30 @@ import VoxtrAthleteDomain
 ///
 /// CONSISTENCY RULES (Sprint 1 scope: exactly one family per device,
 /// since multi-family support and CloudKit sharing aren't implemented
-/// yet):
+/// yet; Multi-Athlete Family Foundation: relaxed from "exactly one
+/// athlete" to "zero or more athletes," each still fully accounted
+/// for):
 /// - Zero of all five entities → `.noExistingFamily`.
-/// - Exactly one of each, AND every cross-reference matches:
+/// - Exactly one parent, one workspace, one participant, AND every
+///   cross-reference matches:
 ///   - `participant.workspaceId == workspace.id`
 ///   - `participant.role == .workspaceOwner` (Sprint 1 never creates any
 ///     other participant role — see `FamilyOnboardingCoordinator`)
-///   - `athlete.workspaceId == workspace.id`
-///   - `grant.participantId == participant.id`
-///   - `grant.athleteId == athlete.id`
-///   → `.existingFamily`.
-/// - Anything else — a missing entity, more than one of any entity (not
-///   yet supported by Sprint 1's single-family assumption), or a
-///   cross-reference that doesn't match — → `.inconsistentGraph`, with
-///   a reason string naming which rule failed.
+///   - every `AthleteProfile.workspaceId == workspace.id`
+///   - the `AthleteAccessGrant` set corresponds exactly to the
+///     `AthleteProfile` set: same count, every grant's `participantId`
+///     matches the sole participant, and the grants' `athleteId` set
+///     equals the athletes' `id` set exactly (no orphaned grant, no
+///     athlete missing a grant) — this covers archived athletes too:
+///     archiving (see `AthleteManagementService.archiveAthlete`) never
+///     removes a grant, so an archived athlete still needs one.
+///   → `.existingFamily`, with `RestoredFamily.athletes` possibly
+///   empty.
+/// - Anything else — a missing parent/workspace/participant, more than
+///   one of any of those three (not yet supported by Sprint 1's
+///   single-family assumption), or a cross-reference/grant mismatch —
+///   → `.inconsistentGraph`, with a reason string naming which rule
+///   failed.
 @MainActor
 public final class FamilyRestorationService {
     private let parentWorkspaceRepository: ParentWorkspaceRepository
@@ -54,26 +64,21 @@ public final class FamilyRestorationService {
         let parentCount = parents.count
         let workspaceCount = workspaces.count
         let participantCount = participants.count
-        let athleteCount = athletes.count
-        let grantCount = grants.count
 
-        if parentCount == 0 && workspaceCount == 0 && participantCount == 0 && athleteCount == 0 && grantCount == 0 {
+        if parentCount == 0 && workspaceCount == 0 && participantCount == 0 && athletes.isEmpty && grants.isEmpty {
             return .noExistingFamily
         }
 
-        guard parentCount == 1, workspaceCount == 1, participantCount == 1, athleteCount == 1, grantCount == 1 else {
+        guard parentCount == 1, workspaceCount == 1, participantCount == 1 else {
             return .inconsistentGraph(
-                reason: "Expected exactly one of each entity (parent, workspace, participant, athlete, grant); "
-                    + "found \(parentCount) parent(s), \(workspaceCount) workspace(s), \(participantCount) participant(s), "
-                    + "\(athleteCount) athlete(s), \(grantCount) grant(s)."
+                reason: "Expected exactly one parent, workspace, and participant; "
+                    + "found \(parentCount) parent(s), \(workspaceCount) workspace(s), \(participantCount) participant(s)."
             )
         }
 
         let parent = parents[0]
         let workspace = workspaces[0]
         let participant = participants[0]
-        let athlete = athletes[0]
-        let grant = grants[0]
 
         guard participant.workspaceId == workspace.id else {
             return .inconsistentGraph(reason: "WorkspaceParticipant.workspaceId does not match FamilyWorkspace.id.")
@@ -81,14 +86,22 @@ public final class FamilyRestorationService {
         guard participant.role == .workspaceOwner else {
             return .inconsistentGraph(reason: "The sole WorkspaceParticipant's role is not workspaceOwner — unexpected for Sprint 1's model (no athlete participant is ever created).")
         }
-        guard athlete.workspaceId == workspace.id else {
-            return .inconsistentGraph(reason: "AthleteProfile.workspaceId does not match FamilyWorkspace.id.")
+
+        guard athletes.allSatisfy({ $0.workspaceId == workspace.id }) else {
+            return .inconsistentGraph(reason: "At least one AthleteProfile.workspaceId does not match FamilyWorkspace.id.")
         }
-        guard grant.participantId == participant.id else {
-            return .inconsistentGraph(reason: "AthleteAccessGrant.participantId does not match WorkspaceParticipant.id.")
+
+        guard grants.count == athletes.count else {
+            return .inconsistentGraph(
+                reason: "Expected exactly one AthleteAccessGrant per AthleteProfile (including archived); "
+                    + "found \(athletes.count) athlete(s) and \(grants.count) grant(s)."
+            )
         }
-        guard grant.athleteId == athlete.id else {
-            return .inconsistentGraph(reason: "AthleteAccessGrant.athleteId does not match AthleteProfile.id.")
+        guard grants.allSatisfy({ $0.participantId == participant.id }) else {
+            return .inconsistentGraph(reason: "At least one AthleteAccessGrant.participantId does not match the sole WorkspaceParticipant.id.")
+        }
+        guard Set(grants.map(\.athleteId)) == Set(athletes.map(\.id)) else {
+            return .inconsistentGraph(reason: "The AthleteAccessGrant set does not correspond exactly to the AthleteProfile set (an orphaned grant, or an athlete missing its grant).")
         }
 
         // `parent` itself has no direct reference to check here — it's
@@ -98,12 +111,25 @@ public final class FamilyRestorationService {
         // uses the same placeholder. Nothing further to verify until
         // CloudKit gives AccountId real values.
 
+        // Deterministic ordering — never leave a caller (e.g. a
+        // management list UI) to fetch order by chance, the same
+        // convention this project already applies to every other
+        // multi-row fetch. createdAt first (oldest athlete first,
+        // matching how they were actually added), then id as a stable
+        // tiebreaker for the (practically impossible but not
+        // structurally excluded) case of two identical createdAt
+        // values.
+        let orderedAthletes = athletes.sorted { lhs, rhs in
+            if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
+
         return .existingFamily(RestoredFamily(
             parent: parent,
             workspace: workspace,
             participant: participant,
-            athlete: athlete,
-            grant: grant
+            athletes: orderedAthletes,
+            grants: grants
         ))
     }
 }
