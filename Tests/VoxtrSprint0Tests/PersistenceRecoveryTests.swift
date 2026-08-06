@@ -206,54 +206,27 @@ struct PersistenceRecoveryTests {
         #expect(try athleteAccessGrantRepository.fetchAllGrants().isEmpty)
     }
 
-    @Test("A genuine SwiftData save failure (forced parent-id collision) during onboarding rolls back completely")
-    @MainActor
-    func onboardingRollbackOnRealPersistenceFailure() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
-        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
-        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
-        let coordinator = FamilyOnboardingCoordinator(
-            modelContext: container.mainContext,
-            parentWorkspaceRepository: parentWorkspaceRepository,
-            athleteRepository: athleteRepository,
-            athleteAccessGrantRepository: athleteAccessGrantRepository
-        )
-        let collidingId = UUID()
-        _ = try coordinator.createFamily(
-            parentGivenName: "Kari",
-            athleteGivenName: "Jonas",
-            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
-            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-            athleteDevelopmentStage: .parentLed,
-            failAt: nil,
-            forcedParentId: collidingId
-        )
-
-        // A second onboarding attempt forced to reuse the same parent
-        // ID — a genuine SwiftData uniqueness violation, not a
-        // simulated error, matching this coordinator's own established
-        // test convention for proving rollback against a real
-        // persistence-layer failure.
-        #expect(throws: (any Error).self) {
-            try coordinator.createFamily(
-                parentGivenName: "Ola",
-                athleteGivenName: "Nora",
-                athleteBirthDate: LocalDate(year: 2013, month: 8, day: 20),
-                athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-                athleteDevelopmentStage: .parentLed,
-                failAt: nil,
-                forcedParentId: collidingId
-            )
-        }
-
-        // Only the first family exists — the second attempt's staged
-        // workspace/athlete/grant were fully rolled back, not left
-        // half-persisted.
-        #expect(try parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
-        #expect(try parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
-        #expect(try athleteRepository.fetchAllAthletes().count == 1)
-        #expect(try athleteAccessGrantRepository.fetchAllGrants().count == 1)
-    }
+    // A test previously here ("A genuine SwiftData save failure
+    // (forced parent-id collision) during onboarding rolls back
+    // completely") assumed that reusing the same ParentProfile.id
+    // across two createFamily calls would cause SwiftData to reject
+    // the second insert with a uniqueness violation. That assumption
+    // was checked against this project's own prior, documented finding
+    // — see the "Recurring Hard-Won Lessons" note "@Attribute(.unique)
+    // is upsert not a rejecting constraint" — and confirmed still true:
+    // ParentProfile.id genuinely IS declared `@Attribute(.unique)` (so
+    // that part of the assumption was correct), but SwiftData's actual
+    // behavior for a `.unique` collision is to UPSERT the existing row
+    // rather than throw. The second createFamily call therefore never
+    // throws at all — it silently overwrites the first family's
+    // ParentProfile fields — so `#expect(throws:)` never has anything
+    // to catch, and the test fails not because rollback is broken but
+    // because its own premise about SwiftData's behavior was wrong.
+    // Removed rather than rewritten to assert the upsert instead: that
+    // would be a different test with a different purpose (documenting
+    // upsert behavior, not rollback), and rollback against a genuine,
+    // non-simulated failure is already covered by
+    // onboardingRollbackOnSaveFailure above, via this project's
+    // established saveOverride seam — the correct, deterministic way
+    // to force a real save-time failure in this codebase.
 }
