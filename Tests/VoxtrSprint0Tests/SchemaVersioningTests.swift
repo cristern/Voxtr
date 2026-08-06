@@ -48,7 +48,20 @@ struct SchemaVersioningTests {
     @Test("Current entities can still be written and fetched through the versioned schema")
     @MainActor
     func currentEntitiesCanStillBeWrittenAndFetched() throws {
-        let schema = Schema(versionedSchema: AppSchemaV1.self)
+        // Uses AppSchemaV6 (the current latest versioned schema, which
+        // references the live model types) rather than AppSchemaV1 —
+        // after the critical launch-crash fix (LegacySchemaTypes.swift),
+        // AppSchemaV1 intentionally references the frozen, historical
+        // AthleteProfile shape (birthDate: LocalDate stored directly),
+        // not the live one (birthDateRaw: String). Constructing a live
+        // AthleteProfile via its current public init and inserting it
+        // into a V1-scoped container fails SwiftData's own validation —
+        // the container's schema, from V1's declared shape, expects a
+        // stored `birthDate` the live object doesn't have. V6 is the
+        // correct version to exercise "current entities through the
+        // versioned schema" now; the live AthleteProfile init call
+        // itself was already correct and needed no change.
+        let schema = Schema(versionedSchema: AppSchemaV6.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,
@@ -77,7 +90,11 @@ struct SchemaVersioningTests {
     func persistenceSurvivesContainerRecreation() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("a1-schema-versioning-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppSchemaV1.self)
+        // AppSchemaV6, not AppSchemaV1 — see
+        // currentEntitiesCanStillBeWrittenAndFetched's own comment
+        // above for the full explanation; the same reasoning applies
+        // here.
+        let schema = Schema(versionedSchema: AppSchemaV6.self)
 
         let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
         let firstContainer = try ModelContainer(
