@@ -76,6 +76,36 @@ enum LegacyAthleteProfileSchema {
         var updatedAt: Date = Date.now
         var schemaVersion: Int = 1
         var revision: Int = 1
+
+        /// Codemagic build fix: `@Model` requires an explicit
+        /// initializer be provided — it does not synthesize one from
+        /// stored-property defaults the way a plain Swift class
+        /// sometimes can. Kept parameterless, matching every existing
+        /// call site (`LegacyAthleteProfileSchema.AthleteProfile()` in
+        /// `SchemaMigrationPlanValidationCrashFixTests.swift`, which
+        /// constructs then mutates), and assigning each property the
+        /// exact same literal value already declared above as its
+        /// default — those inline defaults are not removed, since
+        /// SwiftData's lightweight-migration inference reads them
+        /// directly from the property declarations when populating a
+        /// newly-added column on existing rows, a schema-level
+        /// operation that never goes through this initializer at all.
+        init() {
+            self.id = UUID()
+            self.workspaceId = UUID()
+            self.givenName = ""
+            self.familyName = nil
+            self.preferredName = nil
+            self.birthDate = LocalDate(year: 1900, month: 1, day: 1)
+            self.timeZoneId = TimeZoneId(rawValue: "UTC")
+            self.developmentStage = DevelopmentStage.parentLed
+            self.avatarAssetKey = nil
+            self.isArchived = false
+            self.createdAt = Date.now
+            self.updatedAt = Date.now
+            self.schemaVersion = 1
+            self.revision = 1
+        }
     }
 }
 
@@ -97,5 +127,26 @@ enum LegacyWorkspaceParticipantSchema {
         var createdAt: Date = Date.now
         var updatedAt: Date = Date.now
         var schemaVersion: Int = 1
+
+        /// Codemagic build fix — see `LegacyAthleteProfileSchema
+        /// .AthleteProfile.init()`'s own doc comment above for the full
+        /// explanation; the same reasoning applies here. Matches
+        /// `LegacyWorkspaceParticipantSchema.WorkspaceParticipant()` in
+        /// `SchemaMigrationPlanValidationCrashFixTests.swift`.
+        init() {
+            self.id = UUID()
+            self.workspaceId = UUID()
+            self.accountId = ""
+            self.role = WorkspaceRole.workspaceOwner
+            self.state = ParticipantState.invited
+            self.linkedAthleteId = nil
+            self.invitedBy = nil
+            self.invitedAt = nil
+            self.acceptedAt = nil
+            self.revokedAt = nil
+            self.createdAt = Date.now
+            self.updatedAt = Date.now
+            self.schemaVersion = 1
+        }
     }
 }
