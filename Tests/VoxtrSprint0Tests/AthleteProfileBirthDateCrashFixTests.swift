@@ -30,6 +30,15 @@ import VoxtrAthleteDomain
 // correctness) — see this fix's own root-cause writeup for the full
 // explanation of why a stronger, byte-for-byte reproduction isn't
 // possible from Swift test code.
+// A store-level "V5 migrates to current latest" test used to live here
+// but was moved to SchemaMigrationPlanValidationCrashFixTests.swift
+// (as `onDiskV5StoreMigratesToCurrentLatest`) and rewritten to insert
+// the LEGACY AthleteProfile type directly — after the critical
+// launch-crash fix, AppSchemaV5's schema correctly recognizes only
+// that legacy shape (see LegacySchemaTypes.swift), so the original
+// version of this test here (which used AthleteRepository, inserting
+// the LIVE type) would itself fail. See that suite's own doc comment
+// for the full story.
 @Suite("AthleteProfile.birthDate crash fix", .serialized)
 struct AthleteProfileBirthDateCrashFixTests {
 
@@ -91,35 +100,6 @@ struct AthleteProfileBirthDateCrashFixTests {
         #expect(refetchedAthletes.count == 2)
         let birthDates = Set(refetchedAthletes.map(\.birthDate))
         #expect(birthDates == [firstBirthDate, secondBirthDate])
-    }
-
-    @Test("A store honestly versioned at 5.0.0 migrates to the current latest version without throwing")
-    @MainActor
-    func storeAtV5MigratesToCurrentLatest() throws {
-        let schema = Schema(versionedSchema: AppSchemaV5.self)
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
-
-        let container = try ModelContainer(
-            for: schema,
-            migrationPlan: AppSchemaMigrationPlan.self,
-            configurations: [configuration]
-        )
-
-        // Confirms the migration plan itself is structurally sound
-        // (constructible, no thrown error) — see this suite's own doc
-        // comment for what this test does and does not prove.
-        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
-        let expectedBirthDate = LocalDate(year: 2013, month: 3, day: 15)
-        let created = try athleteRepository.createAthlete(
-            workspaceId: WorkspaceId(),
-            givenName: "Oliver",
-            birthDate: expectedBirthDate,
-            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-            developmentStage: .parentLed
-        )
-
-        let refetched = try athleteRepository.fetchAthlete(byId: created.athleteId)
-        #expect(refetched?.birthDate == expectedBirthDate)
     }
 
     @Test("The documented placeholder LocalDate parses correctly and matches the model's own default")

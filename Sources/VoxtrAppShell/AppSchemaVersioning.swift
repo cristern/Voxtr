@@ -34,10 +34,10 @@ public enum AppSchemaV1: VersionedSchema {
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
-            AthleteProfile.self,
+            LegacyAthleteProfileSchema.AthleteProfile.self,
             ParentProfile.self,
             FamilyWorkspace.self,
-            WorkspaceParticipant.self,
+            LegacyWorkspaceParticipantSchema.WorkspaceParticipant.self,
             AthleteAccessGrant.self,
             WeekPlan.self,
             PlannedActivity.self,
@@ -67,10 +67,10 @@ public enum AppSchemaV2: VersionedSchema {
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
-            AthleteProfile.self,
+            LegacyAthleteProfileSchema.AthleteProfile.self,
             ParentProfile.self,
             FamilyWorkspace.self,
-            WorkspaceParticipant.self,
+            LegacyWorkspaceParticipantSchema.WorkspaceParticipant.self,
             AthleteAccessGrant.self,
             WeekPlan.self,
             PlannedActivity.self,
@@ -107,10 +107,10 @@ public enum AppSchemaV3: VersionedSchema {
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
-            AthleteProfile.self,
+            LegacyAthleteProfileSchema.AthleteProfile.self,
             ParentProfile.self,
             FamilyWorkspace.self,
-            WorkspaceParticipant.self,
+            LegacyWorkspaceParticipantSchema.WorkspaceParticipant.self,
             AthleteAccessGrant.self,
             WeekPlan.self,
             PlannedActivity.self,
@@ -132,6 +132,23 @@ public enum AppSchemaV3: VersionedSchema {
 /// behavior — the entity *type* list is unchanged from V3; only one
 /// existing type's own shape changed.
 ///
+/// CRITICAL LAUNCH-CRASH FIX: V3 (above) lists
+/// `LegacyWorkspaceParticipantSchema.WorkspaceParticipant` (frozen,
+/// without `declinedAt`); V4 (below) lists the LIVE
+/// `VoxtrParentDomain.WorkspaceParticipant` (which has `declinedAt`).
+/// Before this fix, V3 and V4 both listed the SAME live
+/// `WorkspaceParticipant` type — since a Swift class has only one
+/// definition, that meant V3's and V4's checksums for this type (and
+/// therefore their whole-schema checksums, since every other type in
+/// both lists is identical) were byte-identical. `NSLightweightMigrationStage
+/// .init(versionChecksums:)` requires the two checksums to differ to
+/// represent a real migration; given identical checksums, it threw an
+/// uncaught `NSException`, aborting the app at launch — before the
+/// store was ever opened — for any real device whose store was
+/// literally at V3. See `LegacySchemaTypes.swift`'s own doc comment
+/// for the full explanation and why this is Apple's own documented
+/// pattern for this exact situation.
+///
 /// FROZEN as of Recurring Planned Activities — do not edit this list
 /// again, for the same reason `AppSchemaV1`/`AppSchemaV2`/`AppSchemaV3`
 /// were frozen previously. This is a hardcoded snapshot of exactly the
@@ -145,7 +162,7 @@ public enum AppSchemaV4: VersionedSchema {
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
-            AthleteProfile.self,
+            LegacyAthleteProfileSchema.AthleteProfile.self,
             ParentProfile.self,
             FamilyWorkspace.self,
             WorkspaceParticipant.self,
@@ -166,6 +183,15 @@ public enum AppSchemaV4: VersionedSchema {
 /// this list again, for the same reason
 /// `AppSchemaV1`/`AppSchemaV2`/`AppSchemaV3`/`AppSchemaV4` were frozen
 /// previously.
+///
+/// CRITICAL LAUNCH-CRASH FIX: this list was corrected to reference
+/// `LegacyAthleteProfileSchema.AthleteProfile` (frozen, `birthDate:
+/// LocalDate` directly stored) instead of the live
+/// `VoxtrAthleteDomain.AthleteProfile` (which now has `birthDateRaw:
+/// String`) — see `LegacySchemaTypes.swift`'s own doc comment for why
+/// referencing the same live type from both V5 and V6 produced
+/// identical schema checksums and an invalid, crashing
+/// `NSLightweightMigrationStage` at every launch.
 public enum AppSchemaV5: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(5, 0, 0)
@@ -174,7 +200,7 @@ public enum AppSchemaV5: VersionedSchema {
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
-            AthleteProfile.self,
+            LegacyAthleteProfileSchema.AthleteProfile.self,
             ParentProfile.self,
             FamilyWorkspace.self,
             WorkspaceParticipant.self,
@@ -235,9 +261,20 @@ public enum AppSchemaV6: VersionedSchema {
 }
 
 /// The migration plan. Five stages so far: V1 → V2, V2 → V3, V3 → V4,
-/// V4 → V5, and V5 → V6 — all purely additive or, for V5 → V6, a
-/// field-level storage change with no safe way to preserve the old
-/// value (see `AppSchemaV6`'s own doc comment).
+/// V4 → V5, and V5 → V6.
+///
+/// CRITICAL LAUNCH-CRASH FIX (read this before touching this file
+/// again): V3 → V4 and V5 → V6 were both field-level-only changes (no
+/// model *type* added or removed — only `WorkspaceParticipant
+/// .declinedAt` and `AthleteProfile.birthDateRaw` respectively). Before
+/// this fix, both stages referenced the SAME live Swift class from
+/// both the "old" and "new" `VersionedSchema`, producing identical
+/// checksums and an `NSLightweightMigrationStage` that CoreData rejects
+/// at `ModelContainer.init` — aborting the app at launch, before the
+/// store is ever opened. Both are now fixed by introducing frozen,
+/// separately-declared legacy types in `LegacySchemaTypes.swift` for
+/// exactly the historical shape each superseded version actually had.
+/// See that file's own doc comment for the complete explanation.
 ///
 /// HOW TO ADD V7 (read this before adding, renaming, or removing any
 /// `@Model` property or type in `AppSchema.modelTypes`):
@@ -250,13 +287,27 @@ public enum AppSchemaV6: VersionedSchema {
 ///    `versionIdentifier: Schema.Version(7, 0, 0)` and `models`
 ///    passthrough to `AppSchema.modelTypes` (V7 becomes the new latest).
 /// 3. Update `AppSchema.modelTypes` (in `AppSchema.swift`) — only if a
-///    model *type* is actually being added/removed. A field-level
-///    change to an already-listed type does not touch this array at
-///    all.
-/// 4. Add `AppSchemaV7.self` to `schemas` below, alongside every
+///    model *type* is actually being added/removed.
+/// 4. **If this version changes a FIELD on a type that is already
+///    listed in an earlier, still-referenced version** (rather than
+///    adding/removing a whole model type): that earlier version's
+///    frozen `.models` list MUST reference a separately-declared,
+///    historically-accurate type for that model — NOT the live,
+///    current type — or its checksum will be identical to every later
+///    version's, and the migration stage will crash at launch exactly
+///    like V3→V4 and V5→V6 did. Add the frozen historical shape to
+///    `LegacySchemaTypes.swift` (nested in its own enum namespace, so
+///    its Swift type name differs from the live type while its
+///    persisted SwiftData entity name — from the unqualified class
+///    name — stays the same), then update every affected earlier
+///    version's `.models` array to reference it instead of the live
+///    type. This is NOT needed when only a whole model type is
+///    added/removed — the type-count difference alone already produces
+///    a genuinely different checksum in that case.
+/// 5. Add `AppSchemaV7.self` to `schemas` below, alongside every
 ///    earlier version (old versions are never removed, only appended
 ///    to).
-/// 5. Add a `MigrationStage` to `stages` describing V6 → V7. Use
+/// 6. Add a `MigrationStage` to `stages` describing V6 → V7. Use
 ///    `.lightweight(fromVersion:toVersion:)` for anything SwiftData can
 ///    infer automatically (a new model type, a new property with a
 ///    literal default, a property removal). Use
@@ -266,7 +317,7 @@ public enum AppSchemaV6: VersionedSchema {
 ///    `.custom` cannot help either, since `willMigrate` still runs
 ///    against the old schema; `.lightweight` with a literal default is
 ///    the only safe option in that situation.
-/// 6. Do not skip straight to a "V8" — each actually-shipped schema
+/// 7. Do not skip straight to a "V8" — each actually-shipped schema
 ///    change gets its own version and its own stage, in order, the same
 ///    way this project's sprint-by-sprint entity additions actually
 ///    happened.
