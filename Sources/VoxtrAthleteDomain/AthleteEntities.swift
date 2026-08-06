@@ -22,7 +22,25 @@ public final class AthleteProfile {
     public var givenName: String
     public var familyName: String?
     public var preferredName: String?
-    public var birthDate: LocalDate
+    // TestFlight crash fix: `birthDate` was previously stored directly
+    // as `LocalDate` — a custom-`Codable` struct — on this `@Model`.
+    // SwiftData's own internal decoder (`CompositeSingleValueDecoding`,
+    // visible in the crash trace) does not read that value back through
+    // `LocalDate`'s own `Decodable` conformance the way it was written;
+    // reading `.birthDate` on an existing, persisted row triggers a
+    // fatal, uncatchable runtime trap (`swift_dynamicCastFailure` →
+    // `swift::fatalError` → `abort()`) inside SwiftData's own private
+    // implementation — not a throwable `DecodingError`, so no
+    // `do`/`catch` in `LocalDate.init(from:)` or here could ever
+    // intercept it. This is the exact same storage-shape issue already
+    // solved elsewhere in this codebase (see `WeekPlan.weekStart`,
+    // `PlannedActivity.localDate`, `RecurringPlannedActivity`'s own
+    // effective-date fields) — stored as a plain ISO date `String`,
+    // which SwiftData handles as a native, unambiguous column type, with
+    // a computed `LocalDate` wrapper below providing the same public API
+    // every existing caller already uses. See `AppSchemaVersioning.swift`
+    // (`AppSchemaV6`) for the migration this storage change required.
+    private var birthDateRaw: String = "1900-01-01"
     public var timeZoneId: TimeZoneId
     public var developmentStage: DevelopmentStage
     public var avatarAssetKey: String?
@@ -53,7 +71,7 @@ public final class AthleteProfile {
         self.givenName = givenName
         self.familyName = familyName
         self.preferredName = preferredName
-        self.birthDate = birthDate
+        self.birthDateRaw = birthDate.isoString
         self.timeZoneId = timeZoneId
         self.developmentStage = developmentStage
         self.avatarAssetKey = avatarAssetKey
@@ -65,6 +83,28 @@ public final class AthleteProfile {
     }
 
     public var athleteId: AthleteId { AthleteId(rawValue: id) }
+
+    /// Existing rows migrated from before this fix (`AppSchemaV5` and
+    /// earlier) have no recoverable prior value — the crash this fixes
+    /// happens inside SwiftData's own decoder, before any application
+    /// code (including a migration's `willMigrate`) could safely read
+    /// the old value; see `AppSchemaVersioning.swift`'s `AppSchemaV6`
+    /// migration for exactly what a migrated row's `birthDate` becomes,
+    /// and why. `LocalDate(isoString:)` returning `nil` here (which
+    /// should not happen for any row written by this or a later
+    /// version) falls back to the same placeholder used by that
+    /// migration, rather than crashing.
+    public var birthDate: LocalDate {
+        get { LocalDate(isoString: birthDateRaw) ?? Self.unknownBirthDatePlaceholder }
+        set { birthDateRaw = newValue.isoString }
+    }
+
+    /// A deliberately implausible date for a youth athlete (not `1970-
+    /// 01-01`, which could be mistaken for a real, if unlikely, value) —
+    /// signals "needs re-entry," both here and in
+    /// `AppSchemaVersioning.swift`'s migration, which is the only other
+    /// place this exact value is written.
+    static let unknownBirthDatePlaceholder = LocalDate(year: 1900, month: 1, day: 1)
 }
 
 // MARK: - AthleteProfile mutation API (Domain & Data Model v1.4)
