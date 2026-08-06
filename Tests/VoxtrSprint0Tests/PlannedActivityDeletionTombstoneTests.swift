@@ -144,7 +144,7 @@ struct PlannedActivityDeletionTombstoneTests {
     func deletionAndTombstoneSurviveContainerRecreation() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("a2-tombstone-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppSchemaV2.self)
+        let schema = Schema(versionedSchema: AppCurrentSchema.self)
         let athleteId = AthleteId()
 
         let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)

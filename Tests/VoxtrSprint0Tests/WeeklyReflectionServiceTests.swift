@@ -147,7 +147,7 @@ struct WeeklyReflectionServiceTests {
     func reflectionSurvivesContainerRecreation() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("sprint5-weekly-reflection-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppSchemaV3.self)
+        let schema = Schema(versionedSchema: AppCurrentSchema.self)
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 1, day: 5)
 

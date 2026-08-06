@@ -45,9 +45,19 @@ public final class CompositionRoot {
         self.restorationState = restorationState
     }
 
+    /// CRITICAL PERSISTENCE RECOVERY: this default previously targeted
+    /// `AppSchemaV6` (itself a fix for an earlier bug where it targeted
+    /// `AppSchemaV1`, the oldest version in the plan — see git history).
+    /// The whole multi-version history it pointed into has since been
+    /// collapsed to `AppCurrentSchema` — one live version, no
+    /// historical "legacy type" scaffolding — see
+    /// `AppSchemaVersioning.swift`'s own doc comment for the full
+    /// investigation and why. This parameter must be updated at every
+    /// future schema version bump; see that same file's own "HOW TO
+    /// ADD A NEW VERSION" instructions.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV1.self,
+            versionedSchema: AppCurrentSchema.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

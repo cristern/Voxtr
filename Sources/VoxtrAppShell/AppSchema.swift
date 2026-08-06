@@ -24,14 +24,16 @@ import VoxtrReflectionDomain
 /// domain persistence infrastructure only). A2 (Architecture Decisions
 /// v1) adds `PlannedActivityDeletionTombstone`. Sprint 5.0 adds
 /// `WeeklyReflection`. Recurring Planned Activities adds
-/// `RecurringPlannedActivity` — this is what made the schema version V5
-/// (see `AppSchemaVersioning.swift`; that file's own history shows V4
-/// already existed for a field-level change before this addition — this
-/// comment previously read "V3", which had fallen out of sync with that
-/// file). The AthleteProfile.birthDate crash fix is V6 — a field-level
-/// storage change to `AthleteProfile`, an already-listed type, so it
-/// does not touch this array at all; see `AppSchemaVersioning.swift`'s
-/// `AppSchemaV6` for what actually changed. `DailyStatus`, `MonthlyReflection`,
+/// `RecurringPlannedActivity`. This list of model *types* has been
+/// stable since (the `AthleteProfile.birthDate` crash fix and this
+/// project's later critical persistence recovery were both field-level
+/// changes to already-listed types, so neither touched this array).
+///
+/// CRITICAL PERSISTENCE RECOVERY: this project's schema *versioning*
+/// history (`AppSchemaV1` through `AppSchemaV6`, with "frozen legacy
+/// types" for historical field shapes) was collapsed to a single
+/// `AppCurrentSchema` — see `AppSchemaVersioning.swift`'s own doc
+/// comment for the full investigation and why. `DailyStatus`, `MonthlyReflection`,
 /// `PlanningDecision`, and `TrainingAttachment` are NOT added here —
 /// nothing creates or persists them yet, and registering an unused type
 /// wouldn't be wrong but would misstate what's actually implemented. Do

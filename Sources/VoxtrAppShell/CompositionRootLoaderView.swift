@@ -27,14 +27,26 @@ public struct CompositionRootLoaderView<Content: View>: View {
                 content(root)
                     .modelContainer(root.modelContainer)
             } else if let loadError {
-                VStack(spacing: 8) {
-                    Text("Vǫxtr couldn't start")
-                        .font(.headline)
-                    Text(loadError.localizedDescription)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
+                ScrollView {
+                    VStack(spacing: 8) {
+                        Text("Vǫxtr couldn't start")
+                            .font(.headline)
+                        // Critical startup diagnostics fix: was
+                        // `loadError.localizedDescription` alone —
+                        // for a SwiftDataError this was often just
+                        // "The operation couldn't be completed.
+                        // (SwiftData.SwiftDataError error 1.)", with
+                        // no way to diagnose a real TestFlight
+                        // failure from feedback alone. See
+                        // StartupDiagnostics.swift for exactly what
+                        // this now captures.
+                        Text(StartupDiagnostics.describe(loadError))
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.leading)
+                            .padding(.horizontal)
+                            .textSelection(.enabled)
+                    }
                 }
             } else {
                 ProgressView()
