@@ -19,9 +19,16 @@ enum FamilyHomeDestination: Hashable {
 
 /// The actual Family Home content — replaces the previous
 /// single-athlete `HomeDashboardView` at this position in the
-/// navigation hierarchy. `HomeDashboardView` itself is unchanged and is
-/// now what Athlete Overview presents (see `FamilyHomeDestination
-/// .athlete`), not what Home shows directly.
+/// navigation hierarchy. `HomeDashboardView` itself is unchanged in
+/// content and is now what Athlete Overview presents (see
+/// `FamilyHomeDestination.athlete`), not what Home shows directly.
+///
+/// Sprint 1 integration audit: every athlete lookup in this view reads
+/// from `viewModel.activeAthletes` (refreshed from `AthleteRepository`
+/// on appear), never from `family.activeAthletes` directly — the
+/// latter is a launch-time snapshot that goes stale the moment an
+/// athlete is added, archived, or edited after launch. See
+/// `FamilyHomeViewModel`'s own doc comment for the full explanation.
 public struct FamilyHomeContentView: View {
     @State private var viewModel: FamilyHomeViewModel
     private let family: RestoredFamily
@@ -41,6 +48,7 @@ public struct FamilyHomeContentView: View {
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
+        athleteRepository: AthleteRepository,
         athleteManagementViewModel: AthleteFamilyManagementViewModel
     ) {
         self.family = family
@@ -53,6 +61,8 @@ public struct FamilyHomeContentView: View {
         self.athleteManagementViewModel = athleteManagementViewModel
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
+            workspaceId: WorkspaceId(rawValue: family.workspace.id),
+            athleteRepository: athleteRepository,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         ))
@@ -83,7 +93,11 @@ public struct FamilyHomeContentView: View {
 
                 reflectionReminderSection
             }
-            .navigationTitle("Home")
+            // Naming/navigation clarity: "Family Home" always, never
+            // the generic "Home" — this is the family-wide screen, and
+            // must read as such at a glance, distinct from Athlete
+            // Overview's "<Athlete Name> Home" title.
+            .navigationTitle("Family Home")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     NavigationLink("Manage Athletes", value: FamilyHomeDestination.manageAthletes)
@@ -91,13 +105,12 @@ public struct FamilyHomeContentView: View {
                 }
             }
             .onAppear {
-                viewModel.loadHome()
-                viewModel.loadReflectionReminder()
+                viewModel.refresh()
             }
             .navigationDestination(for: FamilyHomeDestination.self) { destination in
                 switch destination {
                 case .athlete(let athleteId):
-                    if let athlete = family.activeAthletes.first(where: { $0.athleteId == athleteId }) {
+                    if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
                         athleteOverview(for: athlete)
                     }
                 case .activity(let rowId):
@@ -173,7 +186,7 @@ public struct FamilyHomeContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("No reflection yet this week.")
                         .foregroundStyle(.secondary)
-                    if let athlete = family.activeAthletes.first(where: { $0.givenName == athleteName }) {
+                    if let athlete = viewModel.activeAthletes.first(where: { $0.givenName == athleteName }) {
                         NavigationLink("Add reflection", value: FamilyHomeDestination.athlete(athlete.athleteId))
                             .accessibilityIdentifier("familyHome.addReflectionLink")
                     }
@@ -187,7 +200,7 @@ public struct FamilyHomeContentView: View {
                     if let whatCouldImprove, !whatCouldImprove.isEmpty {
                         Text("What could improve: \(whatCouldImprove)")
                     }
-                    if let athlete = family.activeAthletes.first(where: { $0.givenName == athleteName }) {
+                    if let athlete = viewModel.activeAthletes.first(where: { $0.givenName == athleteName }) {
                         NavigationLink("Open reflection", value: FamilyHomeDestination.athlete(athlete.athleteId))
                             .accessibilityIdentifier("familyHome.openReflectionLink")
                     }

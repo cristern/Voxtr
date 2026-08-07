@@ -60,6 +60,8 @@ struct FamilyHomeViewModelTests {
 
         let viewModel = FamilyHomeViewModel(
             activeAthletes: [firstAthlete, secondAthlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -116,6 +118,8 @@ struct FamilyHomeViewModelTests {
 
         let viewModel = FamilyHomeViewModel(
             activeAthletes: [athlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -157,6 +161,8 @@ struct FamilyHomeViewModelTests {
 
         let viewModel = FamilyHomeViewModel(
             activeAthletes: [athlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -193,6 +199,8 @@ struct FamilyHomeViewModelTests {
 
         let viewModel = FamilyHomeViewModel(
             activeAthletes: [athlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -230,6 +238,8 @@ struct FamilyHomeViewModelTests {
 
         let viewModel = FamilyHomeViewModel(
             activeAthletes: [athlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -241,5 +251,48 @@ struct FamilyHomeViewModelTests {
         }
         #expect(athleteName == "Oliver")
         #expect(whatWentWell == "Consistent effort")
+    }
+
+    @Test("An athlete added after the ViewModel was constructed appears once refreshActiveAthletes runs — the launch-time snapshot never goes permanently stale")
+    @MainActor
+    func refreshPicksUpAthleteAddedAfterConstruction() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let workspaceId = WorkspaceId()
+
+        // Constructed with an EMPTY roster — simulating a launch-time
+        // snapshot taken before any athlete existed, or before a second
+        // athlete was added, matching the reported symptom's own
+        // "initially opened... but after creating [more data] no longer
+        // navigates" shape.
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [],
+            workspaceId: workspaceId,
+            athleteRepository: athleteRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        #expect(viewModel.activeAthletes.isEmpty)
+
+        // An athlete is added to the SAME workspace after construction —
+        // e.g. via AthleteFamilyManagementService, in a real launch.
+        _ = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        viewModel.refreshActiveAthletes()
+
+        #expect(viewModel.activeAthletes.count == 1)
+        #expect(viewModel.activeAthletes.first?.givenName == "Oliver")
     }
 }

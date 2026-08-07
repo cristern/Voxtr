@@ -79,7 +79,7 @@ public struct HomeDashboardView: View {
             trainingSection
             reflectionSection
         }
-        .navigationTitle(athleteDisplayName)
+        .navigationTitle("\(athleteDisplayName) Home")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Manage Athletes") {

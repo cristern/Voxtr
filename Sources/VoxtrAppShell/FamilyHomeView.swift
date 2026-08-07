@@ -12,27 +12,30 @@ import VoxtrReflectionDomain
 /// Sprint 9: also threads the coaching pipeline through. Sprint 11:
 /// that dependency is `CoachingApplicationService`.
 ///
-/// Sprint 12 (refactored): this view's own content (the previous
-/// `List` of Parent/Athlete text and three navigation links) has been
-/// replaced — this is now purely the container that receives the
-/// family/services from `RootView` and hosts `HomeDashboardView`,
-/// restoring `RootView → FamilyHomeView → HomeDashboardView` as the
-/// actual navigation hierarchy.
-///
-/// Multi-Athlete Family Foundation: `family.athletes` may now hold
-/// zero, one, or several athletes — this work package explicitly does
-/// not redesign Home into a multi-athlete agenda (that is future work),
-/// so `HomeDashboardView` itself is unchanged and still shows exactly
-/// one athlete: `family.activeAthletes.first`, deterministically
-/// ordered by `FamilyRestorationService`. When there is no active
-/// athlete at all (every athlete archived, or none ever added), this
-/// shows `AthleteFamilyManagementView` directly instead of an empty
-/// dashboard — the family is never actually locked out, since the
+/// Sprint 1 (Daily Use Foundation) integration audit: the doc comment
+/// that used to be here described a "hosts HomeDashboardView,
+/// family.activeAthletes.first" architecture that Sprint 1 replaced —
+/// leaving that description in place after the replacement is exactly
+/// the kind of stale documentation that makes old and new architecture
+/// look mixed even when the actual code isn't. Corrected: when any
+/// active athlete exists, this hosts `FamilyHomeContentView` — the
+/// family-wide "Family Home" screen showing every active athlete's
+/// today, not one athlete's dashboard. `HomeDashboardView` is now
+/// reached only from within `FamilyHomeContentView`, as Athlete
+/// Overview (a per-athlete screen a parent navigates INTO, titled
+/// "<Athlete Name> Home" — see that view's own title logic), never
+/// shown directly from here. When there is no active athlete at all
+/// (every athlete archived, or none ever added), this shows
+/// `AthleteFamilyManagementView` directly instead of an empty Family
+/// Home — the family is never actually locked out, since the
 /// management screen it always falls back to is exactly where "add
 /// athlete" lives. A "Manage Athletes" entry point is also available
-/// from the normal dashboard case (threaded into `HomeDashboardView`),
-/// so a parent doesn't have to delete their only athlete just to reach
-/// the multi-athlete screen.
+/// from the normal Family Home case (inside `FamilyHomeContentView`),
+/// so a parent doesn't have to archive their only athlete just to reach
+/// the multi-athlete screen. Per the same audit: `AthleteFamilyManagementView`
+/// is deliberately administrative-only (list/add/edit/archive) — it
+/// does not navigate into Athlete Overview, and that is the intended
+/// separation, not a regression to fix.
 public struct FamilyHomeView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
@@ -76,6 +79,7 @@ public struct FamilyHomeView: View {
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
+                athleteRepository: athleteRepository,
                 athleteManagementViewModel: makeAthleteManagementViewModel()
             )
         } else {

@@ -32,25 +32,78 @@ public enum ReflectionReminderState {
     case unavailable
 }
 
+/// Sprint 1 integration audit fix: `RestoredFamily.activeAthletes` is a
+/// launch-time snapshot — it is never re-queried after app launch (see
+/// `AthleteFamilyManagementViewModel`'s own established doc comment on
+/// exactly this limitation, written when the multi-athlete foundation
+/// was built, well before this sprint). Family Home was built directly
+/// on top of that stale snapshot, with no refresh of its own — so an
+/// athlete added, archived, or edited after launch silently never
+/// appeared (or a stale one silently failed to resolve, e.g. the
+/// reflection reminder's "Add reflection" link going dead once the
+/// snapshot's athlete no longer matched anything meaningful). This is
+/// the actual architectural gap behind those symptoms, not a collection
+/// of unrelated bugs: `FamilyHomeViewModel` now owns a refreshable
+/// `activeAthletes` list, re-fetched from `AthleteRepository` on every
+/// appearance, and is the single source of truth `FamilyHomeContentView`
+/// reads from for every athlete lookup — `family.activeAthletes` is no
+/// longer read anywhere in that view.
 @MainActor
 @Observable
 public final class FamilyHomeViewModel {
+    public private(set) var activeAthletes: [AthleteProfile]
     public private(set) var rows: [FamilyHomeRow] = []
     public private(set) var reflectionState: ReflectionReminderState = .loading
     public private(set) var errorMessage: String?
 
-    private let activeAthletes: [AthleteProfile]
+    private let workspaceId: WorkspaceId
+    private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
 
     public init(
         activeAthletes: [AthleteProfile],
+        workspaceId: WorkspaceId,
+        athleteRepository: AthleteRepository,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReflectionService: WeeklyReflectionService
     ) {
         self.activeAthletes = activeAthletes
+        self.workspaceId = workspaceId
+        self.athleteRepository = athleteRepository
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
+    }
+
+    /// The single entry point the view calls on appear — refreshes the
+    /// athlete roster first, then loads everything that depends on it,
+    /// in that order, so today's schedule and the reflection reminder
+    /// never operate against a stale roster.
+    public func refresh() {
+        refreshActiveAthletes()
+        loadHome()
+        loadReflectionReminder()
+    }
+
+    /// Re-fetches from persistence — the same repository method and
+    /// active-only filter `AthleteFamilyManagementViewModel.loadAthletes()`
+    /// already established, kept deterministically ordered the same way
+    /// (createdAt, then id) so this list's order never surprises a
+    /// caller relying on "first active athlete."
+    public func refreshActiveAthletes() {
+        do {
+            let fetched = try athleteRepository.fetchAthletes(forWorkspace: workspaceId)
+            activeAthletes = fetched
+                .filter { !$0.isArchived }
+                .sorted { lhs, rhs in
+                    if lhs.createdAt != rhs.createdAt { return lhs.createdAt < rhs.createdAt }
+                    return lhs.id.uuidString < rhs.id.uuidString
+                }
+        } catch {
+            // Keep whatever roster was already known (the launch-time
+            // snapshot, or a previous successful refresh) rather than
+            // clearing it on a transient failure.
+        }
     }
 
     /// Calls the already-existing, per-athlete
