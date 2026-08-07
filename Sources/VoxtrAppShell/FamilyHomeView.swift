@@ -67,23 +67,15 @@ public struct FamilyHomeView: View {
     }
 
     public var body: some View {
-        if let athlete = family.activeAthletes.first {
-            HomeDashboardView(
-                viewModel: HomeDashboardViewModel(
-                    trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                    coachingPresentationProvider: coachingApplicationService,
-                    athleteId: athlete.athleteId,
-                    weekStart: WeeklyPlanningViewModel.currentWeekStart()
-                ),
-                athleteDisplayName: athlete.givenName,
+        if !family.activeAthletes.isEmpty {
+            FamilyHomeContentView(
+                family: family,
                 planningService: planningService,
                 trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
-                athleteId: athlete.athleteId,
-                committedByActorId: ActorId(rawValue: family.participant.id),
                 athleteManagementViewModel: makeAthleteManagementViewModel()
             )
         } else {

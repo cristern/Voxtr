@@ -210,6 +210,15 @@ public final class PlanningService {
         try repository.fetchPlannedActivities(forWeekPlan: weekPlanId)
     }
 
+    /// Sprint 1 (Daily Use Foundation): a thin passthrough, matching
+    /// this service's own established "reuse PlanningService" boundary
+    /// — needed so a UI layer can determine a WeekPlan's `.draft`
+    /// status (e.g. before constructing `ActivityDetailViewModel`)
+    /// without reaching into `PlanningRepository` directly.
+    public func fetchWeekPlan(byId weekPlanId: WeekPlanId) throws -> WeekPlan? {
+        try repository.fetchWeekPlan(byId: weekPlanId)
+    }
+
     /// S2.4: deletes a `PlannedActivity`, only while its `WeekPlan` is
     /// still draft — the same two existence/ownership guards
     /// `editPlannedActivity` already uses, plus the explicitly-requested

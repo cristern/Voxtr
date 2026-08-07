@@ -70,32 +70,30 @@ public struct HomeDashboardView: View {
     }
 
     public var body: some View {
-        NavigationStack {
-            Form {
-                welcomeSection
-                DailyQuoteView()
-                dailyFocusCard
-                coachingSection
-                planningSection
-                trainingSection
-                reflectionSection
-            }
-            .navigationTitle("Home")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Manage Athletes") {
-                        isManagingAthletes = true
-                    }
-                    .accessibilityIdentifier("home.manageAthletesButton")
+        Form {
+            welcomeSection
+            DailyQuoteView()
+            dailyFocusCard
+            coachingSection
+            planningSection
+            trainingSection
+            reflectionSection
+        }
+        .navigationTitle(athleteDisplayName)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Manage Athletes") {
+                    isManagingAthletes = true
                 }
+                .accessibilityIdentifier("home.manageAthletesButton")
             }
-            .sheet(isPresented: $isManagingAthletes) {
-                AthleteFamilyManagementView(viewModel: athleteManagementViewModel)
-            }
-            .onAppear {
-                viewModel.loadTodaysTraining()
-                viewModel.loadCoachingSummary()
-            }
+        }
+        .sheet(isPresented: $isManagingAthletes) {
+            AthleteFamilyManagementView(viewModel: athleteManagementViewModel)
+        }
+        .onAppear {
+            viewModel.loadTodaysTraining()
+            viewModel.loadCoachingSummary()
         }
     }
 
