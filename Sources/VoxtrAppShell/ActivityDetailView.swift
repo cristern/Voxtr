@@ -1,4 +1,5 @@
 import SwiftUI
+import VoxtrCoreContracts
 import VoxtrPlanningDomain
 
 /// Sprint 1 (Daily Use Foundation), Part 3.
