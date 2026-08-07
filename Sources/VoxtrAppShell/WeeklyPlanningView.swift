@@ -124,6 +124,8 @@ public struct WeeklyPlanningView: View {
                         .accessibilityIdentifier("planning.newActivityDatePicker")
                     activityTypePicker(selection: $viewModel.newActivityType)
                         .accessibilityIdentifier("planning.newActivityTypePicker")
+                    TextField("Location (optional)", text: $viewModel.newActivityLocation)
+                        .accessibilityIdentifier("planning.newActivityLocationField")
                     Button("Add activity") {
                         viewModel.addActivity()
                     }

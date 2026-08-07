@@ -62,7 +62,8 @@ public final class PlanningRepository {
         plannedIntensity: Int? = nil,
         externalSourceId: String? = nil,
         externalSourceType: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        location: String? = nil
     ) throws -> PlannedActivity {
         try insertPlannedActivity(
             weekPlanId: weekPlanId,
@@ -79,6 +80,7 @@ public final class PlanningRepository {
             externalSourceId: externalSourceId,
             externalSourceType: externalSourceType,
             notes: notes,
+            location: location,
             saveOverride: nil
         )
     }
@@ -106,6 +108,7 @@ public final class PlanningRepository {
         externalSourceId: String? = nil,
         externalSourceType: String? = nil,
         notes: String? = nil,
+        location: String? = nil,
         saveOverride: (() throws -> Void)?
     ) throws -> PlannedActivity {
         let activity = PlannedActivity(
@@ -122,7 +125,8 @@ public final class PlanningRepository {
             plannedIntensity: plannedIntensity,
             externalSourceId: externalSourceId,
             externalSourceType: externalSourceType,
-            notes: notes
+            notes: notes,
+            location: location
         )
         modelContext.insert(activity)
         if let saveOverride {

@@ -72,11 +72,11 @@ public struct HomeDashboardView: View {
     public var body: some View {
         Form {
             welcomeSection
+            trainingSection
             DailyQuoteView()
             dailyFocusCard
             coachingSection
             planningSection
-            trainingSection
             reflectionSection
         }
         .navigationTitle("\(athleteDisplayName) Home")
@@ -89,7 +89,31 @@ public struct HomeDashboardView: View {
             }
         }
         .sheet(isPresented: $isManagingAthletes) {
-            AthleteFamilyManagementView(viewModel: athleteManagementViewModel)
+            NavigationStack {
+                AthleteFamilyManagementView(
+                    viewModel: athleteManagementViewModel,
+                    athleteHomeDestination: { athlete in
+                        AnyView(HomeDashboardView(
+                            viewModel: HomeDashboardViewModel(
+                                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                                coachingPresentationProvider: coachingApplicationService,
+                                athleteId: athlete.athleteId,
+                                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                            ),
+                            athleteDisplayName: athlete.givenName,
+                            planningService: planningService,
+                            trainingService: trainingService,
+                            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
+                            weeklyReflectionService: weeklyReflectionService,
+                            coachingApplicationService: coachingApplicationService,
+                            athleteId: athlete.athleteId,
+                            committedByActorId: committedByActorId,
+                            athleteManagementViewModel: athleteManagementViewModel
+                        ))
+                    }
+                )
+            }
         }
         .onAppear {
             viewModel.loadTodaysTraining()
@@ -216,12 +240,30 @@ public struct HomeDashboardView: View {
             case .loaded(let activities):
                 if !activities.isEmpty {
                     ForEach(activities, id: \.plannedActivity.id) { item in
-                        HStack {
-                            Text(item.plannedActivity.title)
-                            Spacer()
-                            Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        NavigationLink {
+                            ActivityDetailViewLoader(
+                                plannedActivity: item.plannedActivity,
+                                isCompleted: item.isCompleted,
+                                athleteId: athleteId,
+                                actorId: committedByActorId,
+                                planningService: planningService,
+                                trainingService: trainingService
+                            )
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(item.plannedActivity.title)
+                                    if let location = item.plannedActivity.location, !location.isEmpty {
+                                        Text(location)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         .accessibilityIdentifier("homeDashboard.todaysTraining.row.\(item.plannedActivity.id.uuidString)")
                     }
@@ -234,7 +276,10 @@ public struct HomeDashboardView: View {
                         trainingService: trainingService,
                         coordinationService: trainingPlanningCoordinationService,
                         athleteId: athleteId
-                    )
+                    ),
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    actorId: committedByActorId
                 )
             }
             .accessibilityIdentifier("homeDashboard.dailyTrainingLink")

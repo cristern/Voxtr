@@ -30,10 +30,9 @@ public struct ActivityDetailView: View {
                 if let startTime = viewModel.activity.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
                 }
-                // Known model gap: PlannedActivity has no location
-                // field yet — nothing is shown here rather than a
-                // fabricated placeholder. See this work's own
-                // deliverable for the full explanation.
+                if let location = viewModel.activity.location, !location.isEmpty {
+                    LabeledContent("Location", value: location)
+                }
                 if let notes = viewModel.activity.notes, !notes.isEmpty {
                     LabeledContent("Notes", value: notes)
                 }
@@ -127,6 +126,9 @@ struct ActivityEditFormView: View {
 
                 TextField("Notes", text: $viewModel.editNotes, axis: .vertical)
                     .accessibilityIdentifier("activityDetail.editNotesField")
+
+                TextField("Location", text: $viewModel.editLocation)
+                    .accessibilityIdentifier("activityDetail.editLocationField")
             }
             .navigationTitle("Edit Activity")
             .toolbar {

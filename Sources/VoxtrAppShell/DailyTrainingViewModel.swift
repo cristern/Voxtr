@@ -35,7 +35,7 @@ public final class DailyTrainingViewModel {
 
     private let trainingService: TrainingService
     private let coordinationService: TrainingPlanningCoordinationService
-    private let athleteId: AthleteId
+    public let athleteId: AthleteId
 
     public init(
         trainingService: TrainingService,

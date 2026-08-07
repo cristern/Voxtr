@@ -139,6 +139,12 @@ public final class PlannedActivity {
     public var externalSourceId: String?
     public var externalSourceType: String?
     public var notes: String?
+    // Sprint 1 completion package, Item 5: a simple, optional free-text
+    // field — deliberately not a separate Location entity, no venue
+    // management, no geocoding. Added directly (no schema version bump)
+    // per the current simplified single-version persistence
+    // architecture — there is no production data requiring migration.
+    public var location: String?
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
@@ -159,6 +165,7 @@ public final class PlannedActivity {
         externalSourceId: String? = nil,
         externalSourceType: String? = nil,
         notes: String? = nil,
+        location: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
@@ -172,6 +179,9 @@ public final class PlannedActivity {
         }
         if let n = notes {
             precondition(n.count <= 500, "notes must be 0-500 characters (v1.3 Section 8.2)")
+        }
+        if let l = location {
+            precondition(l.count <= 200, "location must be 0-200 characters")
         }
         self.id = id.rawValue
         self.weekPlanId = weekPlanId.rawValue
@@ -188,6 +198,7 @@ public final class PlannedActivity {
         self.externalSourceId = externalSourceId
         self.externalSourceType = externalSourceType
         self.notes = notes
+        self.location = location
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion

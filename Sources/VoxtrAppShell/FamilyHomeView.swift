@@ -83,8 +83,41 @@ public struct FamilyHomeView: View {
                 athleteManagementViewModel: makeAthleteManagementViewModel()
             )
         } else {
-            AthleteFamilyManagementView(viewModel: makeAthleteManagementViewModel())
+            NavigationStack {
+                AthleteFamilyManagementView(
+                    viewModel: makeAthleteManagementViewModel(),
+                    athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) }
+                )
+            }
         }
+    }
+
+    /// Reused verbatim from `FamilyHomeContentView`'s own
+    /// `athleteOverview(for:)` — the same canonical Athlete Home
+    /// (`HomeDashboardView`), never a second implementation. This
+    /// exists here only because the zero-active-athletes branch above
+    /// is a separate root-level presentation from
+    /// `FamilyHomeContentView`, not because Athlete Home itself
+    /// differs in any way.
+    private func athleteOverview(for athlete: AthleteProfile) -> some View {
+        HomeDashboardView(
+            viewModel: HomeDashboardViewModel(
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                coachingPresentationProvider: coachingApplicationService,
+                athleteId: athlete.athleteId,
+                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+            ),
+            athleteDisplayName: athlete.givenName,
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
+            weeklyReflectionService: weeklyReflectionService,
+            coachingApplicationService: coachingApplicationService,
+            athleteId: athlete.athleteId,
+            committedByActorId: ActorId(rawValue: family.participant.id),
+            athleteManagementViewModel: makeAthleteManagementViewModel()
+        )
     }
 
     private func makeAthleteManagementViewModel() -> AthleteFamilyManagementViewModel {

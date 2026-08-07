@@ -118,7 +118,10 @@ public struct FamilyHomeContentView: View {
                         activityDetail(for: row)
                     }
                 case .manageAthletes:
-                    AthleteFamilyManagementView(viewModel: athleteManagementViewModel)
+                    AthleteFamilyManagementView(
+                        viewModel: athleteManagementViewModel,
+                        athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) }
+                    )
                 }
             }
         }
@@ -154,24 +157,25 @@ public struct FamilyHomeContentView: View {
         }
     }
 
-    /// Upcoming: time + activity is already the row title, so this adds
-    /// nothing extra beyond a location if one existed (it doesn't yet —
-    /// see this work's own deliverable). Completed: duration + date,
-    /// per this part's own requirement — no location field exists to
-    /// show either way.
+    /// Sprint 1 completion package, Item 5: location is now included
+    /// where available — the field genuinely didn't exist when this
+    /// comment previously said so.
     private static func rowSubtitle(for row: FamilyHomeRow) -> String {
+        var parts: [String] = []
         if row.isCompleted {
-            var parts: [String] = []
             if let duration = row.plannedActivity.plannedDurationMinutes {
                 parts.append("\(duration) min")
             }
             parts.append(row.plannedActivity.localDate.isoString)
-            return parts.joined(separator: " · ")
         } else if let startTime = row.plannedActivity.startLocalTime {
-            return String(format: "%02d:%02d", startTime.hour, startTime.minute)
+            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
         } else {
-            return "Ready to log"
+            parts.append("Ready to log")
         }
+        if let location = row.plannedActivity.location, !location.isEmpty {
+            parts.append(location)
+        }
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -233,49 +237,12 @@ public struct FamilyHomeContentView: View {
 
     private func activityDetail(for row: FamilyHomeRow) -> some View {
         ActivityDetailViewLoader(
-            row: row,
+            plannedActivity: row.plannedActivity,
+            isCompleted: row.isCompleted,
+            athleteId: row.athleteId,
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
             trainingService: trainingService
         )
-    }
-}
-
-/// Resolves a `FamilyHomeRow`'s WeekPlan draft status (needed to
-/// construct `ActivityDetailViewModel`) before showing
-/// `ActivityDetailView` — a small, local loading step rather than
-/// fetching this eagerly for every row on Home just to support the rare
-/// tap.
-private struct ActivityDetailViewLoader: View {
-    let row: FamilyHomeRow
-    let actorId: ActorId
-    let planningService: PlanningService
-    let trainingService: TrainingService
-    @State private var viewModel: ActivityDetailViewModel?
-
-    var body: some View {
-        Group {
-            if let viewModel {
-                ActivityDetailView(viewModel: viewModel)
-            } else {
-                ProgressView()
-            }
-        }
-        .onAppear {
-            guard viewModel == nil else { return }
-            let weekPlanId = WeekPlanId(rawValue: row.plannedActivity.weekPlanId)
-            let fetchedWeekPlan = try? planningService.fetchWeekPlan(byId: weekPlanId)
-            let isDraft = (fetchedWeekPlan ?? nil)?.status == .draft
-            viewModel = ActivityDetailViewModel(
-                activity: row.plannedActivity,
-                isCompleted: row.isCompleted,
-                weekPlanId: weekPlanId,
-                athleteId: row.athleteId,
-                isWeekPlanDraft: isDraft,
-                deletedByActorId: actorId,
-                planningService: planningService,
-                trainingService: trainingService
-            )
-        }
     }
 }

@@ -10,9 +10,15 @@ import VoxtrTrainingDomain
 /// logic.
 public struct DailyTrainingView: View {
     @State private var viewModel: DailyTrainingViewModel
+    private let planningService: PlanningService
+    private let trainingService: TrainingService
+    private let actorId: ActorId
 
-    public init(viewModel: DailyTrainingViewModel) {
+    public init(viewModel: DailyTrainingViewModel, planningService: PlanningService, trainingService: TrainingService, actorId: ActorId) {
         _viewModel = State(initialValue: viewModel)
+        self.planningService = planningService
+        self.trainingService = trainingService
+        self.actorId = actorId
     }
 
     public var body: some View {
@@ -31,12 +37,30 @@ public struct DailyTrainingView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                        HStack {
-                            Text(item.plannedActivity.title)
-                            Spacer()
-                            Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                                .font(.caption)
-                                .foregroundStyle(item.isCompleted ? .green : .secondary)
+                        NavigationLink {
+                            ActivityDetailViewLoader(
+                                plannedActivity: item.plannedActivity,
+                                isCompleted: item.isCompleted,
+                                athleteId: viewModel.athleteId,
+                                actorId: actorId,
+                                planningService: planningService,
+                                trainingService: trainingService
+                            )
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading) {
+                                    Text(item.plannedActivity.title)
+                                    if let location = item.plannedActivity.location, !location.isEmpty {
+                                        Text(location)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                                Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                    .font(.caption)
+                                    .foregroundStyle(item.isCompleted ? .green : .secondary)
+                            }
                         }
                         .accessibilityIdentifier("training.plannedActivityRow.\(item.plannedActivity.id.uuidString)")
                     }

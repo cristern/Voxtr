@@ -27,6 +27,7 @@ public final class ActivityDetailViewModel {
     public var editDurationMinutes: Int = 60
     public var editHasDuration: Bool = false
     public var editNotes: String = ""
+    public var editLocation: String = ""
 
     private let weekPlanId: WeekPlanId
     private let athleteId: AthleteId
@@ -80,6 +81,7 @@ public final class ActivityDetailViewModel {
             editHasDuration = false
         }
         editNotes = activity.notes ?? ""
+        editLocation = activity.location ?? ""
     }
 
     @discardableResult
@@ -95,7 +97,8 @@ public final class ActivityDetailViewModel {
                 timeZoneId: activity.timeZoneId,
                 startLocalTime: editHasStartTime ? Self.localTime(from: editStartTime) : nil,
                 plannedDurationMinutes: editHasDuration ? editDurationMinutes : nil,
-                notes: editNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editNotes
+                notes: editNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editNotes,
+                location: editLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editLocation
             )
             activity = updated
             return true

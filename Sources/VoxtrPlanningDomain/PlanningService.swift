@@ -88,7 +88,8 @@ public final class PlanningService {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         plannedIntensity: Int? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        location: String? = nil
     ) throws -> PlannedActivity {
         guard try repository.fetchWeekPlan(byId: weekPlanId) != nil else {
             throw PlanningServiceError.weekPlanNotFound
@@ -111,7 +112,8 @@ public final class PlanningService {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             plannedIntensity: plannedIntensity,
-            notes: notes
+            notes: notes,
+            location: location
         )
     }
 
@@ -134,7 +136,8 @@ public final class PlanningService {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         plannedIntensity: Int? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        location: String? = nil
     ) throws -> PlannedActivity {
         guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
@@ -165,6 +168,7 @@ public final class PlanningService {
         activity.plannedDurationMinutes = plannedDurationMinutes
         activity.plannedIntensity = plannedIntensity
         activity.notes = notes
+        activity.location = location
         activity.updatedAt = .now
 
         try repository.save()
