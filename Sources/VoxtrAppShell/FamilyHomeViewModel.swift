@@ -58,6 +58,7 @@ public final class FamilyHomeViewModel {
     public private(set) var errorMessage: String?
 
     public private(set) var tomorrowRows: [FamilyHomeRow] = []
+    private let workspaceId: WorkspaceId
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
