@@ -29,8 +29,14 @@ public final class ActivityDetailViewModel {
     public var editNotes: String = ""
     public var editLocation: String = ""
 
+    /// Sprint 1.1, P1 (athlete context): passed in by the caller, which
+    /// already has the athlete's name (a `FamilyHomeRow`, an
+    /// `athleteDisplayName` property, etc.) — no repository re-fetch or
+    /// duplicated athlete state.
+    public let athleteDisplayName: String
+
     private let weekPlanId: WeekPlanId
-    private let athleteId: AthleteId
+    public let athleteId: AthleteId
     private let isWeekPlanDraft: Bool
     private let deletedByActorId: ActorId
     private let planningService: PlanningService
@@ -41,6 +47,7 @@ public final class ActivityDetailViewModel {
         isCompleted: Bool,
         weekPlanId: WeekPlanId,
         athleteId: AthleteId,
+        athleteDisplayName: String,
         isWeekPlanDraft: Bool,
         deletedByActorId: ActorId,
         planningService: PlanningService,
@@ -50,6 +57,7 @@ public final class ActivityDetailViewModel {
         self.isCompleted = isCompleted
         self.weekPlanId = weekPlanId
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
         self.isWeekPlanDraft = isWeekPlanDraft
         self.deletedByActorId = deletedByActorId
         self.planningService = planningService
@@ -131,6 +139,7 @@ public final class ActivityDetailViewModel {
         LogActivityViewModel(
             plannedActivity: activity,
             athleteId: athleteId,
+            athleteDisplayName: athleteDisplayName,
             trainingService: trainingService,
             onLogged: { [weak self] in
                 self?.isCompleted = true

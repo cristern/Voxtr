@@ -22,6 +22,7 @@ import VoxtrTrainingDomain
 @Observable
 public final class LogActivityViewModel {
     public let plannedActivity: PlannedActivity
+    public let athleteDisplayName: String
     public private(set) var errorMessage: String?
     public private(set) var didLog: Bool = false
 
@@ -37,11 +38,13 @@ public final class LogActivityViewModel {
     public init(
         plannedActivity: PlannedActivity,
         athleteId: AthleteId,
+        athleteDisplayName: String,
         trainingService: TrainingService,
         onLogged: @escaping () -> Void
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
         self.trainingService = trainingService
         self.onLogged = onLogged
         // Prefilled from the plan itself where a sensible starting

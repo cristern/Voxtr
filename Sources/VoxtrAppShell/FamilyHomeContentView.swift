@@ -142,7 +142,8 @@ public struct FamilyHomeContentView: View {
                     FamilyScheduleView(
                         viewModel: FamilyScheduleViewModel(
                             activeAthletes: viewModel.activeAthletes,
-                            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                            planningService: planningService
                         ),
                         actorId: ActorId(rawValue: family.participant.id),
                         planningService: planningService,
@@ -266,6 +267,7 @@ public struct FamilyHomeContentView: View {
             plannedActivity: row.plannedActivity,
             isCompleted: row.isCompleted,
             athleteId: row.athleteId,
+            athleteDisplayName: row.athleteName,
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
             trainingService: trainingService

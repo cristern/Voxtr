@@ -1,26 +1,72 @@
 import Foundation
 import VoxtrCoreContracts
 import VoxtrAthleteDomain
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+
+/// Sprint 1.1, P1: one row in Family Schedule — either a real, planned
+/// activity (opens the canonical Activity Detail) or a recurring
+/// occurrence that has not yet been materialized into a real
+/// `PlannedActivity` (see `PlanningService.deriveSuggestions(forAthlete:
+/// from:through:)`'s own doc comment for exactly why this distinction
+/// exists). A suggestion has no `PlannedActivityId` yet, so it cannot
+/// open Activity Detail — "tapping an occurrence uses the canonical
+/// Activity Detail path where the domain model supports it" is
+/// satisfied by only offering that navigation for `.planned` rows.
+public enum FamilyScheduleRow: Identifiable {
+    case planned(FamilyHomeRow)
+    case recurringSuggestion(id: String, athleteId: AthleteId, athleteName: String, suggestion: RecurringActivitySuggestion)
+
+    public var id: String {
+        switch self {
+        case .planned(let row): return row.id
+        case .recurringSuggestion(let id, _, _, _): return id
+        }
+    }
+
+    public var athleteName: String {
+        switch self {
+        case .planned(let row): return row.athleteName
+        case .recurringSuggestion(_, _, let athleteName, _): return athleteName
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .planned(let row): return row.plannedActivity.title
+        case .recurringSuggestion(_, _, _, let suggestion): return suggestion.title
+        }
+    }
+
+    public var startLocalTime: LocalTime? {
+        switch self {
+        case .planned(let row): return row.plannedActivity.startLocalTime
+        case .recurringSuggestion(_, _, _, let suggestion): return suggestion.startLocalTime
+        }
+    }
+}
 
 /// Sprint 1 completion package, Part 5. One group of rows for a single
 /// upcoming date — the presentation-level grouping Family Schedule
 /// needs; not a new persisted concept, just a way to organize the same
-/// `PlannedActivity` rows `FamilyHomeRow` already represents by date.
+/// `PlannedActivity`/`RecurringPlannedActivity` rows by date.
 public struct FamilyScheduleDayGroup: Identifiable {
     public let id: String
     public let date: LocalDate
-    public let rows: [FamilyHomeRow]
+    public let rows: [FamilyScheduleRow]
 }
 
-/// Sprint 1 completion package, Part 5: a forward-looking schedule
+/// Sprint 1 completion package, Part 5, extended in Sprint 1.1 P1 to
+/// also include recurring activities: a forward-looking schedule
 /// across every active athlete, grouped by date. Deliberately not a
-/// calendar grid — a simple, deterministic day-by-day list, matching
-/// "prefer a simple, maintainable day/date-based schedule... do not
-/// introduce month-calendar complexity." Reuses
-/// `TrainingPlanningCoordinationService`'s existing date-range query
-/// (added for this same package) — no new persisted model, no
-/// duplicated activities.
+/// calendar grid, per "prefer a simple, maintainable day/date-based
+/// schedule... do not introduce month-calendar complexity." Merges
+/// real `PlannedActivity` rows with unmaterialized recurring
+/// occurrences in the same range — see `FamilyScheduleRow`'s own doc
+/// comment for why these are distinct row kinds, not collapsed
+/// together. Multiple recurring activities are never collapsed: each
+/// occurrence (one per recurring definition per matching date) is its
+/// own row, keyed by its own `externalSourceId`.
 @MainActor
 @Observable
 public final class FamilyScheduleViewModel {
@@ -29,6 +75,7 @@ public final class FamilyScheduleViewModel {
 
     private let activeAthletes: [AthleteProfile]
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
+    private let planningService: PlanningService
 
     /// How many upcoming days this first version shows — deliberately
     /// small and fixed rather than open-ended paging, matching "this is
@@ -37,10 +84,12 @@ public final class FamilyScheduleViewModel {
 
     public init(
         activeAthletes: [AthleteProfile],
-        trainingPlanningCoordinationService: TrainingPlanningCoordinationService
+        trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
+        planningService: PlanningService
     ) {
         self.activeAthletes = activeAthletes
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
+        self.planningService = planningService
     }
 
     public func loadSchedule() {
@@ -54,7 +103,7 @@ public final class FamilyScheduleViewModel {
         let start = Self.localDate(from: startDate, calendar: calendar)
         let end = Self.localDate(from: endDate, calendar: calendar)
 
-        var merged: [FamilyHomeRow] = []
+        var merged: [FamilyScheduleRow] = []
         var anyFailed = false
         for athlete in activeAthletes {
             do {
@@ -62,12 +111,28 @@ public final class FamilyScheduleViewModel {
                     forAthlete: athlete.athleteId, from: start, through: end
                 )
                 merged.append(contentsOf: completions.map { completion in
-                    FamilyHomeRow(
+                    .planned(FamilyHomeRow(
                         id: completion.plannedActivity.id.uuidString,
                         athleteId: athlete.athleteId,
                         athleteName: athlete.givenName,
                         plannedActivity: completion.plannedActivity,
                         isCompleted: completion.isCompleted
+                    ))
+                })
+            } catch {
+                anyFailed = true
+            }
+
+            do {
+                let suggestions = try planningService.deriveSuggestions(
+                    forAthlete: athlete.athleteId, from: start, through: end
+                )
+                merged.append(contentsOf: suggestions.map { suggestion in
+                    .recurringSuggestion(
+                        id: suggestion.id,
+                        athleteId: athlete.athleteId,
+                        athleteName: athlete.givenName,
+                        suggestion: suggestion
                     )
                 })
             } catch {
@@ -79,7 +144,12 @@ public final class FamilyScheduleViewModel {
         // start time (no-start-time rows sorted after timed ones —
         // deterministic, same convention as Family Home's own today
         // list), and sort the groups themselves by date.
-        let grouped = Dictionary(grouping: merged) { $0.plannedActivity.localDate }
+        let grouped = Dictionary(grouping: merged) { row -> LocalDate in
+            switch row {
+            case .planned(let familyRow): return familyRow.plannedActivity.localDate
+            case .recurringSuggestion(_, _, _, let suggestion): return suggestion.occurrenceDate
+            }
+        }
         dayGroups = grouped.keys.sorted().map { date in
             let rowsForDate = grouped[date] ?? []
             let sortedRows = rowsForDate.sorted { lhs, rhs in
@@ -93,8 +163,8 @@ public final class FamilyScheduleViewModel {
         }
     }
 
-    private static func timeSortKey(_ row: FamilyHomeRow) -> Int {
-        guard let time = row.plannedActivity.startLocalTime else { return Int.max }
+    private static func timeSortKey(_ row: FamilyScheduleRow) -> Int {
+        guard let time = row.startLocalTime else { return Int.max }
         return time.hour * 60 + time.minute
     }
 

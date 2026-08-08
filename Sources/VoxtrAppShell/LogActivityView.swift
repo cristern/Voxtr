@@ -26,14 +26,14 @@ public struct LogActivityView: View {
                 // Read-only context — already known from the plan, never
                 // re-asked.
                 Section {
+                    LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                     LabeledContent("Activity", value: viewModel.plannedActivity.title)
                     LabeledContent("Date", value: viewModel.plannedActivity.localDate.isoString)
                 }
                 .accessibilityIdentifier("logActivity.plannedContext")
 
                 Section("How did it go?") {
-                    Stepper("Duration: \(viewModel.durationMinutes) min", value: $viewModel.durationMinutes, in: 1...1440)
-                        .accessibilityIdentifier("logActivity.durationStepper")
+                    DurationPickerView(durationMinutes: $viewModel.durationMinutes)
 
                     Picker("RPE", selection: $viewModel.perceivedExertion) {
                         Text("Not set").tag(Int?.none)

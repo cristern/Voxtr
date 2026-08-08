@@ -82,7 +82,7 @@ struct Sprint1CoreFlowCompletionTests {
 
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
-            athleteId: athleteId, isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingService: trainingService
         )
 
@@ -114,7 +114,7 @@ struct Sprint1CoreFlowCompletionTests {
 
         var loggedFlag = false
         let logViewModel = LogActivityViewModel(
-            plannedActivity: activity, athleteId: athleteId, trainingService: trainingService,
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", trainingService: trainingService,
             onLogged: { loggedFlag = true }
         )
         logViewModel.durationMinutes = 45

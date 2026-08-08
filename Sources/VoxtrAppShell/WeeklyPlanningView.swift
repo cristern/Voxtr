@@ -97,6 +97,7 @@ public struct WeeklyPlanningView: View {
                             plannedActivity: activity,
                             isCompleted: false,
                             athleteId: viewModel.athleteId,
+                            athleteDisplayName: athleteDisplayName,
                             actorId: actorId,
                             planningService: planningService,
                             trainingService: trainingService

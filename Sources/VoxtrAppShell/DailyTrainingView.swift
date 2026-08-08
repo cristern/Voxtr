@@ -10,15 +10,25 @@ import VoxtrTrainingDomain
 /// logic.
 public struct DailyTrainingView: View {
     @State private var viewModel: DailyTrainingViewModel
+    @State private var recurringManagementViewModel: WeeklyPlanningViewModel?
+    @State private var isManagingRecurringActivities: Bool = false
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let actorId: ActorId
+    private let athleteDisplayName: String
 
-    public init(viewModel: DailyTrainingViewModel, planningService: PlanningService, trainingService: TrainingService, actorId: ActorId) {
+    public init(
+        viewModel: DailyTrainingViewModel,
+        planningService: PlanningService,
+        trainingService: TrainingService,
+        actorId: ActorId,
+        athleteDisplayName: String
+    ) {
         _viewModel = State(initialValue: viewModel)
         self.planningService = planningService
         self.trainingService = trainingService
         self.actorId = actorId
+        self.athleteDisplayName = athleteDisplayName
     }
 
     public var body: some View {
@@ -42,6 +52,7 @@ public struct DailyTrainingView: View {
                                 plannedActivity: item.plannedActivity,
                                 isCompleted: item.isCompleted,
                                 athleteId: viewModel.athleteId,
+                                athleteDisplayName: athleteDisplayName,
                                 actorId: actorId,
                                 planningService: planningService,
                                 trainingService: trainingService
@@ -152,10 +163,29 @@ public struct DailyTrainingView: View {
                 .disabled(viewModel.isSubmitting)
                 .accessibilityIdentifier("training.logActivityButton")
             }
+
+            Section {
+                Button("Manage Recurring Activities") {
+                    let recurringViewModel = WeeklyPlanningViewModel(
+                        service: planningService,
+                        athleteId: viewModel.athleteId,
+                        committedByActorId: actorId
+                    )
+                    recurringViewModel.loadRecurringActivities()
+                    recurringManagementViewModel = recurringViewModel
+                    isManagingRecurringActivities = true
+                }
+                .accessibilityIdentifier("training.manageRecurringActivitiesButton")
+            }
         }
-        .navigationTitle("Daily Training")
+        .navigationTitle("\(athleteDisplayName) Daily Training")
         .onAppear {
             viewModel.load()
+        }
+        .sheet(isPresented: $isManagingRecurringActivities) {
+            if let recurringManagementViewModel {
+                RecurringActivityManagementView(viewModel: recurringManagementViewModel)
+            }
         }
     }
 }

@@ -1,0 +1,6 @@
+The following files were deleted as part of Sprint 1.1 (P2 — Daily Focus removal left them orphaned, zero remaining callers, confirmed by whole-repo search):
+
+Sources/VoxtrAppShell/DailyFocusCardView.swift
+Sources/VoxtrAppShell/DailyFocusStrings.swift
+
+Neither was registered in project.pbxproj (both were SPM Sources/ files, auto-included by directory), so no pbxproj change is required to remove them — deleting the files from the repository is sufficient. Please delete these two files manually when applying this ZIP, since a ZIP cannot express a deletion on its own.

@@ -74,7 +74,6 @@ public struct HomeDashboardView: View {
             welcomeSection
             trainingSection
             DailyQuoteView()
-            dailyFocusCard
             coachingSection
             planningSection
             reflectionSection
@@ -121,27 +120,18 @@ public struct HomeDashboardView: View {
         }
     }
 
-    /// Sprint 13 (architecture correction): passes
-    /// `viewModel.dailyFocusState` — a value already fully derived by
-    /// `HomeDashboardViewModel` from `todaysTrainingState`/
-    /// `coachingSummaryState` — directly to `DailyFocusCardView`. No
-    /// `DailyFocusViewModel` is constructed here anymore (that type no
-    /// longer exists); no third loading call is triggered anywhere in
-    /// this file. `HomeDashboardViewModel`'s own `loadTodaysTraining()`/
-    /// `loadCoachingSummary()` calls below are still the only two
-    /// loading entry points this screen has ever had.
-    private var dailyFocusCard: some View {
-        DailyFocusCardView(
-            dailyFocusState: viewModel.dailyFocusState,
-            athleteDisplayName: athleteDisplayName,
-            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
-            weeklyReflectionService: weeklyReflectionService,
-            coachingApplicationService: coachingApplicationService,
-            athleteId: athleteId,
-            weekStart: viewModel.weekStart,
-            committedByActorId: committedByActorId
-        )
-    }
+    /// Sprint 1.1, P2: the `dailyFocusCard` UI section that used to live
+    /// here (`DailyFocusCardView`) was removed — it duplicated
+    /// `trainingSection`'s own "Strength — Not yet logged" content with
+    /// no additional information, exactly the redundancy this work
+    /// package identified. Removed the VIEW only:
+    /// `HomeDashboardViewModel.dailyFocusState`,
+    /// `loadCoachingSummary()`, and `DailyFocusComposer` are all
+    /// untouched — no domain concept or persistence was deleted, and
+    /// nothing was invented to replace this section, per this work
+    /// package's own explicit constraint. A future, genuinely
+    /// contextual Daily Focus (reflection/load/recommendation-based) is
+    /// out of scope here.
 
     private var welcomeSection: some View {
         Section {
@@ -249,6 +239,7 @@ public struct HomeDashboardView: View {
                                 plannedActivity: item.plannedActivity,
                                 isCompleted: item.isCompleted,
                                 athleteId: athleteId,
+                                athleteDisplayName: athleteDisplayName,
                                 actorId: committedByActorId,
                                 planningService: planningService,
                                 trainingService: trainingService
@@ -283,7 +274,8 @@ public struct HomeDashboardView: View {
                     ),
                     planningService: planningService,
                     trainingService: trainingService,
-                    actorId: committedByActorId
+                    actorId: committedByActorId,
+                    athleteDisplayName: athleteDisplayName
                 )
             }
             .accessibilityIdentifier("homeDashboard.dailyTrainingLink")

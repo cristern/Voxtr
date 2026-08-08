@@ -16,10 +16,17 @@ import VoxtrTrainingDomain
 /// `ActivityDetailViewModel`) before showing `ActivityDetailView` — a
 /// small, local loading step rather than fetching this eagerly for
 /// every row just to support the occasional tap.
+///
+/// Sprint 1.1, P1 (athlete context): `athleteDisplayName` is required
+/// from every caller — each one already has the athlete's name at hand
+/// (a `FamilyHomeRow`, an `athleteDisplayName` property already on the
+/// calling view, etc.), so this never duplicates athlete state or
+/// re-fetches it from a repository.
 public struct ActivityDetailViewLoader: View {
     let plannedActivity: PlannedActivity
     let isCompleted: Bool
     let athleteId: AthleteId
+    let athleteDisplayName: String
     let actorId: ActorId
     let planningService: PlanningService
     let trainingService: TrainingService
@@ -29,6 +36,7 @@ public struct ActivityDetailViewLoader: View {
         plannedActivity: PlannedActivity,
         isCompleted: Bool,
         athleteId: AthleteId,
+        athleteDisplayName: String,
         actorId: ActorId,
         planningService: PlanningService,
         trainingService: TrainingService
@@ -36,6 +44,7 @@ public struct ActivityDetailViewLoader: View {
         self.plannedActivity = plannedActivity
         self.isCompleted = isCompleted
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
         self.actorId = actorId
         self.planningService = planningService
         self.trainingService = trainingService
@@ -59,6 +68,7 @@ public struct ActivityDetailViewLoader: View {
                 isCompleted: isCompleted,
                 weekPlanId: weekPlanId,
                 athleteId: athleteId,
+                athleteDisplayName: athleteDisplayName,
                 isWeekPlanDraft: isDraft,
                 deletedByActorId: actorId,
                 planningService: planningService,

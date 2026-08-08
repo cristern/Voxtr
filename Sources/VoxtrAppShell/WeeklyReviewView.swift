@@ -54,7 +54,7 @@ public struct WeeklyReviewView: View {
 
             coachingSection
         }
-        .navigationTitle("Weekly Review")
+        .navigationTitle("\(athleteDisplayName) Weekly Review")
         .onAppear {
             viewModel.load()
             viewModel.loadCoachingPresentation()
@@ -67,15 +67,17 @@ public struct WeeklyReviewView: View {
             viewModel.load()
         }) {
             if case .loaded(let result) = viewModel.loadState {
-                WeeklyReflectionFormView(
-                    viewModel: WeeklyReflectionFormViewModel(
-                        service: reflectionService,
-                        athleteId: viewModel.athleteId,
-                        weekStart: viewModel.weekStart,
-                        authorId: authorId,
-                        existing: result.weeklyReflection
+                NavigationStack {
+                    WeeklyReflectionFormView(
+                        viewModel: WeeklyReflectionFormViewModel(
+                            service: reflectionService,
+                            athleteId: viewModel.athleteId,
+                            weekStart: viewModel.weekStart,
+                            authorId: authorId,
+                            existing: result.weeklyReflection
+                        )
                     )
-                )
+                }
             }
         }
     }

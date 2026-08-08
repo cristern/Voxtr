@@ -25,6 +25,7 @@ public struct ActivityDetailView: View {
             }
 
             Section {
+                LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                 LabeledContent("Activity", value: viewModel.activity.title)
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
                 if let startTime = viewModel.activity.startLocalTime {
@@ -120,8 +121,7 @@ struct ActivityEditFormView: View {
 
                 Toggle("Has duration", isOn: $viewModel.editHasDuration)
                 if viewModel.editHasDuration {
-                    Stepper("Duration: \(viewModel.editDurationMinutes) min", value: $viewModel.editDurationMinutes, in: 1...1440)
-                        .accessibilityIdentifier("activityDetail.editDurationStepper")
+                    DurationPickerView(durationMinutes: $viewModel.editDurationMinutes)
                 }
 
                 TextField("Notes", text: $viewModel.editNotes, axis: .vertical)

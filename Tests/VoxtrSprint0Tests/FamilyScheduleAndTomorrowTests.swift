@@ -154,7 +154,8 @@ struct FamilyScheduleAndTomorrowTests {
 
         let viewModel = FamilyScheduleViewModel(
             activeAthletes: [oliver, emma],
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
         )
         viewModel.loadSchedule()
 
@@ -204,7 +205,8 @@ struct FamilyScheduleAndTomorrowTests {
         )
         let viewModel = FamilyScheduleViewModel(
             activeAthletes: [athlete],
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
         )
         // Note: athleteId in the group's rows comes from the ViewModel's
         // own activeAthletes list, not the freshly-generated athleteId
@@ -222,9 +224,123 @@ struct FamilyScheduleAndTomorrowTests {
         // created, not derived or guessed.
         let detailViewModel = ActivityDetailViewModel(
             activity: created, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
-            athleteId: athleteId, isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingService: trainingService
         )
         #expect(detailViewModel.activity.plannedActivityId == created.plannedActivityId)
+    }
+}
+
+extension FamilyScheduleAndTomorrowTests {
+    /// Sprint 1.1, P1: Family Schedule must show recurring activities
+    /// occurring within its displayed range, even for a week the
+    /// parent has never visited (no WeekPlan exists yet for it) — the
+    /// exact gap this fix addresses. Confirms the recurring occurrence
+    /// appears as its own, distinct row (never collapsed with a real
+    /// planned activity), with correct athlete identity.
+    @Test("Family Schedule includes recurring activities within its date range, even for a week with no existing WeekPlan")
+    @MainActor
+    func familyScheduleIncludesRecurringActivitiesForUnvisitedWeek() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        // A recurring activity effective well into the future — no
+        // WeekPlan has ever been created for any of the weeks it
+        // recurs into; deliberately NOT calling getOrCreateWeekPlan at
+        // all, matching "a week nobody has visited yet."
+        guard let farFuture = Calendar.current.date(byAdding: .day, value: 10, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: farFuture)
+        let farFutureDate = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
+            weekday: farFutureDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [oliver],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        let matchingGroup = viewModel.dayGroups.first { $0.date == farFutureDate }
+        let recurringRow = matchingGroup?.rows.first { row in
+            if case .recurringSuggestion = row { return true }
+            return false
+        }
+        #expect(recurringRow != nil)
+        #expect(recurringRow?.title == "Swim Practice")
+        #expect(recurringRow?.athleteName == "Oliver")
+    }
+
+    @Test("A recurring occurrence already materialized into a real PlannedActivity is not duplicated as a separate suggestion row")
+    @MainActor
+    func materializedRecurringOccurrenceIsNotDuplicated() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let inThreeDays = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: inThreeDays)
+        let occurrenceDate = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let weekStart = TrainingPlanningCoordinationService.weekStart(referenceDate: inThreeDays)
+
+        let recurring = try planningService.createRecurringPlannedActivity(
+            athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
+            weekday: occurrenceDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+
+        // Materialize the occurrence via the real acceptSuggestion path.
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStart)
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let matchingSuggestion = try #require(suggestions.first { $0.recurringPlannedActivityId == recurring.recurringPlannedActivityId })
+        _ = try planningService.acceptSuggestion(matchingSuggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [oliver],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        let matchingGroup = viewModel.dayGroups.first { $0.date == occurrenceDate }
+        // Exactly one row for this occurrence — the materialized
+        // .planned one — never a duplicate .recurringSuggestion.
+        #expect(matchingGroup?.rows.count == 1)
+        if case .planned = matchingGroup?.rows.first {
+            // Correct — materialized.
+        } else {
+            Issue.record("Expected the materialized occurrence to appear as a .planned row, not a suggestion")
+        }
     }
 }

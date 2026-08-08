@@ -424,6 +424,114 @@ public final class PlanningService {
         }
     }
 
+    /// Sprint 1.1, P1 (Family Schedule missing recurring activities):
+    /// `deriveSuggestions(forWeekPlan:)` above requires an existing
+    /// `WeekPlan` — but a WeekPlan is only ever created when a parent
+    /// actually opens that week's Weekly Plan screen
+    /// (`getOrCreateWeekPlan`). A future week nobody has visited yet
+    /// has no WeekPlan at all, so that method can't be used to preview
+    /// recurring occurrences across a multi-week range like Family
+    /// Schedule's. This is the same occurrence-matching logic
+    /// (weekday match, effective-date-range match, already-materialized
+    /// occurrences excluded), generalized to an arbitrary date range
+    /// and not requiring any WeekPlan to pre-exist. Still excludes
+    /// occurrences already materialized into a real `PlannedActivity`
+    /// (checked per-week, only for weeks that do have a WeekPlan — a
+    /// week with none can't have any materialized occurrences either).
+    /// Returns unmaterialized suggestions only — a real
+    /// `PlannedActivity` in the same range is returned separately by
+    /// `TrainingPlanningCoordinationService`'s own range query; callers
+    /// combine both, the same way Family Schedule needs to represent
+    /// "planned for real" and "recurring but not yet accepted" as
+    /// distinct row kinds rather than conflating them.
+    public func deriveSuggestions(
+        forAthlete athleteId: AthleteId,
+        from startDate: LocalDate,
+        through endDate: LocalDate,
+        calendar: Calendar = .current
+    ) throws -> [RecurringActivitySuggestion] {
+        guard startDate <= endDate else { return [] }
+
+        let recurringActivities = try repository.fetchRecurringPlannedActivities(forAthlete: athleteId).filter(\.isEnabled)
+        guard !recurringActivities.isEmpty else { return [] }
+
+        // Already-materialized occurrences, gathered across every week
+        // that overlaps the range and genuinely has a WeekPlan — a week
+        // with no WeekPlan has nothing materialized in it by
+        // definition.
+        var acceptedExternalSourceIds: Set<String> = []
+        var weekStarts: Set<LocalDate> = []
+        if let startDay = calendar.date(from: DateComponents(year: startDate.year, month: startDate.month, day: startDate.day)),
+           let endDay = calendar.date(from: DateComponents(year: endDate.year, month: endDate.month, day: endDate.day)) {
+            var cursor = startDay
+            while cursor <= endDay {
+                let cursorComponents = calendar.dateComponents([.year, .month, .day], from: cursor)
+                let cursorDate = LocalDate(
+                    year: cursorComponents.year ?? 1970,
+                    month: cursorComponents.month ?? 1,
+                    day: cursorComponents.day ?? 1
+                )
+                let weekOfCursor = calendar.dateInterval(of: .weekOfYear, for: cursor)?.start ?? cursor
+                let weekComponents = calendar.dateComponents([.year, .month, .day], from: weekOfCursor)
+                weekStarts.insert(LocalDate(
+                    year: weekComponents.year ?? 1970,
+                    month: weekComponents.month ?? 1,
+                    day: weekComponents.day ?? 1
+                ))
+                _ = cursorDate
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
+            }
+        }
+        for weekStart in weekStarts {
+            guard let weekPlan = try repository.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else { continue }
+            let existingActivities = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+            for activity in existingActivities {
+                guard activity.externalSourceType == RecurringPlannedActivity.externalSourceType,
+                      let externalSourceId = activity.externalSourceId else { continue }
+                acceptedExternalSourceIds.insert(externalSourceId)
+            }
+        }
+
+        var suggestions: [RecurringActivitySuggestion] = []
+        for recurringActivity in recurringActivities {
+            var date = startDate
+            while date <= endDate {
+                defer { date = date.adding(days: 1) }
+                guard date.weekday == recurringActivity.weekday else { continue }
+                guard recurringActivity.effectiveStartDate <= date, date <= recurringActivity.effectiveEndDate else { continue }
+                let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
+                    recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
+                    occurrenceDate: date,
+                    athleteId: athleteId
+                )
+                guard !acceptedExternalSourceIds.contains(externalSourceId) else { continue }
+                suggestions.append(
+                    RecurringActivitySuggestion(
+                        id: externalSourceId,
+                        recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
+                        athleteId: athleteId,
+                        occurrenceDate: date,
+                        title: recurringActivity.title,
+                        activityType: recurringActivity.activityType,
+                        sportId: recurringActivity.sportId.map(SportId.init(rawValue:)),
+                        categoryIds: recurringActivity.categoryIds.map(ActivityCategoryId.init(rawValue:)),
+                        startLocalTime: recurringActivity.startLocalTime,
+                        plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
+                        timeZoneId: recurringActivity.timeZoneId
+                    )
+                )
+            }
+        }
+
+        return suggestions.sorted { lhs, rhs in
+            if lhs.occurrenceDate != rhs.occurrenceDate {
+                return lhs.occurrenceDate < rhs.occurrenceDate
+            }
+            return lhs.recurringPlannedActivityId.rawValue.uuidString < rhs.recurringPlannedActivityId.rawValue.uuidString
+        }
+    }
+
     /// Accepts one suggestion, creating exactly one `PlannedActivity` in
     /// the given `WeekPlan`. `suggestion` is treated as untrusted,
     /// caller-suppliable presentation data, not authoritative domain
