@@ -77,6 +77,89 @@ public final class TrainingPlanningCoordinationService {
         return try plannedActivitiesWithCompletion(todaysActivities)
     }
 
+    /// Sprint 1 completion package, Part 4 (Tomorrow on Family Home):
+    /// the same derivation as `todaysPlannedActivitiesWithCompletion`,
+    /// generalized to an arbitrary `LocalDate` rather than hardcoded to
+    /// "today" — computes the WeekPlan that actually contains `date`
+    /// (which may differ from today's own week, e.g. tomorrow being the
+    /// first day of next week), not assumed to be the current week.
+    /// Empty (not an error) if no WeekPlan exists for that week, same
+    /// "nothing to show yet" meaning as the today-specific method.
+    public func plannedActivitiesWithCompletion(
+        forAthlete athleteId: AthleteId,
+        on date: LocalDate,
+        calendar: Calendar = .current
+    ) throws -> [PlannedActivityCompletion] {
+        let weekStart = Self.weekStart(containing: date, calendar: calendar)
+        guard let weekPlan = try planningRepository.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else {
+            return []
+        }
+        let activities = try planningRepository
+            .fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+            .filter { $0.localDate == date }
+        return try plannedActivitiesWithCompletion(activities)
+    }
+
+    /// Sprint 1 completion package, Part 5 (Family Schedule): activities
+    /// across a date range (inclusive), which may span more than one
+    /// WeekPlan — fetches each distinct week's WeekPlan that overlaps
+    /// the range (skipping any that don't exist, same "nothing planned
+    /// yet" meaning as elsewhere) and filters to the range. Result
+    /// order is NOT guaranteed sorted by date — callers that need a
+    /// specific ordering (Family Schedule groups by date) sort the
+    /// result themselves, the same separation of concerns
+    /// `plannedActivitiesWithCompletion(_:)` already establishes
+    /// (fetch/derive here, present elsewhere).
+    public func plannedActivitiesWithCompletion(
+        forAthlete athleteId: AthleteId,
+        from startDate: LocalDate,
+        through endDate: LocalDate,
+        calendar: Calendar = .current
+    ) throws -> [PlannedActivityCompletion] {
+        guard let startDay = calendar.date(from: DateComponents(year: startDate.year, month: startDate.month, day: startDate.day)),
+              let endDay = calendar.date(from: DateComponents(year: endDate.year, month: endDate.month, day: endDate.day)),
+              startDay <= endDay else {
+            return []
+        }
+
+        var weekStarts: Set<LocalDate> = []
+        var cursor = startDay
+        while cursor <= endDay {
+            let cursorComponents = calendar.dateComponents([.year, .month, .day], from: cursor)
+            let cursorDate = LocalDate(
+                year: cursorComponents.year ?? 1970,
+                month: cursorComponents.month ?? 1,
+                day: cursorComponents.day ?? 1
+            )
+            weekStarts.insert(Self.weekStart(containing: cursorDate, calendar: calendar))
+            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+            cursor = next
+        }
+
+        var allActivities: [PlannedActivity] = []
+        for weekStart in weekStarts {
+            guard let weekPlan = try planningRepository.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else {
+                continue
+            }
+            let activities = try planningRepository
+                .fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+                .filter { $0.localDate >= startDate && $0.localDate <= endDate }
+            allActivities.append(contentsOf: activities)
+        }
+
+        return try plannedActivitiesWithCompletion(allActivities)
+    }
+
+    /// Start of the calendar week containing `date` (a `LocalDate`, not
+    /// a reference `Date`/instant) — generalizes `weekStart(referenceDate:calendar:)`
+    /// above, which only ever computes the week containing "now."
+    /// Needed because Tomorrow/Family Schedule must resolve the WeekPlan
+    /// for an arbitrary future date, not just today's own week.
+    static func weekStart(containing date: LocalDate, calendar: Calendar = .current) -> LocalDate {
+        let asDate = calendar.date(from: DateComponents(year: date.year, month: date.month, day: date.day)) ?? .now
+        return weekStart(referenceDate: asDate, calendar: calendar)
+    }
+
     /// Sprint 5.1: the completion-derivation primitive, extracted so
     /// `WeeklyReviewCoordinationService` can reuse it for a whole week's
     /// planned activities instead of duplicating this check — the

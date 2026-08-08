@@ -15,6 +15,8 @@ enum FamilyHomeDestination: Hashable {
     case athlete(AthleteId)
     case activity(rowId: String)
     case manageAthletes
+    case reflection(AthleteId)
+    case familySchedule
 }
 
 /// The actual Family Home content — replaces the previous
@@ -91,6 +93,13 @@ public struct FamilyHomeContentView: View {
                 }
                 .accessibilityIdentifier("familyHome.scheduleList")
 
+                tomorrowSection
+
+                Section {
+                    NavigationLink("View upcoming schedule", value: FamilyHomeDestination.familySchedule)
+                        .accessibilityIdentifier("familyHome.familyScheduleLink")
+                }
+
                 reflectionReminderSection
             }
             // Naming/navigation clarity: "Family Home" always, never
@@ -122,8 +131,37 @@ public struct FamilyHomeContentView: View {
                         viewModel: athleteManagementViewModel,
                         athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) }
                     )
+                case .reflection(let athleteId):
+                    ReflectionFormViewLoader(
+                        athleteId: athleteId,
+                        weekStart: TrainingPlanningCoordinationService.weekStart(),
+                        authorId: ActorId(rawValue: family.participant.id),
+                        weeklyReflectionService: weeklyReflectionService
+                    )
+                case .familySchedule:
+                    FamilyScheduleView(
+                        viewModel: FamilyScheduleViewModel(
+                            activeAthletes: viewModel.activeAthletes,
+                            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                        ),
+                        actorId: ActorId(rawValue: family.participant.id),
+                        planningService: planningService,
+                        trainingService: trainingService
+                    )
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var tomorrowSection: some View {
+        if !viewModel.tomorrowRows.isEmpty {
+            Section("Tomorrow") {
+                ForEach(viewModel.tomorrowRows) { row in
+                    familyHomeRow(row)
+                }
+            }
+            .accessibilityIdentifier("familyHome.tomorrowList")
         }
     }
 
@@ -181,33 +219,21 @@ public struct FamilyHomeContentView: View {
     @ViewBuilder
     private var reflectionReminderSection: some View {
         Section("Reflection") {
-            switch viewModel.reflectionState {
-            case .loading:
-                ProgressView()
-            case .unavailable:
-                EmptyView()
-            case .none(let athleteName):
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No reflection yet this week.")
-                        .foregroundStyle(.secondary)
-                    if let athlete = viewModel.activeAthletes.first(where: { $0.givenName == athleteName }) {
-                        NavigationLink("Add reflection", value: FamilyHomeDestination.athlete(athlete.athleteId))
-                            .accessibilityIdentifier("familyHome.addReflectionLink")
+            if viewModel.reflectionReminders.isEmpty {
+                Text("No reflection yet this week.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.reflectionReminders) { reminder in
+                    NavigationLink(value: FamilyHomeDestination.reflection(reminder.athleteId)) {
+                        HStack {
+                            Text(reminder.athleteName)
+                            Spacer()
+                            Text(reminder.reflectionExists ? "Recorded" : "No reflection yet")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                }
-            case .recorded(let athleteName, let whatWentWell, let whatCouldImprove):
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(athleteName).font(.caption).foregroundStyle(.secondary)
-                    if let whatWentWell, !whatWentWell.isEmpty {
-                        Text("What went well: \(whatWentWell)")
-                    }
-                    if let whatCouldImprove, !whatCouldImprove.isEmpty {
-                        Text("What could improve: \(whatCouldImprove)")
-                    }
-                    if let athlete = viewModel.activeAthletes.first(where: { $0.givenName == athleteName }) {
-                        NavigationLink("Open reflection", value: FamilyHomeDestination.athlete(athlete.athleteId))
-                            .accessibilityIdentifier("familyHome.openReflectionLink")
-                    }
+                    .accessibilityIdentifier("familyHome.reflectionRow.\(reminder.id)")
                 }
             }
         }

@@ -20,6 +20,8 @@ public final class WeeklyPlanningViewModel {
     public var newActivityDate: Date = .now
     public var newActivityType: ActivityType = .individualTraining
     public var newActivityLocation: String = ""
+    public var newActivityHasStartTime: Bool = false
+    public var newActivityStartTime: Date = .now
 
     /// Derived fresh on every load/mutation, never persisted. Reflects
     /// `dismissedSuggestionIds` below — a dismissed occurrence is
@@ -48,7 +50,7 @@ public final class WeeklyPlanningViewModel {
     public var recurringFormEndDate: Date = .now
 
     private let service: PlanningService
-    private let athleteId: AthleteId
+    public let athleteId: AthleteId
     private let committedByActorId: ActorId
     private let weekStart: LocalDate
 
@@ -108,11 +110,14 @@ public final class WeeklyPlanningViewModel {
                 title: trimmedTitle,
                 localDate: localDate,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
+                startLocalTime: newActivityHasStartTime ? Self.localTime(from: newActivityStartTime) : nil,
                 location: newActivityLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newActivityLocation
             )
             newActivityTitle = ""
             newActivityDate = .now
             newActivityLocation = ""
+            newActivityHasStartTime = false
+            newActivityStartTime = .now
             try reloadActivities(for: weekPlan)
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)

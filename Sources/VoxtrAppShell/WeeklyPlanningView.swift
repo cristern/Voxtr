@@ -1,6 +1,7 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 
 /// S2.4: first functional Weekly Planning UI. Deliberately unpolished —
 /// design polish is explicitly out of scope. All state changes go
@@ -18,15 +19,24 @@ import VoxtrPlanningDomain
 /// activity-type pickers).
 public struct WeeklyPlanningView: View {
     @State private var viewModel: WeeklyPlanningViewModel
-    @State private var isEditingActivity: Bool = false
-    @State private var editingActivity: PlannedActivity?
-    @State private var editTitle: String = ""
-    @State private var editDate: Date = .now
-    @State private var editActivityType: ActivityType = .individualTraining
     @State private var isManagingRecurringActivities: Bool = false
+    private let athleteDisplayName: String
+    private let planningService: PlanningService
+    private let trainingService: TrainingService
+    private let actorId: ActorId
 
-    public init(viewModel: WeeklyPlanningViewModel) {
+    public init(
+        viewModel: WeeklyPlanningViewModel,
+        athleteDisplayName: String,
+        planningService: PlanningService,
+        trainingService: TrainingService,
+        actorId: ActorId
+    ) {
         _viewModel = State(initialValue: viewModel)
+        self.athleteDisplayName = athleteDisplayName
+        self.planningService = planningService
+        self.trainingService = trainingService
+        self.actorId = actorId
     }
 
     public var body: some View {
@@ -82,28 +92,24 @@ public struct WeeklyPlanningView: View {
 
             Section("Planned activities") {
                 ForEach(viewModel.activities, id: \.id) { activity in
-                    VStack(alignment: .leading) {
-                        Text(activity.title)
-                        Text(activity.localDate.isoString)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    NavigationLink {
+                        ActivityDetailViewLoader(
+                            plannedActivity: activity,
+                            isCompleted: false,
+                            athleteId: viewModel.athleteId,
+                            actorId: actorId,
+                            planningService: planningService,
+                            trainingService: trainingService
+                        )
+                    } label: {
+                        VStack(alignment: .leading) {
+                            Text(activity.title)
+                            Text(Self.rowSubtitle(for: activity))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
-                    .contentShape(Rectangle())
                     .accessibilityIdentifier("planning.activityRow.\(activity.id.uuidString)")
-                    .onTapGesture {
-                        guard !viewModel.isCommitted else { return }
-                        editingActivity = activity
-                        editTitle = activity.title
-                        editActivityType = activity.activityType
-                        editDate = Calendar.current.date(
-                            from: DateComponents(
-                                year: activity.localDate.year,
-                                month: activity.localDate.month,
-                                day: activity.localDate.day
-                            )
-                        ) ?? .now
-                        isEditingActivity = true
-                    }
                     .swipeActions {
                         if !viewModel.isCommitted {
                             Button("Delete", role: .destructive) {
@@ -124,6 +130,12 @@ public struct WeeklyPlanningView: View {
                         .accessibilityIdentifier("planning.newActivityDatePicker")
                     activityTypePicker(selection: $viewModel.newActivityType)
                         .accessibilityIdentifier("planning.newActivityTypePicker")
+                    Toggle("Has start time", isOn: $viewModel.newActivityHasStartTime)
+                        .accessibilityIdentifier("planning.newActivityHasStartTimeToggle")
+                    if viewModel.newActivityHasStartTime {
+                        DatePicker("Start time", selection: $viewModel.newActivityStartTime, displayedComponents: .hourAndMinute)
+                            .accessibilityIdentifier("planning.newActivityStartTimePicker")
+                    }
                     TextField("Location (optional)", text: $viewModel.newActivityLocation)
                         .accessibilityIdentifier("planning.newActivityLocationField")
                     Button("Add activity") {
@@ -133,7 +145,7 @@ public struct WeeklyPlanningView: View {
                 }
             }
         }
-        .navigationTitle("Weekly Plan")
+        .navigationTitle("\(athleteDisplayName) Weekly Plan")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Manage recurring activities") {
@@ -148,45 +160,6 @@ public struct WeeklyPlanningView: View {
         }
         .sheet(isPresented: $isManagingRecurringActivities) {
             RecurringActivityManagementView(viewModel: viewModel)
-        }
-        .sheet(isPresented: $isEditingActivity) {
-            if let activity = editingActivity {
-                NavigationStack {
-                    Form {
-                        TextField("Title", text: $editTitle)
-                            .accessibilityIdentifier("planning.editActivityTitleField")
-                        DatePicker("Date", selection: $editDate, displayedComponents: .date)
-                            .accessibilityIdentifier("planning.editActivityDatePicker")
-                        activityTypePicker(selection: $editActivityType)
-                            .accessibilityIdentifier("planning.editActivityTypePicker")
-                    }
-                    .navigationTitle("Edit activity")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Save") {
-                                let components = Calendar.current.dateComponents([.year, .month, .day], from: editDate)
-                                let localDate = LocalDate(
-                                    year: components.year ?? 1970,
-                                    month: components.month ?? 1,
-                                    day: components.day ?? 1
-                                )
-                                viewModel.editActivity(
-                                    activity,
-                                    title: editTitle,
-                                    localDate: localDate,
-                                    activityType: editActivityType
-                                )
-                                isEditingActivity = false
-                            }
-                            .accessibilityIdentifier("planning.saveEditButton")
-                        }
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { isEditingActivity = false }
-                                .accessibilityIdentifier("planning.cancelEditButton")
-                        }
-                    }
-                }
-            }
         }
     }
 
@@ -203,6 +176,21 @@ public struct WeeklyPlanningView: View {
             Text("Test").tag(ActivityType.test)
             Text("Other").tag(ActivityType.other)
         }
+    }
+
+    /// Sprint 1 completion package, Part 6: date, start time (when
+    /// planned), and location (when set) — everywhere the domain model
+    /// already represents these, they're shown, not replaced with a
+    /// generic label.
+    private static func rowSubtitle(for activity: PlannedActivity) -> String {
+        var parts: [String] = [activity.localDate.isoString]
+        if let startTime = activity.startLocalTime {
+            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+        }
+        if let location = activity.location, !location.isEmpty {
+            parts.append(location)
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// Weekday/date, start time (if present), and duration (if present)

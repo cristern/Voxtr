@@ -17,19 +17,20 @@ public struct FamilyHomeRow: Identifiable {
     public let isCompleted: Bool
 }
 
-/// The bottom-of-Home reflection reminder (Part 5) — deliberately shows
-/// one athlete's reflection, not every athlete's. With Home now
-/// family-first and no global "selected athlete," there is no existing
-/// concept of which athlete a reminder like this should represent;
-/// showing the first active athlete's (the same deterministic
-/// ordering `FamilyRestorationService` already establishes) is a
-/// disclosed simplification, not a hidden assumption — a future work
-/// package may want this per-athlete or rotating.
-public enum ReflectionReminderState {
-    case loading
-    case recorded(athleteName: String, whatWentWell: String?, whatCouldImprove: String?)
-    case none(athleteName: String)
-    case unavailable
+/// Sprint 1 (Vǫxtr Parent continuation), Part 3: one reflection
+/// reminder per active athlete, each carrying its own explicit
+/// `athleteId` — replaces the previous single "first active athlete's
+/// reflection" reminder, which relied on array ordering rather than
+/// identity. With multiple athletes, a parent must be able to tell
+/// which athlete each reminder is about, and navigate to that specific
+/// athlete's reflection, not whichever athlete happened to be first.
+public struct AthleteReflectionReminder: Identifiable {
+    public let id: String
+    public let athleteId: AthleteId
+    public let athleteName: String
+    public let reflectionExists: Bool
+    public let whatWentWell: String?
+    public let whatCouldImprove: String?
 }
 
 /// Sprint 1 integration audit fix: `RestoredFamily.activeAthletes` is a
@@ -53,10 +54,10 @@ public enum ReflectionReminderState {
 public final class FamilyHomeViewModel {
     public private(set) var activeAthletes: [AthleteProfile]
     public private(set) var rows: [FamilyHomeRow] = []
-    public private(set) var reflectionState: ReflectionReminderState = .loading
+    public private(set) var reflectionReminders: [AthleteReflectionReminder] = []
     public private(set) var errorMessage: String?
 
-    private let workspaceId: WorkspaceId
+    public private(set) var tomorrowRows: [FamilyHomeRow] = []
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
@@ -82,7 +83,8 @@ public final class FamilyHomeViewModel {
     public func refresh() {
         refreshActiveAthletes()
         loadHome()
-        loadReflectionReminder()
+        loadTomorrow()
+        loadReflectionReminders()
     }
 
     /// Re-fetches from persistence — the same repository method and
@@ -140,6 +142,39 @@ public final class FamilyHomeViewModel {
         }
     }
 
+    /// Sprint 1 completion package, Part 4: tomorrow's activities
+    /// across every active athlete — same aggregation shape as
+    /// `loadHome()`, over the generalized, date-parameterized
+    /// coordination-service method rather than a new one hardcoded to
+    /// "tomorrow." No new persisted model, no duplicated activities —
+    /// this reads the same `PlannedActivity` rows `loadHome()` and
+    /// every other surface already read.
+    public func loadTomorrow() {
+        guard let tomorrow = Calendar.current.date(byAdding: .day, value: 1, to: .now) else {
+            tomorrowRows = []
+            return
+        }
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
+        let tomorrowDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+
+        var merged: [FamilyHomeRow] = []
+        for athlete in activeAthletes {
+            let completions = (try? trainingPlanningCoordinationService.plannedActivitiesWithCompletion(
+                forAthlete: athlete.athleteId, on: tomorrowDate
+            )) ?? []
+            merged.append(contentsOf: completions.map { completion in
+                FamilyHomeRow(
+                    id: completion.plannedActivity.id.uuidString,
+                    athleteId: athlete.athleteId,
+                    athleteName: athlete.givenName,
+                    plannedActivity: completion.plannedActivity,
+                    isCompleted: completion.isCompleted
+                )
+            })
+        }
+        tomorrowRows = Self.sorted(merged)
+    }
+
     /// Not completed first (sorted chronologically by start time, with
     /// no-start-time activities — e.g. "Strength · Ready to log" —
     /// sorted after timed ones within that group), then completed
@@ -154,24 +189,24 @@ public final class FamilyHomeViewModel {
         return notCompleted + completed
     }
 
-    public func loadReflectionReminder() {
-        guard let athlete = activeAthletes.first else {
-            reflectionState = .unavailable
-            return
-        }
-        do {
-            let weekStart = TrainingPlanningCoordinationService.weekStart()
-            if let reflection = try weeklyReflectionService.fetchWeeklyReflection(forAthlete: athlete.athleteId, weekStart: weekStart) {
-                reflectionState = .recorded(
-                    athleteName: athlete.givenName,
-                    whatWentWell: reflection.whatWorked,
-                    whatCouldImprove: reflection.whatWasDifficult
-                )
-            } else {
-                reflectionState = .none(athleteName: athlete.givenName)
-            }
-        } catch {
-            reflectionState = .unavailable
+    /// Sprint 1 (Vǫxtr Parent continuation), Part 3: one reminder per
+    /// active athlete — never just `activeAthletes.first`. A failure
+    /// fetching one athlete's reflection doesn't block the others,
+    /// same independence principle `loadHome()` above already
+    /// establishes.
+    public func loadReflectionReminders() {
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        reflectionReminders = activeAthletes.compactMap { athlete in
+            let reflection = try? weeklyReflectionService.fetchWeeklyReflection(forAthlete: athlete.athleteId, weekStart: weekStart)
+            let resolved = (reflection ?? nil)
+            return AthleteReflectionReminder(
+                id: athlete.athleteId.rawValue.uuidString,
+                athleteId: athlete.athleteId,
+                athleteName: athlete.givenName,
+                reflectionExists: resolved != nil,
+                whatWentWell: resolved?.whatWorked,
+                whatCouldImprove: resolved?.whatWasDifficult
+            )
         }
     }
 }

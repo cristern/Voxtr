@@ -204,13 +204,12 @@ struct FamilyHomeViewModelTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
-        viewModel.loadReflectionReminder()
+        viewModel.loadReflectionReminders()
 
-        guard case .none(let athleteName) = viewModel.reflectionState else {
-            Issue.record("Expected .none, got \(viewModel.reflectionState)")
-            return
-        }
-        #expect(athleteName == "Oliver")
+        #expect(viewModel.reflectionReminders.count == 1)
+        let reminder = try #require(viewModel.reflectionReminders.first)
+        #expect(reminder.athleteName == "Oliver")
+        #expect(reminder.reflectionExists == false)
     }
 
     @Test("Reflection reminder shows recorded content when a reflection exists")
@@ -243,14 +242,13 @@ struct FamilyHomeViewModelTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
-        viewModel.loadReflectionReminder()
+        viewModel.loadReflectionReminders()
 
-        guard case .recorded(let athleteName, let whatWentWell, _) = viewModel.reflectionState else {
-            Issue.record("Expected .recorded, got \(viewModel.reflectionState)")
-            return
-        }
-        #expect(athleteName == "Oliver")
-        #expect(whatWentWell == "Consistent effort")
+        #expect(viewModel.reflectionReminders.count == 1)
+        let reminder = try #require(viewModel.reflectionReminders.first)
+        #expect(reminder.athleteName == "Oliver")
+        #expect(reminder.reflectionExists == true)
+        #expect(reminder.whatWentWell == "Consistent effort")
     }
 
     @Test("An athlete added after the ViewModel was constructed appears once refreshActiveAthletes runs — the launch-time snapshot never goes permanently stale")
@@ -294,5 +292,52 @@ struct FamilyHomeViewModelTests {
 
         #expect(viewModel.activeAthletes.count == 1)
         #expect(viewModel.activeAthletes.first?.givenName == "Oliver")
+    }
+
+    @Test("With two athletes, both get their own explicitly-identified reflection reminder — never just the first")
+    @MainActor
+    func reflectionRemindersCoverEveryActiveAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: emma.athleteId, weekStart: weekStart, authorId: ActorId(),
+            whatWorked: "Great focus", visibility: .privateToAthlete
+        )
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [oliver, emma],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.loadReflectionReminders()
+
+        #expect(viewModel.reflectionReminders.count == 2)
+        let oliverReminder = viewModel.reflectionReminders.first { $0.athleteId == oliver.athleteId }
+        let emmaReminder = viewModel.reflectionReminders.first { $0.athleteId == emma.athleteId }
+        #expect(oliverReminder?.reflectionExists == false)
+        #expect(emmaReminder?.reflectionExists == true)
+        #expect(emmaReminder?.whatWentWell == "Great focus")
+        // Oliver's own reminder must never surface Emma's content.
+        #expect(oliverReminder?.whatWentWell == nil)
     }
 }

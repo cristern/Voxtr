@@ -217,7 +217,11 @@ public struct HomeDashboardView: View {
                         service: planningService,
                         athleteId: athleteId,
                         committedByActorId: committedByActorId
-                    )
+                    ),
+                    athleteDisplayName: athleteDisplayName,
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    actorId: committedByActorId
                 )
             }
             .accessibilityIdentifier("homeDashboard.weeklyPlanLink")
@@ -288,6 +292,16 @@ public struct HomeDashboardView: View {
 
     private var reflectionSection: some View {
         Section("Reflection") {
+            NavigationLink("Add Reflection") {
+                ReflectionFormViewLoader(
+                    athleteId: athleteId,
+                    weekStart: viewModel.weekStart,
+                    authorId: committedByActorId,
+                    weeklyReflectionService: weeklyReflectionService
+                )
+            }
+            .accessibilityIdentifier("homeDashboard.addReflectionLink")
+
             NavigationLink("Weekly Review") {
                 WeeklyReviewView(
                     viewModel: WeeklyReviewViewModel(
