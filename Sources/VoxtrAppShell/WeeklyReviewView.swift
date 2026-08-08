@@ -72,6 +72,7 @@ public struct WeeklyReviewView: View {
                         viewModel: WeeklyReflectionFormViewModel(
                             service: reflectionService,
                             athleteId: viewModel.athleteId,
+                            athleteDisplayName: athleteDisplayName,
                             weekStart: viewModel.weekStart,
                             authorId: authorId,
                             existing: result.weeklyReflection

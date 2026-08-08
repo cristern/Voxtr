@@ -10,8 +10,7 @@ import VoxtrTrainingDomain
 /// logic.
 public struct DailyTrainingView: View {
     @State private var viewModel: DailyTrainingViewModel
-    @State private var recurringManagementViewModel: WeeklyPlanningViewModel?
-    @State private var isManagingRecurringActivities: Bool = false
+    @State private var recurringManagementSheetItem: RecurringManagementSheetItem?
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let actorId: ActorId
@@ -116,12 +115,7 @@ public struct DailyTrainingView: View {
                 DatePicker("Started at", selection: $viewModel.newLogStartedAt)
                     .accessibilityIdentifier("training.newLogStartedAtPicker")
 
-                Stepper(
-                    "Duration: \(viewModel.newLogDurationMinutes) min",
-                    value: $viewModel.newLogDurationMinutes,
-                    in: 1...1440
-                )
-                .accessibilityIdentifier("training.newLogDurationStepper")
+                DurationPickerView(durationMinutes: $viewModel.newLogDurationMinutes)
 
                 Stepper(
                     "Perceived exertion: \(viewModel.newLogPerceivedExertion.map { String($0) } ?? "—")",
@@ -172,8 +166,7 @@ public struct DailyTrainingView: View {
                         committedByActorId: actorId
                     )
                     recurringViewModel.loadRecurringActivities()
-                    recurringManagementViewModel = recurringViewModel
-                    isManagingRecurringActivities = true
+                    recurringManagementSheetItem = RecurringManagementSheetItem(viewModel: recurringViewModel)
                 }
                 .accessibilityIdentifier("training.manageRecurringActivitiesButton")
             }
@@ -182,10 +175,39 @@ public struct DailyTrainingView: View {
         .onAppear {
             viewModel.load()
         }
-        .sheet(isPresented: $isManagingRecurringActivities) {
-            if let recurringManagementViewModel {
-                RecurringActivityManagementView(viewModel: recurringManagementViewModel)
-            }
+        .sheet(item: $recurringManagementSheetItem) { item in
+            RecurringActivityManagementView(viewModel: item.viewModel)
         }
     }
+}
+
+/// Sprint 1.1 closeout, Item 4 (white-screen root cause fix): wraps
+/// `WeeklyPlanningViewModel` for `.sheet(item:)` presentation.
+///
+/// Root cause: the previous implementation used two separate `@State`
+/// variables — a `Bool` driving `.sheet(isPresented:)` and a separately
+/// -set `WeeklyPlanningViewModel?` the sheet's content closure read via
+/// `if let`. Both were set in the same button action, but nothing
+/// guarantees SwiftUI evaluates the sheet's content closure only after
+/// BOTH state updates are visible to it — `.sheet(isPresented:)`'s
+/// content closure can be evaluated at the moment `isPresented` becomes
+/// true, independent of whether a second, separately-tracked state
+/// variable has "caught up" yet. When it hadn't, the `if let` fell
+/// through with no `else`, and SwiftUI's `@ViewBuilder` renders that as
+/// an implicit `EmptyView()` — a genuinely blank sheet. This exactly
+/// matches "first attempt: white screen, second attempt: works" —  by
+/// the second tap, the (never-reset) view model was already non-nil
+/// from the first attempt, so the same race no longer mattered.
+///
+/// `HomeDashboardView`'s "Manage Athletes" sheet never had this bug: its
+/// view model is a stored property, constructed once at `init` and
+/// never nil, so there was nothing to race. This bug was specific to
+/// this button's lazy, on-demand construction.
+///
+/// Fix: `.sheet(item:)` instead of `.sheet(isPresented:)` — presence
+/// and content are now the SAME piece of state, so there is no window
+/// where the sheet can be "presented" with no content to show.
+private struct RecurringManagementSheetItem: Identifiable {
+    let id = UUID()
+    let viewModel: WeeklyPlanningViewModel
 }

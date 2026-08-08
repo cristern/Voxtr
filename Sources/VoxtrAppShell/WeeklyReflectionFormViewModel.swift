@@ -26,6 +26,11 @@ public final class WeeklyReflectionFormViewModel {
     /// save path is decided by the same flag.
     public let isEditing: Bool
 
+    /// Sprint 1.1 closeout, Item 1: passed in by the caller, which
+    /// already has the athlete's name — no repository re-fetch, no
+    /// global selected-athlete state.
+    public let athleteDisplayName: String
+
     private let service: WeeklyReflectionService
     private let athleteId: AthleteId
     private let weekStart: LocalDate
@@ -38,10 +43,12 @@ public final class WeeklyReflectionFormViewModel {
     public init(
         service: WeeklyReflectionService,
         athleteId: AthleteId,
+        athleteDisplayName: String,
         weekStart: LocalDate,
         authorId: ActorId,
         existing: WeeklyReflection? = nil
     ) {
+        self.athleteDisplayName = athleteDisplayName
         self.service = service
         self.athleteId = athleteId
         self.weekStart = weekStart

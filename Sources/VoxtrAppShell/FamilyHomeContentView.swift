@@ -134,6 +134,7 @@ public struct FamilyHomeContentView: View {
                 case .reflection(let athleteId):
                     ReflectionFormViewLoader(
                         athleteId: athleteId,
+                        athleteDisplayName: viewModel.activeAthletes.first(where: { $0.athleteId == athleteId })?.givenName ?? "Athlete",
                         weekStart: TrainingPlanningCoordinationService.weekStart(),
                         authorId: ActorId(rawValue: family.participant.id),
                         weeklyReflectionService: weeklyReflectionService

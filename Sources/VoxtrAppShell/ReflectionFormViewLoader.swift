@@ -12,8 +12,14 @@ import VoxtrReflectionDomain
 /// reflection already exists, the form opens pre-filled for editing —
 /// "open/view/edit that reflection directly" — rather than creating a
 /// second, conflicting one.
+///
+/// Sprint 1.1 closeout, Item 1: `athleteDisplayName` is required from
+/// every caller — each one already has the athlete's name at hand, so
+/// this never duplicates athlete state or introduces a global
+/// selected-athlete workaround.
 public struct ReflectionFormViewLoader: View {
     let athleteId: AthleteId
+    let athleteDisplayName: String
     let weekStart: LocalDate
     let authorId: ActorId
     let weeklyReflectionService: WeeklyReflectionService
@@ -21,11 +27,13 @@ public struct ReflectionFormViewLoader: View {
 
     public init(
         athleteId: AthleteId,
+        athleteDisplayName: String,
         weekStart: LocalDate,
         authorId: ActorId,
         weeklyReflectionService: WeeklyReflectionService
     ) {
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
         self.weekStart = weekStart
         self.authorId = authorId
         self.weeklyReflectionService = weeklyReflectionService
@@ -45,6 +53,7 @@ public struct ReflectionFormViewLoader: View {
             viewModel = WeeklyReflectionFormViewModel(
                 service: weeklyReflectionService,
                 athleteId: athleteId,
+                athleteDisplayName: athleteDisplayName,
                 weekStart: weekStart,
                 authorId: authorId,
                 existing: existing ?? nil

@@ -223,6 +223,16 @@ public final class PlanningService {
         try repository.fetchWeekPlan(byId: weekPlanId)
     }
 
+    /// Sprint 1.1 closeout, Item 2: a thin passthrough, matching this
+    /// service's own established "reuse PlanningService" boundary —
+    /// needed so an unmaterialized recurring occurrence's preview can
+    /// reach its underlying `RecurringPlannedActivity` definition (to
+    /// open the existing edit form) without reaching into
+    /// `PlanningRepository` directly.
+    public func fetchRecurringPlannedActivity(byId recurringPlannedActivityId: RecurringPlannedActivityId) throws -> RecurringPlannedActivity? {
+        try repository.fetchRecurringPlannedActivity(byId: recurringPlannedActivityId)
+    }
+
     /// S2.4: deletes a `PlannedActivity`, only while its `WeekPlan` is
     /// still draft — the same two existence/ownership guards
     /// `editPlannedActivity` already uses, plus the explicitly-requested

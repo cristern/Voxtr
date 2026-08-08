@@ -24,7 +24,16 @@ public final class DailyTrainingViewModel {
     public var newLogTitle: String = ""
     public var newLogActivityType: ActivityType = .individualTraining
     public var newLogStartedAt: Date = .now
-    public var newLogDurationMinutes: Int = 1
+    /// Sprint 1.1 closeout, Item 5: 1 was the validation floor
+    /// (`TrainingValidator.validateDurationMinutes`'s own minimum), not
+    /// a deliberate UX choice — nothing in the domain requires this
+    /// specific starting value. 60 matches `LogActivityViewModel`'s own
+    /// established default. This is transient UI state only — never a
+    /// persisted default. It is not reset after a successful save (see
+    /// `logActivity()` below, which resets title/notes/RPE but leaves
+    /// duration as the user's own last-entered value, matching this
+    /// form's existing behavior for that field).
+    public var newLogDurationMinutes: Int = 60
     public var newLogPerceivedExertion: Int?
     public var newLogNotes: String = ""
     /// Optional link to a PlannedActivity — the picker in the view only

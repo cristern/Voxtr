@@ -84,7 +84,7 @@ public struct WeeklyReflectionFormView: View {
                     .accessibilityIdentifier("weeklyReflectionForm.nextWeekField")
             }
         }
-        .navigationTitle(viewModel.isEditing ? "Edit reflection" : "New reflection")
+        .navigationTitle(viewModel.isEditing ? "\(viewModel.athleteDisplayName) · Edit Reflection" : "\(viewModel.athleteDisplayName) · New Reflection")
         .onAppear {
             viewModel.onSaved = { dismiss() }
         }

@@ -54,7 +54,7 @@ public struct FamilyScheduleView: View {
                 }
             } else {
                 ForEach(viewModel.dayGroups) { group in
-                    Section(group.date.isoString) {
+                    Section(Self.dayHeading(for: group.date)) {
                         ForEach(group.rows) { row in
                             scheduleRow(row)
                         }
@@ -96,19 +96,25 @@ public struct FamilyScheduleView: View {
             }
             .accessibilityIdentifier("familySchedule.activityRow.\(row.id)")
         case .recurringSuggestion(_, _, let athleteName, let suggestion):
-            // Not a NavigationLink — no real PlannedActivity exists yet
-            // to open Activity Detail for.
-            HStack {
-                rowContent(
-                    athleteName: athleteName,
-                    title: suggestion.title,
-                    subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: nil, isCompleted: false)
+            NavigationLink {
+                RecurringOccurrencePreviewView(
+                    suggestion: suggestion,
+                    athleteDisplayName: athleteName,
+                    planningService: planningService,
+                    actorId: actorId
                 )
-                Spacer()
-                Text("Recurring")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("familySchedule.recurringBadge.\(row.id)")
+            } label: {
+                HStack {
+                    rowContent(
+                        athleteName: athleteName,
+                        title: suggestion.title,
+                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: nil, isCompleted: false)
+                    )
+                    Spacer()
+                    Text("Recurring")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             .accessibilityIdentifier("familySchedule.recurringRow.\(row.id)")
         }
@@ -130,6 +136,18 @@ public struct FamilyScheduleView: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    /// Sprint 1.1 closeout, Item 3: weekday added, reusing the existing
+    /// `WeeklyPlanningView.weekdayLabel(for:)` helper (already this
+    /// app's own established weekday-name approach — see that
+    /// function's own definition) rather than introducing a second,
+    /// differently-sourced formatting approach for one screen. Derived
+    /// from `LocalDate.weekday`, the same value every other weekday
+    /// display in this app already uses. Presentation only — does not
+    /// change `FamilyScheduleViewModel`'s sort/group semantics at all.
+    private static func dayHeading(for date: LocalDate) -> String {
+        "\(WeeklyPlanningView.weekdayLabel(for: date.weekday)) · \(date.isoString)"
     }
 
     private static func rowSubtitle(startLocalTime: LocalTime?, location: String?, isCompleted: Bool) -> String {

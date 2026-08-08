@@ -287,6 +287,7 @@ public struct HomeDashboardView: View {
             NavigationLink("Add Reflection") {
                 ReflectionFormViewLoader(
                     athleteId: athleteId,
+                    athleteDisplayName: athleteDisplayName,
                     weekStart: viewModel.weekStart,
                     authorId: committedByActorId,
                     weeklyReflectionService: weeklyReflectionService
