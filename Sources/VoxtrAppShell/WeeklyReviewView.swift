@@ -116,20 +116,44 @@ public struct WeeklyReviewView: View {
                     .accessibilityIdentifier("weeklyReview.noPlannedActivities")
             } else {
                 ForEach(result.plannedActivities, id: \.plannedActivity.id) { item in
-                    HStack {
-                        Text(item.plannedActivity.title)
-                        Spacer()
-                        Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                            .font(.caption)
-                            .foregroundStyle(item.isCompleted ? .green : .secondary)
-                            .accessibilityLabel(
-                                Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                            )
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Text(item.plannedActivity.title)
+                            Spacer()
+                            Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                .font(.caption)
+                                .foregroundStyle(item.isCompleted ? .green : .secondary)
+                                .accessibilityLabel(
+                                    Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                )
+                        }
+                        // Planned -> actual, using the exact same
+                        // PlannedActivity<->LoggedActivity relationship
+                        // TrainingPlanningCoordinationService already
+                        // derives completion from — never a second,
+                        // separate lookup, never inferred from matching
+                        // title/date. Only shown when it exists; kept
+                        // to the two fields this work package names
+                        // (actual duration, RPE), not everything the
+                        // model happens to have.
+                        if let loggedActivity = item.loggedActivity {
+                            Text(Self.actualSubtitle(for: loggedActivity))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .accessibilityIdentifier("weeklyReview.plannedActivityRow.\(item.plannedActivity.id.uuidString)")
                 }
             }
         }
+    }
+
+    private static func actualSubtitle(for loggedActivity: LoggedActivity) -> String {
+        var parts = ["\(loggedActivity.durationMinutes) min"]
+        if let rpe = loggedActivity.perceivedExertion {
+            parts.append("RPE \(rpe)")
+        }
+        return "Actual: " + parts.joined(separator: " · ")
     }
 
     private func loggedActivitiesSection(_ result: WeeklyReviewResult) -> some View {

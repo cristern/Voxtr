@@ -1,32 +1,49 @@
-Sprint 1.2A documentation record (for the project's own docs/backlog, wherever they're maintained):
+Activity Completion & Review Flow package -- documentation record.
 
-- Recurring Location is NO LONGER a model gap as of this package.
-  RecurringPlannedActivity now has `location: String?`, reusing the
-  exact same representation PlannedActivity.location already used.
-- Location now flows: recurring definition -> derived suggestion
-  (RecurringActivitySuggestion.location) -> materialized PlannedActivity
-  (via acceptSuggestion, using the definition's current value, never a
-  possibly-stale suggestion) -> Activity Detail / Weekly Plan / Family
-  Schedule, wherever PlannedActivity.location was already surfaced.
-- Editing a recurring definition's Location does NOT retroactively
-  update already-materialized PlannedActivity rows -- only future,
-  not-yet-materialized derivation sees the new value. This is the
-  same pre-existing rule already governing every other recurring
-  field (title, weekday, duration, etc.) -- no special Location-only
-  synchronization was invented.
-- No schema version bump was made. This was a field-level addition to
-  an already-listed model type, which the project's own
-  AppSchemaVersioning.swift guidance (step 3/4) explicitly says does
-  not require a new version. Combined with confirmed Internal Alpha /
-  test-data-only status, no migration machinery was added. If a local
-  device's existing SwiftData store is incompatible with the new
-  field, a store reset may be required -- acceptable per Internal
-  Alpha status, not a production data-loss concern.
-- Address lookup/autocomplete, saved/favorite locations, and
-  maps/geocoding remain backlog -- explicitly not implemented here.
-  The Location representation (plain optional String) was not changed
-  in a way that would require a second Location concept if that work
-  happens later.
-- Daily Focus remains a valid, deferred product concept -- hidden
-  because its old implementation duplicated Training, not deleted or
-  reconsidered. Untouched by this package.
+ESTABLISHED DECISIONS PRESERVED (not reconsidered, only confirmed by investigation):
+- TrainingService.logActivity's duplicate-PlannedActivity-logging
+  prevention (S3.2, checked before any insert) is the correct
+  application/domain boundary and was NOT rewritten -- only surfaced
+  correctly in the UI, which previously didn't reflect it.
+- There is one canonical logging service/persistence path
+  (TrainingService.logActivity), reached from two legitimate entry
+  points (ActivityDetailView's planned-activity flow via
+  LogActivityView, and Daily Training's own unplanned-activity form).
+  This is intentional multiplicity, not a duplicate implementation --
+  both converge on the same service and the same duplicate-prevention
+  check.
+- LogActivityView already correctly dismissed only on confirmed save
+  success and preserved entered values + error state on failure --
+  unchanged.
+
+NEW FINDINGS / IMPLEMENTATION THIS PACKAGE:
+- Root cause of "unclear post-logging state": Activity Detail's own
+  "Log Activity" button remained visible and tappable even after the
+  activity was already logged -- the only feedback was a small status
+  label. Fixed by replacing the button with a non-actionable "Logged"
+  indicator once completed, and auto-dismissing Activity Detail back
+  to wherever the user came from immediately after a successful log
+  (via an isCompleted state transition, never firing on simply
+  viewing an already-completed activity).
+- This auto-dismiss naturally re-triggers the parent screen's own
+  .onAppear (e.g. Daily Training's), which already refreshes Today's
+  Logged Activities from canonical persisted data -- no new refresh
+  mechanism was needed.
+- PlannedActivityCompletion now optionally carries the actual
+  LoggedActivity it was derived from (previously fetched via the
+  existing PlannedActivityId relationship lookup, then discarded).
+  Added as a defaulted, additive field -- no existing caller broke.
+- Weekly Review's Planned Activities section now shows actual
+  duration/RPE inline for completed items, using this same
+  relationship -- never inferred from matching title/date (explicitly
+  tested with two same-titled planned activities where only one was
+  logged).
+- Weekly Review's separate "Logged Activities" list was kept, not
+  removed -- it can include unplanned/spontaneous logs with no
+  PlannedActivity link at all, which is genuinely different
+  information from the now-inline planned/actual pairing.
+
+OUT OF SCOPE / UNCHANGED:
+- Daily Focus remains a retained, deferred product concept.
+- Recurring Location, address lookup, and all previously-listed
+  backlog items untouched.

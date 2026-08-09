@@ -42,10 +42,31 @@ public struct ActivityDetailView: View {
             .accessibilityIdentifier("activityDetail.summary")
 
             Section {
-                Button("Log Activity") {
-                    isLogging = true
+                if viewModel.isCompleted {
+                    // Activity Completion & Review Flow package: the
+                    // "Log Activity" button used to remain visible and
+                    // tappable even after the activity was already
+                    // logged — the only feedback was a small "Status"
+                    // label easy to miss among several other fields.
+                    // Since TrainingService.logActivity already
+                    // prevents the same PlannedActivity from being
+                    // linked twice (S3.2, the correct application/
+                    // domain boundary — preserved, not rewritten here),
+                    // re-tapping "Log Activity" would only surface that
+                    // failure after the user filled the form out again.
+                    // Replacing the button with a clear, non-actionable
+                    // confirmation closes that gap at the UI layer,
+                    // where it belongs alongside the existing service-
+                    // layer protection.
+                    Label("Logged", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("activityDetail.loggedIndicator")
+                } else {
+                    Button("Log Activity") {
+                        isLogging = true
+                    }
+                    .accessibilityIdentifier("activityDetail.logActivityButton")
                 }
-                .accessibilityIdentifier("activityDetail.logActivityButton")
 
                 if viewModel.canEditOrDelete {
                     Button("Edit Planned Activity") {
@@ -71,6 +92,15 @@ public struct ActivityDetailView: View {
         }
         .sheet(isPresented: $isLogging) {
             LogActivityView(viewModel: viewModel.makeLogActivityViewModel())
+        }
+        .onChange(of: viewModel.isCompleted) { wasCompleted, isCompleted in
+            // Fires only on the true transition from not-yet-logged to
+            // logged (the moment a save actually succeeds) — never on
+            // initial appearance, so opening an already-completed
+            // activity to review it never auto-dismisses.
+            if !wasCompleted && isCompleted {
+                dismiss()
+            }
         }
         .confirmationDialog(
             "Delete this planned activity?",

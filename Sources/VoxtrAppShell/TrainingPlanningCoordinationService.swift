@@ -19,6 +19,22 @@ import VoxtrTrainingDomain
 public struct PlannedActivityCompletion {
     public let plannedActivity: PlannedActivity
     public let isCompleted: Bool
+    /// Activity Completion & Review Flow package: the actual
+    /// `LoggedActivity` this completion was derived from, when one
+    /// exists — the exact relationship lookup below (`fetchLoggedActivities
+    /// (forPlannedActivity:)`) already fetches this; it was previously
+    /// discarded, keeping only the boolean. Carrying it forward lets a
+    /// caller like Weekly Review show actual duration/RPE inline next to
+    /// the plan, without a second query and without ever inferring the
+    /// link from title/date. `nil` when `isCompleted` is `false`, or for
+    /// any existing caller that never populates it.
+    public let loggedActivity: LoggedActivity?
+
+    public init(plannedActivity: PlannedActivity, isCompleted: Bool, loggedActivity: LoggedActivity? = nil) {
+        self.plannedActivity = plannedActivity
+        self.isCompleted = isCompleted
+        self.loggedActivity = loggedActivity
+    }
 }
 
 @MainActor
@@ -173,7 +189,7 @@ public final class TrainingPlanningCoordinationService {
     public func plannedActivitiesWithCompletion(_ plannedActivities: [PlannedActivity]) throws -> [PlannedActivityCompletion] {
         try plannedActivities.map { activity in
             let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
-            return PlannedActivityCompletion(plannedActivity: activity, isCompleted: !links.isEmpty)
+            return PlannedActivityCompletion(plannedActivity: activity, isCompleted: !links.isEmpty, loggedActivity: links.first)
         }
     }
 }
