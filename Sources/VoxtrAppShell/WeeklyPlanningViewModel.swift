@@ -48,6 +48,7 @@ public final class WeeklyPlanningViewModel {
     public var recurringFormDurationMinutes: Int = 60
     public var recurringFormStartDate: Date = .now
     public var recurringFormEndDate: Date = .now
+    public var recurringFormLocation: String = ""
 
     private let service: PlanningService
     public let athleteId: AthleteId
@@ -257,6 +258,7 @@ public final class WeeklyPlanningViewModel {
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
+                location: recurringFormLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recurringFormLocation,
                 effectiveStartDate: Self.localDate(from: recurringFormStartDate),
                 effectiveEndDate: Self.localDate(from: recurringFormEndDate)
             )
@@ -289,6 +291,7 @@ public final class WeeklyPlanningViewModel {
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
                 timeZoneId: recurringActivity.timeZoneId,
+                location: recurringFormLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : recurringFormLocation,
                 effectiveStartDate: Self.localDate(from: recurringFormStartDate),
                 effectiveEndDate: Self.localDate(from: recurringFormEndDate)
             )
@@ -343,6 +346,7 @@ public final class WeeklyPlanningViewModel {
         }
         recurringFormStartDate = Self.date(from: recurringActivity.effectiveStartDate)
         recurringFormEndDate = Self.date(from: recurringActivity.effectiveEndDate)
+        recurringFormLocation = recurringActivity.location ?? ""
     }
 
     public func resetRecurringForm() {
@@ -355,6 +359,7 @@ public final class WeeklyPlanningViewModel {
         recurringFormDurationMinutes = 60
         recurringFormStartDate = .now
         recurringFormEndDate = .now
+        recurringFormLocation = ""
     }
 
     /// Best-effort refresh after a management action — deliberately

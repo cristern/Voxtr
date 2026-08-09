@@ -277,6 +277,7 @@ public final class PlanningService {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
+        location: String? = nil,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate
     ) throws -> RecurringPlannedActivity {
@@ -296,6 +297,7 @@ public final class PlanningService {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
+            location: location,
             effectiveStartDate: effectiveStartDate,
             effectiveEndDate: effectiveEndDate
         )
@@ -304,7 +306,9 @@ public final class PlanningService {
     /// Edits an existing recurring activity definition in place.
     /// Editing it does not retroactively touch any `PlannedActivity`
     /// already accepted from an earlier occurrence — only future
-    /// derivation (`deriveSuggestions`) sees the new values.
+    /// derivation (`deriveSuggestions`) sees the new values. Location
+    /// (Sprint 1.2A) follows this exact same, already-established rule
+    /// — no special Location-only synchronization behavior.
     @discardableResult
     public func editRecurringPlannedActivity(
         _ recurringPlannedActivityId: RecurringPlannedActivityId,
@@ -316,6 +320,7 @@ public final class PlanningService {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
+        location: String? = nil,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate
     ) throws -> RecurringPlannedActivity {
@@ -336,6 +341,7 @@ public final class PlanningService {
         recurringActivity.startLocalTime = startLocalTime
         recurringActivity.plannedDurationMinutes = plannedDurationMinutes
         recurringActivity.timeZoneId = timeZoneId
+        recurringActivity.location = location
         recurringActivity.effectiveStartDate = effectiveStartDate
         recurringActivity.effectiveEndDate = effectiveEndDate
         recurringActivity.updatedAt = .now
@@ -420,7 +426,8 @@ public final class PlanningService {
                         categoryIds: recurringActivity.categoryIds.map(ActivityCategoryId.init(rawValue:)),
                         startLocalTime: recurringActivity.startLocalTime,
                         plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
-                        timeZoneId: recurringActivity.timeZoneId
+                        timeZoneId: recurringActivity.timeZoneId,
+                        location: recurringActivity.location
                     )
                 )
             }
@@ -528,7 +535,8 @@ public final class PlanningService {
                         categoryIds: recurringActivity.categoryIds.map(ActivityCategoryId.init(rawValue:)),
                         startLocalTime: recurringActivity.startLocalTime,
                         plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
-                        timeZoneId: recurringActivity.timeZoneId
+                        timeZoneId: recurringActivity.timeZoneId,
+                        location: recurringActivity.location
                     )
                 )
             }
@@ -662,6 +670,7 @@ public final class PlanningService {
             plannedDurationMinutes: recurringActivity.plannedDurationMinutes,
             externalSourceId: externalSourceId,
             externalSourceType: RecurringPlannedActivity.externalSourceType,
+            location: recurringActivity.location,
             saveOverride: saveOverride
         )
     }

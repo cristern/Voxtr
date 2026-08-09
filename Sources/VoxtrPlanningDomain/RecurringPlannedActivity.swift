@@ -28,6 +28,15 @@ public final class RecurringPlannedActivity {
     public var startLocalTime: LocalTime?
     public var plannedDurationMinutes: Int?
     public var timeZoneId: TimeZoneId
+    /// Sprint 1.2A: the recurring definition's own Location — reuses
+    /// the exact same optional free-text `String?` representation
+    /// `PlannedActivity.location` already established, not a new
+    /// Location type or a second representation. Part of the recurring
+    /// DEFINITION, so it flows into every occurrence derived from it
+    /// (see `RecurringActivitySuggestion.location` and
+    /// `PlanningService.acceptSuggestion`), the same way weekday, start
+    /// time, and duration already do.
+    public var location: String?
     // Same storage fix as WeekPlan.weekStart / PlannedActivity.localDate
     // (see those types' own doc comments): stored as ISO date Strings,
     // not `LocalDate` directly, to avoid the documented SwiftData crash
@@ -50,6 +59,7 @@ public final class RecurringPlannedActivity {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
+        location: String? = nil,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate,
         isEnabled: Bool = true,
@@ -62,6 +72,9 @@ public final class RecurringPlannedActivity {
             precondition((1...1440).contains(duration), "plannedDurationMinutes must be 1-1440, matching PlannedActivity's own bound")
         }
         precondition(effectiveStartDate <= effectiveEndDate, "effectiveStartDate must be on or before effectiveEndDate")
+        if let l = location {
+            precondition(l.count <= 200, "location must be 0-200 characters, matching PlannedActivity's own bound")
+        }
         self.id = id.rawValue
         self.athleteId = athleteId.rawValue
         self.title = title
@@ -72,6 +85,7 @@ public final class RecurringPlannedActivity {
         self.startLocalTime = startLocalTime
         self.plannedDurationMinutes = plannedDurationMinutes
         self.timeZoneId = timeZoneId
+        self.location = location
         self.effectiveStartDateRaw = effectiveStartDate.isoString
         self.effectiveEndDateRaw = effectiveEndDate.isoString
         self.isEnabled = isEnabled
@@ -138,6 +152,9 @@ public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
     public let startLocalTime: LocalTime?
     public let plannedDurationMinutes: Int?
     public let timeZoneId: TimeZoneId
+    /// Sprint 1.2A: carried from the recurring definition's own
+    /// `location`, same as every other field this suggestion projects.
+    public let location: String?
 
     public init(
         id: String,
@@ -150,7 +167,8 @@ public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
         categoryIds: [ActivityCategoryId],
         startLocalTime: LocalTime?,
         plannedDurationMinutes: Int?,
-        timeZoneId: TimeZoneId
+        timeZoneId: TimeZoneId,
+        location: String? = nil
     ) {
         self.id = id
         self.recurringPlannedActivityId = recurringPlannedActivityId
@@ -163,5 +181,6 @@ public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
         self.startLocalTime = startLocalTime
         self.plannedDurationMinutes = plannedDurationMinutes
         self.timeZoneId = timeZoneId
+        self.location = location
     }
 }

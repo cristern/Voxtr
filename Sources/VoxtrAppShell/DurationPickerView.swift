@@ -1,28 +1,37 @@
 import SwiftUI
 
-/// Sprint 1.1, P1 (duration input), revised in Sprint 1.1.1 Items 4/5
-/// and the P2 Stepper UX audit: a compact wheel-style `Picker` of
-/// common presets plus "Custom", which reveals a direct numeric
-/// minutes `TextField` — not another Stepper. One component reused
-/// everywhere duration is entered (Log Activity, Edit Activity, Daily
-/// Training, and now Add/Edit Recurring Activity), so these screens'
-/// duration input never drifts apart. No external dependency: standard
-/// SwiftUI `Picker`/`TextField` only. `durationMinutes: Int` (the
-/// existing domain representation) is unchanged — this is presentation
-/// only.
+/// Sprint 1.1, P1 (duration input), revised in Sprint 1.1.1 and
+/// Sprint 1.2A: a compact wheel-style `Picker` of common presets plus
+/// "Custom", which reveals a direct numeric minutes `TextField` — not
+/// a Stepper. One component reused everywhere duration is entered (Log
+/// Activity, Edit Activity, Daily Training, Recurring Activity), so
+/// these screens' duration input never drifts apart. No external
+/// dependency: standard SwiftUI `Picker`/`TextField` only.
+/// `durationMinutes: Int` (the existing domain representation) is
+/// unchanged — this is presentation only.
 ///
-/// Custom duration UX (Sprint 1.1.1, Item 5): typing is the only way
-/// to set a non-preset value now — no more repeated +/- tapping.
-/// Reopening an existing non-preset value (e.g. 53) automatically
-/// selects "Custom" in the wheel (the picker's own selection is
-/// derived from `durationMinutes`, not separately tracked) and shows
-/// that value in the text field. Invalid or empty input is never
-/// committed to `durationMinutes` — the last valid value is preserved
-/// until the user types something valid, so an invalid duration can
-/// never be persisted through this control.
+/// Sprint 1.2A root-cause fix: selecting "Custom" previously did NOT
+/// reveal the text field when starting from a preset. The field's
+/// visibility was driven entirely by `!presets.contains(durationMinutes)`
+/// — but selecting "Custom" was deliberately designed to leave
+/// `durationMinutes` untouched until the user typed a value (so an
+/// incomplete edit never persisted). Since `durationMinutes` therefore
+/// never actually left the preset set the moment "Custom" was tapped,
+/// that condition stayed false and the field silently never appeared.
+/// It only ever worked when reopening an activity whose duration was
+/// ALREADY a non-preset value before the view opened — which is why
+/// this passed casual testing but failed the very case being tested
+/// (choosing Custom from a preset). Fixed by tracking which row is
+/// selected (`isCustomSelected`) as its own explicit state, independent
+/// of `durationMinutes`'s current value — initialized once from
+/// `durationMinutes` (so reopening an existing 53 still auto-selects
+/// Custom) but updated immediately when the user taps "Custom" in the
+/// picker, regardless of whether a new value has been typed yet.
 public struct DurationPickerView: View {
     @Binding var durationMinutes: Int
+    @State private var isCustomSelected: Bool = false
     @State private var customText: String = ""
+    @State private var hasInitialized: Bool = false
 
     /// The common presets this work package explicitly asks for.
     private static let presets = [30, 45, 60, 75, 90, 120]
@@ -42,8 +51,21 @@ public struct DurationPickerView: View {
         .pickerStyle(.wheel)
         .frame(height: 110)
         .accessibilityIdentifier("durationPicker.presetPicker")
+        .onAppear {
+            // Runs once, regardless of whether durationMinutes happens
+            // to be a preset or not — establishes the picker's own
+            // selection state from the current value exactly one time,
+            // covering "reopening an existing non-preset duration"
+            // (e.g. 53: Custom is selected, the field shows 53).
+            guard !hasInitialized else { return }
+            hasInitialized = true
+            isCustomSelected = !Self.presets.contains(durationMinutes)
+            if isCustomSelected {
+                customText = String(durationMinutes)
+            }
+        }
 
-        if !Self.presets.contains(durationMinutes) {
+        if isCustomSelected {
             HStack {
                 Text("Minutes")
                 Spacer()
@@ -53,36 +75,32 @@ public struct DurationPickerView: View {
                     .frame(width: 80)
                     .accessibilityIdentifier("durationPicker.customMinutesField")
             }
-            .onAppear {
-                // Seeds the field from the current value the first time
-                // the custom row appears — covers both "user just
-                // selected Custom" (starts from the last value) and
-                // "reopening an existing non-preset duration" (shows
-                // that saved value, e.g. 53).
-                if customText.isEmpty {
-                    customText = String(durationMinutes)
-                }
-            }
             .onChange(of: customText) { _, newValue in
                 commitCustomText(newValue)
             }
         }
     }
 
-    /// Maps the picker's own selection (a preset, or `nil` for
-    /// "Custom") onto the real `durationMinutes` binding. Selecting a
-    /// preset sets the value directly and hides the custom text field
-    /// (the `if !presets.contains(...)` above stops showing it).
-    /// Selecting "Custom" does not alter `durationMinutes` itself —
-    /// only the text field's own `onChange` commits a value, and only
-    /// once the user has typed something valid.
+    /// The picker's own selection is now driven by `isCustomSelected`
+    /// directly, not derived from `durationMinutes` — this is the core
+    /// of the fix. Choosing a preset clears `isCustomSelected` AND sets
+    /// `durationMinutes` together, so the field hides and the value
+    /// updates in the same action. Choosing "Custom" sets
+    /// `isCustomSelected = true` immediately — the field appears
+    /// regardless of what `durationMinutes` currently holds — and seeds
+    /// the text field from the current value as a starting point.
     private var pickerSelection: Binding<Int?> {
         Binding<Int?>(
-            get: { Self.presets.contains(durationMinutes) ? durationMinutes : nil },
+            get: { isCustomSelected ? nil : durationMinutes },
             set: { newValue in
                 if let newValue {
+                    isCustomSelected = false
                     durationMinutes = newValue
-                    customText = ""
+                } else {
+                    isCustomSelected = true
+                    if customText.isEmpty {
+                        customText = String(durationMinutes)
+                    }
                 }
             }
         )

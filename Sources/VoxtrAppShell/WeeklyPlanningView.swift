@@ -245,6 +245,11 @@ struct RecurringActivityManagementView: View {
                                 Text(WeeklyPlanningView.weekdayLabel(for: recurringActivity.weekday))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                                if let location = recurringActivity.location, !location.isEmpty {
+                                    Text(location)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             Spacer()
                             Toggle(
@@ -381,6 +386,9 @@ struct RecurringActivityFormView: View {
                 if viewModel.recurringFormHasDuration {
                     DurationPickerView(durationMinutes: $viewModel.recurringFormDurationMinutes)
                 }
+
+                TextField("Location (optional)", text: $viewModel.recurringFormLocation)
+                    .accessibilityIdentifier("planning.recurringFormLocationField")
             }
             .navigationTitle(editingRecurringActivity == nil ? "\(athleteDisplayName) · Add Recurring Activity" : "\(athleteDisplayName) · Edit Recurring Activity")
             .toolbar {

@@ -1,0 +1,32 @@
+Sprint 1.2A documentation record (for the project's own docs/backlog, wherever they're maintained):
+
+- Recurring Location is NO LONGER a model gap as of this package.
+  RecurringPlannedActivity now has `location: String?`, reusing the
+  exact same representation PlannedActivity.location already used.
+- Location now flows: recurring definition -> derived suggestion
+  (RecurringActivitySuggestion.location) -> materialized PlannedActivity
+  (via acceptSuggestion, using the definition's current value, never a
+  possibly-stale suggestion) -> Activity Detail / Weekly Plan / Family
+  Schedule, wherever PlannedActivity.location was already surfaced.
+- Editing a recurring definition's Location does NOT retroactively
+  update already-materialized PlannedActivity rows -- only future,
+  not-yet-materialized derivation sees the new value. This is the
+  same pre-existing rule already governing every other recurring
+  field (title, weekday, duration, etc.) -- no special Location-only
+  synchronization was invented.
+- No schema version bump was made. This was a field-level addition to
+  an already-listed model type, which the project's own
+  AppSchemaVersioning.swift guidance (step 3/4) explicitly says does
+  not require a new version. Combined with confirmed Internal Alpha /
+  test-data-only status, no migration machinery was added. If a local
+  device's existing SwiftData store is incompatible with the new
+  field, a store reset may be required -- acceptable per Internal
+  Alpha status, not a production data-loss concern.
+- Address lookup/autocomplete, saved/favorite locations, and
+  maps/geocoding remain backlog -- explicitly not implemented here.
+  The Location representation (plain optional String) was not changed
+  in a way that would require a second Location concept if that work
+  happens later.
+- Daily Focus remains a valid, deferred product concept -- hidden
+  because its old implementation duplicated Training, not deleted or
+  reconsidered. Untouched by this package.

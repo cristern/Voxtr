@@ -108,7 +108,7 @@ public struct FamilyScheduleView: View {
                     rowContent(
                         athleteName: athleteName,
                         title: suggestion.title,
-                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: nil, isCompleted: false)
+                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location, isCompleted: false)
                     )
                     Spacer()
                     Text("Recurring")

@@ -73,6 +73,9 @@ public struct RecurringOccurrencePreviewView: View {
                 if let startTime = suggestion.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
                 }
+                if let location = suggestion.location, !location.isEmpty {
+                    LabeledContent("Location", value: location)
+                }
                 LabeledContent("Status", value: "Recurring — not yet added to this week's plan")
             }
             .accessibilityIdentifier("recurringOccurrence.summary")

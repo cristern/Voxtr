@@ -232,6 +232,7 @@ public final class PlanningRepository {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
+        location: String? = nil,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate
     ) throws -> RecurringPlannedActivity {
@@ -245,6 +246,7 @@ public final class PlanningRepository {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
+            location: location,
             effectiveStartDate: effectiveStartDate,
             effectiveEndDate: effectiveEndDate,
             saveOverride: nil
@@ -267,6 +269,7 @@ public final class PlanningRepository {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
+        location: String? = nil,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate,
         saveOverride: (() throws -> Void)?
@@ -281,6 +284,7 @@ public final class PlanningRepository {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
+            location: location,
             effectiveStartDate: effectiveStartDate,
             effectiveEndDate: effectiveEndDate
         )
