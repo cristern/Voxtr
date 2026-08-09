@@ -18,15 +18,30 @@ import VoxtrPlanningDomain
 /// `PlannedActivity` is created just by looking; only actually editing
 /// the recurring definition (an already-established, pre-existing
 /// mutation path) touches persistence.
+///
+/// Sprint 1.1.1, Item 2 (white-screen fix): this view previously drove
+/// its "Edit Recurring Definition" sheet from THREE separate `@State`
+/// variables (`isPresentingEditForm: Bool`,
+/// `recurringActivity: RecurringPlannedActivity?`,
+/// `recurringManagementViewModel: WeeklyPlanningViewModel?`) — the
+/// exact same race already diagnosed and fixed for `DailyTrainingView`
+/// "Manage Recurring Activities": `.sheet(isPresented:)`'s content
+/// closure can be evaluated before the separately-set optional state
+/// has "caught up," and the `if let` (no `else`) falls through to an
+/// implicit, blank `EmptyView()`. First tap: blank. Return and tap
+/// again: the (never-reset) values are already populated from the
+/// first attempt, so the same race no longer matters — exactly the
+/// reported symptom. This view introduced the same bug independently,
+/// in the same turn the first instance was fixed elsewhere, by not yet
+/// applying the same lesson to new code. Fixed the same way:
+/// `.sheet(item:)` — presence and content are now one piece of state.
 public struct RecurringOccurrencePreviewView: View {
     let suggestion: RecurringActivitySuggestion
     let athleteDisplayName: String
     let planningService: PlanningService
     let actorId: ActorId
 
-    @State private var isPresentingEditForm = false
-    @State private var recurringActivity: RecurringPlannedActivity?
-    @State private var recurringManagementViewModel: WeeklyPlanningViewModel?
+    @State private var editSheetItem: RecurringEditSheetItem?
     @State private var errorMessage: String?
 
     public init(
@@ -73,13 +88,12 @@ public struct RecurringOccurrencePreviewView: View {
             }
         }
         .navigationTitle("\(athleteDisplayName) · Recurring Activity")
-        .sheet(isPresented: $isPresentingEditForm) {
-            if let recurringManagementViewModel, let recurringActivity {
-                RecurringActivityFormView(
-                    viewModel: recurringManagementViewModel,
-                    editingRecurringActivity: recurringActivity
-                )
-            }
+        .sheet(item: $editSheetItem) { item in
+            RecurringActivityFormView(
+                viewModel: item.viewModel,
+                editingRecurringActivity: item.recurringActivity,
+                athleteDisplayName: athleteDisplayName
+            )
         }
     }
 
@@ -87,7 +101,9 @@ public struct RecurringOccurrencePreviewView: View {
     /// suggestion is only a lightweight, derived projection of it) and
     /// presents the existing edit form for it — the one, already-
     /// established way to change a recurring definition, not a new one
-    /// built for this screen.
+    /// built for this screen. Both pieces of data the sheet needs are
+    /// fully resolved BEFORE `editSheetItem` is ever set, so there is no
+    /// window where the sheet is "presented" with nothing to show.
     private func openEditForm() {
         errorMessage = nil
         do {
@@ -95,15 +111,24 @@ public struct RecurringOccurrencePreviewView: View {
                 errorMessage = "Could not find this recurring activity's definition."
                 return
             }
-            recurringActivity = fetched
-            recurringManagementViewModel = WeeklyPlanningViewModel(
+            let viewModel = WeeklyPlanningViewModel(
                 service: planningService,
                 athleteId: suggestion.athleteId,
                 committedByActorId: actorId
             )
-            isPresentingEditForm = true
+            editSheetItem = RecurringEditSheetItem(viewModel: viewModel, recurringActivity: fetched)
         } catch {
             errorMessage = "Could not load this recurring activity's definition."
         }
     }
+}
+
+/// Sprint 1.1.1, Item 2: wraps the two pieces of data
+/// `RecurringActivityFormView` needs for `.sheet(item:)` presentation —
+/// see `RecurringOccurrencePreviewView`'s own doc comment for the full
+/// root-cause explanation this fixes.
+private struct RecurringEditSheetItem: Identifiable {
+    let id = UUID()
+    let viewModel: WeeklyPlanningViewModel
+    let recurringActivity: RecurringPlannedActivity
 }
