@@ -7,6 +7,7 @@ import VoxtrCoreContracts
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
