@@ -117,17 +117,13 @@ public struct DailyTrainingView: View {
 
                 DurationPickerView(durationMinutes: $viewModel.newLogDurationMinutes)
 
-                Stepper(
-                    "Perceived exertion: \(viewModel.newLogPerceivedExertion.map { String($0) } ?? "—")",
-                    onIncrement: {
-                        viewModel.newLogPerceivedExertion = min((viewModel.newLogPerceivedExertion ?? 0) + 1, 10)
-                    },
-                    onDecrement: {
-                        let next = (viewModel.newLogPerceivedExertion ?? 1) - 1
-                        viewModel.newLogPerceivedExertion = next < 1 ? nil : next
+                Picker("RPE", selection: $viewModel.newLogPerceivedExertion) {
+                    Text("Not set").tag(Int?.none)
+                    ForEach(1...10, id: \.self) { value in
+                        Text("\(value)").tag(Int?.some(value))
                     }
-                )
-                .accessibilityIdentifier("training.newLogExertionStepper")
+                }
+                .accessibilityIdentifier("training.newLogExertionPicker")
 
                 TextField("Notes", text: $viewModel.newLogNotes)
                     .accessibilityIdentifier("training.newLogNotesField")
@@ -176,7 +172,7 @@ public struct DailyTrainingView: View {
             viewModel.load()
         }
         .sheet(item: $recurringManagementSheetItem) { item in
-            RecurringActivityManagementView(viewModel: item.viewModel)
+            RecurringActivityManagementView(viewModel: item.viewModel, athleteDisplayName: athleteDisplayName)
         }
     }
 }

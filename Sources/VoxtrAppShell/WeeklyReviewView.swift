@@ -76,7 +76,8 @@ public struct WeeklyReviewView: View {
                             weekStart: viewModel.weekStart,
                             authorId: authorId,
                             existing: result.weeklyReflection
-                        )
+                        ),
+                        isModal: true
                     )
                 }
             }

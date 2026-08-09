@@ -160,7 +160,7 @@ public struct WeeklyPlanningView: View {
             viewModel.loadOrCreateWeekPlan()
         }
         .sheet(isPresented: $isManagingRecurringActivities) {
-            RecurringActivityManagementView(viewModel: viewModel)
+            RecurringActivityManagementView(viewModel: viewModel, athleteDisplayName: athleteDisplayName)
         }
     }
 
@@ -230,9 +230,9 @@ public struct WeeklyPlanningView: View {
 /// work package's own "keep the UI functional and simple" instruction.
 struct RecurringActivityManagementView: View {
     @Bindable var viewModel: WeeklyPlanningViewModel
+    let athleteDisplayName: String
     @Environment(\.dismiss) private var dismiss
-    @State private var isPresentingForm: Bool = false
-    @State private var editingRecurringActivity: RecurringPlannedActivity?
+    @State private var formSheetItem: RecurringFormSheetItem?
 
     var body: some View {
         NavigationStack {
@@ -261,20 +261,18 @@ struct RecurringActivityManagementView: View {
                     .contentShape(Rectangle())
                     .accessibilityIdentifier("planning.recurringActivityRow.\(recurringActivity.id.uuidString)")
                     .onTapGesture {
-                        editingRecurringActivity = recurringActivity
                         viewModel.beginEditingRecurringActivity(recurringActivity)
-                        isPresentingForm = true
+                        formSheetItem = RecurringFormSheetItem(editingRecurringActivity: recurringActivity)
                     }
                 }
             }
             .accessibilityIdentifier("planning.recurringActivityList")
-            .navigationTitle("Recurring activities")
+            .navigationTitle("\(athleteDisplayName) · Recurring Activities")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add") {
-                        editingRecurringActivity = nil
                         viewModel.resetRecurringForm()
-                        isPresentingForm = true
+                        formSheetItem = RecurringFormSheetItem(editingRecurringActivity: nil)
                     }
                     .accessibilityIdentifier("planning.addRecurringActivityButton")
                 }
@@ -283,11 +281,32 @@ struct RecurringActivityManagementView: View {
                         .accessibilityIdentifier("planning.doneManagingRecurringActivitiesButton")
                 }
             }
-            .sheet(isPresented: $isPresentingForm) {
-                RecurringActivityFormView(viewModel: viewModel, editingRecurringActivity: editingRecurringActivity)
+            .sheet(item: $formSheetItem) { item in
+                RecurringActivityFormView(
+                    viewModel: viewModel,
+                    editingRecurringActivity: item.editingRecurringActivity,
+                    athleteDisplayName: athleteDisplayName
+                )
             }
         }
     }
+}
+
+/// Sprint 1.1.1, Item 6 (regression audit — "no Bool + separately-
+/// populated destination state"): wraps the one piece of data
+/// `RecurringActivityFormView` needs (which recurring activity, if
+/// any, is being edited) for `.sheet(item:)` presentation. Previously
+/// this view used a `Bool` (`isPresentingForm`) plus a separately-set
+/// `editingRecurringActivity: RecurringPlannedActivity?` — the exact
+/// pattern already diagnosed and fixed twice elsewhere (`DailyTrainingView`
+/// "Manage Recurring Activities", `RecurringOccurrencePreviewView` "Edit
+/// Recurring Definition"). For "Add" (nil) this was low-risk since nil
+/// is itself a valid state; for "Edit" a race could present the form
+/// still in "Add" mode rather than truly blank — still a real bug this
+/// fix removes entirely.
+private struct RecurringFormSheetItem: Identifiable {
+    let id = UUID()
+    let editingRecurringActivity: RecurringPlannedActivity?
 }
 
 /// The create/edit form itself — one form, reused for both, matching
@@ -296,6 +315,7 @@ struct RecurringActivityManagementView: View {
 struct RecurringActivityFormView: View {
     @Bindable var viewModel: WeeklyPlanningViewModel
     let editingRecurringActivity: RecurringPlannedActivity?
+    let athleteDisplayName: String
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -359,15 +379,10 @@ struct RecurringActivityFormView: View {
                 Toggle("Has duration", isOn: $viewModel.recurringFormHasDuration)
                     .accessibilityIdentifier("planning.recurringFormHasDurationToggle")
                 if viewModel.recurringFormHasDuration {
-                    Stepper(
-                        "Duration: \(viewModel.recurringFormDurationMinutes) min",
-                        value: $viewModel.recurringFormDurationMinutes,
-                        in: 1...1440
-                    )
-                    .accessibilityIdentifier("planning.recurringFormDurationStepper")
+                    DurationPickerView(durationMinutes: $viewModel.recurringFormDurationMinutes)
                 }
             }
-            .navigationTitle(editingRecurringActivity == nil ? "Add recurring activity" : "Edit recurring activity")
+            .navigationTitle(editingRecurringActivity == nil ? "\(athleteDisplayName) · Add Recurring Activity" : "\(athleteDisplayName) · Edit Recurring Activity")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {

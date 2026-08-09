@@ -29,8 +29,11 @@ public struct WeeklyReflectionFormView: View {
     @State private var viewModel: WeeklyReflectionFormViewModel
     @Environment(\.dismiss) private var dismiss
 
-    public init(viewModel: WeeklyReflectionFormViewModel) {
+    let isModal: Bool
+
+    public init(viewModel: WeeklyReflectionFormViewModel, isModal: Bool = false) {
         _viewModel = State(initialValue: viewModel)
+        self.isModal = isModal
     }
 
     public var body: some View {
@@ -44,27 +47,21 @@ public struct WeeklyReflectionFormView: View {
             }
 
             Section("How did the week feel?") {
-                Stepper(
-                    "Overall satisfaction: \(viewModel.overallSatisfaction.map { String($0) } ?? "—")",
-                    onIncrement: {
-                        viewModel.overallSatisfaction = min((viewModel.overallSatisfaction ?? 0) + 1, 5)
-                    },
-                    onDecrement: {
-                        let next = (viewModel.overallSatisfaction ?? 1) - 1
-                        viewModel.overallSatisfaction = next < 1 ? nil : next
+                Picker("Overall satisfaction", selection: $viewModel.overallSatisfaction) {
+                    Text("Not set").tag(Int?.none)
+                    ForEach(1...5, id: \.self) { value in
+                        Text("\(value)").tag(Int?.some(value))
                     }
-                )
-                .accessibilityIdentifier("weeklyReflectionForm.satisfactionStepper")
+                }
+                .accessibilityIdentifier("weeklyReflectionForm.satisfactionPicker")
 
-                Stepper(
-                    "Load felt: \(viewModel.loadFelt.map { String($0) } ?? "—")",
-                    onIncrement: { viewModel.loadFelt = min((viewModel.loadFelt ?? 0) + 1, 5) },
-                    onDecrement: {
-                        let next = (viewModel.loadFelt ?? 1) - 1
-                        viewModel.loadFelt = next < 1 ? nil : next
+                Picker("Load felt", selection: $viewModel.loadFelt) {
+                    Text("Not set").tag(Int?.none)
+                    ForEach(1...5, id: \.self) { value in
+                        Text("\(value)").tag(Int?.some(value))
                     }
-                )
-                .accessibilityIdentifier("weeklyReflectionForm.loadFeltStepper")
+                }
+                .accessibilityIdentifier("weeklyReflectionForm.loadFeltPicker")
             }
 
             Section("What worked") {
@@ -96,9 +93,25 @@ public struct WeeklyReflectionFormView: View {
                 .disabled(viewModel.isSubmitting)
                 .accessibilityIdentifier("weeklyReflectionForm.saveButton")
             }
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
-                    .accessibilityIdentifier("weeklyReflectionForm.cancelButton")
+            // Sprint 1.1.1, Item 6 (Back vs Cancel audit): this is the
+            // only one of this app's 7 Cancel-bearing screens that is
+            // genuinely used both pushed (ReflectionFormViewLoader,
+            // within an already-active NavigationStack — the standard
+            // back chevron already dismisses it) and modally
+            // (WeeklyReviewView's own sheet, which has no back chevron
+          // to rely on). The other 6 (ActivityEditFormView,
+            // AthleteFormView, LogActivityView, RecurringActivityFormView,
+            // and RecurringActivityManagementView's own "Done") are all
+            // sheet-only — confirmed by checking every construction
+            // site — so their Cancel/Done buttons are correctly
+            // retained as-is; showing Cancel unconditionally here would
+            // have duplicated the back chevron specifically in the
+            // pushed case, matching the reported symptom exactly.
+            if isModal {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("weeklyReflectionForm.cancelButton")
+                }
             }
         }
     }
