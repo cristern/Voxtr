@@ -530,8 +530,16 @@ struct Sprint12BTests {
     /// own `firstWeekday` — proving the fix without mutating global
     /// process locale (which would be brittle/order-dependent across a
     /// test suite); passing explicit, differently-configured `Calendar`
-    /// values is the direct, non-brittle way to exercise this.
+    /// values is the direct, non-brittle way to exercise this. Calls
+    /// `TrainingPlanningCoordinationService.weekStart` directly (not
+    /// `LocalDate.startOfWeek` alone) because that's the only function
+    /// that even accepts a `Calendar` parameter to vary — `startOfWeek`
+    /// has none, so it can't exercise this specific claim.
+    /// `@MainActor` here because `TrainingPlanningCoordinationService`
+    /// is itself `@MainActor`-isolated — matches every other test in
+    /// this suite that calls it.
     @Test("weekStart is identical regardless of the calendar's own firstWeekday configuration")
+    @MainActor
     func weekStartIgnoresCalendarFirstWeekday() throws {
         // A known Wednesday: 2026-08-12. Its Monday is 2026-08-10.
         var utcCalendar = Calendar(identifier: .gregorian)
