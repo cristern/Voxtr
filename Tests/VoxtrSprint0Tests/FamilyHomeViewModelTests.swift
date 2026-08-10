@@ -197,6 +197,7 @@ struct FamilyHomeViewModelTests {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
@@ -233,6 +234,7 @@ struct FamilyHomeViewModelTests {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
@@ -277,7 +279,6 @@ struct FamilyHomeViewModelTests {
         let athleteRepository = AthleteRepository(modelContext: container.mainContext)
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
-        let trainingService = TrainingService(repository: trainingRepository)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
@@ -323,6 +324,7 @@ struct FamilyHomeViewModelTests {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
