@@ -60,10 +60,24 @@ public final class TrainingPlanningCoordinationService {
     /// uses, duplicated here rather than shared across the module
     /// boundary between `VoxtrAppShell` types, to keep this type
     /// self-contained.
+    /// Fix: previously computed via
+    /// `calendar.dateInterval(of: .weekOfYear, for: referenceDate)`,
+    /// which depends on the calendar's locale-configured `firstWeekday`
+    /// — the same device running this app in a Sunday-first-week
+    /// locale would put different dates in "this week" than one in a
+    /// Monday-first locale. Vǫxtr's own planning/training weeks are
+    /// Monday → Sunday, deterministically, regardless of device locale
+    /// — now computed via `LocalDate.startOfWeek`, the one canonical
+    /// implementation of that rule (see its own doc comment). The
+    /// `Date` → `LocalDate` conversion below still legitimately uses
+    /// the passed `calendar` (i.e. its time zone) — "which calendar day
+    /// does this instant fall on" is a genuine device/timezone
+    /// question; only the week-boundary rule itself needed to stop
+    /// depending on locale.
     public static func weekStart(referenceDate: Date = .now, calendar: Calendar = .current) -> LocalDate {
-        let start = calendar.dateInterval(of: .weekOfYear, for: referenceDate)?.start ?? referenceDate
-        let components = calendar.dateComponents([.year, .month, .day], from: start)
-        return LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        let components = calendar.dateComponents([.year, .month, .day], from: referenceDate)
+        let localDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        return localDate.startOfWeek
     }
 
     /// Returns today's `PlannedActivity` records for the athlete's

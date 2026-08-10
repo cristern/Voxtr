@@ -73,14 +73,15 @@ public final class WeeklyPlanningViewModel {
         self.weekStart = weekStart ?? Self.currentWeekStart()
     }
 
-    /// Start of the calendar week containing today, per the device's
-    /// own calendar — not a product business rule, the same kind of
-    /// device-provided default `CreateFamilyViewModel` already uses for
-    /// time zone.
+    /// Fix: this used to duplicate `TrainingPlanningCoordinationService.weekStart`'s
+    /// own (formerly locale-dependent, now-fixed) computation, with a
+    /// doc comment incorrectly framing week boundaries as "not a
+    /// product business rule" — Vǫxtr's Monday → Sunday week IS a
+    /// product decision, not a device default. Now delegates to that
+    /// one canonical implementation instead of recomputing the same
+    /// thing a second way.
     public static func currentWeekStart(referenceDate: Date = .now, calendar: Calendar = .current) -> LocalDate {
-        let start = calendar.dateInterval(of: .weekOfYear, for: referenceDate)?.start ?? referenceDate
-        let components = calendar.dateComponents([.year, .month, .day], from: start)
-        return LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        TrainingPlanningCoordinationService.weekStart(referenceDate: referenceDate, calendar: calendar)
     }
 
     public var isCommitted: Bool { weekPlan?.status == .committed }

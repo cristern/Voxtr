@@ -139,7 +139,20 @@ public final class FamilyHomeViewModel {
                 anyFailed = true
             }
         }
-        rows = merged.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        // Family Home presentation ordering (fix: this grouping was lost
+        // when loadHome() moved from its own per-athlete fetch to
+        // TodayActivityComposer, which only sorts chronologically — see
+        // TodayActivityComposer.todayActivities(...)'s own doc comment).
+        // Not-completed rows first (chronological), completed/logged
+        // rows last (chronological) — the same pre-existing contract
+        // FamilyHomeViewModel.sorted(_:) below still applies to
+        // tomorrowRows. This is presentation ordering on top of the
+        // composer's already-composed data, not a second aggregation —
+        // the composer itself remains the single source of what rows
+        // exist; only their order here is Family-Home-specific.
+        let notCompleted = merged.filter { !$0.isCompletedOrLogged }.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        let completed = merged.filter { $0.isCompletedOrLogged }.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        rows = notCompleted + completed
         if anyFailed && rows.isEmpty {
             errorMessage = "Could not load today's activities."
         }

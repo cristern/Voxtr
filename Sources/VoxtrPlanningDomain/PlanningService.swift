@@ -542,14 +542,7 @@ public final class PlanningService {
                     month: cursorComponents.month ?? 1,
                     day: cursorComponents.day ?? 1
                 )
-                let weekOfCursor = calendar.dateInterval(of: .weekOfYear, for: cursor)?.start ?? cursor
-                let weekComponents = calendar.dateComponents([.year, .month, .day], from: weekOfCursor)
-                weekStarts.insert(LocalDate(
-                    year: weekComponents.year ?? 1970,
-                    month: weekComponents.month ?? 1,
-                    day: weekComponents.day ?? 1
-                ))
-                _ = cursorDate
+                weekStarts.insert(cursorDate.startOfWeek)
                 guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
                 cursor = next
             }

@@ -77,6 +77,17 @@ struct Sprint12BTests {
     /// Item 3: date range boundaries are respected — a weekday outside
     /// the definition's own effective date range never derives an
     /// occurrence, even if it matches the weekday set.
+    ///
+    /// Restored to an explicit assertion: `TrainingPlanningCoordinationService.weekStart()`
+    /// now deterministically returns Monday (Vǫxtr's own Monday →
+    /// Sunday week, via `LocalDate.startOfWeek` — no longer dependent
+    /// on `Calendar.current`'s locale-configured `firstWeekday`). So
+    /// `weekStart` is genuinely Monday and `weekStart.adding(days: 2)`
+    /// is genuinely Wednesday, regardless of the environment this test
+    /// runs in — the earlier, locale-defensive version of this test is
+    /// no longer needed. The already-confirmed inclusive
+    /// `effectiveStartDate...effectiveEndDate` contract (`<=` on both
+    /// ends, unchanged by this fix) is what's being exercised here.
     @Test("Date range boundaries are respected for multi-weekday definitions")
     @MainActor
     func dateRangeBoundariesRespected() throws {
@@ -86,6 +97,7 @@ struct Sprint12BTests {
         let planningService = PlanningService(repository: planningRepository)
         let athleteId = AthleteId()
         let weekStart = TrainingPlanningCoordinationService.weekStart()
+        #expect(weekStart.weekday == .monday)
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
 
         // Effective range covers only Mon-Wed of this week, even though
@@ -490,5 +502,53 @@ struct Sprint12BTests {
                 activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
             )
         }
+    }
+
+    // MARK: - Locale-independence regression (deterministic Monday->Sunday week)
+
+    /// `LocalDate.startOfWeek` itself takes no `Calendar` parameter —
+    /// it's built purely from `weekday` (already locale-independent).
+    /// Confirms every day of a known week maps to the same Monday,
+    /// proving the canonical rule directly rather than only indirectly
+    /// through a caller.
+    @Test("LocalDate.startOfWeek is deterministically Monday for every day of the week")
+    func startOfWeekIsDeterministicallyMonday() throws {
+        // A known Monday: 2026-08-10.
+        let monday = LocalDate(year: 2026, month: 8, day: 10)
+        let weekDates = (0..<7).map { monday.adding(days: $0) }
+        for date in weekDates {
+            #expect(date.startOfWeek == monday)
+        }
+        // The following Monday must NOT collapse into the same week.
+        let nextMonday = monday.adding(days: 7)
+        #expect(nextMonday.startOfWeek == nextMonday)
+    }
+
+    /// Regression guard for the actual bug found in this package:
+    /// `TrainingPlanningCoordinationService.weekStart(referenceDate:calendar:)`
+    /// must return the SAME Monday regardless of the passed calendar's
+    /// own `firstWeekday` — proving the fix without mutating global
+    /// process locale (which would be brittle/order-dependent across a
+    /// test suite); passing explicit, differently-configured `Calendar`
+    /// values is the direct, non-brittle way to exercise this.
+    @Test("weekStart is identical regardless of the calendar's own firstWeekday configuration")
+    func weekStartIgnoresCalendarFirstWeekday() throws {
+        // A known Wednesday: 2026-08-12. Its Monday is 2026-08-10.
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        let referenceDate = utcCalendar.date(from: DateComponents(year: 2026, month: 8, day: 12)) ?? .now
+
+        var sundayFirstCalendar = utcCalendar
+        sundayFirstCalendar.firstWeekday = 1 // Sunday — e.g. a US locale.
+        var mondayFirstCalendar = utcCalendar
+        mondayFirstCalendar.firstWeekday = 2 // Monday — e.g. many European locales.
+
+        let expectedMonday = LocalDate(year: 2026, month: 8, day: 10)
+        let resultWithSundayFirst = TrainingPlanningCoordinationService.weekStart(referenceDate: referenceDate, calendar: sundayFirstCalendar)
+        let resultWithMondayFirst = TrainingPlanningCoordinationService.weekStart(referenceDate: referenceDate, calendar: mondayFirstCalendar)
+
+        #expect(resultWithSundayFirst == expectedMonday)
+        #expect(resultWithMondayFirst == expectedMonday)
+        #expect(resultWithSundayFirst == resultWithMondayFirst)
     }
 }

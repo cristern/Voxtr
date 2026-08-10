@@ -71,6 +71,24 @@ public enum TodayActivityRow: Identifiable {
         guard let time else { return Int.max }
         return time.hour * 60 + time.minute
     }
+
+    /// Fix (Family Home sorting regression): a generic, domain-meaningful
+    /// "is this already resolved" notion across all three row kinds —
+    /// `.planned` uses its own real `isCompleted`, `.recurringOccurrence`
+    /// is inherently not-yet-logged (it has no `PlannedActivityId` yet),
+    /// `.unplannedLogged` is inherently already logged. This lives here,
+    /// on the shared row type, rather than being re-derived by each
+    /// consumer — but the composer's own `todayActivities(...)` still
+    /// does not use it for ordering; that grouping is a presentation
+    /// concern for whichever surface wants it (see `FamilyHomeViewModel`),
+    /// not something baked into the shared data composition.
+    public var isCompletedOrLogged: Bool {
+        switch self {
+        case .planned(let row): return row.isCompleted
+        case .recurringOccurrence: return false
+        case .unplannedLogged: return true
+        }
+    }
 }
 
 /// Sprint 1.2B, Part 2: the one, shared application-layer composer for

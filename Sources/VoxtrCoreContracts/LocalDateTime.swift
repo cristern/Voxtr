@@ -78,6 +78,29 @@ public struct LocalDate: Hashable, Codable, Sendable, Comparable {
             day: shiftedComponents.day ?? day
         )
     }
+
+    /// The canonical, deterministic start (Monday) of the Vǫxtr
+    /// planning/training week this date falls in — a MONDAY → SUNDAY
+    /// week, per Vǫxtr's own product semantics, never dependent on the
+    /// device's locale-configured `Calendar.current.firstWeekday`
+    /// (which varies — e.g. Sunday-first in a US locale — and would
+    /// otherwise make which dates belong to the same planning week
+    /// change depending on where the app is running). Computed purely
+    /// from `weekday` (itself already locale-independent, see that
+    /// property's own doc comment) and `adding(days:)` — no `Calendar`
+    /// consulted for the week-boundary logic itself, only for the
+    /// underlying (year, month, day) arithmetic both of those already
+    /// use. This is the one, canonical implementation of Vǫxtr's week
+    /// boundary — every week-start call site in the app should compute
+    /// through this, not reimplement the same offset separately.
+    public var startOfWeek: LocalDate {
+        // Weekday.monday.rawValue == 2 (Weekday's own 1=Sunday...7=Saturday
+        // numbering, see Weekday's definition) — this offset counts how
+        // many days back to the most recent Monday, wrapping correctly
+        // for Sunday (6 days back) through Saturday (5 days back).
+        let daysSinceMonday = (weekday.rawValue - Weekday.monday.rawValue + 7) % 7
+        return adding(days: -daysSinceMonday)
+    }
 }
 
 /// Day of the week, independent of any specific `Calendar`/locale
