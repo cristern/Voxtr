@@ -66,7 +66,7 @@ struct Sprint1CloseoutTests {
 
         let recurring = try planningService.createRecurringPlannedActivity(
             athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
-            weekday: occurrenceDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            weekdays: [occurrenceDate.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )

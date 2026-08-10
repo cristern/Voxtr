@@ -41,7 +41,13 @@ public final class WeeklyPlanningViewModel {
     // Recurring-activity management form fields.
     public var recurringFormTitle: String = ""
     public var recurringFormActivityType: ActivityType = .individualTraining
-    public var recurringFormWeekday: Weekday = .monday
+    /// Sprint 1.2B: one or more weekdays — replaces the previous
+    /// single `recurringFormWeekday: Weekday`. `Set<Weekday>` (not
+    /// an array) since UI multi-select has no meaningful order of
+    /// its own; `RecurringPlannedActivity.init` itself sorts and
+    /// dedupes when this is finally passed through, so this being a
+    /// Set here changes nothing about the persisted result.
+    public var recurringFormWeekdays: Set<Weekday> = [.monday]
     public var recurringFormHasStartTime: Bool = false
     public var recurringFormStartTime: Date = .now
     public var recurringFormHasDuration: Bool = false
@@ -254,7 +260,7 @@ public final class WeeklyPlanningViewModel {
                 athleteId: athleteId,
                 title: trimmedTitle,
                 activityType: recurringFormActivityType,
-                weekday: recurringFormWeekday,
+                weekdays: Array(recurringFormWeekdays),
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
@@ -287,7 +293,7 @@ public final class WeeklyPlanningViewModel {
                 recurringActivity.recurringPlannedActivityId,
                 title: trimmedTitle,
                 activityType: recurringFormActivityType,
-                weekday: recurringFormWeekday,
+                weekdays: Array(recurringFormWeekdays),
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
                 timeZoneId: recurringActivity.timeZoneId,
@@ -329,7 +335,7 @@ public final class WeeklyPlanningViewModel {
     public func beginEditingRecurringActivity(_ recurringActivity: RecurringPlannedActivity) {
         recurringFormTitle = recurringActivity.title
         recurringFormActivityType = recurringActivity.activityType
-        recurringFormWeekday = recurringActivity.weekday
+        recurringFormWeekdays = Set(recurringActivity.weekdays)
         if let startLocalTime = recurringActivity.startLocalTime {
             recurringFormHasStartTime = true
             recurringFormStartTime = Calendar.current.date(
@@ -352,7 +358,7 @@ public final class WeeklyPlanningViewModel {
     public func resetRecurringForm() {
         recurringFormTitle = ""
         recurringFormActivityType = .individualTraining
-        recurringFormWeekday = .monday
+        recurringFormWeekdays = [.monday]
         recurringFormHasStartTime = false
         recurringFormStartTime = .now
         recurringFormHasDuration = false

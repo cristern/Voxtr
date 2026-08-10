@@ -53,20 +53,23 @@ public struct AthleteReflectionReminder: Identifiable {
 @Observable
 public final class FamilyHomeViewModel {
     public private(set) var activeAthletes: [AthleteProfile]
-    public private(set) var rows: [FamilyHomeRow] = []
     public private(set) var reflectionReminders: [AthleteReflectionReminder] = []
     public private(set) var errorMessage: String?
 
+    public private(set) var rows: [TodayActivityRow] = []
     public private(set) var tomorrowRows: [FamilyHomeRow] = []
     private let workspaceId: WorkspaceId
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
+    private let todayActivityComposer: TodayActivityComposer
 
     public init(
         activeAthletes: [AthleteProfile],
         workspaceId: WorkspaceId,
         athleteRepository: AthleteRepository,
+        planningService: PlanningService,
+        trainingService: TrainingService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReflectionService: WeeklyReflectionService
     ) {
@@ -75,6 +78,11 @@ public final class FamilyHomeViewModel {
         self.athleteRepository = athleteRepository
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
+        self.todayActivityComposer = TodayActivityComposer(
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
     }
 
     /// The single entry point the view calls on appear — refreshes the
@@ -116,20 +124,14 @@ public final class FamilyHomeViewModel {
     /// aggregation over an already-existing capability.
     public func loadHome() {
         errorMessage = nil
-        var merged: [FamilyHomeRow] = []
+        var merged: [TodayActivityRow] = []
         var anyFailed = false
         for athlete in activeAthletes {
             do {
-                let completions = try trainingPlanningCoordinationService.todaysPlannedActivitiesWithCompletion(forAthlete: athlete.athleteId)
-                merged.append(contentsOf: completions.map { completion in
-                    FamilyHomeRow(
-                        id: completion.plannedActivity.id.uuidString,
-                        athleteId: athlete.athleteId,
-                        athleteName: athlete.givenName,
-                        plannedActivity: completion.plannedActivity,
-                        isCompleted: completion.isCompleted
-                    )
-                })
+                let athleteRows = try todayActivityComposer.todayActivities(
+                    forAthlete: athlete.athleteId, athleteName: athlete.givenName
+                )
+                merged.append(contentsOf: athleteRows)
             } catch {
                 // One athlete's failure must never block the others —
                 // same principle HomeDashboardViewModel's own two
@@ -137,7 +139,7 @@ public final class FamilyHomeViewModel {
                 anyFailed = true
             }
         }
-        rows = Self.sorted(merged)
+        rows = merged.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
         if anyFailed && rows.isEmpty {
             errorMessage = "Could not load today's activities."
         }

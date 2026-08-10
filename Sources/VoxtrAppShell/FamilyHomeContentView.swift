@@ -14,6 +14,7 @@ import VoxtrReflectionDomain
 enum FamilyHomeDestination: Hashable {
     case athlete(AthleteId)
     case activity(rowId: String)
+    case recurringOccurrence(id: String)
     case manageAthletes
     case reflection(AthleteId)
     case familySchedule
@@ -65,6 +66,8 @@ public struct FamilyHomeContentView: View {
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
             athleteRepository: athleteRepository,
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         ))
@@ -87,7 +90,7 @@ public struct FamilyHomeContentView: View {
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(viewModel.rows) { row in
-                            familyHomeRow(row)
+                            todayActivityRow(row)
                         }
                     }
                 }
@@ -123,8 +126,22 @@ public struct FamilyHomeContentView: View {
                         athleteOverview(for: athlete)
                     }
                 case .activity(let rowId):
-                    if let row = viewModel.rows.first(where: { $0.id == rowId }) {
+                    let plannedRowsToday: [FamilyHomeRow] = viewModel.rows.compactMap {
+                        if case .planned(let row) = $0 { return row }
+                        return nil
+                    }
+                    if let row = (plannedRowsToday + viewModel.tomorrowRows).first(where: { $0.id == rowId }) {
                         activityDetail(for: row)
+                    }
+                case .recurringOccurrence(let id):
+                    if case .recurringOccurrence(let athleteId, let athleteName, let suggestion) = viewModel.rows.first(where: { $0.id == id }) {
+                        RecurringOccurrencePreviewView(
+                            suggestion: suggestion,
+                            athleteDisplayName: athleteName,
+                            planningService: planningService,
+                            trainingService: trainingService,
+                            actorId: ActorId(rawValue: family.participant.id)
+                        )
                     }
                 case .manageAthletes:
                     AthleteFamilyManagementView(
@@ -165,6 +182,77 @@ public struct FamilyHomeContentView: View {
             }
             .accessibilityIdentifier("familyHome.tomorrowList")
         }
+    }
+
+    /// Sprint 1.2B: renders any of the three `TodayActivityRow` cases.
+    /// `.planned` reuses the same navigation `familyHomeRow` already
+    /// established. `.recurringOccurrence` routes to the existing
+    /// `RecurringOccurrencePreviewView` (via `.recurringOccurrence`),
+    /// never fabricating a `PlannedActivityId`. `.unplannedLogged` has
+    /// no existing detail view for a bare `LoggedActivity` with no
+    /// plan — shown as a plain, non-navigable row (Part 3's "subtle
+    /// existing-style indication", not a new detail screen this
+    /// package wasn't asked to build).
+    @ViewBuilder
+    private func todayActivityRow(_ row: TodayActivityRow) -> some View {
+        switch row {
+        case .planned(let familyHomeRowValue):
+            familyHomeRow(familyHomeRowValue)
+        case .recurringOccurrence(let athleteId, let athleteName, let suggestion):
+            VStack(alignment: .leading, spacing: 4) {
+                NavigationLink(value: FamilyHomeDestination.athlete(athleteId)) {
+                    Text(athleteName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("familyHome.athleteLink.\(athleteId.rawValue.uuidString)")
+
+                NavigationLink(value: FamilyHomeDestination.recurringOccurrence(id: suggestion.id)) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(suggestion.title)
+                            Text(Self.recurringRowSubtitle(for: suggestion))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("Recurring")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier("familyHome.recurringRow.\(suggestion.id)")
+            }
+        case .unplannedLogged(let athleteId, let athleteName, let loggedActivity):
+            VStack(alignment: .leading, spacing: 4) {
+                Text(athleteName)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("familyHome.athleteLabel.\(athleteId.rawValue.uuidString)")
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(loggedActivity.title)
+                        Text("Unplanned · Logged")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .accessibilityIdentifier("familyHome.unplannedLoggedRow.\(loggedActivity.id.uuidString)")
+        }
+    }
+
+    private static func recurringRowSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
+        var parts: [String] = []
+        if let startTime = suggestion.startLocalTime {
+            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+        }
+        if let location = suggestion.location, !location.isEmpty {
+            parts.append(location)
+        }
+        return parts.joined(separator: " · ")
     }
 
     private func familyHomeRow(_ row: FamilyHomeRow) -> some View {
@@ -248,7 +336,13 @@ public struct FamilyHomeContentView: View {
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 coachingPresentationProvider: coachingApplicationService,
                 athleteId: athlete.athleteId,
-                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                athleteDisplayName: athlete.givenName,
+                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                todayActivityComposer: TodayActivityComposer(
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                )
             ),
             athleteDisplayName: athlete.givenName,
             planningService: planningService,

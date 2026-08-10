@@ -50,6 +50,7 @@ struct FamilyScheduleAndTomorrowTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -90,6 +91,8 @@ struct FamilyScheduleAndTomorrowTests {
             activeAthletes: [oliver, emma],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -109,6 +112,7 @@ struct FamilyScheduleAndTomorrowTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -246,6 +250,7 @@ extension FamilyScheduleAndTomorrowTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -267,7 +272,7 @@ extension FamilyScheduleAndTomorrowTests {
         let farFutureDate = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
         _ = try planningService.createRecurringPlannedActivity(
             athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
-            weekday: farFutureDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            weekdays: [farFutureDate.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )
@@ -297,6 +302,7 @@ extension FamilyScheduleAndTomorrowTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -315,7 +321,7 @@ extension FamilyScheduleAndTomorrowTests {
 
         let recurring = try planningService.createRecurringPlannedActivity(
             athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
-            weekday: occurrenceDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            weekdays: [occurrenceDate.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )

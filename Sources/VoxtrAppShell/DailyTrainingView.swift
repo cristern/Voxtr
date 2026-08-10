@@ -78,6 +78,32 @@ public struct DailyTrainingView: View {
             }
             .accessibilityIdentifier("training.plannedActivitiesList")
 
+            if !viewModel.recurringOccurrences.isEmpty {
+                Section("Today's recurring activities") {
+                    ForEach(viewModel.recurringOccurrences, id: \.id) { suggestion in
+                        NavigationLink {
+                            RecurringOccurrencePreviewView(
+                                suggestion: suggestion,
+                                athleteDisplayName: athleteDisplayName,
+                                planningService: planningService,
+                                trainingService: trainingService,
+                                actorId: actorId
+                            )
+                        } label: {
+                            HStack {
+                                Text(suggestion.title)
+                                Spacer()
+                                Text("Recurring")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier("training.recurringOccurrenceRow.\(suggestion.id)")
+                    }
+                }
+                .accessibilityIdentifier("training.recurringOccurrencesList")
+            }
+
             Section("Today's logged activities") {
                 if viewModel.loggedActivities.isEmpty {
                     Text(TrainingStrings.noLoggedActivitiesToday)

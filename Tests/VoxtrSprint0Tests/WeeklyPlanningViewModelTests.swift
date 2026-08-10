@@ -325,7 +325,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -347,7 +347,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -372,11 +372,11 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Swimming", activityType: .individualTraining, weekday: .wednesday,
+            athleteId: athleteId, title: "Swimming", activityType: .individualTraining, weekdays: [.wednesday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -401,7 +401,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let firstViewModel = WeeklyPlanningViewModel(
@@ -432,7 +432,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let firstViewModel = WeeklyPlanningViewModel(
@@ -460,7 +460,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -485,7 +485,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -519,7 +519,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -545,7 +545,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         )
         viewModel.recurringFormTitle = "Football"
         viewModel.recurringFormActivityType = .teamTraining
-        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormWeekdays = [.monday]
         viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
         viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
 
@@ -571,7 +571,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         #expect(viewModel.recurringSuggestions.isEmpty)
 
         viewModel.recurringFormTitle = "Football"
-        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormWeekdays = [.monday]
         viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
         viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
         viewModel.createRecurringActivity()
@@ -588,7 +588,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -612,7 +612,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
@@ -636,7 +636,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             startLocalTime: LocalTime(hour: 17, minute: 30), plannedDurationMinutes: 150,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
@@ -647,7 +647,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         viewModel.beginEditingRecurringActivity(created)
 
         #expect(viewModel.recurringFormTitle == "Football")
-        #expect(viewModel.recurringFormWeekday == .monday)
+        #expect(viewModel.recurringFormWeekdays == [.monday])
         #expect(viewModel.recurringFormHasStartTime == true)
         #expect(viewModel.recurringFormHasDuration == true)
         #expect(viewModel.recurringFormDurationMinutes == 150)
@@ -667,7 +667,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.recurringFormTitle = "Football"
-        viewModel.recurringFormWeekday = .monday
+        viewModel.recurringFormWeekdays = [.monday]
         viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
         viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
 
@@ -692,7 +692,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         // own validation, a real reachable failure rather than a forced
         // one.
         viewModel.recurringFormTitle = ""
-        viewModel.recurringFormWeekday = .wednesday
+        viewModel.recurringFormWeekdays = [.wednesday]
         viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
         viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
 
@@ -702,7 +702,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         #expect(viewModel.errorMessage != nil)
         // Entered values remain available — the form was not reset.
         #expect(viewModel.recurringFormTitle == "")
-        #expect(viewModel.recurringFormWeekday == .wednesday)
+        #expect(viewModel.recurringFormWeekdays == [.wednesday])
     }
 
     @Test("A successful edit reports success (true)")
@@ -714,7 +714,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
         )
@@ -739,7 +739,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
         )
@@ -749,7 +749,7 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         viewModel.beginEditingRecurringActivity(created)
         // Empty title — genuinely invalid.
         viewModel.recurringFormTitle = ""
-        viewModel.recurringFormWeekday = .friday
+        viewModel.recurringFormWeekdays = [.friday]
 
         let succeeded = viewModel.editRecurringActivity(created)
 
@@ -757,6 +757,6 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         #expect(viewModel.errorMessage != nil)
         // Entered values remain available — the form was not reset.
         #expect(viewModel.recurringFormTitle == "")
-        #expect(viewModel.recurringFormWeekday == .friday)
+        #expect(viewModel.recurringFormWeekdays == [.friday])
     }
 }

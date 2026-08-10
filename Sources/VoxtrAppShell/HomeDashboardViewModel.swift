@@ -16,6 +16,19 @@ public enum TodaysTrainingLoadState {
     case failed
 }
 
+/// Sprint 1.2B: the comprehensive "today" read model — reuses
+/// `TodayActivityComposer`/`TodayActivityRow` (already established for
+/// Family Home) rather than a second, screen-specific aggregation.
+/// Additive alongside `TodaysTrainingLoadState` above, not a
+/// replacement — `dailyFocusState` below still depends on that
+/// original, narrower `[PlannedActivityCompletion]` shape, and Daily
+/// Focus is a retained product concept out of this package's scope.
+public enum TodayActivityLoadState {
+    case loading
+    case loaded([TodayActivityRow])
+    case failed
+}
+
 /// Sprint 13 (architecture correction): moved here from the now-removed
 /// `DailyFocusViewModel` — this is where the state is actually derived
 /// now, so this is where the type belongs. Same shape as
@@ -62,11 +75,12 @@ public enum DailyFocusLoadState {
 @Observable
 public final class HomeDashboardViewModel {
     public private(set) var todaysTrainingState: TodaysTrainingLoadState = .loading
+    public private(set) var todayActivityState: TodayActivityLoadState = .loading
     public private(set) var coachingSummaryState: CoachingPresentationLoadState = .loading
 
     public let athleteId: AthleteId
     public let weekStart: LocalDate
-
+    private let athleteDisplayName: String
     /// Sprint 13 (architecture correction): now protocol-injected —
     /// `HomeDashboardViewModel`'s own tests need deterministic
     /// call-count and independent-failure control over this dependency,
@@ -77,17 +91,46 @@ public final class HomeDashboardViewModel {
     /// Protocol-injected — matches the established convention for this
     /// exact dependency since Sprint 11.
     private let coachingPresentationProvider: any CoachingPresentationProviding
+    /// Sprint 1.2B: injected by the caller (which already holds
+    /// `planningService`/`trainingService`/the concrete coordination
+    /// service) rather than this ViewModel taking those three
+    /// dependencies directly just to build one internally. Optional,
+    /// defaulted to `nil`, so the many existing construction sites that
+    /// predate this feature don't all need updating — `loadTodayActivityRows()`
+    /// simply reports `.failed` if no composer was supplied, the same
+    /// "one dependency's absence never corrupts the rest of this
+    /// ViewModel" principle this type's own two independent load
+    /// states already establish.
+    private let todayActivityComposer: TodayActivityComposer?
 
     public init(
         trainingPlanningCoordinationService: any TodaysTrainingProviding,
         coachingPresentationProvider: any CoachingPresentationProviding,
         athleteId: AthleteId,
-        weekStart: LocalDate
+        athleteDisplayName: String = "",
+        weekStart: LocalDate,
+        todayActivityComposer: TodayActivityComposer? = nil
     ) {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.coachingPresentationProvider = coachingPresentationProvider
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
         self.weekStart = weekStart
+        self.todayActivityComposer = todayActivityComposer
+    }
+
+    public func loadTodayActivityRows() {
+        todayActivityState = .loading
+        guard let todayActivityComposer else {
+            todayActivityState = .failed
+            return
+        }
+        do {
+            let rows = try todayActivityComposer.todayActivities(forAthlete: athleteId, athleteName: athleteDisplayName)
+            todayActivityState = .loaded(rows)
+        } catch {
+            todayActivityState = .failed
+        }
     }
 
     public func loadTodaysTraining() {

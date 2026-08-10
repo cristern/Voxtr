@@ -51,7 +51,7 @@ struct Sprint12ATests {
 
         let created = try planningService.createRecurringPlannedActivity(
             athleteId: athleteId, title: "Football Training", activityType: .teamTraining,
-            weekday: .tuesday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
+            weekdays: [.tuesday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
             effectiveStartDate: LocalDate(year: 2026, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2027, month: 1, day: 1)
         )
@@ -72,14 +72,14 @@ struct Sprint12ATests {
 
         let created = try planningService.createRecurringPlannedActivity(
             athleteId: athleteId, title: "Football Training", activityType: .teamTraining,
-            weekday: .tuesday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
+            weekdays: [.tuesday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
             effectiveStartDate: LocalDate(year: 2026, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2027, month: 1, day: 1)
         )
 
         let edited = try planningService.editRecurringPlannedActivity(
             created.recurringPlannedActivityId, title: "Football Training", activityType: .teamTraining,
-            weekday: .tuesday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Colosseum Stadium",
+            weekdays: [.tuesday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Colosseum Stadium",
             effectiveStartDate: LocalDate(year: 2026, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2027, month: 1, day: 1)
         )
@@ -106,7 +106,7 @@ struct Sprint12ATests {
 
         _ = try planningService.createRecurringPlannedActivity(
             athleteId: athleteId, title: "Football Training", activityType: .teamTraining,
-            weekday: today.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )
@@ -133,7 +133,7 @@ struct Sprint12ATests {
 
         _ = try planningService.createRecurringPlannedActivity(
             athleteId: athleteId, title: "Football Training", activityType: .teamTraining,
-            weekday: today.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud",
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )
@@ -173,7 +173,7 @@ struct Sprint12ATests {
 
         _ = try planningService.createRecurringPlannedActivity(
             athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
-            weekday: occurrenceDate.weekday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Aquatic Center",
+            weekdays: [occurrenceDate.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Aquatic Center",
             effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
             effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
         )

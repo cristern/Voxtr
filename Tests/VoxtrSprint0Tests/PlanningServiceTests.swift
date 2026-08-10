@@ -402,7 +402,7 @@ struct PlanningServiceRecurringActivityTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             startLocalTime: LocalTime(hour: 17, minute: 30),
             plannedDurationMinutes: 150,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
@@ -426,7 +426,7 @@ struct PlanningServiceRecurringActivityTests {
                 athleteId: AthleteId(),
                 title: "",
                 activityType: .teamTraining,
-                weekday: .monday,
+                weekdays: [.monday],
                 timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
                 effectiveStartDate: Self.rangeStart,
                 effectiveEndDate: Self.rangeEnd
@@ -443,7 +443,7 @@ struct PlanningServiceRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -451,7 +451,7 @@ struct PlanningServiceRecurringActivityTests {
             created.recurringPlannedActivityId,
             title: "Football (updated)",
             activityType: .match,
-            weekday: .wednesday,
+            weekdays: [.wednesday],
             plannedDurationMinutes: 90,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.rangeStart,
@@ -460,7 +460,7 @@ struct PlanningServiceRecurringActivityTests {
 
         #expect(edited.title == "Football (updated)")
         #expect(edited.activityType == .match)
-        #expect(edited.weekday == .wednesday)
+        #expect(edited.weekdays == [.wednesday])
         #expect(edited.plannedDurationMinutes == 90)
     }
 
@@ -477,7 +477,7 @@ struct PlanningServiceRecurringActivityTests {
                 RecurringPlannedActivityId(),
                 title: "Football",
                 activityType: .teamTraining,
-                weekday: .monday,
+                weekdays: [.monday],
                 timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
                 effectiveStartDate: Self.rangeStart,
                 effectiveEndDate: Self.rangeEnd
@@ -494,7 +494,7 @@ struct PlanningServiceRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -529,7 +529,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -554,7 +554,7 @@ struct PlanningServiceRecurringActivityTests {
         // not just an out-of-range date, this definition's own
         // effective range deliberately excludes this week's Saturday.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .saturday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.saturday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 1, day: 17),
             effectiveEndDate: LocalDate(year: 2026, month: 1, day: 31)
@@ -577,7 +577,7 @@ struct PlanningServiceRecurringActivityTests {
         // Monday Jan 5 is both the week's first day and the
         // definition's own effectiveStartDate.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.mondayWeekStart,
             effectiveEndDate: Self.rangeEnd
@@ -599,7 +599,7 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // Monday Jan 5 is the definition's own effectiveEndDate.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.rangeStart,
             effectiveEndDate: Self.mondayWeekStart
@@ -621,7 +621,7 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // effectiveStartDate is the day AFTER this week's only Monday.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.mondayWeekStart.adding(days: 1),
             effectiveEndDate: Self.rangeEnd
@@ -643,7 +643,7 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // effectiveEndDate is the day BEFORE this week's only Monday.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.rangeStart,
             effectiveEndDate: Self.mondayWeekStart.adding(days: -1)
@@ -664,7 +664,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         try service.setRecurringPlannedActivityEnabled(created.recurringPlannedActivityId, isEnabled: false)
@@ -688,7 +688,7 @@ struct PlanningServiceRecurringActivityTests {
         // should each get exactly one suggestion, not the whole range's
         // worth in one call.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -712,15 +712,15 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // Created deliberately out of weekday order.
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Friday swim", activityType: .individualTraining, weekday: .friday,
+            athleteId: athleteId, title: "Friday swim", activityType: .individualTraining, weekdays: [.friday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Monday football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Monday football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Wednesday gym", activityType: .physicalTraining, weekday: .wednesday,
+            athleteId: athleteId, title: "Wednesday gym", activityType: .physicalTraining, weekdays: [.wednesday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -739,7 +739,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -759,7 +759,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let firstSuggestions = try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
@@ -781,7 +781,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         // A manually-added activity on the SAME date/title, but with no
@@ -809,7 +809,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -829,7 +829,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             startLocalTime: LocalTime(hour: 17, minute: 30), plannedDurationMinutes: 150,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
@@ -853,7 +853,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -874,7 +874,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -896,7 +896,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let created = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -920,7 +920,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -956,7 +956,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -981,7 +981,7 @@ struct PlanningServiceRecurringActivityTests {
         let otherAthleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let genuine = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
@@ -1011,7 +1011,7 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // Belongs to a DIFFERENT athlete than the WeekPlan.
         let otherAthletesDefinition = try service.createRecurringPlannedActivity(
-            athleteId: otherAthleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: otherAthleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         // Hand-constructed — deriveSuggestions for weekPlan's own
@@ -1041,7 +1041,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2025, month: 12, day: 1), effectiveEndDate: Self.rangeEnd
         )
@@ -1071,7 +1071,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         // One week after weekStart — still a Monday, still within the
@@ -1100,7 +1100,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         // Tuesday within the same week — inside the WeekPlan and inside
@@ -1131,7 +1131,7 @@ struct PlanningServiceRecurringActivityTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         // Effective range deliberately excludes this week's Monday.
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 1, day: 12), effectiveEndDate: Self.rangeEnd
         )
@@ -1160,7 +1160,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         // Derived while still enabled — genuinely valid at the moment
@@ -1206,7 +1206,7 @@ struct PlanningServiceRecurringActivityTests {
         let athleteId = AthleteId()
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
         let definition = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: athleteId, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             plannedDurationMinutes: 90,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
@@ -1220,7 +1220,7 @@ struct PlanningServiceRecurringActivityTests {
             definition.recurringPlannedActivityId,
             title: "Football (renamed)",
             activityType: .match,
-            weekday: .monday,
+            weekdays: [.monday],
             plannedDurationMinutes: 120,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: Self.rangeStart,

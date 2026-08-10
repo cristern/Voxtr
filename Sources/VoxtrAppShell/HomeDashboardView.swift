@@ -97,7 +97,13 @@ public struct HomeDashboardView: View {
                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                                 coachingPresentationProvider: coachingApplicationService,
                                 athleteId: athlete.athleteId,
-                                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                                athleteDisplayName: athlete.givenName,
+                                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                                todayActivityComposer: TodayActivityComposer(
+                                    planningService: planningService,
+                                    trainingService: trainingService,
+                                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                                )
                             ),
                             athleteDisplayName: athlete.givenName,
                             planningService: planningService,
@@ -116,6 +122,7 @@ public struct HomeDashboardView: View {
         }
         .onAppear {
             viewModel.loadTodaysTraining()
+            viewModel.loadTodayActivityRows()
             viewModel.loadCoachingSummary()
         }
     }
@@ -222,45 +229,90 @@ public struct HomeDashboardView: View {
     /// derived by `TrainingPlanningCoordinationService`, never
     /// recomputed here) alongside the shortcut to the full Daily
     /// Training screen.
+    @ViewBuilder
+    private func todayActivityRow(_ row: TodayActivityRow) -> some View {
+        switch row {
+        case .planned(let familyHomeRow):
+            NavigationLink {
+                ActivityDetailViewLoader(
+                    plannedActivity: familyHomeRow.plannedActivity,
+                    isCompleted: familyHomeRow.isCompleted,
+                    athleteId: athleteId,
+                    athleteDisplayName: athleteDisplayName,
+                    actorId: committedByActorId,
+                    planningService: planningService,
+                    trainingService: trainingService
+                )
+            } label: {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(familyHomeRow.plannedActivity.title)
+                        if let location = familyHomeRow.plannedActivity.location, !location.isEmpty {
+                            Text(location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Text(familyHomeRow.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("homeDashboard.todaysTraining.row.\(familyHomeRow.id)")
+        case .recurringOccurrence(_, _, let suggestion):
+            NavigationLink {
+                RecurringOccurrencePreviewView(
+                    suggestion: suggestion,
+                    athleteDisplayName: athleteDisplayName,
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    actorId: committedByActorId
+                )
+            } label: {
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text(suggestion.title)
+                        if let location = suggestion.location, !location.isEmpty {
+                            Text(location)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Text("Recurring")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("homeDashboard.todaysTraining.recurringRow.\(suggestion.id)")
+        case .unplannedLogged(_, _, let loggedActivity):
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(loggedActivity.title)
+                    Text("Unplanned · Logged")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .accessibilityIdentifier("homeDashboard.todaysTraining.unplannedLoggedRow.\(loggedActivity.id.uuidString)")
+        }
+    }
+
     private var trainingSection: some View {
         Section("Training") {
-            switch viewModel.todaysTrainingState {
+            switch viewModel.todayActivityState {
             case .loading:
                 EmptyView()
             case .failed:
                 Text(CoachingPresentationStrings.unavailable)
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("homeDashboard.todaysTraining.unavailable")
-            case .loaded(let activities):
-                if !activities.isEmpty {
-                    ForEach(activities, id: \.plannedActivity.id) { item in
-                        NavigationLink {
-                            ActivityDetailViewLoader(
-                                plannedActivity: item.plannedActivity,
-                                isCompleted: item.isCompleted,
-                                athleteId: athleteId,
-                                athleteDisplayName: athleteDisplayName,
-                                actorId: committedByActorId,
-                                planningService: planningService,
-                                trainingService: trainingService
-                            )
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading) {
-                                    Text(item.plannedActivity.title)
-                                    if let location = item.plannedActivity.location, !location.isEmpty {
-                                        Text(location)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .accessibilityIdentifier("homeDashboard.todaysTraining.row.\(item.plannedActivity.id.uuidString)")
+            case .loaded(let rows):
+                if !rows.isEmpty {
+                    ForEach(rows) { row in
+                        todayActivityRow(row)
                     }
                 }
             }
@@ -270,7 +322,13 @@ public struct HomeDashboardView: View {
                     viewModel: DailyTrainingViewModel(
                         trainingService: trainingService,
                         coordinationService: trainingPlanningCoordinationService,
-                        athleteId: athleteId
+                        athleteId: athleteId,
+                        athleteDisplayName: athleteDisplayName,
+                        todayActivityComposer: TodayActivityComposer(
+                            planningService: planningService,
+                            trainingService: trainingService,
+                            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                        )
                     ),
                     planningService: planningService,
                     trainingService: trainingService,

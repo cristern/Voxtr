@@ -105,7 +105,13 @@ public struct FamilyHomeView: View {
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 coachingPresentationProvider: coachingApplicationService,
                 athleteId: athlete.athleteId,
-                weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                athleteDisplayName: athlete.givenName,
+                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                todayActivityComposer: TodayActivityComposer(
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                )
             ),
             athleteDisplayName: athlete.givenName,
             planningService: planningService,

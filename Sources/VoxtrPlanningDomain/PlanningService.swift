@@ -233,6 +233,56 @@ public final class PlanningService {
         try repository.fetchRecurringPlannedActivity(byId: recurringPlannedActivityId)
     }
 
+    /// Sprint 1.2B, Priority 4: a thin passthrough — needed so a
+    /// second "Log Activity" tap on an already-materialized recurring
+    /// occurrence can recover the existing `PlannedActivity`
+    /// (`acceptSuggestion` above already throws
+    /// `.recurringOccurrenceAlreadyAccepted` rather than duplicating;
+    /// this is how the caller then reaches the real, already-existing
+    /// row instead of treating that as a hard failure).
+    public func fetchPlannedActivity(forExternalSourceId externalSourceId: String, weekPlanId: WeekPlanId) throws -> PlannedActivity? {
+        try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlanId)
+    }
+
+    /// Sprint 1.2B, Priority 1 (recurring occurrence → Log Activity):
+    /// materializes a recurring occurrence into a real `PlannedActivity`
+    /// if it isn't one already, or deterministically resolves to the
+    /// SAME existing `PlannedActivity` if it already was — repeated
+    /// calls (e.g. the parent tapping "Log Activity" twice, or two
+    /// screens racing to materialize the same occurrence) never create
+    /// a duplicate. This is not new idempotency logic: `acceptSuggestion`
+    /// already guards against a duplicate insert via the occurrence's
+    /// own deterministic `externalSourceId` (see its own doc comment);
+    /// this method only adds the recovery step — when that guard fires,
+    /// fetch the row it's guarding instead of treating that as a hard
+    /// failure the caller must handle. `occurrenceExternalSourceId` is
+    /// `internal` to this module by design (an implementation detail of
+    /// materialization identity, not something callers should compute
+    /// themselves) — this method exists so a UI-layer caller never
+    /// needs to.
+    public func materializeOrFetchExisting(
+        _ suggestion: RecurringActivitySuggestion,
+        forWeekPlan weekPlanId: WeekPlanId
+    ) throws -> PlannedActivity {
+        do {
+            return try acceptSuggestion(suggestion, forWeekPlan: weekPlanId)
+        } catch PlanningServiceError.recurringOccurrenceAlreadyAccepted {
+            let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
+                recurringPlannedActivityId: suggestion.recurringPlannedActivityId,
+                occurrenceDate: suggestion.occurrenceDate,
+                athleteId: suggestion.athleteId
+            )
+            guard let existing = try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlanId) else {
+                // The guard that threw .recurringOccurrenceAlreadyAccepted
+                // just confirmed this row exists — this should be
+                // unreachable, but surface the original error rather than
+                // silently returning something invented if it somehow is.
+                throw PlanningServiceError.recurringOccurrenceAlreadyAccepted
+            }
+            return existing
+        }
+    }
+
     /// S2.4: deletes a `PlannedActivity`, only while its `WeekPlan` is
     /// still draft — the same two existence/ownership guards
     /// `editPlannedActivity` already uses, plus the explicitly-requested
@@ -273,7 +323,7 @@ public final class PlanningService {
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
-        weekday: Weekday,
+        weekdays: [Weekday],
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
@@ -285,7 +335,8 @@ public final class PlanningService {
             title: title,
             plannedDurationMinutes: plannedDurationMinutes,
             effectiveStartDate: effectiveStartDate,
-            effectiveEndDate: effectiveEndDate
+            effectiveEndDate: effectiveEndDate,
+            weekdays: weekdays
         )
         return try repository.insertRecurringPlannedActivity(
             athleteId: athleteId,
@@ -293,7 +344,7 @@ public final class PlanningService {
             activityType: activityType,
             sportId: sportId,
             categoryIds: categoryIds,
-            weekday: weekday,
+            weekdays: weekdays,
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
@@ -316,7 +367,7 @@ public final class PlanningService {
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
-        weekday: Weekday,
+        weekdays: [Weekday],
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
@@ -331,13 +382,14 @@ public final class PlanningService {
             title: title,
             plannedDurationMinutes: plannedDurationMinutes,
             effectiveStartDate: effectiveStartDate,
-            effectiveEndDate: effectiveEndDate
+            effectiveEndDate: effectiveEndDate,
+            weekdays: weekdays
         )
         recurringActivity.title = title
         recurringActivity.activityType = activityType
         recurringActivity.sportId = sportId?.rawValue
         recurringActivity.categoryIds = categoryIds.map(\.rawValue)
-        recurringActivity.weekday = weekday
+        recurringActivity.weekdays = weekdays
         recurringActivity.startLocalTime = startLocalTime
         recurringActivity.plannedDurationMinutes = plannedDurationMinutes
         recurringActivity.timeZoneId = timeZoneId
@@ -375,7 +427,9 @@ public final class PlanningService {
     /// `WeekPlan`'s 7-day week (`weekStart` through `weekStart` +6,
     /// computed via `LocalDate.adding(days:)` — pure calendar
     /// arithmetic, never device-local `Date` math): the day's
-    /// `LocalDate.weekday` matches the recurring definition's weekday;
+    /// `LocalDate.weekday` is contained in the recurring definition's
+    /// `weekdays` set (Sprint 1.2B: one or more weekdays, previously a
+    /// single `Weekday`);
     /// the day falls within the definition's inclusive effective date
     /// range; the definition is enabled; and no `PlannedActivity`
     /// already exists in this `WeekPlan` for that exact occurrence
@@ -406,7 +460,7 @@ public final class PlanningService {
         var suggestions: [RecurringActivitySuggestion] = []
         for recurringActivity in recurringActivities {
             for date in weekDates {
-                guard date.weekday == recurringActivity.weekday else { continue }
+                guard recurringActivity.weekdays.contains(date.weekday) else { continue }
                 guard recurringActivity.effectiveStartDate <= date, date <= recurringActivity.effectiveEndDate else { continue }
                 let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
                     recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
@@ -515,7 +569,7 @@ public final class PlanningService {
             var date = startDate
             while date <= endDate {
                 defer { date = date.adding(days: 1) }
-                guard date.weekday == recurringActivity.weekday else { continue }
+                guard recurringActivity.weekdays.contains(date.weekday) else { continue }
                 guard recurringActivity.effectiveStartDate <= date, date <= recurringActivity.effectiveEndDate else { continue }
                 let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
                     recurringPlannedActivityId: recurringActivity.recurringPlannedActivityId,
@@ -625,7 +679,7 @@ public final class PlanningService {
             throw PlanningServiceError.recurringOccurrenceOutsideWeekPlan
         }
 
-        guard suggestion.occurrenceDate.weekday == recurringActivity.weekday else {
+        guard recurringActivity.weekdays.contains(suggestion.occurrenceDate.weekday) else {
             throw PlanningServiceError.recurringOccurrenceWeekdayMismatch
         }
 
@@ -685,7 +739,8 @@ public final class PlanningService {
         title: String,
         plannedDurationMinutes: Int?,
         effectiveStartDate: LocalDate,
-        effectiveEndDate: LocalDate
+        effectiveEndDate: LocalDate,
+        weekdays: [Weekday]
     ) throws {
         guard (1...120).contains(title.count) else {
             throw PlanningServiceError.invalidField("title must be 1-120 characters")
@@ -697,6 +752,15 @@ public final class PlanningService {
         }
         guard effectiveStartDate <= effectiveEndDate else {
             throw PlanningServiceError.invalidField("effectiveStartDate must be on or before effectiveEndDate")
+        }
+        // Sprint 1.2B: at least one weekday is required — surfaced here
+        // as a normal, catchable validation error (the same way every
+        // other field on this form already is), rather than only
+        // relying on RecurringPlannedActivity.init's own precondition,
+        // which would crash instead of showing the existing error
+        // presentation.
+        guard !weekdays.isEmpty else {
+            throw PlanningServiceError.invalidField("at least one weekday is required")
         }
     }
 }

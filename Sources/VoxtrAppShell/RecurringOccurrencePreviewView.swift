@@ -1,6 +1,7 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 
 /// Sprint 1.1 closeout, Item 2. Family Schedule shows unmaterialized
 /// recurring occurrences (`RecurringActivitySuggestion` — a derived
@@ -39,20 +40,24 @@ public struct RecurringOccurrencePreviewView: View {
     let suggestion: RecurringActivitySuggestion
     let athleteDisplayName: String
     let planningService: PlanningService
+    let trainingService: TrainingService
     let actorId: ActorId
 
     @State private var editSheetItem: RecurringEditSheetItem?
+    @State private var materializedActivity: MaterializedActivityItem?
     @State private var errorMessage: String?
 
     public init(
         suggestion: RecurringActivitySuggestion,
         athleteDisplayName: String,
         planningService: PlanningService,
+        trainingService: TrainingService,
         actorId: ActorId
     ) {
         self.suggestion = suggestion
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
+        self.trainingService = trainingService
         self.actorId = actorId
     }
 
@@ -81,9 +86,13 @@ public struct RecurringOccurrencePreviewView: View {
             .accessibilityIdentifier("recurringOccurrence.summary")
 
             Section {
-                Text("This occurrence comes from a recurring activity and hasn't been added to a specific week's plan yet — it isn't logged or edited directly here.")
+                Text("This occurrence comes from a recurring activity and hasn't been added to a specific week's plan yet.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                Button("Log Activity") {
+                    materializeAndOpen()
+                }
+                .accessibilityIdentifier("recurringOccurrence.logActivityButton")
                 Button("Edit Recurring Definition") {
                     openEditForm()
                 }
@@ -97,6 +106,41 @@ public struct RecurringOccurrencePreviewView: View {
                 editingRecurringActivity: item.recurringActivity,
                 athleteDisplayName: athleteDisplayName
             )
+        }
+        .navigationDestination(item: $materializedActivity) { item in
+            ActivityDetailViewLoader(
+                plannedActivity: item.plannedActivity,
+                isCompleted: false,
+                athleteId: suggestion.athleteId,
+                athleteDisplayName: athleteDisplayName,
+                actorId: actorId,
+                planningService: planningService,
+                trainingService: trainingService
+            )
+        }
+    }
+
+    /// Sprint 1.2B, Priority 1: "Log Activity" is the one action that
+    /// touches persistence on this otherwise read-only screen —
+    /// viewing never materializes anything (see this type's own doc
+    /// comment above); only this explicit action does, and it does so
+    /// idempotently via `PlanningService.materializeOrFetchExisting`
+    /// (reused, not reimplemented). Repeated taps — even after the
+    /// occurrence was already materialized by a prior tap, or by a
+    /// different screen entirely — resolve to the SAME `PlannedActivity`,
+    /// never a duplicate. `.navigationDestination(item:)` (a single
+    /// piece of optional state) drives presentation, not a separate
+    /// Bool alongside it — the same fix already applied to this
+    /// screen's own edit-sheet presentation above.
+    private func materializeAndOpen() {
+        errorMessage = nil
+        do {
+            let weekStart = TrainingPlanningCoordinationService.weekStart(containing: suggestion.occurrenceDate)
+            let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: suggestion.athleteId, weekStart: weekStart)
+            let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+            materializedActivity = MaterializedActivityItem(plannedActivity: materialized)
+        } catch {
+            errorMessage = "Could not open this activity. Please try again."
         }
     }
 
@@ -134,4 +178,18 @@ private struct RecurringEditSheetItem: Identifiable {
     let id = UUID()
     let viewModel: WeeklyPlanningViewModel
     let recurringActivity: RecurringPlannedActivity
+}
+
+/// Sprint 1.2B, Priority 1: wraps the real, materialized
+/// `PlannedActivity` for `.navigationDestination(item:)` presentation —
+/// one piece of state driving both presence and content, matching this
+/// file's own established fix for the exact same class of race.
+private struct MaterializedActivityItem: Identifiable {
+    let id: String
+    let plannedActivity: PlannedActivity
+
+    init(plannedActivity: PlannedActivity) {
+        self.id = plannedActivity.plannedActivityId.rawValue.uuidString
+        self.plannedActivity = plannedActivity
+    }
 }

@@ -41,29 +41,57 @@ public final class DailyTrainingViewModel {
     /// doesn't enforce that (the view disables completed options, and
     /// `TrainingService` itself rejects a duplicate link regardless).
     public var selectedPlannedActivityId: PlannedActivityId?
+    /// Sprint 1.2B, Priority 3: today's recurring occurrences not yet
+    /// materialized — filtered from `TodayActivityComposer`'s own
+    /// output (the same shared read model Family Home/Athlete Home
+    /// use), not a second, screen-specific derivation.
+    /// `plannedActivities`/`loggedActivities` above already cover the
+    /// materialized-planned and logged cases for this screen, so only
+    /// the recurring-occurrence case is pulled from the composer here.
+    public private(set) var recurringOccurrences: [RecurringActivitySuggestion] = []
 
     private let trainingService: TrainingService
     private let coordinationService: TrainingPlanningCoordinationService
     public let athleteId: AthleteId
+    /// Optional, defaulted to `nil` — existing construction sites and
+    /// tests that predate this feature are unaffected;
+    /// `recurringOccurrences` simply stays empty if none was supplied,
+    /// the same "absence never corrupts the rest of this ViewModel"
+    /// principle `HomeDashboardViewModel`'s own optional composer
+    /// dependency already establishes.
+    private let todayActivityComposer: TodayActivityComposer?
+    private let athleteDisplayName: String
 
     public init(
         trainingService: TrainingService,
         coordinationService: TrainingPlanningCoordinationService,
-        athleteId: AthleteId
+        athleteId: AthleteId,
+        athleteDisplayName: String = "",
+        todayActivityComposer: TodayActivityComposer? = nil
     ) {
         self.trainingService = trainingService
         self.coordinationService = coordinationService
         self.athleteId = athleteId
+        self.athleteDisplayName = athleteDisplayName
+        self.todayActivityComposer = todayActivityComposer
     }
 
-    /// Loads today's planned activities (with completion state) and
-    /// today's logged activities. Call once when the view appears, and
-    /// again after a successful log to refresh both lists.
+    /// Loads today's planned activities (with completion state),
+    /// today's logged activities, and (Sprint 1.2B) today's
+    /// unmaterialized recurring occurrences. Call once when the view
+    /// appears, and again after a successful log to refresh all three.
     public func load() {
         errorMessage = nil
         do {
             plannedActivities = try coordinationService.todaysPlannedActivitiesWithCompletion(forAthlete: athleteId)
             loggedActivities = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
+            if let todayActivityComposer {
+                let rows = try todayActivityComposer.todayActivities(forAthlete: athleteId, athleteName: athleteDisplayName)
+                recurringOccurrences = rows.compactMap { row in
+                    if case .recurringOccurrence(_, _, let suggestion) = row { return suggestion }
+                    return nil
+                }
+            }
         } catch {
             errorMessage = TrainingStrings.genericError
         }

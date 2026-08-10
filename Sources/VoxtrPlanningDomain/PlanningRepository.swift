@@ -228,7 +228,7 @@ public final class PlanningRepository {
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
-        weekday: Weekday,
+        weekdays: [Weekday],
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
@@ -242,7 +242,7 @@ public final class PlanningRepository {
             activityType: activityType,
             sportId: sportId,
             categoryIds: categoryIds,
-            weekday: weekday,
+            weekdays: weekdays,
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
@@ -265,7 +265,7 @@ public final class PlanningRepository {
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
-        weekday: Weekday,
+        weekdays: [Weekday],
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
@@ -280,7 +280,7 @@ public final class PlanningRepository {
             activityType: activityType,
             sportId: sportId,
             categoryIds: categoryIds,
-            weekday: weekday,
+            weekdays: weekdays,
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             timeZoneId: timeZoneId,
@@ -317,8 +317,18 @@ public final class PlanningRepository {
         return all
             .filter { $0.athleteId == rawAthleteId }
             .sorted { lhs, rhs in
-                if lhs.weekday != rhs.weekday {
-                    return lhs.weekday < rhs.weekday
+                let lhsFirst = lhs.weekdays.min()
+                let rhsFirst = rhs.weekdays.min()
+                if lhsFirst != rhsFirst {
+                    // nil (no weekdays — precondition prevents this in
+                    // practice, but Optional comparison needs a defined
+                    // order) sorts last.
+                    switch (lhsFirst, rhsFirst) {
+                    case (nil, nil): break
+                    case (nil, _): return false
+                    case (_, nil): return true
+                    case (let l?, let r?): return l < r
+                    }
                 }
                 return lhs.title < rhs.title
             }

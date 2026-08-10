@@ -27,6 +27,7 @@ struct FamilyHomeViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -62,6 +63,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [firstAthlete, secondAthlete],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -120,6 +123,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [athlete],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -127,7 +132,7 @@ struct FamilyHomeViewModelTests {
 
         // Not-completed rows chronological first (earlier before later),
         // completed row last regardless of its own (earliest) time.
-        #expect(viewModel.rows.map(\.plannedActivity.title) == ["Morning run", "Evening session", "Strength"])
+        #expect(viewModel.rows.map(\.title) == ["Morning run", "Evening session", "Strength"])
         _ = earlier
         _ = later
     }
@@ -140,6 +145,7 @@ struct FamilyHomeViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -163,6 +169,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [athlete],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -176,7 +184,11 @@ struct FamilyHomeViewModelTests {
             return
         }
         let resolved = viewModel.rows.first { $0.id == rowId }
-        #expect(resolved?.plannedActivity.plannedActivityId == created.plannedActivityId)
+        guard let resolved, case .planned(let resolvedFamilyHomeRow) = resolved else {
+            Issue.record("Expected a .planned row")
+            return
+        }
+        #expect(resolvedFamilyHomeRow.plannedActivity.plannedActivityId == created.plannedActivityId)
     }
 
     @Test("Reflection reminder shows 'no reflection yet' when none exists for the first active athlete")
@@ -186,6 +198,7 @@ struct FamilyHomeViewModelTests {
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -201,6 +214,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [athlete],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -219,6 +234,7 @@ struct FamilyHomeViewModelTests {
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -239,6 +255,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [athlete],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -259,6 +277,9 @@ struct FamilyHomeViewModelTests {
         let athleteRepository = AthleteRepository(modelContext: container.mainContext)
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -275,6 +296,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [],
             workspaceId: workspaceId,
             athleteRepository: athleteRepository,
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -301,6 +324,7 @@ struct FamilyHomeViewModelTests {
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -326,6 +350,8 @@ struct FamilyHomeViewModelTests {
             activeAthletes: [oliver, emma],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )

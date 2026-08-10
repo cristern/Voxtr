@@ -101,6 +101,7 @@ public struct FamilyScheduleView: View {
                     suggestion: suggestion,
                     athleteDisplayName: athleteName,
                     planningService: planningService,
+                    trainingService: trainingService,
                     actorId: actorId
                 )
             } label: {

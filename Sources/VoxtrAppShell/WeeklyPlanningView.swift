@@ -221,6 +221,62 @@ public struct WeeklyPlanningView: View {
         case .saturday: return "Saturday"
         }
     }
+
+    /// Sprint 1.2B: compact display for one or more weekdays — e.g.
+    /// "Mon, Tue, Wed, Thu, Fri" for a Monday-Friday camp. Uses a
+    /// three-letter abbreviation here specifically (not the full
+    /// `weekdayLabel(for:)` names) since a definition can now list up
+    /// to seven days and this needs to stay compact in a single row,
+    /// per this package's own "presented compactly" requirement.
+    /// Deterministically ordered (`RecurringPlannedActivity.init`
+    /// already stores `weekdays` sorted) — never depends on selection
+    /// or insertion order.
+    static func weekdaysLabel(for weekdays: [Weekday]) -> String {
+        weekdays.map { weekday in
+            String(weekdayLabel(for: weekday).prefix(3))
+        }.joined(separator: ", ")
+    }
+}
+
+/// Sprint 1.2B, Priority 3: compact Monday–Sunday multi-select for
+/// recurring activity weekdays. A grid of toggle buttons rather than a
+/// list-style multi-select `Picker` (SwiftUI's `Picker` doesn't support
+/// multiple selection natively) — deliberately simple, not a general
+/// recurrence-builder UI. At least one weekday must remain selected in
+/// practice (enforced by `PlanningService`'s own validation before
+/// save, not by disabling the last toggle here — the user can freely
+/// toggle all off mid-edit without the UI fighting them, and only sees
+/// the "at least one weekday" requirement if they actually try to save
+/// with none selected).
+struct WeekdayMultiSelectView: View {
+    @Binding var selectedWeekdays: Set<Weekday>
+
+    private static let orderedWeekdays: [Weekday] = [.monday, .tuesday, .wednesday, .thursday, .friday, .saturday, .sunday]
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(Self.orderedWeekdays, id: \.self) { weekday in
+                let isSelected = selectedWeekdays.contains(weekday)
+                Button {
+                    if isSelected {
+                        selectedWeekdays.remove(weekday)
+                    } else {
+                        selectedWeekdays.insert(weekday)
+                    }
+                } label: {
+                    Text(String(WeeklyPlanningView.weekdayLabel(for: weekday).prefix(1)))
+                        .frame(width: 32, height: 32)
+                        .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
+                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("planning.recurringFormWeekdayToggle.\(weekday.rawValue)")
+                .accessibilityLabel(Text(WeeklyPlanningView.weekdayLabel(for: weekday)))
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+            }
+        }
+    }
 }
 
 /// Simple management flow for recurring activities: list existing
@@ -242,7 +298,7 @@ struct RecurringActivityManagementView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(recurringActivity.title)
-                                Text(WeeklyPlanningView.weekdayLabel(for: recurringActivity.weekday))
+                                Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                 if let location = recurringActivity.location, !location.isEmpty {
@@ -349,12 +405,8 @@ struct RecurringActivityFormView: View {
                 }
                 .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
 
-                Picker("Weekday", selection: $viewModel.recurringFormWeekday) {
-                    ForEach(Weekday.allCases, id: \.self) { weekday in
-                        Text(WeeklyPlanningView.weekdayLabel(for: weekday)).tag(weekday)
-                    }
-                }
-                .accessibilityIdentifier("planning.recurringFormWeekdayPicker")
+                WeekdayMultiSelectView(selectedWeekdays: $viewModel.recurringFormWeekdays)
+                    .accessibilityIdentifier("planning.recurringFormWeekdayPicker")
 
                 DatePicker(
                     "Start date",

@@ -24,7 +24,25 @@ public final class RecurringPlannedActivity {
     public var activityType: ActivityType
     public var sportId: UUID?
     public var categoryIds: [UUID]
-    public var weekday: Weekday
+    /// Sprint 1.2B: SCHEMA CHANGE. This was `public var weekday: Weekday`
+    /// (a single value) — now `[Weekday]` (one or more). This is a
+    /// genuine SwiftData persisted-property type change on an
+    /// already-listed `@Model` type, not merely "the type stays in
+    /// AppSchema so nothing changed" — any existing recurring
+    /// definition stored under the old single-`Weekday` shape is NOT
+    /// automatically convertible by this change alone. Per the current
+    /// Internal Alpha policy (confirmed applicable here, same as
+    /// Sprint 1.2A's own Location addition): persisted test data is
+    /// disposable, so no migration stage was written for this
+    /// property's shape change. A TestFlight install with existing
+    /// recurring-activity data may need the app reinstalled/store reset
+    /// to pick this up cleanly — this must be revisited before real
+    /// user data exists, per that same policy's own stated limit.
+    /// `AppSchema.swift`'s model-type list itself is unchanged (this is
+    /// a field-level change to an already-listed type), consistent with
+    /// `AppSchemaVersioning.swift`'s own "HOW TO ADD A NEW VERSION"
+    /// guidance for when a new explicit schema version is/isn't needed.
+    public var weekdays: [Weekday]
     public var startLocalTime: LocalTime?
     public var plannedDurationMinutes: Int?
     public var timeZoneId: TimeZoneId
@@ -55,7 +73,7 @@ public final class RecurringPlannedActivity {
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
-        weekday: Weekday,
+        weekdays: [Weekday],
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         timeZoneId: TimeZoneId,
@@ -72,6 +90,7 @@ public final class RecurringPlannedActivity {
             precondition((1...1440).contains(duration), "plannedDurationMinutes must be 1-1440, matching PlannedActivity's own bound")
         }
         precondition(effectiveStartDate <= effectiveEndDate, "effectiveStartDate must be on or before effectiveEndDate")
+        precondition(!weekdays.isEmpty, "at least one weekday is required")
         if let l = location {
             precondition(l.count <= 200, "location must be 0-200 characters, matching PlannedActivity's own bound")
         }
@@ -81,7 +100,11 @@ public final class RecurringPlannedActivity {
         self.activityType = activityType
         self.sportId = sportId?.rawValue
         self.categoryIds = categoryIds.map(\.rawValue)
-        self.weekday = weekday
+        // Deterministic ordering (by Weekday's own raw ordering) and
+        // deduplication — a caller passing [.monday, .monday] or
+        // weekdays out of order never produces a different persisted
+        // shape than the equivalent, cleanly-specified set.
+        self.weekdays = Array(Set(weekdays)).sorted { $0.rawValue < $1.rawValue }
         self.startLocalTime = startLocalTime
         self.plannedDurationMinutes = plannedDurationMinutes
         self.timeZoneId = timeZoneId

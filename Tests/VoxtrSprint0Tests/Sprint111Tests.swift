@@ -33,6 +33,7 @@ struct Sprint111Tests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
         let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
@@ -59,6 +60,8 @@ struct Sprint111Tests {
             activeAthletes: [oliver],
             workspaceId: WorkspaceId(),
             athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService
         )
@@ -67,7 +70,11 @@ struct Sprint111Tests {
         #expect(viewModel.tomorrowRows.count == 1)
         // The exact identity FamilyHomeDestination.activity(rowId:) resolves against.
         let rowId = created.plannedActivityId.rawValue.uuidString
-        let resolvedRow = (viewModel.rows + viewModel.tomorrowRows).first { $0.id == rowId }
+        let plannedRowsToday: [FamilyHomeRow] = viewModel.rows.compactMap {
+            if case .planned(let row) = $0 { return row }
+            return nil
+        }
+        let resolvedRow = (plannedRowsToday + viewModel.tomorrowRows).first { $0.id == rowId }
         #expect(resolvedRow?.athleteId == oliver.athleteId)
         #expect(resolvedRow?.plannedActivity.plannedActivityId == created.plannedActivityId)
     }

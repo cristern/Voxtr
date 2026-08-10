@@ -224,7 +224,7 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             startLocalTime: LocalTime(hour: 17, minute: 30),
             plannedDurationMinutes: 150,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
@@ -249,7 +249,7 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10),
             effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14)
@@ -272,13 +272,13 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: start,
             effectiveEndDate: end
         )
 
-        #expect(created.weekday == .monday)
+        #expect(created.weekdays == [.monday])
         #expect(created.effectiveStartDate == start)
         #expect(created.effectiveEndDate == end)
     }
@@ -295,7 +295,7 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             startLocalTime: LocalTime(hour: 17, minute: 30),
             plannedDurationMinutes: 150,
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
@@ -319,7 +319,7 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10),
             effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14)
@@ -340,7 +340,7 @@ struct PlanningRepositoryTests {
             athleteId: athleteId,
             title: "Football",
             activityType: .teamTraining,
-            weekday: .monday,
+            weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10),
             effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14)
@@ -362,12 +362,12 @@ struct PlanningRepositoryTests {
         let firstAthlete = AthleteId()
         let secondAthlete = AthleteId()
         _ = try repository.insertRecurringPlannedActivity(
-            athleteId: firstAthlete, title: "Football", activityType: .teamTraining, weekday: .monday,
+            athleteId: firstAthlete, title: "Football", activityType: .teamTraining, weekdays: [.monday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10), effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14)
         )
         _ = try repository.insertRecurringPlannedActivity(
-            athleteId: secondAthlete, title: "Swimming", activityType: .individualTraining, weekday: .tuesday,
+            athleteId: secondAthlete, title: "Swimming", activityType: .individualTraining, weekdays: [.tuesday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10), effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14)
         )
@@ -392,7 +392,7 @@ struct PlanningRepositoryTests {
                 athleteId: AthleteId(),
                 title: "Football",
                 activityType: .teamTraining,
-                weekday: .monday,
+                weekdays: [.monday],
                 timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
                 effectiveStartDate: LocalDate(year: 2026, month: 8, day: 10),
                 effectiveEndDate: LocalDate(year: 2026, month: 12, day: 14),
