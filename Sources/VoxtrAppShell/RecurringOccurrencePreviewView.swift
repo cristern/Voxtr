@@ -184,7 +184,7 @@ private struct RecurringEditSheetItem: Identifiable {
 /// `PlannedActivity` for `.navigationDestination(item:)` presentation —
 /// one piece of state driving both presence and content, matching this
 /// file's own established fix for the exact same class of race.
-private struct MaterializedActivityItem: Identifiable {
+private struct MaterializedActivityItem: Identifiable, Hashable {
     let id: String
     let plannedActivity: PlannedActivity
 
