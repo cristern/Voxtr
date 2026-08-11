@@ -74,7 +74,11 @@ struct Sprint111Tests {
             if case .planned(let row) = $0 { return row }
             return nil
         }
-        let resolvedRow = (plannedRowsToday + viewModel.tomorrowRows).first { $0.id == rowId }
+        let plannedRowsTomorrow: [FamilyHomeRow] = viewModel.tomorrowRows.compactMap {
+            if case .planned(let row) = $0 { return row }
+            return nil
+        }
+        let resolvedRow = (plannedRowsToday + plannedRowsTomorrow).first { $0.id == rowId }
         #expect(resolvedRow?.athleteId == oliver.athleteId)
         #expect(resolvedRow?.plannedActivity.plannedActivityId == created.plannedActivityId)
     }

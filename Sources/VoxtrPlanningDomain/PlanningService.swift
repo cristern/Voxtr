@@ -265,7 +265,15 @@ public final class PlanningService {
         forWeekPlan weekPlanId: WeekPlanId
     ) throws -> PlannedActivity {
         do {
-            return try acceptSuggestion(suggestion, forWeekPlan: weekPlanId)
+            // requireDraftWeekPlan: false — the P0 fix. "Log Activity"
+            // on a recurring occurrence is recording that training
+            // actually happened, not modifying the plan, so it must not
+            // be blocked merely because this week was already
+            // committed (an entirely ordinary state by the time
+            // "today" arrives). See acceptSuggestion's own doc comment
+            // on this parameter for the full explanation — every other
+            // validation there remains fully enforced.
+            return try acceptSuggestion(suggestion, forWeekPlan: weekPlanId, requireDraftWeekPlan: false, saveOverride: nil)
         } catch PlanningServiceError.recurringOccurrenceAlreadyAccepted {
             let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
                 recurringPlannedActivityId: suggestion.recurringPlannedActivityId,
@@ -640,13 +648,36 @@ public final class PlanningService {
     func acceptSuggestion(
         _ suggestion: RecurringActivitySuggestion,
         forWeekPlan weekPlanId: WeekPlanId,
+        requireDraftWeekPlan: Bool = true,
         saveOverride: (() throws -> Void)?
     ) throws -> PlannedActivity {
         guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
         }
-        guard weekPlan.status == .draft else {
-            throw PlanningServiceError.weekPlanNotDraft
+        // Sprint 1.2B runtime closeout (P0 fix): the normal "accept a
+        // suggestion into this week's plan" UI flow (Weekly Plan) must
+        // keep requiring draft status — you cannot add a new planned
+        // activity to an already-committed plan through that path, and
+        // this guard is what protects it. But "Log Activity" on a
+        // recurring occurrence (materializeOrFetchExisting below) is a
+        // fundamentally different action: recording that a recurring
+        // training session actually happened, not modifying the plan.
+        // A week's plan being already committed by the time "today"
+        // arrives is completely ordinary — yet that state made this
+        // guard throw `.weekPlanNotDraft`, an error
+        // `materializeOrFetchExisting`'s own catch clause never handled
+        // (it only recovers from `.recurringOccurrenceAlreadyAccepted`),
+        // so it propagated straight to the UI's generic "could not open
+        // this activity" message. Every other validation below this
+        // guard (athlete match, date range, weekday match, effective
+        // range, enabled check, and above all the duplicate-materialization
+        // check via `externalSourceId`) is unchanged and still fully
+        // enforced regardless of this parameter — only the draft-only
+        // restriction itself is now conditional.
+        if requireDraftWeekPlan {
+            guard weekPlan.status == .draft else {
+                throw PlanningServiceError.weekPlanNotDraft
+            }
         }
         let weekPlanAthleteId = AthleteId(rawValue: weekPlan.athleteId)
 

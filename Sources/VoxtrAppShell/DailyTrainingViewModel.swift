@@ -41,6 +41,13 @@ public final class DailyTrainingViewModel {
     /// doesn't enforce that (the view disables completed options, and
     /// `TrainingService` itself rejects a duplicate link regardless).
     public var selectedPlannedActivityId: PlannedActivityId?
+    /// Sprint 1.2B runtime closeout: increments on every SUCCESSFUL
+    /// unplanned-activity log only — never on validation failure,
+    /// persistence failure, or merely opening the form. The view
+    /// watches this to scroll to the top after logging, per this
+    /// package's own explicit "only after confirmed successful
+    /// logging" requirement.
+    public private(set) var successfulLogTrigger: Int = 0
     /// Sprint 1.2B, Priority 3: today's recurring occurrences not yet
     /// materialized — filtered from `TodayActivityComposer`'s own
     /// output (the same shared read model Family Home/Athlete Home
@@ -133,9 +140,15 @@ public final class DailyTrainingViewModel {
             newLogTitle = ""
             newLogNotes = ""
             newLogPerceivedExertion = nil
-            newLogDurationMinutes = 1
+            newLogDurationMinutes = 60
             selectedPlannedActivityId = nil
             load()
+            // Sprint 1.2B runtime closeout: a simple counter, not a
+            // Bool — .onChange must fire on every successful log, not
+            // only a false->true transition, so a second/third
+            // successful log in the same session still triggers the
+            // view's own scroll-to-top.
+            successfulLogTrigger += 1
         } catch let error as TrainingServiceError {
             errorMessage = Self.message(for: error)
         } catch {

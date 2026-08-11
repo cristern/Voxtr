@@ -472,6 +472,52 @@ struct Sprint12BTests {
         #expect(allActivities.count == 1)
     }
 
+    /// Sprint 1.2B runtime closeout (P0): the actual root cause fixed
+    /// in this package — `materializeOrFetchExisting` previously called
+    /// `acceptSuggestion`, which requires `weekPlan.status == .draft`.
+    /// A committed WeekPlan (completely ordinary by the time "today"
+    /// arrives) made every "Log Activity" tap on a recurring occurrence
+    /// throw `.weekPlanNotDraft` — an error the recovery `catch` never
+    /// handled, surfacing as "Could not open the activity" in the UI.
+    /// Extends the existing idempotency test above rather than adding a
+    /// new file, per this package's own test-strategy guidance.
+    @Test("Materializing a recurring occurrence succeeds even when the WeekPlan is already committed, and remains idempotent there too")
+    @MainActor
+    func materializationSucceedsAgainstCommittedWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(suggestions.first)
+
+        // Commit the plan BEFORE ever attempting to materialize this
+        // occurrence — this is the exact P0 scenario, not a repeat-tap
+        // scenario.
+        _ = try planningService.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        let first = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        // A second tap after the first successful materialization must
+        // still resolve to the same activity, not fail or duplicate,
+        // even though the plan remains committed throughout.
+        let second = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(first.plannedActivityId == second.plannedActivityId)
+        let allActivities = try planningRepository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(allActivities.count == 1)
+    }
+
     /// Item 14: existing duplicate-log protection remains intact after
     /// all this package's changes.
     @Test("Existing duplicate-PlannedActivity-log protection remains intact")

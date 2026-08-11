@@ -135,21 +135,31 @@ public final class TodayActivityComposer {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
     }
 
-    public func todayActivities(
+    /// Sprint 1.2B runtime closeout (P1): generalized from the
+    /// original `todayActivities`, which hardcoded "today" internally.
+    /// `loadTomorrow()` needs the exact same canonical composition —
+    /// materialized planned activities plus unmaterialized recurring
+    /// occurrences — for an arbitrary date, not a second,
+    /// Tomorrow-specific aggregation. `includeUnplannedLogged` exists
+    /// because a genuinely unplanned `LoggedActivity` is inherently a
+    /// past/present fact — there is no meaningful "unplanned logged
+    /// activity for tomorrow" case, and no existing repository method
+    /// even fetches logged activities for an arbitrary future date;
+    /// `todayActivities` below always passes `true` (its existing,
+    /// unchanged behavior), `loadTomorrow()` passes `false`.
+    public func activities(
         forAthlete athleteId: AthleteId,
         athleteName: String,
-        referenceDate: Date = .now,
+        on date: LocalDate,
+        includeUnplannedLogged: Bool,
         calendar: Calendar = .current
     ) throws -> [TodayActivityRow] {
-        let components = calendar.dateComponents([.year, .month, .day], from: referenceDate)
-        let today = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
-
         var rows: [TodayActivityRow] = []
 
         // A/B: materialized planned activities, with their real
         // completion/logged relationship already resolved.
         let completions = try trainingPlanningCoordinationService.plannedActivitiesWithCompletion(
-            forAthlete: athleteId, on: today, calendar: calendar
+            forAthlete: athleteId, on: date, calendar: calendar
         )
         rows.append(contentsOf: completions.map { completion in
             .planned(FamilyHomeRow(
@@ -161,21 +171,29 @@ public final class TodayActivityComposer {
             ))
         })
 
-        // C: recurring occurrences applicable today, not yet
+        // C: recurring occurrences applicable on this date, not yet
         // materialized — deriveSuggestions already excludes any that
-        // are (see this type's own doc comment above).
+        // are (see this type's own doc comment above). Never
+        // materializes anything merely by being composed here.
         let suggestions = try planningService.deriveSuggestions(
-            forAthlete: athleteId, from: today, through: today, calendar: calendar
+            forAthlete: athleteId, from: date, through: date, calendar: calendar
         )
         rows.append(contentsOf: suggestions.map { suggestion in
             .recurringOccurrence(athleteId: athleteId, athleteName: athleteName, suggestion: suggestion)
         })
 
+        guard includeUnplannedLogged else {
+            return rows.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        }
+
         // D: genuinely unplanned logged activities only — filtered to
         // no PlannedActivityId, so a logged PlannedActivity is never
-        // double-represented.
+        // double-represented. Only reached when includeUnplannedLogged
+        // is true, which only ever happens via todayActivities' own
+        // delegation below (i.e. `date` is genuinely today here) — so
+        // the default `.now` reference is correct, not a leftover.
         let allLogged = try trainingService.fetchTodaysLoggedActivities(
-            forAthlete: athleteId, referenceDate: referenceDate, calendar: calendar
+            forAthlete: athleteId, calendar: calendar
         )
         let unplanned = allLogged.filter { $0.plannedActivityId == nil }
         rows.append(contentsOf: unplanned.map { loggedActivity in
@@ -183,5 +201,22 @@ public final class TodayActivityComposer {
         })
 
         return rows.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+    }
+
+    /// Preserved for full backward compatibility — every existing
+    /// caller (Family Home, Athlete Home, Daily Training) is unchanged.
+    /// Computes "today" as a `LocalDate` and delegates to the
+    /// generalized `activities(forAthlete:athleteName:on:includeUnplannedLogged:calendar:)`
+    /// above with `includeUnplannedLogged: true`, its own original
+    /// behavior.
+    public func todayActivities(
+        forAthlete athleteId: AthleteId,
+        athleteName: String,
+        referenceDate: Date = .now,
+        calendar: Calendar = .current
+    ) throws -> [TodayActivityRow] {
+        let components = calendar.dateComponents([.year, .month, .day], from: referenceDate)
+        let today = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        return try activities(forAthlete: athleteId, athleteName: athleteName, on: today, includeUnplannedLogged: true, calendar: calendar)
     }
 }

@@ -104,6 +104,72 @@ struct FamilyScheduleAndTomorrowTests {
         #expect(viewModel.tomorrowRows.map(\.athleteName) == ["Emma", "Oliver"])
     }
 
+    /// Sprint 1.2B runtime closeout (P1): Tomorrow must include an
+    /// unmaterialized recurring occurrence — confirmed missing
+    /// entirely before this fix (loadTomorrow() only ever queried
+    /// materialized PlannedActivity rows). Also confirms viewing it
+    /// never materializes anything: no WeekPlan is created for
+    /// tomorrow's week merely by loading the schedule.
+    @Test("Tomorrow includes an unmaterialized recurring occurrence, without materializing it")
+    @MainActor
+    func tomorrowIncludesUnmaterializedRecurringOccurrence() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+
+        guard let tomorrowDate = Calendar.current.date(byAdding: .day, value: 1, to: .now) else {
+            Issue.record("Could not compute tomorrow"); return
+        }
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: tomorrowDate)
+        let tomorrow = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        let weekStart = TrainingPlanningCoordinationService.weekStart(referenceDate: tomorrowDate)
+
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        // Deliberately NOT calling getOrCreateWeekPlan for tomorrow's
+        // week at all — matching "the parent has never visited this
+        // week's plan," the exact scenario the fix addresses.
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: oliver.athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [tomorrow.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [oliver],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.loadTomorrow()
+
+        #expect(viewModel.tomorrowRows.count == 1)
+        guard case .recurringOccurrence = viewModel.tomorrowRows.first else {
+            Issue.record("Expected a .recurringOccurrence row")
+            return
+        }
+
+        // Never materialized merely by loading Tomorrow — no WeekPlan
+        // exists for tomorrow's week at all.
+        let weekPlan = try planningRepository.fetchWeekPlan(forAthlete: oliver.athleteId, weekStart: weekStart)
+        #expect(weekPlan == nil)
+    }
+
     @Test("Family Schedule includes upcoming activities from multiple athletes, grouped and ordered deterministically")
     @MainActor
     func familyScheduleGroupsMultipleAthletesDeterministically() throws {

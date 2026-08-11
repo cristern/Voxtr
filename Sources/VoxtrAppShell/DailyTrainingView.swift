@@ -31,23 +31,29 @@ public struct DailyTrainingView: View {
     }
 
     public var body: some View {
-        Form {
-            if let errorMessage = viewModel.errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("training.errorMessage")
-                }
-            }
+        ScrollViewReader { proxy in
+            Form {
+                // Sprint 1.2B runtime closeout: an invisible top anchor
+                // for the scroll-to-top-after-logging fix below — zero
+                // height, never visible, exists only as a scroll target.
+                Color.clear.frame(height: 0).id("dailyTraining.top")
 
-            Section("Today's planned activities") {
-                if viewModel.plannedActivities.isEmpty {
-                    Text(TrainingStrings.noPlannedActivitiesToday)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                        NavigationLink {
-                            ActivityDetailViewLoader(
+                if let errorMessage = viewModel.errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("training.errorMessage")
+                    }
+                }
+
+                Section("Today's planned activities") {
+                    if viewModel.plannedActivities.isEmpty {
+                        Text(TrainingStrings.noPlannedActivitiesToday)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
+                            NavigationLink {
+                                ActivityDetailViewLoader(
                                 plannedActivity: item.plannedActivity,
                                 isCompleted: item.isCompleted,
                                 athleteId: viewModel.athleteId,
@@ -199,6 +205,18 @@ public struct DailyTrainingView: View {
         }
         .sheet(item: $recurringManagementSheetItem) { item in
             RecurringActivityManagementView(viewModel: item.viewModel, athleteDisplayName: athleteDisplayName)
+        }
+        .onChange(of: viewModel.successfulLogTrigger) { _, _ in
+            // Only fires when a log genuinely succeeded (see
+            // successfulLogTrigger's own doc comment) — never on
+            // validation failure, persistence failure, or opening the
+            // form. withAnimation is optional polish, not required for
+            // correctness; native ScrollViewReader.scrollTo is the
+            // actual mechanism, no timing hacks.
+            withAnimation {
+                proxy.scrollTo("dailyTraining.top", anchor: .top)
+            }
+        }
         }
     }
 }

@@ -57,7 +57,7 @@ public final class FamilyHomeViewModel {
     public private(set) var errorMessage: String?
 
     public private(set) var rows: [TodayActivityRow] = []
-    public private(set) var tomorrowRows: [FamilyHomeRow] = []
+    public private(set) var tomorrowRows: [TodayActivityRow] = []
     private let workspaceId: WorkspaceId
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
@@ -173,37 +173,21 @@ public final class FamilyHomeViewModel {
         let components = Calendar.current.dateComponents([.year, .month, .day], from: tomorrow)
         let tomorrowDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
 
-        var merged: [FamilyHomeRow] = []
+        var merged: [TodayActivityRow] = []
         for athlete in activeAthletes {
-            let completions = (try? trainingPlanningCoordinationService.plannedActivitiesWithCompletion(
-                forAthlete: athlete.athleteId, on: tomorrowDate
+            let athleteRows = (try? todayActivityComposer.activities(
+                forAthlete: athlete.athleteId, athleteName: athlete.givenName,
+                on: tomorrowDate, includeUnplannedLogged: false
             )) ?? []
-            merged.append(contentsOf: completions.map { completion in
-                FamilyHomeRow(
-                    id: completion.plannedActivity.id.uuidString,
-                    athleteId: athlete.athleteId,
-                    athleteName: athlete.givenName,
-                    plannedActivity: completion.plannedActivity,
-                    isCompleted: completion.isCompleted
-                )
-            })
+            merged.append(contentsOf: athleteRows)
         }
-        tomorrowRows = Self.sorted(merged)
+        // Same presentation ordering as loadHome() above — not-completed
+        // first (chronological), completed/logged last (chronological).
+        let notCompleted = merged.filter { !$0.isCompletedOrLogged }.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        let completed = merged.filter { $0.isCompletedOrLogged }.sorted { $0.startLocalTimeSortKey < $1.startLocalTimeSortKey }
+        tomorrowRows = notCompleted + completed
     }
 
-    /// Not completed first (sorted chronologically by start time, with
-    /// no-start-time activities — e.g. "Strength · Ready to log" —
-    /// sorted after timed ones within that group), then completed
-    /// activities after, also chronological.
-    private static func sorted(_ rows: [FamilyHomeRow]) -> [FamilyHomeRow] {
-        func timeSortKey(_ row: FamilyHomeRow) -> Int {
-            guard let time = row.plannedActivity.startLocalTime else { return Int.max }
-            return time.hour * 60 + time.minute
-        }
-        let notCompleted = rows.filter { !$0.isCompleted }.sorted { timeSortKey($0) < timeSortKey($1) }
-        let completed = rows.filter { $0.isCompleted }.sorted { timeSortKey($0) < timeSortKey($1) }
-        return notCompleted + completed
-    }
 
     /// Sprint 1 (Vǫxtr Parent continuation), Part 3: one reminder per
     /// active athlete — never just `activeAthletes.first`. A failure

@@ -130,11 +130,15 @@ public struct FamilyHomeContentView: View {
                         if case .planned(let row) = $0 { return row }
                         return nil
                     }
-                    if let row = (plannedRowsToday + viewModel.tomorrowRows).first(where: { $0.id == rowId }) {
+                    let plannedRowsTomorrow: [FamilyHomeRow] = viewModel.tomorrowRows.compactMap {
+                        if case .planned(let row) = $0 { return row }
+                        return nil
+                    }
+                    if let row = (plannedRowsToday + plannedRowsTomorrow).first(where: { $0.id == rowId }) {
                         activityDetail(for: row)
                     }
                 case .recurringOccurrence(let id):
-                    if case .recurringOccurrence(let athleteId, let athleteName, let suggestion) = viewModel.rows.first(where: { $0.id == id }) {
+                    if case .recurringOccurrence(let athleteId, let athleteName, let suggestion) = (viewModel.rows + viewModel.tomorrowRows).first(where: { $0.id == id }) {
                         RecurringOccurrencePreviewView(
                             suggestion: suggestion,
                             athleteDisplayName: athleteName,
@@ -177,7 +181,7 @@ public struct FamilyHomeContentView: View {
         if !viewModel.tomorrowRows.isEmpty {
             Section("Tomorrow") {
                 ForEach(viewModel.tomorrowRows) { row in
-                    familyHomeRow(row)
+                    todayActivityRow(row)
                 }
             }
             .accessibilityIdentifier("familyHome.tomorrowList")
