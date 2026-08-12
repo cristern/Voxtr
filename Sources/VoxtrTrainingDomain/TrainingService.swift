@@ -83,6 +83,15 @@ public final class TrainingService {
         try repository.fetchLoggedActivities(forAthlete: athleteId)
     }
 
+    /// Runtime closeout (stale recurring preview fix): a thin
+    /// passthrough for the exact same relationship lookup
+    /// `TrainingPlanningCoordinationService.plannedActivitiesWithCompletion`
+    /// already uses to derive completion elsewhere — never a second,
+    /// separate completion-checking mechanism.
+    public func fetchLoggedActivities(forPlannedActivity plannedActivityId: PlannedActivityId) throws -> [LoggedActivity] {
+        try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId)
+    }
+
     public func fetchLoggedActivities(
         forAthlete athleteId: AthleteId,
         from startDate: Date,

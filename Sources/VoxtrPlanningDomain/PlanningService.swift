@@ -244,6 +244,31 @@ public final class PlanningService {
         try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlanId)
     }
 
+    /// Runtime closeout (stale recurring preview fix): a purely
+    /// read-only check — never creates a `WeekPlan` (unlike
+    /// `getOrCreateWeekPlan`, used only by the actual "Log Activity"
+    /// mutation path) — for whether this specific occurrence has
+    /// already been materialized into a real `PlannedActivity`,
+    /// through whatever path (this screen, a different screen, or a
+    /// prior visit to this same screen before it went stale). Returns
+    /// `nil` if no `WeekPlan` exists yet for that week at all, since
+    /// nothing could have been materialized into it. Reuses the same
+    /// `fetchPlannedActivity(forExternalSourceId:)` lookup
+    /// `materializeOrFetchExisting` already relies on — no new identity
+    /// resolution logic, no second source of truth.
+    public func fetchMaterializedPlannedActivity(for suggestion: RecurringActivitySuggestion) throws -> PlannedActivity? {
+        let weekStart = suggestion.occurrenceDate.startOfWeek
+        guard let weekPlan = try repository.fetchWeekPlan(forAthlete: suggestion.athleteId, weekStart: weekStart) else {
+            return nil
+        }
+        let externalSourceId = RecurringPlannedActivity.occurrenceExternalSourceId(
+            recurringPlannedActivityId: suggestion.recurringPlannedActivityId,
+            occurrenceDate: suggestion.occurrenceDate,
+            athleteId: suggestion.athleteId
+        )
+        return try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlan.weekPlanId)
+    }
+
     /// Sprint 1.2B, Priority 1 (recurring occurrence → Log Activity):
     /// materializes a recurring occurrence into a real `PlannedActivity`
     /// if it isn't one already, or deterministically resolves to the

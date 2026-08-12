@@ -605,4 +605,55 @@ struct Sprint12BTests {
         #expect(resultWithMondayFirst == expectedMonday)
         #expect(resultWithSundayFirst == resultWithMondayFirst)
     }
+
+    // MARK: - Stale recurring preview fix (RecurringOccurrencePreviewView)
+
+    /// Protects the exact invariant `RecurringOccurrencePreviewView`'s
+    /// own `checkForStaleness()` depends on: `fetchMaterializedPlannedActivity`
+    /// must return `nil` for a genuinely unmaterialized occurrence, and
+    /// the correct `PlannedActivity` once one has been materialized —
+    /// but materialization alone (before any actual log) must NOT be
+    /// mistaken for completion. This is what lets the preview
+    /// distinguish "user cancelled after materializing" (retain normal
+    /// navigation) from "user actually logged it" (unwind).
+    @Test("fetchMaterializedPlannedActivity distinguishes unmaterialized, materialized-not-logged, and materialized-and-logged")
+    @MainActor
+    func fetchMaterializedPlannedActivityDistinguishesLifecycleStages() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(suggestions.first)
+
+        // Stage 1: genuinely unmaterialized.
+        #expect(try planningService.fetchMaterializedPlannedActivity(for: suggestion) == nil)
+
+        // Stage 2: materialized (the "Log Activity" tap), but not yet
+        // logged — the exact "user might still cancel" window.
+        let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        let stage2 = try planningService.fetchMaterializedPlannedActivity(for: suggestion)
+        #expect(stage2?.plannedActivityId == materialized.plannedActivityId)
+        #expect(try trainingService.fetchLoggedActivities(forPlannedActivity: materialized.plannedActivityId).isEmpty)
+
+        // Stage 3: actually logged.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
+            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90
+        )
+        #expect(try !trainingService.fetchLoggedActivities(forPlannedActivity: materialized.plannedActivityId).isEmpty)
+    }
 }

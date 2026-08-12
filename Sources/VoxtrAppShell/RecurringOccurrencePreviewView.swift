@@ -46,6 +46,7 @@ public struct RecurringOccurrencePreviewView: View {
     @State private var editSheetItem: RecurringEditSheetItem?
     @State private var materializedActivity: MaterializedActivityItem?
     @State private var errorMessage: String?
+    @Environment(\.dismiss) private var dismiss
 
     public init(
         suggestion: RecurringActivitySuggestion,
@@ -118,6 +119,60 @@ public struct RecurringOccurrencePreviewView: View {
                 trainingService: trainingService
             )
         }
+        .onAppear {
+            checkForStaleness()
+        }
+    }
+
+    /// Fixes the stale-preview bug reported after a successful
+    /// recurring-occurrence log: `ActivityDetailView` already dismisses
+    /// itself on successful save (its own `.onChange(of: isCompleted)`,
+    /// unchanged), popping back exactly one level — to whichever screen
+    /// pushed it, which for this flow is always THIS view. Without this
+    /// check, this screen would then redraw with its hardcoded, static
+    /// "not yet added to this week's plan" content — genuinely
+    /// contradictory now that the occurrence is logged, even though
+    /// persistence itself was always correct.
+    ///
+    /// Deliberately checks for a genuinely LOGGED activity, not merely
+    /// a materialized one: materialization itself happens at the "Log
+    /// Activity" button tap on THIS screen, before `ActivityDetailView`
+    /// is ever shown — so a materialized-but-not-yet-logged
+    /// `PlannedActivity` already exists the moment Activity Detail
+    /// appears, regardless of whether the user goes on to log it or
+    /// cancels/goes back. Checking only "is it materialized" would
+    /// wrongly dismiss this screen even on cancel, violating this
+    /// package's own explicit "cancel/back without logging retains
+    /// normal navigation" requirement.
+    ///
+    /// `.onAppear` fires both on first display AND when this view
+    /// becomes visible again after a pushed child dismisses — which is
+    /// exactly the moment to check. A fresh, first-time appearance of
+    /// this screen can never find a match here: `deriveSuggestions`
+    /// already excludes any occurrence that's been materialized from
+    /// ever being presented as a `.recurringOccurrence` in the first
+    /// place, so this screen is only ever reached for a genuinely
+    /// unmaterialized occurrence on first display.
+    ///
+    /// Not a second source of truth: reuses the exact same
+    /// `fetchMaterializedPlannedActivity`/`fetchLoggedActivities(forPlannedActivity:)`
+    /// relationship lookups the rest of the app already resolves
+    /// completion through — never infers from title/date, never
+    /// fabricates anything, never creates a WeekPlan merely by
+    /// checking. When it finds a genuinely logged match, this screen
+    /// dismisses itself — propagating the same "unwind" principle one
+    /// level further up the stack, back to whatever surface (Athlete
+    /// Home, Family Home, Family Schedule) originally pushed this
+    /// screen, without ever hardcoding which one that was.
+    private func checkForStaleness() {
+        guard let materialized = try? planningService.fetchMaterializedPlannedActivity(for: suggestion) else {
+            return
+        }
+        guard let loggedActivities = try? trainingService.fetchLoggedActivities(forPlannedActivity: materialized.plannedActivityId),
+              !loggedActivities.isEmpty else {
+            return
+        }
+        dismiss()
     }
 
     /// Sprint 1.2B, Priority 1: "Log Activity" is the one action that
