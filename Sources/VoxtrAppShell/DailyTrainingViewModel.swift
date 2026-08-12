@@ -140,7 +140,6 @@ public final class DailyTrainingViewModel {
             newLogTitle = ""
             newLogNotes = ""
             newLogPerceivedExertion = nil
-            newLogDurationMinutes = 60
             selectedPlannedActivityId = nil
             load()
             // Sprint 1.2B runtime closeout: a simple counter, not a

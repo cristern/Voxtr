@@ -68,7 +68,12 @@ struct DailyTrainingViewModelTests {
         #expect(viewModel.loggedActivities.count == 1)
         #expect(viewModel.loggedActivities.first?.title == "Easy jog")
         #expect(viewModel.newLogTitle.isEmpty)
-        #expect(viewModel.newLogDurationMinutes == 1)
+        // Duration is deliberately NOT reset after a successful save
+        // (see newLogDurationMinutes's own doc comment, Sprint 1.1
+        // closeout Item 5) — it remains the user's own last-entered
+        // value, so a parent logging several activities in a row with
+        // the same duration doesn't have to re-enter it each time.
+        #expect(viewModel.newLogDurationMinutes == 30)
         #expect(viewModel.errorMessage == nil)
     }
 
