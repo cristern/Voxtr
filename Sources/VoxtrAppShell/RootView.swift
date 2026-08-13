@@ -29,7 +29,7 @@ public struct RootView: View {
                 CreateFamilyView(viewModel: makeOnboardingViewModel())
             }
         case .existingFamily(let family):
-            FamilyHomeView(
+            ParentTabShellView(
                 family: family,
                 planningService: root.container.resolve(PlanningService.self),
                 trainingService: root.container.resolve(TrainingService.self),
