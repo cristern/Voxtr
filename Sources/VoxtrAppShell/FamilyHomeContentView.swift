@@ -226,6 +226,7 @@ public struct FamilyHomeContentView: View {
         }
     }
 
+    @ViewBuilder
     private func todayActivityRow(_ row: TodayActivityRow) -> some View {
         switch row {
         case .planned(let familyHomeRowValue):
