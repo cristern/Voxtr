@@ -201,7 +201,6 @@ public struct FamilyHomeContentView: View {
     /// existing-style indication", not a new detail screen this
     /// package wasn't asked to build).
     @ViewBuilder
-    @ViewBuilder
     private var nowNextSection: some View {
         switch viewModel.nowNextState {
         case .now(let items):
@@ -339,7 +338,6 @@ public struct FamilyHomeContentView: View {
         return parts.joined(separator: " · ")
     }
 
-    @ViewBuilder
     @ViewBuilder
     private var reflectionNavigationSection: some View {
         // Reduced from a full, headline "Reflection" section (one row
