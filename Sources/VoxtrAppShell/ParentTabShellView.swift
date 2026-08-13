@@ -206,6 +206,21 @@ public struct ParentTabShellView: View {
 /// `FamilyHomeViewModel.refreshActiveAthletes()` already established
 /// (see that method's own doc comment), reused rather than
 /// reimplemented separately in each tab.
+///
+/// `@MainActor`: `AthleteRepository` is itself `@MainActor`-isolated
+/// (class-level). As a top-level, free function — not a member method
+/// on an already-`@MainActor` type — this does not inherit that
+/// isolation automatically, unlike e.g. `FamilyHomeViewModel`'s own
+/// `refreshActiveAthletes()`, which is `@MainActor` only because
+/// `FamilyHomeViewModel` itself is. Both call sites below are already
+/// valid `@MainActor` contexts on their own: they're inside
+/// `.onAppear` closures attached directly within `ParentPlanTabView`/
+/// `ParentTrainingTabView`'s own `body`, and `View.body` is declared
+/// `@MainActor` by the `View` protocol itself — the same guarantee
+/// every other `.onAppear`-triggered call in this app already relies
+/// on. This annotation makes that existing guarantee explicit for a
+/// free function, which the compiler cannot infer on its own.
+@MainActor
 private func fetchActiveAthletes(workspaceId: WorkspaceId, athleteRepository: AthleteRepository) -> [AthleteProfile] {
     (try? athleteRepository.fetchAthletes(forWorkspace: workspaceId))?
         .filter { !$0.isArchived }
