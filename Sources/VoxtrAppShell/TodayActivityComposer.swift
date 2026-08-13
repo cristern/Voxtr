@@ -72,6 +72,34 @@ public enum TodayActivityRow: Identifiable {
         return time.hour * 60 + time.minute
     }
 
+    /// Parent Home UX Closeout: an activity's end, for correctly
+    /// bounding NOW to `start <= current time < end` — not just
+    /// `start <= current time`, which would keep something "NOW"
+    /// forever once it started, regardless of how long ago it ended.
+    ///
+    /// `nil` when duration is unknown — deliberately never fabricated.
+    /// Inspected directly: neither `PlannedActivity.plannedDurationMinutes`
+    /// nor `RecurringPlannedActivity.plannedDurationMinutes` (and
+    /// therefore `RecurringActivitySuggestion.plannedDurationMinutes`,
+    /// projected from it) is guaranteed — both default to `nil` with no
+    /// precondition requiring a value, only a range check when one is
+    /// present. A 60-minute (or any other) fallback here would let
+    /// Vǫxtr claim NOW status for an activity it has no actual basis to
+    /// believe is still in progress. Callers must treat `nil` as "end
+    /// unknown," never as "no limit" — see `nowNextState`'s own
+    /// handling.
+    public var endLocalTimeSortKey: Int? {
+        guard startLocalTimeSortKey != Int.max else { return nil }
+        let durationMinutes: Int?
+        switch self {
+        case .planned(let row): durationMinutes = row.plannedActivity.plannedDurationMinutes
+        case .recurringOccurrence(_, _, let suggestion): durationMinutes = suggestion.plannedDurationMinutes
+        case .unplannedLogged: durationMinutes = nil
+        }
+        guard let durationMinutes else { return nil }
+        return startLocalTimeSortKey + durationMinutes
+    }
+
     /// Fix (Family Home sorting regression): a generic, domain-meaningful
     /// "is this already resolved" notion across all three row kinds —
     /// `.planned` uses its own real `isCompleted`, `.recurringOccurrence`

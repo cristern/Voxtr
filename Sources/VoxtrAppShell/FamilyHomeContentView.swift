@@ -84,6 +84,8 @@ public struct FamilyHomeContentView: View {
                     }
                 }
 
+                nowNextSection
+
                 Section("Today's Schedule") {
                     if viewModel.rows.isEmpty {
                         Text("Nothing planned for today.")
@@ -103,7 +105,8 @@ public struct FamilyHomeContentView: View {
                         .accessibilityIdentifier("familyHome.familyScheduleLink")
                 }
 
-                reflectionReminderSection
+                focusThisWeekSection
+                reflectionNavigationSection
             }
             // Naming/navigation clarity: "Family Home" always, never
             // the generic "Home" — this is the family-wide screen, and
@@ -198,6 +201,32 @@ public struct FamilyHomeContentView: View {
     /// existing-style indication", not a new detail screen this
     /// package wasn't asked to build).
     @ViewBuilder
+    @ViewBuilder
+    private var nowNextSection: some View {
+        switch viewModel.nowNextState {
+        case .now(let items):
+            Section("Now") {
+                ForEach(items) { todayActivityRow($0) }
+            }
+            .accessibilityIdentifier("familyHome.nowNext.now")
+        case .next(let items):
+            Section("Next") {
+                ForEach(items) { todayActivityRow($0) }
+            }
+            .accessibilityIdentifier("familyHome.nowNext.next")
+        case .tomorrow(let items):
+            Section("Next (tomorrow)") {
+                ForEach(items) { todayActivityRow($0) }
+            }
+            .accessibilityIdentifier("familyHome.nowNext.tomorrow")
+        case .empty:
+            // Calm by Default: no placeholder text, no "nothing
+            // scheduled" filler — genuine absence of relevant activity
+            // simply shows nothing here at all.
+            EmptyView()
+        }
+    }
+
     private func todayActivityRow(_ row: TodayActivityRow) -> some View {
         switch row {
         case .planned(let familyHomeRowValue):
@@ -311,27 +340,53 @@ public struct FamilyHomeContentView: View {
     }
 
     @ViewBuilder
-    private var reflectionReminderSection: some View {
-        Section("Reflection") {
-            if viewModel.reflectionReminders.isEmpty {
-                Text("No reflection yet this week.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(viewModel.reflectionReminders) { reminder in
-                    NavigationLink(value: FamilyHomeDestination.reflection(reminder.athleteId)) {
-                        HStack {
-                            Text(reminder.athleteName)
-                            Spacer()
-                            Text(reminder.reflectionExists ? "Recorded" : "No reflection yet")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+    @ViewBuilder
+    private var reflectionNavigationSection: some View {
+        // Reduced from a full, headline "Reflection" section (one row
+        // per athlete) to the minimum discoverable navigation: no
+        // section header, footer text only — visually secondary, not a
+        // permanent Reflection dashboard. Focus this week (below)
+        // remains the actual Home content; this is only a discreet
+        // route to it when useful. Per-athlete links are kept, not
+        // collapsed into one, since navigating to a specific athlete's
+        // reflection requires real, explicit athlete identity — no
+        // "first athlete" shortcut. Access itself isn't removed merely
+        // because Training also exposes it elsewhere.
+        if !viewModel.activeAthletes.isEmpty {
+            Section {
+                ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
+                    NavigationLink(athlete.givenName, value: FamilyHomeDestination.reflection(athlete.athleteId))
+                        .font(.footnote)
+                        .accessibilityIdentifier("familyHome.reflectionLink.\(athlete.athleteId.rawValue.uuidString)")
+                }
+            } footer: {
+                Text("Reflect on this week")
+            }
+            .accessibilityIdentifier("familyHome.reflectionNavigation")
+        }
+    }
+
+    @ViewBuilder
+    private var focusThisWeekSection: some View {
+        // Parent Home UX / Content Contract: shows nothing at all when
+        // no athlete has a relevant prior-week focus — no placeholder,
+        // no "no focus entered" text, matching the approved "absence"
+        // rule exactly. The prior reflection remains the sole source
+        // of truth; this section never persists anything of its own.
+        if !viewModel.focusThisWeek.isEmpty {
+            Section("Focus this week") {
+                ForEach(viewModel.focusThisWeek) { item in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.athleteName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(item.focus)
                     }
-                    .accessibilityIdentifier("familyHome.reflectionRow.\(reminder.id)")
+                    .accessibilityIdentifier("familyHome.focusThisWeekRow.\(item.id)")
                 }
             }
+            .accessibilityIdentifier("familyHome.focusThisWeek")
         }
-        .accessibilityIdentifier("familyHome.reflectionReminder")
     }
 
     private func athleteOverview(for athlete: AthleteProfile) -> some View {
