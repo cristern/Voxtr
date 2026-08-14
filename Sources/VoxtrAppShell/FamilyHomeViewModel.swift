@@ -15,6 +15,29 @@ public struct FamilyHomeRow: Identifiable {
     public let athleteName: String
     public let plannedActivity: PlannedActivity
     public let isCompleted: Bool
+
+    /// Recurring cancel/materialization fix: identifies a
+    /// `PlannedActivity` that originated from a recurring definition —
+    /// e.g. one materialized by "Log Activity" on a recurring
+    /// occurrence but not yet logged (the exact state after the user
+    /// cancels), which must still present as recurring through any
+    /// fresh recomposition.
+    ///
+    /// Compares `externalSourceType` against `RecurringPlannedActivity`'s
+    /// own constant — deliberately NOT `externalSourceId != nil`.
+    /// Repository-wide inspection confirmed `externalSourceId`/
+    /// `externalSourceType` are a GENERIC external-provenance pair (the
+    /// `type` half exists precisely because more than one source kind is
+    /// anticipated); recurring materialization merely happens to be the
+    /// only producer today. Treating any non-nil `externalSourceId` as
+    /// "recurring" would silently mislabel every future external source.
+    ///
+    /// Read directly from the persisted `PlannedActivity` on every
+    /// access — never cached, so it cannot go stale across
+    /// recomposition.
+    public var isFromRecurring: Bool {
+        plannedActivity.externalSourceType == RecurringPlannedActivity.externalSourceType
+    }
 }
 
 /// Parent Home UX / Content Contract package: "Focus this week" — the
@@ -269,8 +292,19 @@ public final class FamilyHomeViewModel {
     /// are never hidden from
     /// each other.
     public var nowNextState: NowNextState {
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.hour, .minute], from: .now)
+        nowNextState(referenceDate: .now, calendar: .current)
+    }
+
+    /// Maintainability fix: the underlying logic, with an injectable
+    /// `referenceDate`/`calendar` — exists so tests can construct a
+    /// genuinely deterministic scenario (a fixed reference instant)
+    /// rather than depending on wall-clock `.now` in a way that could
+    /// theoretically cross a day boundary mid-test. `nowNextState`
+    /// above is the one public, unchanged API every existing caller
+    /// already uses — this defaults to the exact same `.now`/`.current`
+    /// it always used, so no existing behavior changes.
+    func nowNextState(referenceDate: Date, calendar: Calendar) -> NowNextState {
+        let components = calendar.dateComponents([.hour, .minute], from: referenceDate)
         let nowMinutes = (components.hour ?? 0) * 60 + (components.minute ?? 0)
 
         let activeToday = rows.filter { !$0.isCompletedOrLogged && $0.startLocalTimeSortKey != Int.max }
@@ -288,11 +322,11 @@ public final class FamilyHomeViewModel {
             return .next(upcomingToday.filter { $0.startLocalTimeSortKey == earliestKey })
         }
 
-        let upcomingTomorrow = tomorrowRows.filter { !$0.isCompletedOrLogged && $0.startLocalTimeSortKey != Int.max }
-        if let earliestKey = upcomingTomorrow.map(\.startLocalTimeSortKey).min() {
-            return .tomorrow(upcomingTomorrow.filter { $0.startLocalTimeSortKey == earliestKey })
-        }
-
+        // Fix: NEXT must never fall forward into tomorrow — Tomorrow
+        // already owns tomorrow's own preview (tomorrowSection), and
+        // showing the same activity here too duplicated it on screen.
+        // When nothing relevant remains today, the correct result is
+        // .empty, not a synthetic "next (tomorrow)" fallback.
         return .empty
     }
 }
@@ -307,6 +341,5 @@ public final class FamilyHomeViewModel {
 public enum NowNextState {
     case now([TodayActivityRow])
     case next([TodayActivityRow])
-    case tomorrow([TodayActivityRow])
     case empty
 }
