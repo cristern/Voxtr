@@ -97,13 +97,24 @@ public final class FamilyScheduleViewModel {
     }
 
     public func loadSchedule() {
+        loadSchedule(referenceDate: .now, calendar: .current)
+    }
+
+    /// Maintainability fix, same pattern as `FamilyHomeViewModel.nowNextState(referenceDate:calendar:)`:
+    /// the underlying logic, with an injectable `referenceDate` — exists
+    /// so tests can construct a genuinely deterministic scenario (e.g. a
+    /// fixed Sunday) rather than depending on wall-clock `.now`, whose
+    /// weekday varies by whenever the test happens to run. `loadSchedule()`
+    /// above is the one public, unchanged API every existing caller
+    /// already uses — this defaults to the exact same `.now`/`.current`
+    /// it always used, so no existing behavior changes.
+    func loadSchedule(referenceDate: Date, calendar: Calendar) {
         errorMessage = nil
-        let calendar = Calendar.current
-        guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: .now) else {
+        guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: referenceDate) else {
             dayGroups = []
             return
         }
-        let start = Self.localDate(from: .now, calendar: calendar)
+        let start = Self.localDate(from: referenceDate, calendar: calendar)
         let end = Self.localDate(from: endDate, calendar: calendar)
 
         var merged: [FamilyScheduleRow] = []

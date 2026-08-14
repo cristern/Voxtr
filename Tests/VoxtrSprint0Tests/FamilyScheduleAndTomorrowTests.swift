@@ -523,4 +523,112 @@ extension FamilyScheduleAndTomorrowTests {
             return false
         } == true)
     }
+
+    /// Highest-practical-layer regression for the actual TestFlight
+    /// report: proves `FamilyScheduleViewModel` itself — the real
+    /// screen's own data path, not an isolated helper — genuinely
+    /// crosses a Monday-Sunday week boundary. Unlike
+    /// `sundayReferenceSurfacesFollowingWeekActivities` above (which
+    /// only tests "3 days ahead," a window that DOESN'T cross a week
+    /// boundary at all unless "today" happens to already be late in
+    /// the week when the test runs — a non-deterministic proof of the
+    /// one thing this test needs to prove), this test injects a
+    /// deterministically-computed Sunday as "today" via the new
+    /// `loadSchedule(referenceDate:calendar:)` overload, so the
+    /// following-Monday activity is guaranteed to sit in the NEXT
+    /// Vǫxtr week regardless of which weekday this test actually runs
+    /// on.
+    @Test("FamilyScheduleViewModel itself crosses a Sunday->Monday week boundary — planned activity, recurring occurrence, no duplication, no materialization")
+    @MainActor
+    func viewModelCrossesSundayToMondayWeekBoundary() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        // Deterministically compute the NEXT Sunday from "now" (or
+        // today itself, if today already is Sunday) as the injected
+        // reference date — never a hardcoded calendar date that could
+        // go stale, never wall-clock "today" used directly.
+        let calendar = Calendar.current
+        let nowComponents = calendar.dateComponents([.year, .month, .day], from: .now)
+        let todayLocalDate = LocalDate(year: nowComponents.year ?? 1970, month: nowComponents.month ?? 1, day: nowComponents.day ?? 1)
+        let daysUntilSunday = (Weekday.sunday.rawValue - todayLocalDate.weekday.rawValue + 7) % 7
+        let sundayLocalDate = todayLocalDate.adding(days: daysUntilSunday)
+        var sundayComponents = DateComponents()
+        sundayComponents.year = sundayLocalDate.year; sundayComponents.month = sundayLocalDate.month; sundayComponents.day = sundayLocalDate.day
+        let sundayReferenceDate = calendar.date(from: sundayComponents) ?? .now
+        #expect(sundayLocalDate.weekday == .sunday)
+
+        // The following Monday — genuinely in the NEXT Vǫxtr week
+        // relative to sundayLocalDate, not the same one.
+        let followingMonday = sundayLocalDate.adding(days: 1)
+        #expect(followingMonday.startOfWeek != sundayLocalDate.startOfWeek)
+        // +8 days from the Sunday reference — must be excluded.
+        let eightDaysOut = sundayLocalDate.adding(days: 8)
+
+        let weekPlanForMonday = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: followingMonday.startOfWeek)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanForMonday.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Following Monday session", localDate: followingMonday, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        // A recurring definition landing on the same following Monday —
+        // proves recurring composition also crosses the boundary,
+        // read-only (never materialized merely by being displayed).
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: oliver.athleteId, title: "Swim Practice", activityType: .individualTraining,
+            weekdays: [followingMonday.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        // An activity 8 days out from the Sunday reference — must be
+        // excluded from the rolling window entirely.
+        let weekPlanForEighthDay = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: eightDaysOut.startOfWeek)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanForEighthDay.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Excluded eighth-day session", localDate: eightDaysOut, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [oliver],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        // The real screen's own entry point, injected with the fixed
+        // Sunday reference — the same method FamilyScheduleView's own
+        // .onAppear calls, not a bypass around it.
+        viewModel.loadSchedule(referenceDate: sundayReferenceDate, calendar: calendar)
+
+        // Criterion 4: crossing the boundary works — the materialized
+        // planned activity in the following week appears.
+        let mondayGroup = viewModel.dayGroups.first { $0.date == followingMonday }
+        let plannedRow = mondayGroup?.rows.first { row in
+            if case .planned(let familyHomeRow) = row { return familyHomeRow.plannedActivity.title == "Following Monday session" }
+            return false
+        }
+        #expect(plannedRow != nil)
+
+        // Criterion 5/6: the recurring occurrence for the SAME date
+        // also appears (read-only composition), and there is exactly
+        // one row per real identity on that day — no duplicate
+        // recurring/materialized pair, no title/date-only inference.
+        let recurringRow = mondayGroup?.rows.first { row in
+            if case .recurringSuggestion(_, _, _, let suggestion) = row { return suggestion.title == "Swim Practice" }
+            return false
+        }
+        #expect(recurringRow != nil)
+        #expect(mondayGroup?.rows.count == 2)
+
+        // Criterion 3: +8 days is excluded from the rolling window.
+        #expect(!viewModel.dayGroups.contains { $0.date == eightDaysOut })
+    }
 }
