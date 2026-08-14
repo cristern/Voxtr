@@ -759,4 +759,99 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         #expect(viewModel.recurringFormTitle == "")
         #expect(viewModel.recurringFormWeekdays == [.friday])
     }
+
+    // MARK: - Issue 2 (Parent Time Navigation package): switchToWeek coverage
+
+    @Test("switchToWeek actually uses the new week for subsequent planning operations")
+    @MainActor
+    func switchToWeekIsUsedForPlanningOperations() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        let nextWeekStart = Self.fixedWeekStart.adding(days: 7)
+        viewModel.switchToWeek(nextWeekStart)
+        viewModel.newActivityTitle = "Added after switch"
+        viewModel.addActivity()
+
+        // The activity landed in the NEW week's plan, not the original.
+        let newWeekPlan = try repository.fetchWeekPlan(forAthlete: athleteId, weekStart: nextWeekStart)
+        let originalWeekPlan = try repository.fetchWeekPlan(forAthlete: athleteId, weekStart: Self.fixedWeekStart)
+        #expect(newWeekPlan != nil)
+        let newWeekActivities = try repository.fetchPlannedActivities(forWeekPlan: newWeekPlan!.weekPlanId)
+        let originalWeekActivities = try repository.fetchPlannedActivities(forWeekPlan: originalWeekPlan!.weekPlanId)
+        #expect(newWeekActivities.contains { $0.title == "Added after switch" })
+        #expect(!originalWeekActivities.contains { $0.title == "Added after switch" })
+    }
+
+    @Test("switchToWeek selects/creates the correct WeekPlan for the destination week")
+    @MainActor
+    func switchToWeekSelectsCorrectWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let previousWeekStart = Self.fixedWeekStart.adding(days: -7)
+        let existingPreviousWeekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: previousWeekStart)
+
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.switchToWeek(previousWeekStart)
+
+        #expect(viewModel.weekPlan?.weekPlanId == existingPreviousWeekPlan.weekPlanId)
+        #expect(viewModel.weekStart == previousWeekStart)
+    }
+
+    @Test("switchToWeek does not leave the previous week's activities visible under the new week")
+    @MainActor
+    func switchToWeekClearsStaleActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Week one activity"
+        viewModel.addActivity()
+        #expect(viewModel.activities.contains { $0.title == "Week one activity" })
+
+        let emptyNextWeekStart = Self.fixedWeekStart.adding(days: 7)
+        viewModel.switchToWeek(emptyNextWeekStart)
+
+        // The new (empty) week must never show the previous week's
+        // activity — no stale carry-over.
+        #expect(!viewModel.activities.contains { $0.title == "Week one activity" })
+    }
+
+    @Test("switchToWeek preserves canonical Monday-Sunday week identity for the destination week")
+    @MainActor
+    func switchToWeekPreservesMondaySundaySemantics() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: AthleteId(), committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        let nextWeekStart = Self.fixedWeekStart.adding(days: 7)
+        viewModel.switchToWeek(nextWeekStart)
+
+        #expect(viewModel.weekStart.weekday == .monday)
+        #expect(viewModel.weekStart == nextWeekStart.startOfWeek)
+    }
 }

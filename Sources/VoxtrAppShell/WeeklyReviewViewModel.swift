@@ -55,7 +55,7 @@ public final class WeeklyReviewViewModel {
     public private(set) var coachingPresentationState: CoachingPresentationLoadState = .loading
 
     public let athleteId: AthleteId
-    public let weekStart: LocalDate
+    public private(set) var weekStart: LocalDate
 
     private let coordinationService: any WeeklyReviewProviding
     /// Sprint 9: the one new dependency that sprint added. Sprint 11:
@@ -76,6 +76,24 @@ public final class WeeklyReviewViewModel {
         self.coachingPresentationProvider = coachingPresentationProvider
         self.athleteId = athleteId
         self.weekStart = weekStart
+    }
+
+    /// Area 5 (Parent Time Navigation package): switches to a
+    /// different Monday–Sunday week and reloads — the same `load()`
+    /// this type already uses. Never allows a future week: Reflection
+    /// belongs to a week that has happened, not one still ahead.
+    /// `referenceDate` is injectable (defaults to `.now`, so no
+    /// existing caller's behavior changes) so tests can construct a
+    /// genuinely deterministic "future" scenario rather than depending
+    /// on wall-clock `.now` — the same pattern already established by
+    /// `FamilyHomeViewModel.nowNextState(referenceDate:calendar:)` and
+    /// `FamilyScheduleViewModel.loadSchedule(referenceDate:calendar:)`.
+    public func switchToWeek(_ newWeekStart: LocalDate, referenceDate: Date = .now, calendar: Calendar = .current) {
+        let currentWeekStart = TrainingPlanningCoordinationService.weekStart(referenceDate: referenceDate, calendar: calendar)
+        guard newWeekStart <= currentWeekStart else { return }
+        weekStart = newWeekStart
+        load()
+        loadCoachingPresentation()
     }
 
     /// Loads (or reloads) the review for this screen's fixed

@@ -38,6 +38,14 @@ public struct WeeklyReflectionFormView: View {
 
     public var body: some View {
         Form {
+            Section {
+                WeekIdentityView(
+                    weekStart: viewModel.weekStart,
+                    referenceWeekStart: WeeklyPlanningViewModel.currentWeekStart()
+                )
+            }
+            .accessibilityIdentifier("weeklyReflectionForm.weekIdentity")
+
             if let errorMessage = viewModel.errorMessage {
                 Section {
                     Text(errorMessage)

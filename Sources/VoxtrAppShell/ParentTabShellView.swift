@@ -413,6 +413,32 @@ private struct ParentTrainingTabView: View {
                                 .accessibilityIdentifier("parentTraining.weeklyReviewLink.\(athlete.athleteId.rawValue.uuidString)")
                             }
                         }
+                        Section("Week by Week") {
+                            ForEach(activeAthletes, id: \.athleteId) { athlete in
+                                NavigationLink(athlete.givenName) {
+                                    WeeklyHistoryListView(
+                                        viewModel: WeeklyHistoryListViewModel(
+                                            coordinationService: weeklyReviewCoordinationService,
+                                            athleteId: athlete.athleteId,
+                                            currentWeekStart: WeeklyPlanningViewModel.currentWeekStart()
+                                        ),
+                                        athleteDisplayName: athlete.givenName,
+                                        currentWeekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                                        makeDetailView: { selectedWeekStart in
+                                            WeeklyHistoryView(
+                                                viewModel: WeeklyHistoryViewModel(
+                                                    coordinationService: weeklyReviewCoordinationService,
+                                                    athleteId: athlete.athleteId,
+                                                    weekStart: selectedWeekStart
+                                                ),
+                                                athleteDisplayName: athlete.givenName
+                                            )
+                                        }
+                                    )
+                                }
+                                .accessibilityIdentifier("parentTraining.weeklyHistoryLink.\(athlete.athleteId.rawValue.uuidString)")
+                            }
+                        }
                     }
                 }
             }

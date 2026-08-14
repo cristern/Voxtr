@@ -59,7 +59,7 @@ public final class WeeklyPlanningViewModel {
     private let service: PlanningService
     public let athleteId: AthleteId
     private let committedByActorId: ActorId
-    private let weekStart: LocalDate
+    public private(set) var weekStart: LocalDate
 
     public init(
         service: PlanningService,
@@ -71,6 +71,18 @@ public final class WeeklyPlanningViewModel {
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
         self.weekStart = weekStart ?? Self.currentWeekStart()
+    }
+
+    /// Area 4 (Parent Time Navigation package): switches to a
+    /// different Monday–Sunday week and reloads that week's plan —
+    /// the same `loadOrCreateWeekPlan()` this type already uses for
+    /// its initial load, not a second loading path. The canonical
+    /// Monday–Sunday week model itself is unchanged; this only lets
+    /// the same, already-established mechanism be re-entered for a
+    /// different week.
+    public func switchToWeek(_ newWeekStart: LocalDate) {
+        weekStart = newWeekStart
+        loadOrCreateWeekPlan()
     }
 
     /// Fix: this used to duplicate `TrainingPlanningCoordinationService.weekStart`'s
@@ -94,6 +106,15 @@ public final class WeeklyPlanningViewModel {
     /// suggestions. Call once when the view appears.
     public func loadOrCreateWeekPlan() {
         errorMessage = nil
+        // Issue 3 fix: clear dependent state BEFORE attempting the new
+        // load, consistent with the same principle applied to
+        // `WeeklyHistoryViewModel.load()` — if getOrCreateWeekPlan
+        // succeeds but a later step throws, the previous week's
+        // activities/suggestions must not remain displayed under the
+        // new week's heading.
+        weekPlan = nil
+        activities = []
+        recurringSuggestions = []
         do {
             let plan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
             weekPlan = plan

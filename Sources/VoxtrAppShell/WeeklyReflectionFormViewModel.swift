@@ -33,7 +33,7 @@ public final class WeeklyReflectionFormViewModel {
 
     private let service: WeeklyReflectionService
     private let athleteId: AthleteId
-    private let weekStart: LocalDate
+    public let weekStart: LocalDate
     private let authorId: ActorId
 
     /// Called after a successful save (create or update) — the Weekly

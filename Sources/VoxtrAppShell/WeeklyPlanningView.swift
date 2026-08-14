@@ -43,6 +43,31 @@ public struct WeeklyPlanningView: View {
         Form {
             Section {
                 HStack {
+                    Text(athleteDisplayName)
+                        .font(.headline)
+                    Spacer()
+                    Button {
+                        viewModel.switchToWeek(viewModel.weekStart.adding(days: -7))
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .accessibilityIdentifier("planning.previousWeekButton")
+                    WeekIdentityView(
+                        weekStart: viewModel.weekStart,
+                        referenceWeekStart: WeeklyPlanningViewModel.currentWeekStart()
+                    )
+                    Button {
+                        viewModel.switchToWeek(viewModel.weekStart.adding(days: 7))
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .accessibilityIdentifier("planning.nextWeekButton")
+                }
+                .accessibilityIdentifier("planning.weekIdentityBar")
+            }
+
+            Section {
+                HStack {
                     Text(viewModel.statusLabel)
                         .font(.headline)
                         .foregroundStyle(viewModel.isCommitted ? .green : .orange)

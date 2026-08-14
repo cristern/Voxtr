@@ -88,10 +88,25 @@ public struct WeeklyReviewView: View {
         Section {
             Text(athleteDisplayName)
                 .accessibilityIdentifier("weeklyReview.athleteName")
-            Text(viewModel.weekStart.isoString)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("weeklyReview.weekStart")
+            HStack {
+                Button {
+                    viewModel.switchToWeek(viewModel.weekStart.adding(days: -7))
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .accessibilityIdentifier("weeklyReview.previousWeekButton")
+                WeekIdentityView(
+                    weekStart: viewModel.weekStart,
+                    referenceWeekStart: WeeklyPlanningViewModel.currentWeekStart()
+                )
+                Button {
+                    viewModel.switchToWeek(viewModel.weekStart.adding(days: 7))
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .accessibilityIdentifier("weeklyReview.nextWeekButton")
+            }
+            .accessibilityIdentifier("weeklyReview.weekStart")
         }
     }
 

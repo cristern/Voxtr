@@ -209,4 +209,200 @@ struct WeeklyReflectionServiceTests {
         }
         #expect(try container.mainContext.fetch(FetchDescriptor<WeeklyReflection>()).count == 0)
     }
+
+    // MARK: - Issue 2 (Parent Time Navigation package): Reflection backfill / switchToWeek coverage
+
+    /// A `CoachingPresentationProviding` that always succeeds with an
+    /// empty presentation — `WeeklyReviewViewModel`'s coaching pipeline
+    /// is not what these tests exercise, so it's kept minimal, not
+    /// re-derived per test.
+    private struct EmptyCoachingPresentationProvider: CoachingPresentationProviding {
+        func coachingPresentation(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> CoachingPresentation {
+            CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+        }
+    }
+
+    @Test("A missing previous-week reflection can be created for that selected historical week, and retains that week's identity")
+    @MainActor
+    func backfillCreatesReflectionForSelectedHistoricalWeek() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let reflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let athleteId = AthleteId()
+        let currentWeekStart = LocalDate(year: 2026, month: 1, day: 12)
+        let previousWeekStart = currentWeekStart.adding(days: -7)
+
+        let viewModel = WeeklyReviewViewModel(
+            coordinationService: coordinator,
+            coachingPresentationProvider: EmptyCoachingPresentationProvider(),
+            athleteId: athleteId,
+            weekStart: currentWeekStart
+        )
+        viewModel.load()
+
+        // Criterion 1: previous week can be selected.
+        viewModel.switchToWeek(previousWeekStart, calendar: Calendar(identifier: .gregorian))
+        #expect(viewModel.weekStart == previousWeekStart)
+
+        // Criterion 2/3: the missing previous-week reflection is
+        // created for THAT selected week, and retains its identity.
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: viewModel.weekStart, authorId: ActorId(),
+            nextWeekConsideration: "Focus on recovery", visibility: .sharedWithGuardians
+        )
+        let persisted = try weeklyReflectionRepository.fetchWeeklyReflection(forAthlete: athleteId, weekStart: previousWeekStart)
+        #expect(persisted?.weekStart == previousWeekStart)
+        #expect(persisted?.nextWeekConsideration == "Focus on recovery")
+    }
+
+    @Test("A future week cannot be selected as the active Reflection week")
+    @MainActor
+    func futureWeekCannotBeSelected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let athleteId = AthleteId()
+        let currentWeekStart = LocalDate(year: 2026, month: 1, day: 12)
+        let futureWeekStart = currentWeekStart.adding(days: 7)
+
+        let viewModel = WeeklyReviewViewModel(
+            coordinationService: coordinator,
+            coachingPresentationProvider: EmptyCoachingPresentationProvider(),
+            athleteId: athleteId,
+            weekStart: currentWeekStart
+        )
+        viewModel.load()
+
+        // Injects a fixed reference instant (a date within
+        // currentWeekStart's own week) directly into switchToWeek —
+        // genuinely deterministic, never dependent on the actual
+        // wall-clock date this test happens to run on.
+        var referenceComponents = DateComponents()
+        referenceComponents.year = currentWeekStart.year; referenceComponents.month = currentWeekStart.month; referenceComponents.day = currentWeekStart.day
+        let referenceInstant = Calendar(identifier: .gregorian).date(from: referenceComponents) ?? .now
+        viewModel.switchToWeek(futureWeekStart, referenceDate: referenceInstant, calendar: Calendar(identifier: .gregorian))
+
+        // Rejected — weekStart remains the current week, never the
+        // future one.
+        #expect(viewModel.weekStart == currentWeekStart)
+    }
+
+    @Test("Switching Reflection weeks does not leave stale data from the previous week visible under the new week")
+    @MainActor
+    func switchingWeeksClearsStaleReflectionData() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let reflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let athleteId = AthleteId()
+        let currentWeekStart = LocalDate(year: 2026, month: 1, day: 12)
+        let previousWeekStart = currentWeekStart.adding(days: -7)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: previousWeekStart, authorId: ActorId(),
+            overallSatisfaction: 5, visibility: .sharedWithGuardians
+        )
+        // Current week has NO reflection at all.
+
+        let viewModel = WeeklyReviewViewModel(
+            coordinationService: coordinator,
+            coachingPresentationProvider: EmptyCoachingPresentationProvider(),
+            athleteId: athleteId,
+            weekStart: previousWeekStart
+        )
+        viewModel.load()
+        guard case .loaded(let previousResult) = viewModel.loadState else {
+            Issue.record("Expected .loaded"); return
+        }
+        #expect(previousResult.weeklyReflection?.overallSatisfaction == 5)
+
+        viewModel.switchToWeek(currentWeekStart, calendar: Calendar(identifier: .gregorian))
+
+        // The new week's own (nil) reflection must be reflected — never
+        // the previous week's satisfaction score carried over stale.
+        guard case .loaded(let currentResult) = viewModel.loadState else {
+            Issue.record("Expected .loaded after switch"); return
+        }
+        #expect(currentResult.weeklyReflection == nil)
+    }
+
+    @Test("Privacy behavior is unaffected by week switching — a privateToAthlete reflection stays private for any selected week")
+    @MainActor
+    func privacyIntactAcrossWeekSwitching() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let reflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let athleteId = AthleteId()
+        let currentWeekStart = LocalDate(year: 2026, month: 1, day: 12)
+        let previousWeekStart = currentWeekStart.adding(days: -7)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: previousWeekStart, authorId: ActorId(),
+            nextWeekConsideration: "Private note", visibility: .privateToAthlete
+        )
+
+        let viewModel = WeeklyReviewViewModel(
+            coordinationService: coordinator,
+            coachingPresentationProvider: EmptyCoachingPresentationProvider(),
+            athleteId: athleteId,
+            weekStart: currentWeekStart
+        )
+        viewModel.load()
+        viewModel.switchToWeek(previousWeekStart, calendar: Calendar(identifier: .gregorian))
+
+        // The underlying WeeklyReviewResult still carries the
+        // reflection entity itself (WeeklyReviewCoordinationService
+        // assembles canonical data, unfiltered) — visibility
+        // enforcement for Home's Focus surface is a separate,
+        // existing, unchanged gate (FamilyHomeViewModel), not
+        // something this switch touches or bypasses.
+        guard case .loaded(let result) = viewModel.loadState else {
+            Issue.record("Expected .loaded"); return
+        }
+        #expect(result.weeklyReflection?.visibility == .privateToAthlete)
+    }
 }

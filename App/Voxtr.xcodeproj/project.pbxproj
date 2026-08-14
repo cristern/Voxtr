@@ -37,6 +37,8 @@
 		F90E3D996E3DA08602D1A635 /* Sprint1CoreFlowCompletionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C1F549CFA2B4E071C47A532 /* Sprint1CoreFlowCompletionTests.swift */; };
 		95E64240E72E743030B65BED /* Sprint1CloseoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 500151AD279B133C9C8F73E9 /* Sprint1CloseoutTests.swift */; };
 		FE5A63CE6D6889274922AA5E /* Sprint111Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4DF0891EA536A4F94E537DF /* Sprint111Tests.swift */; };
+		D7FAE72840AE39E997346F04 /* WeeklyHistoryViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20EF56F7C7A4F1D5D0CD855E /* WeeklyHistoryViewModelTests.swift */; };
+		F0C2C34D0C0B52BABF1A6AA0 /* WeekIdentityFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 519FF9F65574D319CC275681 /* WeekIdentityFormatterTests.swift */; };
 		01D3F5CBC983114CE173F33F /* Sprint12BTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEF2D9D1C344F050274A752 /* Sprint12BTests.swift */; };
 		EC021149199D95AC7148F128 /* Sprint12ATests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86070052464467E9B3E67BE0 /* Sprint12ATests.swift */; };
 		33E151E46D4CDF6FAA6E1D77 /* ActivityCompletionReviewFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F06721A185B37C86D1B34465 /* ActivityCompletionReviewFlowTests.swift */; };
@@ -107,6 +109,8 @@
 		5C1F549CFA2B4E071C47A532 /* Sprint1CoreFlowCompletionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint1CoreFlowCompletionTests.swift; sourceTree = "<group>"; };
 		500151AD279B133C9C8F73E9 /* Sprint1CloseoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint1CloseoutTests.swift; sourceTree = "<group>"; };
 		D4DF0891EA536A4F94E537DF /* Sprint111Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint111Tests.swift; sourceTree = "<group>"; };
+		20EF56F7C7A4F1D5D0CD855E /* WeeklyHistoryViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeeklyHistoryViewModelTests.swift; sourceTree = "<group>"; };
+		519FF9F65574D319CC275681 /* WeekIdentityFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekIdentityFormatterTests.swift; sourceTree = "<group>"; };
 		8DEF2D9D1C344F050274A752 /* Sprint12BTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint12BTests.swift; sourceTree = "<group>"; };
 		86070052464467E9B3E67BE0 /* Sprint12ATests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Sprint12ATests.swift; sourceTree = "<group>"; };
 		F06721A185B37C86D1B34465 /* ActivityCompletionReviewFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityCompletionReviewFlowTests.swift; sourceTree = "<group>"; };
@@ -236,6 +240,8 @@
 				5C1F549CFA2B4E071C47A532 /* Sprint1CoreFlowCompletionTests.swift */,
 				500151AD279B133C9C8F73E9 /* Sprint1CloseoutTests.swift */,
 				D4DF0891EA536A4F94E537DF /* Sprint111Tests.swift */,
+				20EF56F7C7A4F1D5D0CD855E /* WeeklyHistoryViewModelTests.swift */,
+				519FF9F65574D319CC275681 /* WeekIdentityFormatterTests.swift */,
 				8DEF2D9D1C344F050274A752 /* Sprint12BTests.swift */,
 				86070052464467E9B3E67BE0 /* Sprint12ATests.swift */,
 				F06721A185B37C86D1B34465 /* ActivityCompletionReviewFlowTests.swift */,
@@ -455,6 +461,8 @@
 				F90E3D996E3DA08602D1A635 /* Sprint1CoreFlowCompletionTests.swift in Sources */,
 				95E64240E72E743030B65BED /* Sprint1CloseoutTests.swift in Sources */,
 				FE5A63CE6D6889274922AA5E /* Sprint111Tests.swift in Sources */,
+				D7FAE72840AE39E997346F04 /* WeeklyHistoryViewModelTests.swift in Sources */,
+				F0C2C34D0C0B52BABF1A6AA0 /* WeekIdentityFormatterTests.swift in Sources */,
 				01D3F5CBC983114CE173F33F /* Sprint12BTests.swift in Sources */,
 				EC021149199D95AC7148F128 /* Sprint12ATests.swift in Sources */,
 				33E151E46D4CDF6FAA6E1D77 /* ActivityCompletionReviewFlowTests.swift in Sources */,
