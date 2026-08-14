@@ -108,15 +108,15 @@ public struct RecurringOccurrencePreviewView: View {
                 athleteDisplayName: athleteDisplayName
             )
         }
-        .navigationDestination(item: $materializedActivity) { item in
-            ActivityDetailViewLoader(
-                plannedActivity: item.plannedActivity,
-                isCompleted: false,
-                athleteId: suggestion.athleteId,
-                athleteDisplayName: athleteDisplayName,
-                actorId: actorId,
-                planningService: planningService,
-                trainingService: trainingService
+        .sheet(item: $materializedActivity) { item in
+            LogActivityView(
+                viewModel: LogActivityViewModel(
+                    plannedActivity: item.plannedActivity,
+                    athleteId: suggestion.athleteId,
+                    athleteDisplayName: athleteDisplayName,
+                    trainingService: trainingService,
+                    onLogged: { dismiss() }
+                )
             )
         }
         .onAppear {
@@ -175,18 +175,33 @@ public struct RecurringOccurrencePreviewView: View {
         dismiss()
     }
 
-    /// Sprint 1.2B, Priority 1: "Log Activity" is the one action that
-    /// touches persistence on this otherwise read-only screen —
-    /// viewing never materializes anything (see this type's own doc
-    /// comment above); only this explicit action does, and it does so
-    /// idempotently via `PlanningService.materializeOrFetchExisting`
-    /// (reused, not reimplemented). Repeated taps — even after the
-    /// occurrence was already materialized by a prior tap, or by a
-    /// different screen entirely — resolve to the SAME `PlannedActivity`,
-    /// never a duplicate. `.navigationDestination(item:)` (a single
-    /// piece of optional state) drives presentation, not a separate
-    /// Bool alongside it — the same fix already applied to this
-    /// screen's own edit-sheet presentation above.
+    /// Sprint 1.2B, Priority 1 (and later, double-hop fix): "Log
+    /// Activity" is the one action that touches persistence on this
+    /// otherwise read-only screen — viewing never materializes
+    /// anything (see this type's own doc comment above); only this
+    /// explicit action does, and it does so idempotently via
+    /// `PlanningService.materializeOrFetchExisting` (reused, not
+    /// reimplemented). Repeated taps — even after the occurrence was
+    /// already materialized by a prior tap, or by a different screen
+    /// entirely — resolve to the SAME `PlannedActivity`, never a
+    /// duplicate.
+    ///
+    /// Presents `LogActivityView` DIRECTLY as a sheet (not
+    /// `ActivityDetailViewLoader` via `.navigationDestination`, the
+    /// prior implementation) — fixes the confirmed TestFlight double-hop
+    /// bug, where `ActivityDetailView` had its own separate "Log
+    /// Activity" button, forcing a second tap before the actual logging
+    /// form ever appeared. Materialization itself still happens here,
+    /// exactly as before — only the redundant Activity Detail hop after
+    /// it is removed. `.sheet(item:)` (a single piece of optional
+    /// state) drives presentation, not a separate Bool alongside it —
+    /// the same fix already applied to this screen's own edit-sheet
+    /// presentation above. `onLogged` dismisses THIS screen once
+    /// logging actually succeeds — the same "unwind to the originating
+    /// surface" principle `checkForStaleness()` already establishes,
+    /// reused here directly rather than waiting for a stale re-check on
+    /// next appearance. Cancelling the sheet (never calls `onLogged`)
+    /// leaves this screen exactly as it was — no lifecycle change.
     private func materializeAndOpen() {
         errorMessage = nil
         do {
@@ -236,7 +251,7 @@ private struct RecurringEditSheetItem: Identifiable {
 }
 
 /// Sprint 1.2B, Priority 1: wraps the real, materialized
-/// `PlannedActivity` for `.navigationDestination(item:)` presentation —
+/// `PlannedActivity` for `.sheet(item:)` presentation —
 /// one piece of state driving both presence and content, matching this
 /// file's own established fix for the exact same class of race.
 private struct MaterializedActivityItem: Identifiable, Hashable {

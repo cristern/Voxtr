@@ -76,8 +76,8 @@ public struct WeeklyReflectionFormView: View {
                 TextField("What did you learn", text: $viewModel.learning, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.learningField")
             }
-            Section("Next week") {
-                TextField("Anything to consider for next week", text: $viewModel.nextWeekConsideration, axis: .vertical)
+            Section("Focus next week") {
+                TextField("What would you like to carry forward into next week?", text: $viewModel.nextWeekConsideration, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.nextWeekField")
             }
         }

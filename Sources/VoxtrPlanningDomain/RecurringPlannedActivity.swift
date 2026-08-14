@@ -137,7 +137,17 @@ public extension RecurringPlannedActivity {
     /// created from a recurring occurrence — reuses the field
     /// `PlannedActivity` already has for exactly this kind of
     /// provenance, rather than adding a new persisted identity field.
-    static let externalSourceType = "recurringPlannedActivity"
+    ///
+    /// `public` so presentation code can identify recurring-originated
+    /// activities by comparing against THIS constant rather than
+    /// duplicating the raw string, or (incorrectly) treating any
+    /// non-nil `externalSourceId` as recurring: `externalSourceId`/
+    /// `externalSourceType` are a deliberately GENERIC provenance pair
+    /// — the `type` half exists precisely because more than one kind of
+    /// external source is anticipated. Recurring materialization is
+    /// simply the only producer today; that must not be assumed
+    /// permanent.
+    public static let externalSourceType = "recurringPlannedActivity"
 
     /// A deterministic identity for one occurrence of a recurring
     /// activity, derived from the three facts the work package

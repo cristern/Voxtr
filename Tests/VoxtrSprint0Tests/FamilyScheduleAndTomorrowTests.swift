@@ -330,8 +330,10 @@ extension FamilyScheduleAndTomorrowTests {
         // A recurring activity effective well into the future — no
         // WeekPlan has ever been created for any of the weeks it
         // recurs into; deliberately NOT calling getOrCreateWeekPlan at
-        // all, matching "a week nobody has visited yet."
-        guard let farFuture = Calendar.current.date(byAdding: .day, value: 10, to: .now) else {
+        // all, matching "a week nobody has visited yet." 5 days ahead —
+        // inside the approved "today through 7 days ahead" window, far
+        // enough to confirm the window extends beyond tomorrow alone.
+        guard let farFuture = Calendar.current.date(byAdding: .day, value: 5, to: .now) else {
             Issue.record("Could not compute reference date"); return
         }
         let c = Calendar.current.dateComponents([.year, .month, .day], from: farFuture)
@@ -414,5 +416,111 @@ extension FamilyScheduleAndTomorrowTests {
         } else {
             Issue.record("Expected the materialized occurrence to appear as a .planned row, not a suggestion")
         }
+    }
+
+    // MARK: - Rolling window: today through +7 days
+
+    @Test("Family Schedule's rolling window includes today and excludes activities beyond +7 days")
+    @MainActor
+    func rollingWindowIncludesTodayThroughSevenDaysAndExcludesEighth() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let today = TrainingPlanningCoordinationService.today()
+        let plusSeven = today.adding(days: 7)
+        let plusEight = today.adding(days: 8)
+        let weekStartToday = TrainingPlanningCoordinationService.weekStart()
+        let weekStartPlusSeven = TrainingPlanningCoordinationService.weekStart(referenceDate: {
+            var comps = DateComponents()
+            comps.year = plusSeven.year; comps.month = plusSeven.month; comps.day = plusSeven.day
+            return Calendar.current.date(from: comps) ?? .now
+        }())
+        let weekStartPlusEight = TrainingPlanningCoordinationService.weekStart(referenceDate: {
+            var comps = DateComponents()
+            comps.year = plusEight.year; comps.month = plusEight.month; comps.day = plusEight.day
+            return Calendar.current.date(from: comps) ?? .now
+        }())
+
+        let weekPlanToday = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStartToday)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanToday.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Today's session", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let weekPlanPlusSeven = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStartPlusSeven)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanPlusSeven.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Plus-seven session", localDate: plusSeven, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let weekPlanPlusEight = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStartPlusEight)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanPlusEight.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Plus-eight session", localDate: plusEight, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [oliver],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        #expect(viewModel.dayGroups.contains { $0.date == today })
+        #expect(viewModel.dayGroups.contains { $0.date == plusSeven })
+        #expect(!viewModel.dayGroups.contains { $0.date == plusEight })
+    }
+
+    @Test("A Sunday reference still surfaces activities in the following week, not just the current calendar week")
+    @MainActor
+    func sundayReferenceSurfacesFollowingWeekActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        // 3 days ahead of today is always within the rolling window
+        // regardless of which weekday "today" happens to be when this
+        // test runs — including when today is itself a Sunday, this
+        // date falls into the FOLLOWING Vǫxtr week (Monday-Sunday),
+        // proving the rolling window is not bounded by the current
+        // calendar week.
+        let today = TrainingPlanningCoordinationService.today()
+        let threeDaysAhead = today.adding(days: 3)
+        let weekStartForTarget = threeDaysAhead.startOfWeek
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStartForTarget)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Following-week session", localDate: threeDaysAhead, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [oliver],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        let matchingGroup = viewModel.dayGroups.first { $0.date == threeDaysAhead }
+        #expect(matchingGroup?.rows.contains { row in
+            if case .planned(let familyHomeRow) = row { return familyHomeRow.plannedActivity.title == "Following-week session" }
+            return false
+        } == true)
     }
 }

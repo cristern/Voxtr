@@ -15,7 +15,6 @@ enum FamilyHomeDestination: Hashable {
     case athlete(AthleteId)
     case activity(rowId: String)
     case recurringOccurrence(id: String)
-    case manageAthletes
     case reflection(AthleteId)
     case familySchedule
 }
@@ -113,12 +112,6 @@ public struct FamilyHomeContentView: View {
             // must read as such at a glance, distinct from Athlete
             // Overview's "<Athlete Name> Home" title.
             .navigationTitle("Family Home")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    NavigationLink("Manage Athletes", value: FamilyHomeDestination.manageAthletes)
-                        .accessibilityIdentifier("familyHome.manageAthletesButton")
-                }
-            }
             .onAppear {
                 viewModel.refresh()
             }
@@ -150,11 +143,6 @@ public struct FamilyHomeContentView: View {
                             actorId: ActorId(rawValue: family.participant.id)
                         )
                     }
-                case .manageAthletes:
-                    AthleteFamilyManagementView(
-                        viewModel: athleteManagementViewModel,
-                        athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) }
-                    )
                 case .reflection(let athleteId):
                     ReflectionFormViewLoader(
                         athleteId: athleteId,
@@ -213,11 +201,6 @@ public struct FamilyHomeContentView: View {
                 ForEach(items) { todayActivityRow($0) }
             }
             .accessibilityIdentifier("familyHome.nowNext.next")
-        case .tomorrow(let items):
-            Section("Next (tomorrow)") {
-                ForEach(items) { todayActivityRow($0) }
-            }
-            .accessibilityIdentifier("familyHome.nowNext.tomorrow")
         case .empty:
             // Calm by Default: no placeholder text, no "nothing
             // scheduled" filler — genuine absence of relevant activity
@@ -307,10 +290,17 @@ public struct FamilyHomeContentView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
-                    if row.isCompleted {
-                        Text("Completed")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing) {
+                        if row.isCompleted {
+                            Text("Completed")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if row.isFromRecurring {
+                            Text("Recurring")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }

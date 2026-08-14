@@ -254,9 +254,16 @@ public struct HomeDashboardView: View {
                         }
                     }
                     Spacer()
-                    Text(familyHomeRow.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .trailing) {
+                        Text(familyHomeRow.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if familyHomeRow.isFromRecurring {
+                            Text("Recurring")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .accessibilityIdentifier("homeDashboard.todaysTraining.row.\(familyHomeRow.id)")

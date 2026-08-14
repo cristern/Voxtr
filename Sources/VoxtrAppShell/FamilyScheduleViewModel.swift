@@ -77,10 +77,14 @@ public final class FamilyScheduleViewModel {
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let planningService: PlanningService
 
-    /// How many upcoming days this first version shows — deliberately
-    /// small and fixed rather than open-ended paging, matching "this is
-    /// NOT intended to become a generic calendar replacement."
-    private static let upcomingDayCount = 14
+    /// Fix: previously `tomorrow` through `+14 days` — omitted today
+    /// entirely, and went twice as far ahead as the approved contract.
+    /// This is a family logistics surface, not Weekly Planning (which
+    /// intentionally keeps its own, separate Monday-Sunday model) —
+    /// today through 7 calendar days ahead, so e.g. a Sunday view still
+    /// shows the coming week rather than only the current calendar
+    /// week's final day.
+    private static let upcomingDayCount = 7
 
     public init(
         activeAthletes: [AthleteProfile],
@@ -95,12 +99,11 @@ public final class FamilyScheduleViewModel {
     public func loadSchedule() {
         errorMessage = nil
         let calendar = Calendar.current
-        guard let startDate = calendar.date(byAdding: .day, value: 1, to: .now),
-              let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: .now) else {
+        guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: .now) else {
             dayGroups = []
             return
         }
-        let start = Self.localDate(from: startDate, calendar: calendar)
+        let start = Self.localDate(from: .now, calendar: calendar)
         let end = Self.localDate(from: endDate, calendar: calendar)
 
         var merged: [FamilyScheduleRow] = []
