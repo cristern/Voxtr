@@ -4,6 +4,8 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAppShell
+import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
