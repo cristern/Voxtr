@@ -147,10 +147,31 @@ struct Sprint12BTests {
 
     /// Item 6: Family Schedule's own date-range derivation
     /// (`deriveSuggestions(forAthlete:from:through:)`) receives every
-    /// occurrence from a multi-weekday definition, not just some —
-    /// confirms it consumes the same, single canonical derivation this
-    /// package updated, not a second implementation.
-    @Test("Family Schedule receives all occurrences from a multi-weekday definition")
+    /// occurrence from a multi-weekday definition that falls inside the
+    /// approved rolling window, not just some — confirms it consumes the
+    /// same, single canonical derivation this package updated, not a
+    /// second implementation.
+    ///
+    /// Fix: the previous version of this test computed its recurring
+    /// definition's effective range from `.now + 3 days`, then asserted
+    /// a hardcoded count of 5. Family Schedule's own window is the
+    /// approved `today...today+7` rolling range (`FamilyScheduleViewModel.upcomingDayCount`,
+    /// inclusive both ends) — not the Monday-Sunday Weekly Planning
+    /// week — and `.now + 3 days` through `.now + 9 days` only
+    /// coincidentally lined up with that window's 5 weekday slots when
+    /// "today" happened to be a Friday when CI ran. On any other
+    /// weekday, part of that range falls outside `today...today+7` by
+    /// design, so fewer than 5 of the Mon-Fri occurrences land inside
+    /// the approved window — that's what produced the flaky 4 vs 5
+    /// result, not a production defect. Rewritten with an explicit,
+    /// deterministic reference date (`loadSchedule(referenceDate:calendar:)`,
+    /// same pattern as `FamilyScheduleAndTomorrowTests`) and a range
+    /// that spans exactly one day past the window's boundary, so the
+    /// expected occurrence set is derived directly from the explicit
+    /// dates rather than asserted as a magic number, and the boundary
+    /// itself (included) versus the day just past it (excluded) is
+    /// checked explicitly.
+    @Test("Family Schedule receives all occurrences from a multi-weekday definition inside the approved today-through-+7 window, and excludes the one just past it")
     @MainActor
     func familyScheduleReceivesAllMultiWeekdayOccurrences() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -166,18 +187,32 @@ struct Sprint12BTests {
             birthDate: LocalDate(year: 2012, month: 1, day: 1),
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
         )
-        guard let inThreeDays = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+
+        // Deterministic "today": 2026-01-05, a known Monday (same fixed
+        // date already used elsewhere in this suite, e.g.
+        // WeeklyReflectionServiceTests). Never dependent on `.now` or
+        // the weekday CI happens to run on.
+        var referenceComponents = DateComponents()
+        referenceComponents.year = 2026; referenceComponents.month = 1; referenceComponents.day = 5
+        let calendar = Calendar(identifier: .gregorian)
+        guard let referenceDate = calendar.date(from: referenceComponents) else {
             Issue.record("Could not compute reference date"); return
         }
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: inThreeDays)
-        let startDate = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
-        let endDate = startDate.adding(days: 6)
+        let today = LocalDate(year: 2026, month: 1, day: 5)
+        let windowEnd = today.adding(days: 7) // 2026-01-12 (Monday) — the approved window's inclusive boundary.
+        let justPastWindow = windowEnd.adding(days: 1) // 2026-01-13 (Tuesday) — one day beyond it.
 
+        // Mon-Fri definition effective from today through the day after
+        // the window's boundary: its raw weekday matches are Jan 5-9
+        // (Mon-Fri), Jan 12 (Mon), and Jan 13 (Tue) — spanning both the
+        // interior of the approved window and just past it, so this
+        // single scenario proves inclusion up to the boundary and
+        // exclusion immediately past it.
         _ = try planningService.createRecurringPlannedActivity(
             athleteId: oliver.athleteId, title: "Hockey Camp", activityType: .teamTraining,
             weekdays: [.monday, .tuesday, .wednesday, .thursday, .friday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-            effectiveStartDate: startDate, effectiveEndDate: endDate
+            effectiveStartDate: today, effectiveEndDate: justPastWindow
         )
 
         let scheduleViewModel = FamilyScheduleViewModel(
@@ -185,15 +220,26 @@ struct Sprint12BTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
-        scheduleViewModel.loadSchedule()
+        scheduleViewModel.loadSchedule(referenceDate: referenceDate, calendar: calendar)
 
-        let recurringRowCount = scheduleViewModel.dayGroups.reduce(0) { total, group in
-            total + group.rows.filter {
+        let recurringDates = scheduleViewModel.dayGroups.reduce(into: Set<LocalDate>()) { dates, group in
+            let hasRecurringRow = group.rows.contains {
                 if case .recurringSuggestion = $0 { return true }
                 return false
-            }.count
+            }
+            if hasRecurringRow { dates.insert(group.date) }
         }
-        #expect(recurringRowCount == 5)
+
+        // Six weekday occurrences fall inside [today, windowEnd]: the
+        // Mon-Fri interior (Jan 5-9) plus the boundary Monday (Jan 12)
+        // itself — every one of them must be present.
+        #expect(recurringDates == [
+            today, today.adding(days: 1), today.adding(days: 2), today.adding(days: 3), today.adding(days: 4),
+            windowEnd
+        ])
+        // The 7th weekday match, Jan 13, sits one day beyond the
+        // approved rolling window and must be excluded.
+        #expect(!recurringDates.contains(justPastWindow))
     }
 
     // MARK: - Today read model (TodayActivityComposer)
