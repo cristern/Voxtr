@@ -224,6 +224,7 @@ struct WeeklyHistoryReflectionAccessStateTests {
 
     private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
 
+    @MainActor
     private static func makeViewModel(container: ModelContainer, athleteId: AthleteId) -> (WeeklyHistoryViewModel, WeeklyReflectionRepository) {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)

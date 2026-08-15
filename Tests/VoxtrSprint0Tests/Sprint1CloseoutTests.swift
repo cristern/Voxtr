@@ -143,6 +143,7 @@ struct Sprint1CloseoutTests {
     /// by Family Schedule's own day heading) always returns the same
     /// label for the same `Weekday`.
     @Test("Weekday label formatting is deterministic")
+    @MainActor
     func weekdayLabelIsDeterministic() {
         #expect(WeeklyPlanningView.weekdayLabel(for: .monday) == WeeklyPlanningView.weekdayLabel(for: .monday))
         #expect(WeeklyPlanningView.weekdayLabel(for: .monday) != WeeklyPlanningView.weekdayLabel(for: .friday))
