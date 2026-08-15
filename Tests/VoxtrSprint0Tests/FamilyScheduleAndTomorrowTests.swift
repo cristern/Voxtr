@@ -292,10 +292,14 @@ struct FamilyScheduleAndTomorrowTests {
         // constructed directly from row.plannedActivity/row.athleteId —
         // confirming here that those values are exactly what was
         // created, not derived or guessed.
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let detailViewModel = ActivityDetailViewModel(
             activity: created, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingService: trainingService
+            planningService: planningService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            )
         )
         #expect(detailViewModel.activity.plannedActivityId == created.plannedActivityId)
     }

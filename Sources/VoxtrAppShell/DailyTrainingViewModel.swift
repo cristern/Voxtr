@@ -36,6 +36,18 @@ public final class DailyTrainingViewModel {
     public var newLogDurationMinutes: Int = 60
     public var newLogPerceivedExertion: Int?
     public var newLogNotes: String = ""
+    /// VX-022 (Session Form): optional 1-5 self-rating, stored as
+    /// `ActivityReflection.bodyFeeling` via
+    /// `TrainingReflectionCoordinationService` — see that type's own
+    /// doc comment for the atomicity/retry contract `logActivity()`
+    /// below implements.
+    public var newLogSessionForm: Int?
+    /// True once a Session Form value was entered but has not yet been
+    /// successfully saved. While true, `newLogSessionForm` is retained
+    /// (never reset) and the next `logActivity()` call retries only the
+    /// Session Form write against the already-logged activity, never
+    /// logs a second one.
+    public private(set) var sessionFormPendingRetry: Bool = false
     /// Optional link to a PlannedActivity — the picker in the view only
     /// lets the user select an uncompleted one; this property itself
     /// doesn't enforce that (the view disables completed options, and
@@ -59,7 +71,14 @@ public final class DailyTrainingViewModel {
 
     private let trainingService: TrainingService
     private let coordinationService: TrainingPlanningCoordinationService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let authorId: ActorId
     public let athleteId: AthleteId
+    /// Set once a `logActivity()` call successfully logs the activity
+    /// but its Session Form write fails — retried on the next
+    /// `logActivity()` call instead of logging again. See
+    /// `sessionFormPendingRetry`'s own doc comment.
+    private var pendingSessionFormLoggedActivityId: LoggedActivityId?
     /// Optional, defaulted to `nil` — existing construction sites and
     /// tests that predate this feature are unaffected;
     /// `recurringOccurrences` simply stays empty if none was supplied,
@@ -72,12 +91,16 @@ public final class DailyTrainingViewModel {
     public init(
         trainingService: TrainingService,
         coordinationService: TrainingPlanningCoordinationService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        authorId: ActorId,
         athleteId: AthleteId,
         athleteDisplayName: String = "",
         todayActivityComposer: TodayActivityComposer? = nil
     ) {
         self.trainingService = trainingService
         self.coordinationService = coordinationService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.authorId = authorId
         self.athleteId = athleteId
         self.athleteDisplayName = athleteDisplayName
         self.todayActivityComposer = todayActivityComposer
@@ -108,6 +131,35 @@ public final class DailyTrainingViewModel {
         guard !isSubmitting else { return }
         errorMessage = nil
 
+        if let pendingSessionFormLoggedActivityId {
+            // Retry path: the activity itself was already logged
+            // successfully on a prior call — only the Session Form
+            // write failed. Never re-invokes trainingService.logActivity.
+            guard let newLogSessionForm else {
+                self.pendingSessionFormLoggedActivityId = nil
+                sessionFormPendingRetry = false
+                return
+            }
+            isSubmitting = true
+            defer { isSubmitting = false }
+            do {
+                _ = try trainingReflectionCoordinationService.recordSessionForm(
+                    athleteId: athleteId,
+                    loggedActivityId: pendingSessionFormLoggedActivityId,
+                    authorId: authorId,
+                    bodyFeeling: newLogSessionForm
+                )
+                self.pendingSessionFormLoggedActivityId = nil
+                sessionFormPendingRetry = false
+                self.newLogSessionForm = nil
+                load()
+            } catch {
+                sessionFormPendingRetry = true
+                errorMessage = "Activity logged. Session Form could not be saved — tap Log activity to try again."
+            }
+            return
+        }
+
         if let durationError = TrainingValidator.validateDurationMinutes(newLogDurationMinutes) {
             errorMessage = durationError
             return
@@ -127,7 +179,7 @@ public final class DailyTrainingViewModel {
         defer { isSubmitting = false }
 
         do {
-            _ = try trainingService.logActivity(
+            let result = try trainingReflectionCoordinationService.logActivity(
                 athleteId: athleteId,
                 plannedActivityId: selectedPlannedActivityId,
                 activityType: newLogActivityType,
@@ -135,7 +187,9 @@ public final class DailyTrainingViewModel {
                 startedAt: newLogStartedAt,
                 durationMinutes: newLogDurationMinutes,
                 perceivedExertion: newLogPerceivedExertion,
-                notes: notesOrNil
+                notes: notesOrNil,
+                authorId: authorId,
+                sessionForm: newLogSessionForm
             )
             newLogTitle = ""
             newLogNotes = ""
@@ -148,6 +202,19 @@ public final class DailyTrainingViewModel {
             // successful log in the same session still triggers the
             // view's own scroll-to-top.
             successfulLogTrigger += 1
+
+            switch result.sessionFormOutcome {
+            case .notRequested, .saved:
+                newLogSessionForm = nil
+                sessionFormPendingRetry = false
+            case .failed:
+                // The activity itself is genuinely logged (above) — only
+                // Session Form failed. Preserved for retry, never
+                // silently discarded.
+                pendingSessionFormLoggedActivityId = result.loggedActivity.loggedActivityId
+                sessionFormPendingRetry = true
+                errorMessage = "Activity logged. Session Form could not be saved — tap Log activity to try again."
+            }
         } catch let error as TrainingServiceError {
             errorMessage = Self.message(for: error)
         } catch {

@@ -36,6 +36,7 @@ public struct FamilyHomeContentView: View {
     private let family: RestoredFamily
     private let planningService: PlanningService
     private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
@@ -46,6 +47,7 @@ public struct FamilyHomeContentView: View {
         family: RestoredFamily,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -56,6 +58,7 @@ public struct FamilyHomeContentView: View {
         self.family = family
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -140,6 +143,7 @@ public struct FamilyHomeContentView: View {
                             athleteDisplayName: athleteName,
                             planningService: planningService,
                             trainingService: trainingService,
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                             actorId: ActorId(rawValue: family.participant.id)
                         )
                     }
@@ -160,7 +164,8 @@ public struct FamilyHomeContentView: View {
                         ),
                         actorId: ActorId(rawValue: family.participant.id),
                         planningService: planningService,
-                        trainingService: trainingService
+                        trainingService: trainingService,
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService
                     )
                 }
             }
@@ -395,6 +400,7 @@ public struct FamilyHomeContentView: View {
             athleteDisplayName: athlete.givenName,
             planningService: planningService,
             trainingService: trainingService,
+            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReviewCoordinationService: weeklyReviewCoordinationService,
             weeklyReflectionService: weeklyReflectionService,
@@ -413,7 +419,7 @@ public struct FamilyHomeContentView: View {
             athleteDisplayName: row.athleteName,
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
-            trainingService: trainingService
+            trainingReflectionCoordinationService: trainingReflectionCoordinationService
         )
     }
 }

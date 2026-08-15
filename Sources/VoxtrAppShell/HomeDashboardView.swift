@@ -34,6 +34,7 @@ public struct HomeDashboardView: View {
     private let athleteDisplayName: String
     private let planningService: PlanningService
     private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
@@ -48,6 +49,7 @@ public struct HomeDashboardView: View {
         athleteDisplayName: String,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -60,6 +62,7 @@ public struct HomeDashboardView: View {
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -108,6 +111,7 @@ public struct HomeDashboardView: View {
                             athleteDisplayName: athlete.givenName,
                             planningService: planningService,
                             trainingService: trainingService,
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                             weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                             weeklyReflectionService: weeklyReflectionService,
@@ -217,7 +221,7 @@ public struct HomeDashboardView: View {
                     ),
                     athleteDisplayName: athleteDisplayName,
                     planningService: planningService,
-                    trainingService: trainingService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     actorId: committedByActorId
                 )
             }
@@ -241,7 +245,7 @@ public struct HomeDashboardView: View {
                     athleteDisplayName: athleteDisplayName,
                     actorId: committedByActorId,
                     planningService: planningService,
-                    trainingService: trainingService
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService
                 )
             } label: {
                 HStack {
@@ -274,6 +278,7 @@ public struct HomeDashboardView: View {
                     athleteDisplayName: athleteDisplayName,
                     planningService: planningService,
                     trainingService: trainingService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     actorId: committedByActorId
                 )
             } label: {
@@ -329,6 +334,8 @@ public struct HomeDashboardView: View {
                     viewModel: DailyTrainingViewModel(
                         trainingService: trainingService,
                         coordinationService: trainingPlanningCoordinationService,
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        authorId: committedByActorId,
                         athleteId: athleteId,
                         athleteDisplayName: athleteDisplayName,
                         todayActivityComposer: TodayActivityComposer(
@@ -339,6 +346,7 @@ public struct HomeDashboardView: View {
                     ),
                     planningService: planningService,
                     trainingService: trainingService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     actorId: committedByActorId,
                     athleteDisplayName: athleteDisplayName
                 )

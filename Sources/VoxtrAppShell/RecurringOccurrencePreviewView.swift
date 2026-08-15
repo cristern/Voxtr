@@ -41,6 +41,7 @@ public struct RecurringOccurrencePreviewView: View {
     let athleteDisplayName: String
     let planningService: PlanningService
     let trainingService: TrainingService
+    let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     let actorId: ActorId
 
     @State private var editSheetItem: RecurringEditSheetItem?
@@ -53,12 +54,14 @@ public struct RecurringOccurrencePreviewView: View {
         athleteDisplayName: String,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         actorId: ActorId
     ) {
         self.suggestion = suggestion
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
     }
 
@@ -114,7 +117,8 @@ public struct RecurringOccurrencePreviewView: View {
                     plannedActivity: item.plannedActivity,
                     athleteId: suggestion.athleteId,
                     athleteDisplayName: athleteDisplayName,
-                    trainingService: trainingService,
+                    authorId: actorId,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     onLogged: { dismiss() }
                 )
             )

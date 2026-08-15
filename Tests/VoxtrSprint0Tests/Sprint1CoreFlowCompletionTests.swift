@@ -8,6 +8,7 @@ import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -80,10 +81,14 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), location: "Nadderud Stadion"
         )
 
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingService: trainingService
+            planningService: planningService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            )
         )
 
         #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
@@ -112,9 +117,13 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         var loggedFlag = false
         let logViewModel = LogActivityViewModel(
-            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", trainingService: trainingService,
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
             onLogged: { loggedFlag = true }
         )
         logViewModel.durationMinutes = 45
@@ -126,6 +135,52 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(links.count == 1)
         #expect(links.first?.durationMinutes == 45)
         #expect(links.first?.perceivedExertion == 6)
+    }
+
+    /// VX-022 (Session Form): logging a planned activity with a Session
+    /// Form value stores it as `ActivityReflection.bodyFeeling`, linked
+    /// to the exact `LoggedActivity` this save created by its stable
+    /// typed ID — never inferred from title/date.
+    @Test("Logging a planned activity with Session Form stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity")
+    @MainActor
+    func loggingPlannedActivityWithSessionFormStoresBodyFeeling() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: authorId,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        logViewModel.sessionForm = 3
+
+        #expect(logViewModel.save())
+        #expect(logViewModel.sessionFormPendingRetry == false)
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        let loggedActivity = try #require(links.first)
+        let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivity.loggedActivityId)
+        #expect(reflection?.bodyFeeling == 3)
+        #expect(reflection?.loggedActivityId == loggedActivity.id)
+        #expect(reflection?.athleteId == athleteId.rawValue)
     }
 
     /// Item 7: Location — save/reload round-trip, and that it remains

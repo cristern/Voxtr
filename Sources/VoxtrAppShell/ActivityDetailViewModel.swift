@@ -1,7 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
-import VoxtrTrainingDomain
 
 /// Sprint 1 (Daily Use Foundation), Part 3. The ONE Activity Detail
 /// screen every planned activity opens into, regardless of entry point
@@ -40,7 +39,7 @@ public final class ActivityDetailViewModel {
     private let isWeekPlanDraft: Bool
     private let deletedByActorId: ActorId
     private let planningService: PlanningService
-    private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
 
     public init(
         activity: PlannedActivity,
@@ -51,7 +50,7 @@ public final class ActivityDetailViewModel {
         isWeekPlanDraft: Bool,
         deletedByActorId: ActorId,
         planningService: PlanningService,
-        trainingService: TrainingService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     ) {
         self.activity = activity
         self.isCompleted = isCompleted
@@ -61,7 +60,7 @@ public final class ActivityDetailViewModel {
         self.isWeekPlanDraft = isWeekPlanDraft
         self.deletedByActorId = deletedByActorId
         self.planningService = planningService
-        self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         prefillEditForm()
     }
 
@@ -140,7 +139,12 @@ public final class ActivityDetailViewModel {
             plannedActivity: activity,
             athleteId: athleteId,
             athleteDisplayName: athleteDisplayName,
-            trainingService: trainingService,
+            // VX-022: the same acting-party identity already used for
+            // `deletedByActorId` doubles as the Session Form reflection's
+            // author — one actor identity per screen, not a second,
+            // separately-resolved one.
+            authorId: deletedByActorId,
+            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             onLogged: { [weak self] in
                 self?.isCompleted = true
             }

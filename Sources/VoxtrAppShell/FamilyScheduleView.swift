@@ -24,17 +24,20 @@ public struct FamilyScheduleView: View {
     private let actorId: ActorId
     private let planningService: PlanningService
     private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
 
     public init(
         viewModel: FamilyScheduleViewModel,
         actorId: ActorId,
         planningService: PlanningService,
-        trainingService: TrainingService
+        trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.actorId = actorId
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
     }
 
     public var body: some View {
@@ -81,7 +84,7 @@ public struct FamilyScheduleView: View {
                     athleteDisplayName: familyRow.athleteName,
                     actorId: actorId,
                     planningService: planningService,
-                    trainingService: trainingService
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService
                 )
             } label: {
                 rowContent(
@@ -102,6 +105,7 @@ public struct FamilyScheduleView: View {
                     athleteDisplayName: athleteName,
                     planningService: planningService,
                     trainingService: trainingService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     actorId: actorId
                 )
             } label: {

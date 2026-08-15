@@ -1,7 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
-import VoxtrTrainingDomain
 
 /// S2.4: first functional Weekly Planning UI. Deliberately unpolished —
 /// design polish is explicitly out of scope. All state changes go
@@ -22,20 +21,20 @@ public struct WeeklyPlanningView: View {
     @State private var isManagingRecurringActivities: Bool = false
     private let athleteDisplayName: String
     private let planningService: PlanningService
-    private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let actorId: ActorId
 
     public init(
         viewModel: WeeklyPlanningViewModel,
         athleteDisplayName: String,
         planningService: PlanningService,
-        trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         actorId: ActorId
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
-        self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
     }
 
@@ -127,7 +126,7 @@ public struct WeeklyPlanningView: View {
                             athleteDisplayName: athleteDisplayName,
                             actorId: actorId,
                             planningService: planningService,
-                            trainingService: trainingService
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService
                         )
                     } label: {
                         VStack(alignment: .leading) {

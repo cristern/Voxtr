@@ -1,7 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
-import VoxtrTrainingDomain
 
 /// Sprint 1 completion package, Item 3: the ONE canonical way any
 /// screen navigates from a `PlannedActivity` representation to
@@ -29,7 +28,7 @@ public struct ActivityDetailViewLoader: View {
     let athleteDisplayName: String
     let actorId: ActorId
     let planningService: PlanningService
-    let trainingService: TrainingService
+    let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     @State private var viewModel: ActivityDetailViewModel?
 
     public init(
@@ -39,7 +38,7 @@ public struct ActivityDetailViewLoader: View {
         athleteDisplayName: String,
         actorId: ActorId,
         planningService: PlanningService,
-        trainingService: TrainingService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     ) {
         self.plannedActivity = plannedActivity
         self.isCompleted = isCompleted
@@ -47,7 +46,7 @@ public struct ActivityDetailViewLoader: View {
         self.athleteDisplayName = athleteDisplayName
         self.actorId = actorId
         self.planningService = planningService
-        self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
     }
 
     public var body: some View {
@@ -72,7 +71,7 @@ public struct ActivityDetailViewLoader: View {
                 isWeekPlanDraft: isDraft,
                 deletedByActorId: actorId,
                 planningService: planningService,
-                trainingService: trainingService
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService
             )
         }
     }

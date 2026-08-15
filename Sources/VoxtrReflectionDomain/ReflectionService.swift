@@ -4,8 +4,17 @@ import VoxtrCoreContracts
 
 /// S4.1: thrown by `ReflectionService.recordActivityReflection` when
 /// one already exists for the same athlete and `LoggedActivity`.
+///
+/// VX-022 (Session Form): `.invalidField` is thrown when a numeric
+/// field would violate `ActivityReflection`'s own `precondition`s
+/// (bodyFeeling/energy/satisfaction 1-5, perceivedExertion 1-10) —
+/// checked here first so out-of-range input is a catchable error
+/// instead of a process crash, the same pattern
+/// `WeeklyReflectionServiceError.invalidField` already established for
+/// `WeeklyReflection`'s own equivalent fields.
 public enum ReflectionServiceError: Error, Equatable {
     case activityReflectionAlreadyExists
+    case invalidField(String)
 }
 
 /// S4.0 scope only: the domain-level use case for recording reflections
@@ -55,6 +64,7 @@ public final class ReflectionService {
         guard !existing.contains(where: { $0.athleteId == athleteId.rawValue }) else {
             throw ReflectionServiceError.activityReflectionAlreadyExists
         }
+        try Self.validate(bodyFeeling: bodyFeeling, energy: energy, satisfaction: satisfaction, perceivedExertion: perceivedExertion)
         return try repository.insertActivityReflection(
             athleteId: athleteId,
             loggedActivityId: loggedActivityId,
@@ -114,5 +124,23 @@ public final class ReflectionService {
     /// S4.2: fetch observations for one LoggedActivity.
     public func fetchParentObservations(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> [ParentObservation] {
         try repository.fetchParentObservations(forLoggedActivity: loggedActivityId)
+    }
+
+    /// Mirrors — does not add to — `ActivityReflection`'s own
+    /// `precondition`s (bodyFeeling/energy/satisfaction 1-5,
+    /// perceivedExertion 1-10). The entity's initializer already
+    /// enforces these, but only by crashing the process on violation;
+    /// checking them here first is what lets this be a catchable error
+    /// instead — same pattern `WeeklyReflectionService.validate`
+    /// already established for `WeeklyReflection`'s equivalent fields.
+    private static func validate(bodyFeeling: Int?, energy: Int?, satisfaction: Int?, perceivedExertion: Int?) throws {
+        for value in [bodyFeeling, energy, satisfaction] {
+            if let value, !(1...5).contains(value) {
+                throw ReflectionServiceError.invalidField("bodyFeeling/energy/satisfaction must be 1-5")
+            }
+        }
+        if let perceivedExertion, !(1...10).contains(perceivedExertion) {
+            throw ReflectionServiceError.invalidField("perceivedExertion must be 1-10")
+        }
     }
 }

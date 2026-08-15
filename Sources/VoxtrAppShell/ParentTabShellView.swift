@@ -40,6 +40,7 @@ public struct ParentTabShellView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
     public let trainingService: TrainingService
+    public let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     public let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
@@ -51,6 +52,7 @@ public struct ParentTabShellView: View {
         family: RestoredFamily,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -61,6 +63,7 @@ public struct ParentTabShellView: View {
         self.family = family
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -81,6 +84,7 @@ public struct ParentTabShellView: View {
                 family: family,
                 planningService: planningService,
                 trainingService: trainingService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
@@ -102,6 +106,7 @@ public struct ParentTabShellView: View {
                 family: family,
                 planningService: planningService,
                 trainingService: trainingService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 athleteRepository: athleteRepository,
                 actorId: ActorId(rawValue: family.participant.id)
@@ -124,6 +129,7 @@ public struct ParentTabShellView: View {
                 family: family,
                 planningService: planningService,
                 trainingService: trainingService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
@@ -178,6 +184,7 @@ public struct ParentTabShellView: View {
                                 athleteDisplayName: athlete.givenName,
                                 planningService: planningService,
                                 trainingService: trainingService,
+                                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                                 weeklyReflectionService: weeklyReflectionService,
@@ -248,6 +255,7 @@ private struct ParentPlanTabView: View {
     let family: RestoredFamily
     let planningService: PlanningService
     let trainingService: TrainingService
+    let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let athleteRepository: AthleteRepository
     let actorId: ActorId
@@ -258,6 +266,7 @@ private struct ParentPlanTabView: View {
         family: RestoredFamily,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         athleteRepository: AthleteRepository,
         actorId: ActorId
@@ -265,6 +274,7 @@ private struct ParentPlanTabView: View {
         self.family = family
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.athleteRepository = athleteRepository
         self.actorId = actorId
@@ -284,7 +294,8 @@ private struct ParentPlanTabView: View {
                             ),
                             actorId: actorId,
                             planningService: planningService,
-                            trainingService: trainingService
+                            trainingService: trainingService,
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService
                         )
                     }
                     .accessibilityIdentifier("parentPlan.familyScheduleLink")
@@ -302,7 +313,7 @@ private struct ParentPlanTabView: View {
                                     ),
                                     athleteDisplayName: athlete.givenName,
                                     planningService: planningService,
-                                    trainingService: trainingService,
+                                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                     actorId: actorId
                                 )
                             }
@@ -328,6 +339,7 @@ private struct ParentTrainingTabView: View {
     let family: RestoredFamily
     let planningService: PlanningService
     let trainingService: TrainingService
+    let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     let weeklyReflectionService: WeeklyReflectionService
@@ -341,6 +353,7 @@ private struct ParentTrainingTabView: View {
         family: RestoredFamily,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -351,6 +364,7 @@ private struct ParentTrainingTabView: View {
         self.family = family
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -378,6 +392,8 @@ private struct ParentTrainingTabView: View {
                                         viewModel: DailyTrainingViewModel(
                                             trainingService: trainingService,
                                             coordinationService: trainingPlanningCoordinationService,
+                                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                            authorId: actorId,
                                             athleteId: athlete.athleteId,
                                             athleteDisplayName: athlete.givenName,
                                             todayActivityComposer: TodayActivityComposer(
@@ -388,6 +404,7 @@ private struct ParentTrainingTabView: View {
                                         ),
                                         planningService: planningService,
                                         trainingService: trainingService,
+                                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                         actorId: actorId,
                                         athleteDisplayName: athlete.givenName
                                     )

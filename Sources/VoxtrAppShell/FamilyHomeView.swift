@@ -40,6 +40,7 @@ public struct FamilyHomeView: View {
     public let family: RestoredFamily
     public let planningService: PlanningService
     public let trainingService: TrainingService
+    public let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     public let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
@@ -51,6 +52,7 @@ public struct FamilyHomeView: View {
         family: RestoredFamily,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -61,6 +63,7 @@ public struct FamilyHomeView: View {
         self.family = family
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -75,6 +78,7 @@ public struct FamilyHomeView: View {
                 family: family,
                 planningService: planningService,
                 trainingService: trainingService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
@@ -116,6 +120,7 @@ public struct FamilyHomeView: View {
             athleteDisplayName: athlete.givenName,
             planningService: planningService,
             trainingService: trainingService,
+            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReviewCoordinationService: weeklyReviewCoordinationService,
             weeklyReflectionService: weeklyReflectionService,

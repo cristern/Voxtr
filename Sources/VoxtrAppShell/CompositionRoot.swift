@@ -119,6 +119,16 @@ public final class CompositionRoot {
         )
         container.register(TrainingPlanningCoordinationService.self) { trainingPlanningCoordinationService }
 
+        // VX-022 (Session Form): the one place TrainingService and
+        // ReflectionService are used together to log an activity with
+        // its optional Session Form value — same placement rationale as
+        // trainingPlanningCoordinationService immediately above.
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: container.resolve(TrainingService.self),
+            reflectionService: container.resolve(ReflectionService.self)
+        )
+        container.register(TrainingReflectionCoordinationService.self) { trainingReflectionCoordinationService }
+
         // Sprint 5.1: reuses the same repositories/coordination service
         // already resolved above — no new resolution paths needed.
         let weeklyReviewCoordinationService = WeeklyReviewCoordinationService(

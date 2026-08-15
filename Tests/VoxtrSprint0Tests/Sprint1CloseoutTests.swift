@@ -162,9 +162,15 @@ struct Sprint1CloseoutTests {
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository, trainingRepository: trainingRepository
         )
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let viewModel = DailyTrainingViewModel(
-            trainingService: TrainingService(repository: trainingRepository),
+            trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: AthleteId()
         )
 

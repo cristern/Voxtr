@@ -13,6 +13,7 @@ public struct DailyTrainingView: View {
     @State private var recurringManagementSheetItem: RecurringManagementSheetItem?
     private let planningService: PlanningService
     private let trainingService: TrainingService
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let actorId: ActorId
     private let athleteDisplayName: String
 
@@ -20,12 +21,14 @@ public struct DailyTrainingView: View {
         viewModel: DailyTrainingViewModel,
         planningService: PlanningService,
         trainingService: TrainingService,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         actorId: ActorId,
         athleteDisplayName: String
     ) {
         _viewModel = State(initialValue: viewModel)
         self.planningService = planningService
         self.trainingService = trainingService
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
         self.athleteDisplayName = athleteDisplayName
     }
@@ -60,7 +63,7 @@ public struct DailyTrainingView: View {
                                 athleteDisplayName: athleteDisplayName,
                                 actorId: actorId,
                                 planningService: planningService,
-                                trainingService: trainingService
+                                trainingReflectionCoordinationService: trainingReflectionCoordinationService
                             )
                         } label: {
                             HStack {
@@ -93,6 +96,7 @@ public struct DailyTrainingView: View {
                                 athleteDisplayName: athleteDisplayName,
                                 planningService: planningService,
                                 trainingService: trainingService,
+                                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                 actorId: actorId
                             )
                         } label: {
@@ -156,6 +160,17 @@ public struct DailyTrainingView: View {
                     }
                 }
                 .accessibilityIdentifier("training.newLogExertionPicker")
+
+                // VX-022 (Session Form): neutral 1-5 scale, same Picker
+                // shape as RPE above — no failure/success labeling, no
+                // scoring or readiness language.
+                Picker("Session Form", selection: $viewModel.newLogSessionForm) {
+                    Text("Not set").tag(Int?.none)
+                    ForEach(1...5, id: \.self) { value in
+                        Text("\(value)").tag(Int?.some(value))
+                    }
+                }
+                .accessibilityIdentifier("training.newLogSessionFormPicker")
 
                 TextField("Notes", text: $viewModel.newLogNotes)
                     .accessibilityIdentifier("training.newLogNotesField")

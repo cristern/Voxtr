@@ -18,6 +18,12 @@ import VoxtrTrainingDomain
 /// genuine data-model gap to close in a future work package if a
 /// distinct "intensity" concept is truly wanted, not something to
 /// paper over here.
+///
+/// VX-022 (Session Form): a separate, optional 1-5 self-rating,
+/// captured alongside the log and stored as `ActivityReflection.bodyFeeling`
+/// via `TrainingReflectionCoordinationService` — not a new field on
+/// `LoggedActivity` itself. See that type's own doc comment for the
+/// exact atomicity/retry contract `save()` below implements.
 @MainActor
 @Observable
 public final class LogActivityViewModel {
@@ -25,27 +31,43 @@ public final class LogActivityViewModel {
     public let athleteDisplayName: String
     public private(set) var errorMessage: String?
     public private(set) var didLog: Bool = false
+    /// True once a Session Form value was entered but has not yet been
+    /// successfully saved (either the first attempt failed, or it
+    /// hasn't been attempted). While true, the entered `sessionForm`
+    /// value is retained, never discarded — the next `save()` call
+    /// retries recording it against the SAME already-logged activity,
+    /// never re-logs.
+    public private(set) var sessionFormPendingRetry: Bool = false
 
     public var durationMinutes: Int
     public var perceivedExertion: Int?
     public var notes: String = ""
     public var isCompleted: Bool = true
+    public var sessionForm: Int?
 
     private let athleteId: AthleteId
-    private let trainingService: TrainingService
+    private let authorId: ActorId
+    private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let onLogged: () -> Void
+    /// Set once the first `save()` call successfully logs the activity —
+    /// from then on, `save()` retries only the Session Form write (see
+    /// `sessionFormPendingRetry`), never `logActivity` again, so a retry
+    /// can never create a duplicate `LoggedActivity`.
+    private var loggedActivityId: LoggedActivityId?
 
     public init(
         plannedActivity: PlannedActivity,
         athleteId: AthleteId,
         athleteDisplayName: String,
-        trainingService: TrainingService,
+        authorId: ActorId,
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         onLogged: @escaping () -> Void
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
         self.athleteDisplayName = athleteDisplayName
-        self.trainingService = trainingService
+        self.authorId = authorId
+        self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onLogged = onLogged
         // Prefilled from the plan itself where a sensible starting
         // value exists — the parent only adjusts if reality differed.
@@ -55,8 +77,33 @@ public final class LogActivityViewModel {
     @discardableResult
     public func save() -> Bool {
         errorMessage = nil
+
+        if let loggedActivityId {
+            // Retry path: the activity itself was already logged
+            // successfully on a prior attempt — only the Session Form
+            // write failed. Never re-invokes logActivity.
+            guard let sessionForm else {
+                sessionFormPendingRetry = false
+                return true
+            }
+            do {
+                _ = try trainingReflectionCoordinationService.recordSessionForm(
+                    athleteId: athleteId,
+                    loggedActivityId: loggedActivityId,
+                    authorId: authorId,
+                    bodyFeeling: sessionForm
+                )
+                sessionFormPendingRetry = false
+                return true
+            } catch {
+                sessionFormPendingRetry = true
+                errorMessage = "Activity logged. Session Form could not be saved — tap Save to try again."
+                return false
+            }
+        }
+
         do {
-            _ = try trainingService.logActivity(
+            let result = try trainingReflectionCoordinationService.logActivity(
                 athleteId: athleteId,
                 plannedActivityId: plannedActivity.plannedActivityId,
                 sportId: plannedActivity.sportId.map(SportId.init(rawValue:)),
@@ -67,11 +114,23 @@ public final class LogActivityViewModel {
                 durationMinutes: max(1, min(1440, durationMinutes)),
                 status: isCompleted ? .completed : .missed,
                 perceivedExertion: perceivedExertion,
-                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes
+                notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
+                authorId: authorId,
+                sessionForm: sessionForm
             )
+            self.loggedActivityId = result.loggedActivity.loggedActivityId
             didLog = true
             onLogged()
-            return true
+
+            switch result.sessionFormOutcome {
+            case .notRequested, .saved:
+                sessionFormPendingRetry = false
+                return true
+            case .failed:
+                sessionFormPendingRetry = true
+                errorMessage = "Activity logged. Session Form could not be saved — tap Save to try again."
+                return false
+            }
         } catch TrainingServiceError.plannedActivityAlreadyLinked {
             errorMessage = "This activity has already been logged."
             return false

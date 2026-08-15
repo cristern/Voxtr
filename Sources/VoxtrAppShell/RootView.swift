@@ -33,6 +33,7 @@ public struct RootView: View {
                 family: family,
                 planningService: root.container.resolve(PlanningService.self),
                 trainingService: root.container.resolve(TrainingService.self),
+                trainingReflectionCoordinationService: root.container.resolve(TrainingReflectionCoordinationService.self),
                 trainingPlanningCoordinationService: root.container.resolve(TrainingPlanningCoordinationService.self),
                 weeklyReviewCoordinationService: root.container.resolve(WeeklyReviewCoordinationService.self),
                 weeklyReflectionService: root.container.resolve(WeeklyReflectionService.self),

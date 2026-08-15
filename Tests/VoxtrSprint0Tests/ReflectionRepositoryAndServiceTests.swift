@@ -278,6 +278,23 @@ struct ReflectionRepositoryAndServiceTests {
         #expect(numeric.energy == 1)
     }
 
+    @Test("VX-022: an out-of-range bodyFeeling is rejected through a controlled error, not a precondition crash")
+    @MainActor
+    func outOfRangeBodyFeelingRejectedViaControlledError() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ReflectionRepository(modelContext: container.mainContext)
+        let service = ReflectionService(repository: repository)
+
+        #expect(throws: ReflectionServiceError.invalidField("bodyFeeling/energy/satisfaction must be 1-5")) {
+            try service.recordActivityReflection(
+                athleteId: AthleteId(), loggedActivityId: LoggedActivityId(), authorId: ActorId(),
+                visibility: .privateToAthlete, bodyFeeling: 99
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReflection>()).count == 0)
+    }
+
     @Test("S4.2: creating a parent observation persists it")
     @MainActor
     func createParentObservationPersists() throws {

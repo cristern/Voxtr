@@ -6,6 +6,7 @@ import VoxtrCoreContracts
 @testable import VoxtrAppShell
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -25,6 +26,7 @@ struct DailyTrainingViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -32,6 +34,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: AthleteId()
         )
 
@@ -50,6 +56,7 @@ struct DailyTrainingViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -57,6 +64,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: AthleteId()
         )
         viewModel.load()
@@ -85,6 +96,7 @@ struct DailyTrainingViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -92,6 +104,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: AthleteId()
         )
         viewModel.newLogTitle = "Easy jog"
@@ -111,6 +127,7 @@ struct DailyTrainingViewModelTests {
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -118,6 +135,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: AthleteId()
         )
         viewModel.newLogTitle = "Easy jog"
@@ -138,6 +159,7 @@ struct DailyTrainingViewModelTests {
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -154,6 +176,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: athleteId
         )
         viewModel.load()
@@ -176,6 +202,7 @@ struct DailyTrainingViewModelTests {
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinationService = TrainingPlanningCoordinationService(
             planningRepository: planningRepository,
             trainingRepository: trainingRepository
@@ -196,6 +223,10 @@ struct DailyTrainingViewModelTests {
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,
             coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
             athleteId: athleteId
         )
 
@@ -205,5 +236,219 @@ struct DailyTrainingViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
+    }
+
+    // MARK: - VX-022: Session Form
+
+    @Test("Logging with a Session Form value stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity")
+    @MainActor
+    func logActivityWithSessionFormStoresBodyFeeling() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: authorId,
+            athleteId: athleteId
+        )
+        viewModel.newLogTitle = "Match day"
+        viewModel.newLogSessionForm = 4
+
+        viewModel.logActivity()
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.sessionFormPendingRetry == false)
+        // The value is never left populated once genuinely saved —
+        // preserved-for-retry only applies to the failure path.
+        #expect(viewModel.newLogSessionForm == nil)
+
+        let logged = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
+        #expect(logged.count == 1)
+        let loggedActivity = try #require(logged.first)
+
+        let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivity.loggedActivityId)
+        #expect(reflection?.bodyFeeling == 4)
+        #expect(reflection?.loggedActivityId == loggedActivity.id)
+        #expect(reflection?.athleteId == athleteId.rawValue)
+    }
+
+    @Test("Logging without a Session Form value preserves existing behavior — no reflection is created")
+    @MainActor
+    func logActivityWithoutSessionFormCreatesNoReflection() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
+            athleteId: athleteId
+        )
+        viewModel.newLogTitle = "Easy jog"
+        // newLogSessionForm left nil — omission must be fully supported.
+
+        viewModel.logActivity()
+
+        #expect(viewModel.errorMessage == nil)
+        let logged = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
+        #expect(logged.count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
+    }
+
+    @Test("Athlete isolation: a Session Form reflection for one athlete's log never appears under another athlete")
+    @MainActor
+    func sessionFormReflectionRespectsAthleteIsolation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: coordinator,
+            authorId: ActorId(),
+            athleteId: athleteId
+        )
+        viewModel.newLogTitle = "Match day"
+        viewModel.newLogSessionForm = 3
+        viewModel.logActivity()
+
+        #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forAthlete: otherAthleteId).isEmpty)
+    }
+
+    @Test("A reflection save failure after a successful log preserves the LoggedActivity and never creates a duplicate on retry")
+    @MainActor
+    func reflectionFailureAfterLoggingIsRetriedWithoutDuplicatingTheActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: coordinator,
+            authorId: authorId,
+            athleteId: athleteId
+        )
+        // A Session Form value outside the entity's own 1-5 bound
+        // deterministically forces ReflectionService to throw
+        // .invalidField on the FIRST attempt — TrainingService.logActivity
+        // itself has no such validation, so the LoggedActivity is
+        // genuinely created and preserved, while the reflection write
+        // fails. This exercises the real failure path (not a simulated
+        // stand-in): the same `ReflectionService.recordActivityReflection`
+        // call the retry below also goes through.
+        viewModel.newLogTitle = "Match day"
+        viewModel.newLogSessionForm = 99
+        viewModel.logActivity()
+
+        #expect(viewModel.sessionFormPendingRetry == true)
+        #expect(viewModel.errorMessage != nil)
+        let loggedAfterFirstAttempt = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
+        #expect(loggedAfterFirstAttempt.count == 1)
+        let loggedActivityId = try #require(loggedAfterFirstAttempt.first).loggedActivityId
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId).isEmpty)
+
+        // Retry with a corrected value — never silently discarded, and
+        // must retry ONLY the reflection write, never re-log.
+        viewModel.newLogSessionForm = 4
+        viewModel.logActivity()
+
+        #expect(viewModel.sessionFormPendingRetry == false)
+        let loggedAfterRetry = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
+        #expect(loggedAfterRetry.count == 1)
+        #expect(loggedAfterRetry.first?.loggedActivityId == loggedActivityId)
+        let reflections = try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId)
+        #expect(reflections.count == 1)
+        #expect(reflections.first?.bodyFeeling == 4)
+    }
+
+    @Test("An out-of-range Session Form value is rejected through controlled validation, not a crash")
+    @MainActor
+    func invalidSessionFormValueIsRejectedViaControlledError() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
+            athleteId: athleteId
+        )
+        viewModel.newLogTitle = "Match day"
+        viewModel.newLogSessionForm = 0
+
+        viewModel.logActivity()
+
+        // Never crashes — surfaced as a controlled, catchable error via
+        // the same ReflectionService.recordActivityReflection path
+        // WeeklyReflectionService's own .invalidField already
+        // established, and the activity itself is still preserved.
+        #expect(viewModel.sessionFormPendingRetry == true)
+        #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 }
