@@ -2,6 +2,7 @@ import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// Area 6: "Week by Week" — presents ONE historical week's factual
 /// truth. Deliberately no hero percentage/score (e.g. never "83%
@@ -9,11 +10,21 @@ import VoxtrTrainingDomain
 /// sibling comparison, no ratings, no gamification.
 public struct WeeklyHistoryView: View {
     @State private var viewModel: WeeklyHistoryViewModel
+    @State private var isShowingReflectionForm = false
     let athleteDisplayName: String
+    let reflectionService: WeeklyReflectionService
+    let authorId: ActorId
 
-    public init(viewModel: WeeklyHistoryViewModel, athleteDisplayName: String) {
+    public init(
+        viewModel: WeeklyHistoryViewModel,
+        athleteDisplayName: String,
+        reflectionService: WeeklyReflectionService,
+        authorId: ActorId
+    ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
+        self.reflectionService = reflectionService
+        self.authorId = authorId
     }
 
     public var body: some View {
@@ -28,6 +39,7 @@ public struct WeeklyHistoryView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                     }
+                    .buttonStyle(.borderless)
                     .accessibilityIdentifier("weeklyHistory.previousWeekButton")
                     WeekIdentityView(
                         weekStart: viewModel.weekStart,
@@ -38,6 +50,8 @@ public struct WeeklyHistoryView: View {
                     } label: {
                         Image(systemName: "chevron.right")
                     }
+                    .buttonStyle(.borderless)
+                    .disabled(viewModel.weekStart.adding(days: 7) > WeeklyPlanningViewModel.currentWeekStart())
                     .accessibilityIdentifier("weeklyHistory.nextWeekButton")
                 }
             }
@@ -82,8 +96,9 @@ public struct WeeklyHistoryView: View {
                 .accessibilityIdentifier("weeklyHistory.additionalActivitiesSection")
             }
 
-            if let reflection = viewModel.result?.weeklyReflection {
-                Section("Reflection") {
+            Section("Reflection") {
+                switch viewModel.reflectionAccessState {
+                case .visible(let reflection):
                     if let whatWorked = reflection.whatWorked, !whatWorked.isEmpty {
                         LabeledContent("What worked", value: whatWorked)
                     }
@@ -93,13 +108,60 @@ public struct WeeklyHistoryView: View {
                     if let focus = viewModel.focusNextWeekIfPermitted, !focus.isEmpty {
                         LabeledContent("Focus next week", value: focus)
                     }
+                    Button("Edit Reflection") {
+                        isShowingReflectionForm = true
+                    }
+                    .accessibilityIdentifier("weeklyHistory.reflectionAction")
+                case .none:
+                    Text("No reflection yet")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("weeklyHistory.noReflection")
+                    Button("Add Reflection") {
+                        isShowingReflectionForm = true
+                    }
+                    .accessibilityIdentifier("weeklyHistory.reflectionAction")
+                case .hiddenForPrivacy:
+                    // Case C: a Reflection exists but is private to the
+                    // athlete. Deliberately shows the SAME neutral text
+                    // as the genuinely-missing case — never reveals
+                    // that a private Reflection exists — but offers NO
+                    // action at all: no Edit (would expose private
+                    // content), and no Add (would attempt to create a
+                    // competing/duplicate Reflection for this
+                    // athlete/week, which already has one).
+                    Text("No reflection yet")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("weeklyHistory.noReflection")
                 }
-                .accessibilityIdentifier("weeklyHistory.reflectionSection")
             }
+            .accessibilityIdentifier("weeklyHistory.reflectionSection")
         }
         .navigationTitle("Week by Week")
         .onAppear {
             viewModel.load()
+        }
+        // Issue 3: the EXISTING Reflection form, for the EXACT
+        // selected historical week — never a duplicate form embedded
+        // here. `onDismiss` reloads this screen's own read model, so a
+        // newly saved/edited Reflection (and any Focus next week it
+        // carries) is immediately visible, never stale pre-save
+        // content.
+        .sheet(isPresented: $isShowingReflectionForm, onDismiss: {
+            viewModel.load()
+        }) {
+            NavigationStack {
+                WeeklyReflectionFormView(
+                    viewModel: WeeklyReflectionFormViewModel(
+                        service: reflectionService,
+                        athleteId: viewModel.athleteId,
+                        athleteDisplayName: athleteDisplayName,
+                        weekStart: viewModel.weekStart,
+                        authorId: authorId,
+                        existing: viewModel.result?.weeklyReflection
+                    ),
+                    isModal: true
+                )
+            }
         }
     }
 }

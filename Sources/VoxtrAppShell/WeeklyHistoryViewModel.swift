@@ -90,4 +90,39 @@ public final class WeeklyHistoryViewModel {
         }
         return reflection.nextWeekConsideration
     }
+
+    /// Final privacy gate for Weekly History's Reflection action.
+    /// Reuses the SAME canonical `WeeklyReflection.visibility` check as
+    /// `focusNextWeekIfPermitted`/`FamilyHomeViewModel.loadFocusThisWeek()`
+    /// above — no parallel permission system invented for this screen.
+    ///
+    /// Critically distinguishes "no Reflection exists" from "a
+    /// Reflection exists but this actor cannot see it" — both are
+    /// knowable directly from `result.weeklyReflection` (present or
+    /// nil) combined with its own `visibility` field, which the
+    /// existing `WeeklyReviewCoordinationService` assembly already
+    /// carries through unfiltered (it is a pure read-model composer,
+    /// not a permission-enforcing layer — enforcement happens here,
+    /// at the point of use, the same place `loadFocusThisWeek()`
+    /// already enforces it). No architectural gap: the distinction is
+    /// fully expressible today.
+    public enum ReflectionAccessState {
+        /// No Reflection exists for this athlete/week — Case A.
+        case none
+        /// A Reflection exists and is visible to the current actor —
+        /// Case B. Carries the reflection itself for display/editing.
+        case visible(WeeklyReflection)
+        /// A Reflection exists but is `.privateToAthlete` — Case C.
+        /// Never exposed as content, never offered for edit, and
+        /// critically never treated as `.none` — offering "Add
+        /// Reflection" here would risk creating a competing/duplicate
+        /// Reflection for the same athlete/week that already has one.
+        case hiddenForPrivacy
+    }
+
+    public var reflectionAccessState: ReflectionAccessState {
+        guard let reflection = result?.weeklyReflection else { return .none }
+        guard reflection.visibility != .privateToAthlete else { return .hiddenForPrivacy }
+        return .visible(reflection)
+    }
 }

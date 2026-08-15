@@ -431,7 +431,9 @@ private struct ParentTrainingTabView: View {
                                                     athleteId: athlete.athleteId,
                                                     weekStart: selectedWeekStart
                                                 ),
-                                                athleteDisplayName: athlete.givenName
+                                                athleteDisplayName: athlete.givenName,
+                                                reflectionService: weeklyReflectionService,
+                                                authorId: actorId
                                             )
                                         }
                                     )

@@ -94,6 +94,7 @@ public struct WeeklyReviewView: View {
                 } label: {
                     Image(systemName: "chevron.left")
                 }
+                .buttonStyle(.borderless)
                 .accessibilityIdentifier("weeklyReview.previousWeekButton")
                 WeekIdentityView(
                     weekStart: viewModel.weekStart,
@@ -104,6 +105,8 @@ public struct WeeklyReviewView: View {
                 } label: {
                     Image(systemName: "chevron.right")
                 }
+                .buttonStyle(.borderless)
+                .disabled(viewModel.weekStart.adding(days: 7) > WeeklyPlanningViewModel.currentWeekStart())
                 .accessibilityIdentifier("weeklyReview.nextWeekButton")
             }
             .accessibilityIdentifier("weeklyReview.weekStart")

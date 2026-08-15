@@ -51,6 +51,7 @@ public struct WeeklyPlanningView: View {
                     } label: {
                         Image(systemName: "chevron.left")
                     }
+                    .buttonStyle(.borderless)
                     .accessibilityIdentifier("planning.previousWeekButton")
                     WeekIdentityView(
                         weekStart: viewModel.weekStart,
@@ -61,6 +62,7 @@ public struct WeeklyPlanningView: View {
                     } label: {
                         Image(systemName: "chevron.right")
                     }
+                    .buttonStyle(.borderless)
                     .accessibilityIdentifier("planning.nextWeekButton")
                 }
                 .accessibilityIdentifier("planning.weekIdentityBar")

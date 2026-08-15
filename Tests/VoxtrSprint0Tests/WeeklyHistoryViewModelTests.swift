@@ -157,3 +157,193 @@ struct WeeklyHistoryViewModelTests {
         #expect(viewModel.weekStart == currentWeekStart)
     }
 }
+
+@Suite("WeeklyHistoryListViewModel (Weekly History & Reflection UX closeout)", .serialized)
+struct WeeklyHistoryListViewModelTests {
+
+    private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
+
+    @Test("A completely empty week is excluded; weeks with planned-only, logged-only, or reflection-only data are included, newest first")
+    @MainActor
+    func filtersEmptyWeeksAndOrdersNewestFirst() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let planning = PlanningService(repository: planningRepository)
+        let training = TrainingService(repository: trainingRepository)
+        let reflection = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let athleteId = AthleteId()
+        let currentWeekStart = LocalDate(year: 2026, month: 1, day: 12) // a Monday
+        let plannedOnlyWeek = currentWeekStart.adding(days: -7)
+        let loggedOnlyWeek = currentWeekStart.adding(days: -14)
+        let emptyWeek = currentWeekStart.adding(days: -21)
+        let reflectionOnlyWeek = currentWeekStart.adding(days: -28)
+
+        let plannedWeekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: plannedOnlyWeek)
+        _ = try planning.addPlannedActivity(
+            toWeekPlan: plannedWeekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Planned only", localDate: plannedOnlyWeek, timeZoneId: Self.oslo
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Logged only",
+            startedAt: Calendar.current.date(from: DateComponents(year: 2025, month: 12, day: 30)) ?? .now
+        )
+        // emptyWeek: deliberately nothing at all.
+        _ = try reflection.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: reflectionOnlyWeek, authorId: ActorId(),
+            overallSatisfaction: 3, visibility: .sharedWithGuardians
+        )
+
+        let listViewModel = WeeklyHistoryListViewModel(coordinationService: coordinator, athleteId: athleteId, currentWeekStart: currentWeekStart)
+        listViewModel.loadInitial()
+
+        let includedWeeks = Set(listViewModel.summaries.map(\.weekStart))
+        #expect(includedWeeks.contains(plannedOnlyWeek))
+        #expect(includedWeeks.contains(loggedOnlyWeek))
+        #expect(includedWeeks.contains(reflectionOnlyWeek))
+        #expect(!includedWeeks.contains(emptyWeek))
+
+        // Newest qualifying week first.
+        #expect(listViewModel.summaries.first?.weekStart == plannedOnlyWeek)
+    }
+}
+
+@Suite("WeeklyHistoryViewModel.reflectionAccessState (final privacy gate for Weekly History Reflection actions)", .serialized)
+struct WeeklyHistoryReflectionAccessStateTests {
+
+    private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
+
+    private static func makeViewModel(container: ModelContainer, athleteId: AthleteId) -> (WeeklyHistoryViewModel, WeeklyReflectionRepository) {
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let viewModel = WeeklyHistoryViewModel(coordinationService: coordinator, athleteId: athleteId, weekStart: weekStart)
+        return (viewModel, weeklyReflectionRepository)
+    }
+
+    @Test("Case B: a visible/shared historical Reflection is exposed for editing to an authorized actor")
+    @MainActor
+    func visibleReflectionIsEditable() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let (viewModel, reflectionRepository) = Self.makeViewModel(container: container, athleteId: athleteId)
+        let reflectionService = WeeklyReflectionService(repository: reflectionRepository)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: Self.weekStart, authorId: ActorId(),
+            whatWorked: "Consistent sleep", visibility: .sharedWithGuardians
+        )
+
+        viewModel.load()
+
+        guard case .visible(let reflection) = viewModel.reflectionAccessState else {
+            Issue.record("Expected .visible — got \(viewModel.reflectionAccessState)"); return
+        }
+        #expect(reflection.whatWorked == "Consistent sleep")
+    }
+
+    @Test("Case C: a privateToAthlete Reflection is never exposed as content to the Parent actor")
+    @MainActor
+    func privateReflectionContentNeverExposed() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let (viewModel, reflectionRepository) = Self.makeViewModel(container: container, athleteId: athleteId)
+        let reflectionService = WeeklyReflectionService(repository: reflectionRepository)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: Self.weekStart, authorId: ActorId(),
+            whatWorked: "Private athlete-only note", visibility: .privateToAthlete
+        )
+
+        viewModel.load()
+
+        // Never .visible — content must not be reachable through this
+        // state at all.
+        guard case .hiddenForPrivacy = viewModel.reflectionAccessState else {
+            Issue.record("Expected .hiddenForPrivacy — got \(viewModel.reflectionAccessState)"); return
+        }
+    }
+
+    @Test("Case C: Parent does not receive an Edit path for a private athlete Reflection")
+    @MainActor
+    func privateReflectionOffersNoEditPath() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let (viewModel, reflectionRepository) = Self.makeViewModel(container: container, athleteId: athleteId)
+        let reflectionService = WeeklyReflectionService(repository: reflectionRepository)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: Self.weekStart, authorId: ActorId(),
+            visibility: .privateToAthlete
+        )
+
+        viewModel.load()
+
+        // .hiddenForPrivacy carries no reflection payload at all — the
+        // view has no reflection value to wire an Edit action to,
+        // structurally, not merely by convention.
+        if case .visible = viewModel.reflectionAccessState {
+            Issue.record("A private reflection must never surface as .visible, which is the only case the view offers Edit for")
+        }
+    }
+
+    @Test("Case C: a hidden private Reflection is never mistaken for missing — Add is never offered where a Reflection already exists")
+    @MainActor
+    func hiddenPrivateReflectionIsNotMistakenForMissing() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let (viewModel, reflectionRepository) = Self.makeViewModel(container: container, athleteId: athleteId)
+        let reflectionService = WeeklyReflectionService(repository: reflectionRepository)
+        _ = try reflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: Self.weekStart, authorId: ActorId(),
+            visibility: .privateToAthlete
+        )
+
+        viewModel.load()
+
+        // Must be .hiddenForPrivacy, never .none — .none is the only
+        // case the view offers "Add Reflection" for, and offering it
+        // here would risk creating a competing/duplicate Reflection
+        // for an athlete/week that already has one.
+        if case .none = viewModel.reflectionAccessState {
+            Issue.record("A private (existing) reflection must never be reported as .none — that would offer Add and risk a duplicate")
+        }
+
+        // Confirms the underlying data genuinely distinguishes the two
+        // states: the reflection really does exist in the repository.
+        let persisted = try reflectionRepository.fetchWeeklyReflection(forAthlete: athleteId, weekStart: Self.weekStart)
+        #expect(persisted != nil)
+    }
+
+    @Test("Case A: a genuinely missing Reflection exposes the Add path")
+    @MainActor
+    func genuinelyMissingReflectionExposesAddPath() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let (viewModel, _) = Self.makeViewModel(container: container, athleteId: athleteId)
+        // No reflection recorded at all for this athlete/week.
+
+        viewModel.load()
+
+        guard case .none = viewModel.reflectionAccessState else {
+            Issue.record("Expected .none — got \(viewModel.reflectionAccessState)"); return
+        }
+    }
+}

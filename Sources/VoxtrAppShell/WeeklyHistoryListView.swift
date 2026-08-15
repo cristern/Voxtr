@@ -36,8 +36,13 @@ public struct WeeklyHistoryListView: View {
                     makeDetailView(summary.weekStart)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(WeekIdentityFormatter.identityLabel(forWeekStart: summary.weekStart, referenceWeekStart: currentWeekStart))
+                        Text(WeekIdentityFormatter.stableIdentityLabel(forWeekStart: summary.weekStart))
                             .font(.headline)
+                        if let context = WeekIdentityFormatter.contextualLabel(for: summary.weekStart, referenceWeekStart: currentWeekStart) {
+                            Text(context)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                         Text("Planned \(summary.plannedCount) · Completed from plan \(summary.completedFromPlanCount) · Additional \(summary.additionalCount)")
                             .font(.caption)
                             .foregroundStyle(.secondary)

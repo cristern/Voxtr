@@ -67,20 +67,31 @@ public final class WeeklyHistoryListViewModel {
         for _ in 0..<Self.pageSize {
             do {
                 let result = try coordinationService.weeklyReview(forAthlete: athleteId, weekStart: cursor)
-                let completed = result.plannedActivities.filter(\.isCompleted).count
-                let additional = result.loggedActivities.filter { $0.plannedActivityId == nil }.count
-                newSummaries.append(WeeklyHistorySummary(
-                    weekStart: cursor,
-                    plannedCount: result.plannedActivities.count,
-                    completedFromPlanCount: completed,
-                    additionalCount: additional
-                ))
+                // Issue 4: a week appears only when it has at least one
+                // piece of canonical data — planned, logged, or a
+                // Reflection. `Focus next week` is part of Reflection
+                // and never independently qualifies a week; no
+                // placeholder history record is created for an empty
+                // week, it's simply omitted from this list.
+                let hasData = !result.plannedActivities.isEmpty
+                    || !result.loggedActivities.isEmpty
+                    || result.weeklyReflection != nil
+                if hasData {
+                    let completed = result.plannedActivities.filter(\.isCompleted).count
+                    let additional = result.loggedActivities.filter { $0.plannedActivityId == nil }.count
+                    newSummaries.append(WeeklyHistorySummary(
+                        weekStart: cursor,
+                        plannedCount: result.plannedActivities.count,
+                        completedFromPlanCount: completed,
+                        additionalCount: additional
+                    ))
+                }
             } catch {
                 errorMessage = "Could not load some weeks."
             }
             cursor = cursor.adding(days: -7)
         }
         summaries.append(contentsOf: newSummaries)
-        oldestLoadedWeekStart = newSummaries.last?.weekStart ?? oldestLoadedWeekStart
+        oldestLoadedWeekStart = cursor.adding(days: 7)
     }
 }
