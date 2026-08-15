@@ -41,6 +41,9 @@ Reuse canonical services/read models where they already exist.
 - Push only the task branch.
 - Stop after push and wait for review/approval.
 - A branch is considered finished after its PR is merged; use a new branch for subsequent fixes.
+- One Claude Code task branch should normally correspond to one PR.
+- Once that PR has been merged, that task branch is considered finished.
+- Any subsequent fix discovered after merge/Codemagic/TestFlight should normally use a new task branch from the latest develop rather than reusing the merged branch.
 
 ## 5. Scope discipline
 - Make the smallest complete change that satisfies the approved task.
