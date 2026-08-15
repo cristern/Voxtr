@@ -146,6 +146,16 @@ At the end of each implementation task report:
 
 ## 13. Merge gate
 Claude Code must never treat its own implementation as approval to merge.
+Claude Code must never merge on its own initiative.
+
+After explicit approval from the user/product/architecture reviewer, Claude Code may merge the approved task branch into `develop`.
+
+Before merging, Claude must verify:
+- the approved branch is unchanged since review
+- the intended PR/diff matches what was approved
+- no new commits or unrelated changes have appeared
+
+Claude Code must never merge to `main` unless explicitly instructed.
 
 The required lifecycle is:
 Claude Code task branch
