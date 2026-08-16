@@ -128,6 +128,7 @@ public final class LogActivityViewModel {
         // exactly. Not required when logging as not completed (missed —
         // nothing happened to measure).
         let outcomeStatus: ActivityStatus = isCompleted ? .completed : .missed
+        let durationIsRequired = TrainingValidator.requiresActualDuration(for: outcomeStatus)
         if let durationError = TrainingValidator.validateActualDuration(durationMinutes, for: outcomeStatus) {
             errorMessage = durationError
             return false
@@ -155,12 +156,20 @@ public final class LogActivityViewModel {
                 activityType: plannedActivity.activityType,
                 title: plannedActivity.title,
                 startedAt: Self.startedAt(for: plannedActivity),
-                // Validated above when required (completed); when not
-                // required and left unset (missed), `1` is the schema's
-                // own documented minimum placeholder — never a
-                // fabricated real duration (see `TrainingService`'s own
-                // doc comment on this exact convention).
-                durationMinutes: durationMinutes.map { max(1, min(1440, $0)) } ?? 1,
+                // Review follow-up (duration placeholder audit): when
+                // duration is NOT required (missed), `1` — the schema's
+                // own documented minimum placeholder — is sent
+                // UNCONDITIONALLY, never whatever happens to be sitting
+                // in `durationMinutes` (commonly the plan's own
+                // prefilled value, still present if the parent flipped
+                // "Completed" off without clearing the field). Sending
+                // that value here would fabricate a specific, plausible
+                // "actual" duration for a session that never happened —
+                // exactly what the placeholder convention exists to
+                // prevent. Only genuinely required (completed) values —
+                // validated above, so guaranteed non-nil and in range —
+                // are ever sent through as entered.
+                durationMinutes: durationIsRequired ? (durationMinutes.map { max(1, min(1440, $0)) } ?? 1) : 1,
                 status: outcomeStatus,
                 perceivedExertion: perceivedExertion,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,

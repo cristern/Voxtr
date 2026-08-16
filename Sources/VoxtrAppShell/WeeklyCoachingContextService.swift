@@ -105,8 +105,29 @@ public final class WeeklyCoachingContextService {
             previousWeekStart: previousWeekStart,
             weekPlanStatus: analysedWeek.weekPlan?.status,
             plannedActivityCount: analysedWeek.plannedActivities.count,
-            completedPlannedActivityCount: analysedWeek.plannedActivities.filter(\.isCompleted).count,
-            uncompletedPlannedActivityCount: analysedWeek.plannedActivities.filter { !$0.isCompleted }.count,
+            // Review follow-up (cancellation sanity check, round 2):
+            // `isGenuinelyCompleted`, not the broader `isCompleted` —
+            // see `PlannedActivityCompletion`'s own doc comment.
+            // `isCompleted` means "an outcome was resolved" (any
+            // status, including Missed/Cancelled); this is consumed by
+            // `CoachingAnalysisInputMapper` -> `CoachingEngine`, whose
+            // `.allPlannedActivitiesCompleted`/`.somePlannedActivitiesMissed`
+            // insights (presented as "All/Some planned activities
+            // were(n't) completed this week") must never count a
+            // cancelled or missed activity as completed training.
+            // `uncompletedPlannedActivityCount` is the complement of
+            // the SAME genuine-completion check (not a separate
+            // "still pending" bucket) — this codebase's existing
+            // Coaching contract has exactly two buckets, completed and
+            // not-completed; introducing a third ("cancelled, neither")
+            // would be a new product decision this task does not make.
+            // A cancelled or missed activity is, factually, "not
+            // completed this week" — the same true statement the
+            // presentation text already makes — so it belongs here,
+            // exactly where a never-logged planned activity already
+            // does.
+            completedPlannedActivityCount: analysedWeek.plannedActivities.filter(\.isGenuinelyCompleted).count,
+            uncompletedPlannedActivityCount: analysedWeek.plannedActivities.filter { !$0.isGenuinelyCompleted }.count,
             unplannedLoggedActivityCount: analysedWeek.loggedActivities.filter { $0.plannedActivityId == nil }.count,
             totalLoggedActivityCount: analysedWeek.loggedActivities.count,
             weeklyReflection: weeklyReflection,

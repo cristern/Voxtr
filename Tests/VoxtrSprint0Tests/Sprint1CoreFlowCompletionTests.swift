@@ -1270,6 +1270,55 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 
+    /// Review follow-up (duration placeholder audit): the exact leak
+    /// found and fixed — `durationMinutes` is prefilled from the plan's
+    /// own `plannedDurationMinutes` at init, so logging as NOT completed
+    /// without clearing that field must never persist the leftover
+    /// planned value as if it were a real, measured "actual" duration.
+    /// The stored value for a Missed log must always be the schema's
+    /// documented `1`-minute placeholder — never a fabricated real
+    /// number for a session that never happened.
+    @Test("Logging as NOT completed always stores the 1-minute placeholder duration, never the leftover prefilled planned duration")
+    @MainActor
+    func loggingNotCompletedNeverLeaksThePrefilledPlannedDuration() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        // Prefilled from the plan — never touched by the user.
+        #expect(logViewModel.durationMinutes == 30)
+        logViewModel.isCompleted = false
+
+        #expect(logViewModel.save())
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.status == .missed)
+        // The leftover planned value (30) must never leak through as
+        // the actual/logged duration.
+        #expect(links.first?.durationMinutes == 1)
+    }
+
     // MARK: - Planned/Logged Activity lifecycle consistency cleanup: actual duration required for Completed
 
     @Test("Logging a completed planned activity with no duration entered is blocked entirely — nothing is created")

@@ -138,11 +138,17 @@ public struct WeeklyReviewView: View {
                         HStack {
                             Text(item.plannedActivity.title)
                             Spacer()
-                            Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                            // Review follow-up (duration/completion
+                            // placeholder audit): `isGenuinelyCompleted`,
+                            // not `isCompleted` — a Cancelled or Missed
+                            // activity must never show as "Completed"
+                            // here, the same fix already applied to
+                            // Weekly History's equivalent row label.
+                            Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
                                 .font(.caption)
-                                .foregroundStyle(item.isCompleted ? .green : .secondary)
+                                .foregroundStyle(item.isGenuinelyCompleted ? .green : .secondary)
                                 .accessibilityLabel(
-                                    Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                    Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
                                 )
                         }
                         // Planned -> actual, using the exact same
@@ -166,12 +172,31 @@ public struct WeeklyReviewView: View {
         }
     }
 
+    /// Review follow-up (duration/logged-consumer audit): duration and
+    /// RPE are presented as "Actual: ..." only for outcomes where
+    /// something genuinely happened (`.completed`/`.partiallyCompleted`)
+    /// — `LoggedActivity.durationMinutes` for `.missed`/`.cancelled` is
+    /// the schema's own non-optional-`Int` placeholder (always `1`,
+    /// never a real measurement; see `TrainingService.logActivity`'s
+    /// own doc comment on this exact convention), and must never be
+    /// presented as if it were factual "Actual" training data. RPE is
+    /// never collected for either outcome either (nothing to rate), so
+    /// this covers both fields the same way.
     private static func actualSubtitle(for loggedActivity: LoggedActivity) -> String {
-        var parts = ["\(loggedActivity.durationMinutes) min"]
-        if let rpe = loggedActivity.perceivedExertion {
-            parts.append("RPE \(rpe)")
+        switch loggedActivity.status {
+        case .completed, .partiallyCompleted:
+            var parts = ["\(loggedActivity.durationMinutes) min"]
+            if let rpe = loggedActivity.perceivedExertion {
+                parts.append("RPE \(rpe)")
+            }
+            return "Actual: " + parts.joined(separator: " · ")
+        case .missed:
+            return "Missed"
+        case .cancelled:
+            return "Cancelled"
+        case .scheduled:
+            return "Scheduled"
         }
-        return "Actual: " + parts.joined(separator: " · ")
     }
 
     private func loggedActivitiesSection(_ result: WeeklyReviewResult) -> some View {
@@ -184,7 +209,13 @@ public struct WeeklyReviewView: View {
                 ForEach(result.loggedActivities, id: \.id) { activity in
                     VStack(alignment: .leading) {
                         Text(activity.title)
-                        Text("\(activity.durationMinutes) min")
+                        // Review follow-up (duration/logged-consumer
+                        // audit): reuses the SAME `actualSubtitle`
+                        // outcome-aware text `plannedActivitiesSection`
+                        // above already uses — a Cancelled/Missed entry
+                        // here must show its outcome, never its
+                        // placeholder duration presented as if real.
+                        Text(Self.actualSubtitle(for: activity))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

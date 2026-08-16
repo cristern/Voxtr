@@ -76,9 +76,16 @@ public struct DailyTrainingView: View {
                                     }
                                 }
                                 Spacer()
-                                Text(item.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                                // Review follow-up (duration/completion
+                                // placeholder audit): `isGenuinelyCompleted`,
+                                // not `isCompleted` — the same fix
+                                // already applied to Weekly Review/
+                                // History's equivalent row label. A
+                                // Cancelled or Missed activity must
+                                // never show as "Completed" here.
+                                Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
                                     .font(.caption)
-                                    .foregroundStyle(item.isCompleted ? .green : .secondary)
+                                    .foregroundStyle(item.isGenuinelyCompleted ? .green : .secondary)
                             }
                         }
                         .accessibilityIdentifier("training.plannedActivityRow.\(item.plannedActivity.id.uuidString)")
@@ -123,7 +130,12 @@ public struct DailyTrainingView: View {
                     ForEach(viewModel.loggedActivities, id: \.id) { activity in
                         VStack(alignment: .leading) {
                             Text(activity.title)
-                            Text("\(activity.durationMinutes) min")
+                            // Review follow-up (duration/logged-consumer
+                            // audit): a Cancelled/Missed entry must show
+                            // its outcome, never present its schema
+                            // placeholder duration as if it were real
+                            // training time.
+                            Text(Self.durationOrOutcomeSubtitle(for: activity))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -234,6 +246,25 @@ public struct DailyTrainingView: View {
                 proxy.scrollTo("dailyTraining.top", anchor: .top)
             }
         }
+        }
+    }
+
+    /// Review follow-up (duration/logged-consumer audit): duration is
+    /// shown only for outcomes where something genuinely happened
+    /// (`.completed`/`.partiallyCompleted`) — `LoggedActivity.durationMinutes`
+    /// for `.missed`/`.cancelled` is the schema's own non-optional-`Int`
+    /// placeholder (always `1`, never a real measurement), and must
+    /// never be presented as if it were factual training time.
+    private static func durationOrOutcomeSubtitle(for activity: LoggedActivity) -> String {
+        switch activity.status {
+        case .completed, .partiallyCompleted:
+            return "\(activity.durationMinutes) min"
+        case .missed:
+            return "Missed"
+        case .cancelled:
+            return "Cancelled"
+        case .scheduled:
+            return "Scheduled"
         }
     }
 }

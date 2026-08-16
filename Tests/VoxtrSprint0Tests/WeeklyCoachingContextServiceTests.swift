@@ -7,6 +7,7 @@ import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoachingDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -117,6 +118,106 @@ struct WeeklyCoachingContextServiceTests {
         #expect(context.weeklyReflection?.whatWorked == "Consistency")
         #expect(context.parentObservations.count == 1)
         #expect(context.parentObservations.first?.text == "Looked strong.")
+    }
+
+    /// Review follow-up (cancellation sanity check, round 2): the exact
+    /// same completion-semantics bug found in Weekly History also
+    /// existed here — `completedPlannedActivityCount` used to count
+    /// Cancelled/Missed as completed training, which would have fed
+    /// `CoachingEngine` (via `CoachingAnalysisInputMapper`) a false
+    /// "all planned activities completed" signal. This proves the fix
+    /// across every outcome the engine's two-bucket completed/
+    /// not-completed contract distinguishes.
+    @Test("completedPlannedActivityCount/uncompletedPlannedActivityCount use genuine completion — Cancelled and Missed both count as not-completed, never as completed")
+    @MainActor
+    func completionCountsExcludeCancelledAndMissed() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReviewCoordinationService = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let contextService = WeeklyCoachingContextService(
+            weeklyReviewProvider: weeklyReviewCoordinationService,
+            parentObservationProvider: EmptyParentObservationProvider()
+        )
+        let planning = PlanningService(repository: planningRepository)
+        let training = TrainingService(repository: trainingRepository)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
+
+        let completed = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Completed run", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        let partiallyCompleted = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Partially completed session", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        let cancelled = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Cancelled swim", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        let missed = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Missed session", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        // A fifth planned activity is left entirely unlogged —
+        // "still unresolved/planned," the same bucket this contract
+        // already put a never-logged activity in before Cancel existed.
+        _ = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Not yet logged", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+
+        let referenceStart = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: completed.plannedActivityId,
+            activityType: .individualTraining, title: "Completed run", startedAt: referenceStart,
+            durationMinutes: 40, status: .completed
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: partiallyCompleted.plannedActivityId,
+            activityType: .individualTraining, title: "Partially completed session", startedAt: referenceStart,
+            durationMinutes: 20, status: .partiallyCompleted
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: cancelled.plannedActivityId,
+            activityType: .individualTraining, title: "Cancelled swim", startedAt: referenceStart,
+            durationMinutes: 1, status: .cancelled
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: missed.plannedActivityId,
+            activityType: .individualTraining, title: "Missed session", startedAt: referenceStart,
+            durationMinutes: 1, status: .missed
+        )
+
+        let context = try contextService.weeklyCoachingContext(forAthlete: athleteId, weekStart: Self.weekStart)
+
+        #expect(context.plannedActivityCount == 5)
+        // Completed + PartiallyCompleted only.
+        #expect(context.completedPlannedActivityCount == 2)
+        // Cancelled + Missed + never-logged.
+        #expect(context.uncompletedPlannedActivityCount == 3)
+        // The two counts fully partition the total — no activity is
+        // silently dropped from both.
+        #expect(context.completedPlannedActivityCount + context.uncompletedPlannedActivityCount == context.plannedActivityCount)
+
+        // The exact boundary CoachingAnalysisInputMapper/CoachingEngine
+        // actually consume — proves the fix reaches the real decision
+        // input, not just the intermediate DTO.
+        let analysisInput = CoachingAnalysisInputMapper().map(context)
+        #expect(analysisInput.uncompletedPlannedActivityCount == 3)
+        let result = CoachingEngine().analyse(analysisInput)
+        #expect(result.insights.contains(.somePlannedActivitiesMissed))
+        #expect(!result.insights.contains(.allPlannedActivitiesCompleted))
     }
 
     @Test("Parent observations outside the analysed week's date range are excluded")
