@@ -96,6 +96,98 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.activity.location == "Nadderud Stadion")
     }
 
+    // MARK: - Post-mutation navigation and stale-state consistency audit (Issue A)
+
+    /// Issue A's exact contract: a successful log through
+    /// `ActivityDetailViewModel.makeLogActivityViewModel()` must not
+    /// only flip `isCompleted` locally — it must also fire the explicit
+    /// `onActivityLogged` signal the screen that pushed Activity Detail
+    /// relies on to reload its own authoritative data. Exercised at the
+    /// ViewModel/contract level (not via real SwiftUI navigation, which
+    /// is not something Swift Testing can drive) — this is the
+    /// deterministic, testable half of the fix; the SwiftUI wiring at
+    /// each of the 5 call sites is what actually connects this signal
+    /// to each source screen's own `load`/`refresh` method.
+    @Test("A successful log fires onActivityLogged, so the screen that pushed Activity Detail can reload its own data")
+    @MainActor
+    func successfulLogFiresOnActivityLoggedCallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+
+        let logViewModel = viewModel.makeLogActivityViewModel()
+        logViewModel.sessionForm = 3
+
+        #expect(logViewModel.save())
+        #expect(viewModel.isCompleted == true)
+        #expect(reloadCallCount == 1)
+    }
+
+    /// A failed log (Form required but missing) must neither flip
+    /// `isCompleted` nor fire `onActivityLogged` — the same "no false
+    /// refresh on failure" contract required for the successful path
+    /// above.
+    @Test("A failed log does not fire onActivityLogged and does not flip isCompleted")
+    @MainActor
+    func failedLogDoesNotFireOnActivityLoggedCallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+
+        let logViewModel = viewModel.makeLogActivityViewModel()
+        // sessionForm left nil — Form is required for a completed log.
+
+        #expect(logViewModel.save() == false)
+        #expect(viewModel.isCompleted == false)
+        #expect(reloadCallCount == 0)
+    }
+
     // MARK: - VX-022 closeout: Activity Detail RPE / Form
 
     /// Builds an `ActivityDetailViewModel` the same way `ActivityDetailViewLoader`

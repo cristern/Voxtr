@@ -86,6 +86,59 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.activities.isEmpty)
     }
 
+    // MARK: - Post-mutation navigation and stale-state consistency audit (Issue B)
+
+    @Test("A successful add increments successfulAddActivityTrigger, so the view can signal it back to the top of the list")
+    @MainActor
+    func addActivitySuccessIncrementsSuccessfulAddActivityTrigger() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        #expect(viewModel.successfulAddActivityTrigger == 0)
+
+        viewModel.newActivityTitle = "Endurance run"
+        viewModel.addActivity()
+        #expect(viewModel.successfulAddActivityTrigger == 1)
+
+        // A second successful add in the same session must increment
+        // again — a Bool would only ever transition once, which is why
+        // this mirrors DailyTrainingViewModel.successfulLogTrigger's own
+        // counter shape rather than a Bool.
+        viewModel.newActivityTitle = "Mobility session"
+        viewModel.addActivity()
+        #expect(viewModel.successfulAddActivityTrigger == 2)
+    }
+
+    @Test("A failed add does not increment successfulAddActivityTrigger")
+    @MainActor
+    func addActivityFailureDoesNotIncrementSuccessfulAddActivityTrigger() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = ""
+
+        viewModel.addActivity()
+
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.successfulAddActivityTrigger == 0)
+    }
+
     @Test("Editing an activity updates its title")
     @MainActor
     func editActivityUpdatesTitle() throws {

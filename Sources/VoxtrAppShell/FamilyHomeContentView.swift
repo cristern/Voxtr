@@ -144,7 +144,8 @@ public struct FamilyHomeContentView: View {
                             planningService: planningService,
                             trainingService: trainingService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            actorId: ActorId(rawValue: family.participant.id)
+                            actorId: ActorId(rawValue: family.participant.id),
+                            onActivityLogged: { viewModel.refresh() }
                         )
                     }
                 case .reflection(let athleteId):
@@ -419,7 +420,8 @@ public struct FamilyHomeContentView: View {
             athleteDisplayName: row.athleteName,
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
-            trainingReflectionCoordinationService: trainingReflectionCoordinationService
+            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            onActivityLogged: { viewModel.refresh() }
         )
     }
 }

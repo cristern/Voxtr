@@ -43,6 +43,14 @@ public struct RecurringOccurrencePreviewView: View {
     let trainingService: TrainingService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     let actorId: ActorId
+    /// Post-mutation navigation and stale-state consistency audit: the
+    /// same explicit reload signal `ActivityDetailViewLoader` now
+    /// carries, threaded through here too — this screen also sits
+    /// between a "Log Activity" mutation and the surface that pushed
+    /// it (Family Home, Athlete Home, Daily Training, Family Schedule),
+    /// and dismisses itself on successful log the same way. Defaulted
+    /// to a no-op so existing call sites/tests are unaffected.
+    let onActivityLogged: () -> Void
 
     @State private var editSheetItem: RecurringEditSheetItem?
     @State private var materializedActivity: MaterializedActivityItem?
@@ -55,7 +63,8 @@ public struct RecurringOccurrencePreviewView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        actorId: ActorId
+        actorId: ActorId,
+        onActivityLogged: @escaping () -> Void = {}
     ) {
         self.suggestion = suggestion
         self.athleteDisplayName = athleteDisplayName
@@ -63,6 +72,7 @@ public struct RecurringOccurrencePreviewView: View {
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
+        self.onActivityLogged = onActivityLogged
     }
 
     public var body: some View {
@@ -119,7 +129,10 @@ public struct RecurringOccurrencePreviewView: View {
                     athleteDisplayName: athleteDisplayName,
                     authorId: actorId,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    onLogged: { dismiss() }
+                    onLogged: {
+                        onActivityLogged()
+                        dismiss()
+                    }
                 )
             )
         }

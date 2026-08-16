@@ -39,7 +39,15 @@ public struct WeeklyPlanningView: View {
     }
 
     public var body: some View {
+        ScrollViewReader { proxy in
         Form {
+            // Post-mutation navigation and stale-state consistency
+            // audit (Issue B): an invisible top anchor for the
+            // scroll-to-top-after-add fix below — same mechanism
+            // DailyTrainingView already established for its own inline
+            // "Log an activity" form.
+            Color.clear.frame(height: 0).id("weeklyPlanning.top")
+
             Section {
                 HStack {
                     Text(athleteDisplayName)
@@ -126,7 +134,8 @@ public struct WeeklyPlanningView: View {
                             athleteDisplayName: athleteDisplayName,
                             actorId: actorId,
                             planningService: planningService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                            onActivityLogged: { viewModel.loadOrCreateWeekPlan() }
                         )
                     } label: {
                         VStack(alignment: .leading) {
@@ -187,6 +196,16 @@ public struct WeeklyPlanningView: View {
         }
         .sheet(isPresented: $isManagingRecurringActivities) {
             RecurringActivityManagementView(viewModel: viewModel, athleteDisplayName: athleteDisplayName)
+        }
+        .onChange(of: viewModel.successfulAddActivityTrigger) { _, _ in
+            // Only fires when an add genuinely succeeded — never on
+            // validation failure, persistence failure, or opening the
+            // form. Same rationale as DailyTrainingView's own identical
+            // `.onChange(of: successfulLogTrigger)`.
+            withAnimation {
+                proxy.scrollTo("weeklyPlanning.top", anchor: .top)
+            }
+        }
         }
     }
 

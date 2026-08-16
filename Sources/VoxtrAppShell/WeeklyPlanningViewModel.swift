@@ -22,6 +22,20 @@ public final class WeeklyPlanningViewModel {
     public var newActivityLocation: String = ""
     public var newActivityHasStartTime: Bool = false
     public var newActivityStartTime: Date = .now
+    /// Post-mutation navigation and stale-state consistency audit
+    /// (Issue B): increments on every SUCCESSFUL `addActivity()` only —
+    /// never on validation failure or persistence failure. Same "simple
+    /// counter, not a Bool" shape as `DailyTrainingViewModel.successfulLogTrigger`
+    /// (its own doc comment explains why: `.onChange` must fire on
+    /// every success, not only a false->true transition, so a second
+    /// add in the same session still triggers the view's own
+    /// scroll-to-top). The "Add activity" form here is inline on this
+    /// same screen, exactly like Daily Training's own "Log an activity"
+    /// section — there is no separate screen to dismiss, so the fix is
+    /// the same one already established there: an explicit signal the
+    /// view uses to scroll back to the top of the list, not a new
+    /// navigation architecture.
+    public private(set) var successfulAddActivityTrigger: Int = 0
 
     /// Derived fresh on every load/mutation, never persisted. Reflects
     /// `dismissedSuggestionIds` below — a dismissed occurrence is
@@ -148,6 +162,7 @@ public final class WeeklyPlanningViewModel {
             newActivityHasStartTime = false
             newActivityStartTime = .now
             try reloadActivities(for: weekPlan)
+            successfulAddActivityTrigger += 1
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)
         } catch {

@@ -29,6 +29,16 @@ public struct ActivityDetailViewLoader: View {
     let actorId: ActorId
     let planningService: PlanningService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Post-mutation navigation and stale-state consistency audit: the
+    /// caller's own reload/refresh entry point — called the moment a
+    /// log genuinely succeeds inside `ActivityDetailView`, so the
+    /// screen this loader was pushed from (Family Home, Athlete Home,
+    /// Daily Training, Family Schedule, Weekly Planning) reflects the
+    /// new completion state immediately when it becomes visible again,
+    /// rather than relying solely on `.onAppear` refiring reliably
+    /// after this deep a push/sheet/pop chain. Defaulted to a no-op so
+    /// existing call sites/tests are unaffected.
+    let onActivityLogged: () -> Void
     @State private var viewModel: ActivityDetailViewModel?
 
     public init(
@@ -38,7 +48,8 @@ public struct ActivityDetailViewLoader: View {
         athleteDisplayName: String,
         actorId: ActorId,
         planningService: PlanningService,
-        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        onActivityLogged: @escaping () -> Void = {}
     ) {
         self.plannedActivity = plannedActivity
         self.isCompleted = isCompleted
@@ -47,6 +58,7 @@ public struct ActivityDetailViewLoader: View {
         self.actorId = actorId
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.onActivityLogged = onActivityLogged
     }
 
     public var body: some View {
@@ -80,7 +92,8 @@ public struct ActivityDetailViewLoader: View {
                 isWeekPlanDraft: isDraft,
                 deletedByActorId: actorId,
                 planningService: planningService,
-                trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                onActivityLogged: onActivityLogged
             )
         }
     }

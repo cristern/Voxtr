@@ -245,7 +245,11 @@ public struct HomeDashboardView: View {
                     athleteDisplayName: athleteDisplayName,
                     actorId: committedByActorId,
                     planningService: planningService,
-                    trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    onActivityLogged: {
+                        viewModel.loadTodaysTraining()
+                        viewModel.loadTodayActivityRows()
+                    }
                 )
             } label: {
                 HStack {
@@ -279,7 +283,11 @@ public struct HomeDashboardView: View {
                     planningService: planningService,
                     trainingService: trainingService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    actorId: committedByActorId
+                    actorId: committedByActorId,
+                    onActivityLogged: {
+                        viewModel.loadTodaysTraining()
+                        viewModel.loadTodayActivityRows()
+                    }
                 )
             } label: {
                 HStack {

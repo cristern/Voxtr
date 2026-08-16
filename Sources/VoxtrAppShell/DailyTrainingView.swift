@@ -63,7 +63,8 @@ public struct DailyTrainingView: View {
                                 athleteDisplayName: athleteDisplayName,
                                 actorId: actorId,
                                 planningService: planningService,
-                                trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                onActivityLogged: { viewModel.load() }
                             )
                         } label: {
                             HStack {
@@ -97,7 +98,8 @@ public struct DailyTrainingView: View {
                                 planningService: planningService,
                                 trainingService: trainingService,
                                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                actorId: actorId
+                                actorId: actorId,
+                                onActivityLogged: { viewModel.load() }
                             )
                         } label: {
                             HStack {

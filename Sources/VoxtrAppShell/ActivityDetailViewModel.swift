@@ -53,6 +53,20 @@ public final class ActivityDetailViewModel {
     private let deletedByActorId: ActorId
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Post-mutation navigation and stale-state consistency audit: the
+    /// explicit signal back to whichever screen pushed this one (Family
+    /// Home, Athlete Home, Daily Training, Family Schedule, Weekly
+    /// Planning), fired the moment a log genuinely succeeds — never a
+    /// mere `.onAppear` refire assumption. This screen already pops
+    /// itself on successful log (`ActivityDetailView`'s own
+    /// `.onChange(of: isCompleted)`); this closure is the deterministic
+    /// counterpart that tells the screen being popped BACK TO to reload
+    /// its own authoritative data, the same "explicit success signal,
+    /// not implicit SwiftUI lifecycle" principle `successfulLogTrigger`/
+    /// `onLogged` already establish elsewhere in this exact flow.
+    /// Defaulted to a no-op so existing construction sites/tests are
+    /// unaffected.
+    private let onActivityLogged: () -> Void
 
     public init(
         activity: PlannedActivity,
@@ -65,7 +79,8 @@ public final class ActivityDetailViewModel {
         isWeekPlanDraft: Bool,
         deletedByActorId: ActorId,
         planningService: PlanningService,
-        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        onActivityLogged: @escaping () -> Void = {}
     ) {
         self.activity = activity
         self.isCompleted = isCompleted
@@ -78,6 +93,7 @@ public final class ActivityDetailViewModel {
         self.deletedByActorId = deletedByActorId
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.onActivityLogged = onActivityLogged
         prefillEditForm()
     }
 
@@ -187,6 +203,7 @@ public final class ActivityDetailViewModel {
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             onLogged: { [weak self] in
                 self?.isCompleted = true
+                self?.onActivityLogged()
             }
         )
     }

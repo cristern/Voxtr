@@ -84,7 +84,8 @@ public struct FamilyScheduleView: View {
                     athleteDisplayName: familyRow.athleteName,
                     actorId: actorId,
                     planningService: planningService,
-                    trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    onActivityLogged: { viewModel.loadSchedule() }
                 )
             } label: {
                 rowContent(
@@ -106,7 +107,8 @@ public struct FamilyScheduleView: View {
                     planningService: planningService,
                     trainingService: trainingService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    actorId: actorId
+                    actorId: actorId,
+                    onActivityLogged: { viewModel.loadSchedule() }
                 )
             } label: {
                 HStack {
