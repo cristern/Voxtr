@@ -78,8 +78,18 @@ public struct WeeklyHistoryView: View {
                         HStack {
                             Text(completion.plannedActivity.title)
                             Spacer()
-                            if completion.isCompleted {
-                                Text("Completed").font(.caption).foregroundStyle(.secondary)
+                            // Review follow-up (cancellation sanity
+                            // check): the outcome, not a blanket
+                            // "Completed" — a cancelled or missed
+                            // planned activity must be shown as such,
+                            // never mislabeled as Completed. `nil` when
+                            // nothing has been logged at all yet (still
+                            // possible for a past week the athlete
+                            // never logged).
+                            if let status = completion.loggedActivity?.status {
+                                Text(Self.outcomeLabel(for: status))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -162,6 +172,21 @@ public struct WeeklyHistoryView: View {
                     isModal: true
                 )
             }
+        }
+    }
+
+    /// Review follow-up (cancellation sanity check): matches
+    /// `ActivityDetailView`'s own outcome-label mapping — the plain
+    /// canonical outcome, no color/interpretation added here (Weekly
+    /// History's own "no hero score, no interpretation" contract, per
+    /// this file's own doc comment above).
+    private static func outcomeLabel(for status: ActivityStatus) -> String {
+        switch status {
+        case .completed: return "Completed"
+        case .partiallyCompleted: return "Partially completed"
+        case .missed: return "Missed"
+        case .cancelled: return "Cancelled"
+        case .scheduled: return "Scheduled"
         }
     }
 }

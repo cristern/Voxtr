@@ -275,9 +275,10 @@ struct TrainingReflectionCoordinationServiceTests {
         let corrected = try coordinator.correctLoggedActivity(
             loggedActivityId: logged.loggedActivity.loggedActivityId,
             athleteId: athleteId, authorId: authorId,
-            perceivedExertion: 8, sessionForm: 2
+            durationMinutes: 45, perceivedExertion: 8, sessionForm: 2
         )
 
+        #expect(corrected.loggedActivity.durationMinutes == 45)
         #expect(corrected.loggedActivity.perceivedExertion == 8)
         guard case .saved(let reflection) = corrected.sessionFormOutcome else {
             Issue.record("Expected .saved"); return
@@ -311,7 +312,7 @@ struct TrainingReflectionCoordinationServiceTests {
         let corrected = try coordinator.correctLoggedActivity(
             loggedActivityId: logged.loggedActivity.loggedActivityId,
             athleteId: athleteId, authorId: authorId,
-            perceivedExertion: nil, sessionForm: 4
+            durationMinutes: 30, perceivedExertion: nil, sessionForm: 4
         )
 
         guard case .saved(let reflection) = corrected.sessionFormOutcome else {
@@ -344,7 +345,7 @@ struct TrainingReflectionCoordinationServiceTests {
             try coordinator.correctLoggedActivity(
                 loggedActivityId: logged.loggedActivity.loggedActivityId,
                 athleteId: otherAthleteId, authorId: authorId,
-                perceivedExertion: 9, sessionForm: nil
+                durationMinutes: 45, perceivedExertion: 9, sessionForm: nil
             )
         }
         // Untouched.

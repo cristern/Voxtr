@@ -45,6 +45,33 @@ public enum TrainingValidator {
         return nil
     }
 
+    /// Review follow-up (Planned/Logged Activity lifecycle consistency
+    /// cleanup): whether Form is required for a given canonical outcome —
+    /// the SAME rule `requiresActualDuration(for:)` below already
+    /// establishes for duration, since both represent "this genuinely
+    /// happened" facts. `.completed`/`.partiallyCompleted` require it;
+    /// `.missed`/`.cancelled` (nothing happened to rate) do not.
+    public static func requiresForm(for status: ActivityStatus) -> Bool {
+        switch status {
+        case .completed, .partiallyCompleted:
+            return true
+        case .missed, .cancelled, .scheduled:
+            return false
+        }
+    }
+
+    /// Status-aware counterpart to `validateForm(_:)` above — the SAME
+    /// canonical rule used for initial logging, reused here (not
+    /// duplicated) so correcting an already-logged activity can never
+    /// clear a required Form value: `LogActivityViewModel.save()` and
+    /// `ActivityDetailViewModel.saveLoggedActivityEdit()` both call this
+    /// one function rather than each encoding their own "is Form
+    /// required" exception.
+    public static func validateForm(_ value: Int?, for status: ActivityStatus) -> String? {
+        guard requiresForm(for: status) else { return nil }
+        return validateForm(value)
+    }
+
     /// Planned/Logged Activity lifecycle consistency cleanup: whether
     /// actual/logged duration is required for a given outcome —
     /// `.completed`/`.partiallyCompleted` genuinely happened, so a real

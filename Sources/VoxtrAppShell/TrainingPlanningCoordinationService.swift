@@ -35,6 +35,27 @@ public struct PlannedActivityCompletion {
         self.isCompleted = isCompleted
         self.loggedActivity = loggedActivity
     }
+
+    /// Review follow-up (cancellation sanity check): `isCompleted`
+    /// above means "an outcome has been resolved" — ANY `LoggedActivity`
+    /// link, regardless of its `status` (`.completed`, `.partiallyCompleted`,
+    /// `.missed`, OR `.cancelled` all set it `true`). That is exactly
+    /// right for gating "is there still something to log" (its original
+    /// purpose), but WRONG for any statistic that claims to count
+    /// "completed training" or "training volume" — those must use this
+    /// property instead, which applies the SAME canonical rule
+    /// `TrainingValidator.requiresActualDuration(for:)`/`requiresForm(for:)`
+    /// already establish for "this genuinely happened":
+    /// `.completed`/`.partiallyCompleted` only. A cancelled or missed
+    /// planned activity never counts here.
+    public var isGenuinelyCompleted: Bool {
+        switch loggedActivity?.status {
+        case .completed, .partiallyCompleted:
+            return true
+        case .missed, .cancelled, .scheduled, .none:
+            return false
+        }
+    }
 }
 
 @MainActor

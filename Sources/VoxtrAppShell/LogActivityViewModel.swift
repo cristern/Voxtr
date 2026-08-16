@@ -133,11 +133,15 @@ public final class LogActivityViewModel {
             return false
         }
 
-        // VX-022: Form is required for a COMPLETED log — checked here,
-        // before anything is created, so a completed log can never be
-        // reported as saved without it. Not required when logging as
-        // not completed (nothing happened to rate).
-        if isCompleted, let formError = TrainingValidator.validateForm(sessionForm) {
+        // VX-022 / review follow-up: Form is required for a COMPLETED
+        // log — checked here, before anything is created, so a
+        // completed log can never be reported as saved without it. Not
+        // required when logging as not completed (nothing happened to
+        // rate). Now routed through the SAME status-aware
+        // `TrainingValidator.validateForm(_:for:)` the Edit Logged
+        // Activity correction path uses, rather than this call site
+        // encoding its own separate `isCompleted` exception.
+        if let formError = TrainingValidator.validateForm(sessionForm, for: outcomeStatus) {
             errorMessage = formError
             return false
         }

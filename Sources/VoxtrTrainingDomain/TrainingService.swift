@@ -120,23 +120,30 @@ public final class TrainingService {
     }
 
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
-    /// Logged Activity -> RPE + Form): corrects the RPE already
-    /// recorded on an existing `LoggedActivity`. Athlete-scoped: only
-    /// ever operates on a `LoggedActivity` that already belongs to
+    /// Logged Activity -> RPE + Form), extended by review follow-up to
+    /// also correct actual duration: corrects the duration and RPE
+    /// already recorded on an existing `LoggedActivity`. Athlete-scoped:
+    /// only ever operates on a `LoggedActivity` that already belongs to
     /// `athleteId` — the same isolation every other athlete-scoped
     /// method here already provides. Never creates a `LoggedActivity`;
     /// `logActivity` remains the only way one comes into existence.
+    /// `durationMinutes` is always the schema's non-optional `Int` —
+    /// callers pass the corrected value when the caller's own UI
+    /// offered duration correction, or the activity's existing
+    /// unchanged value otherwise, so this call can never silently
+    /// rewrite a duration nobody asked to change.
     @discardableResult
     public func correctLoggedActivity(
         _ loggedActivityId: LoggedActivityId,
         athleteId: AthleteId,
+        durationMinutes: Int,
         perceivedExertion: Int?
     ) throws -> LoggedActivity {
         guard let activity = try repository.fetchLoggedActivity(byId: loggedActivityId),
               activity.athleteId == athleteId.rawValue else {
             throw TrainingServiceError.loggedActivityNotFound
         }
-        try repository.updateLoggedActivity(activity, perceivedExertion: perceivedExertion)
+        try repository.updateLoggedActivity(activity, durationMinutes: durationMinutes, perceivedExertion: perceivedExertion)
         return activity
     }
 }

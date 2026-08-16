@@ -77,7 +77,11 @@ public final class WeeklyHistoryListViewModel {
                     || !result.loggedActivities.isEmpty
                     || result.weeklyReflection != nil
                 if hasData {
-                    let completed = result.plannedActivities.filter(\.isCompleted).count
+                    // Review follow-up (cancellation sanity check):
+                    // `isGenuinelyCompleted`, not `isCompleted` — see
+                    // `PlannedActivityCompletion`'s own doc comment.
+                    // Missed/Cancelled must never inflate this count.
+                    let completed = result.plannedActivities.filter(\.isGenuinelyCompleted).count
                     let additional = result.loggedActivities.filter { $0.plannedActivityId == nil }.count
                     newSummaries.append(WeeklyHistorySummary(
                         weekStart: cursor,

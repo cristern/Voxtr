@@ -3,6 +3,33 @@ import VoxtrCoreContracts
 import VoxtrPlanningDomain
 
 /// Sprint 1 (Daily Use Foundation), Part 3.
+///
+/// Review follow-up (Planned/Logged Activity lifecycle consistency
+/// cleanup): the one clear UX contract for every edit/correction action
+/// this screen offers, and exactly which canonical entity each one
+/// mutates — never two ambiguously-named "Edit" actions:
+/// - **"Edit Planned Activity"** (shown while `canEditOrDelete`, i.e.
+///   the WeekPlan is still `.draft`) edits the historical PLAN only —
+///   `PlannedActivity` (title, activity type, planned date, planned
+///   start time, planned duration, notes, location), via
+///   `PlanningService.editPlannedActivity`. This remains available even
+///   after the activity has been logged, as long as the plan itself is
+///   still a draft — editing the plan does NOT change what was actually
+///   logged.
+/// - **"Log Activity"** (shown before any outcome is resolved) CREATES
+///   the `LoggedActivity` (and, if Form was entered, the linked
+///   `ActivityReflection`) via `TrainingReflectionCoordinationService.logActivity`.
+/// - **"Cancel Activity"** (shown before any outcome is resolved) also
+///   CREATES a `LoggedActivity`, with canonical status `.cancelled` —
+///   the same creation path as Log Activity, just a different outcome.
+/// - **"Edit Logged Activity"** (shown once a `LoggedActivity` exists,
+///   regardless of outcome) CORRECTS the actual, already-recorded
+///   result — `LoggedActivity.durationMinutes`/`.perceivedExertion` and
+///   the linked `ActivityReflection.bodyFeeling`, via
+///   `TrainingReflectionCoordinationService.correctLoggedActivity`. This
+///   is the ONLY action that touches `LoggedActivity`/`ActivityReflection`
+///   after they exist — see `LoggedActivityEditFormView`'s own doc
+///   comment.
 public struct ActivityDetailView: View {
     @State private var viewModel: ActivityDetailViewModel
     @State private var isEditing: Bool = false
@@ -96,6 +123,17 @@ public struct ActivityDetailView: View {
                         isEditingLoggedActivity = true
                     }
                     .accessibilityIdentifier("activityDetail.editLoggedActivityButton")
+
+                    // Review follow-up: only shown when BOTH actions
+                    // are simultaneously visible — the one moment the
+                    // distinction actually needs spelling out for the
+                    // person looking at the screen, not only in code
+                    // comments.
+                    if viewModel.canEditOrDelete {
+                        Text("Editing the plan below does not change what was actually logged — use Edit Logged Activity to correct the result.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if viewModel.canEditOrDelete {
@@ -273,16 +311,25 @@ struct ActivityEditFormView: View {
 }
 
 /// Planned/Logged Activity lifecycle consistency cleanup (Edit Logged
-/// Activity -> RPE + Form): a separate sheet, matching
+/// Activity -> RPE + Form), extended by review follow-up to also
+/// correct actual duration: a separate sheet, matching
 /// `ActivityEditFormView`'s own established shape, reusing
 /// `ActivityDetailViewModel`'s own edit fields directly (no duplicate
-/// editing logic). Loads the exact canonical RPE/Form values already
-/// displayed read-only on the parent screen (via
+/// editing logic). Loads the exact canonical duration/RPE/Form values
+/// already displayed read-only on the parent screen (via
 /// `prefillLoggedActivityEditForm()`, called before this sheet is
 /// presented) and writes back through
 /// `TrainingReflectionCoordinationService.correctLoggedActivity` (via
 /// `saveLoggedActivityEdit()`) — never a second, locally-tracked
 /// duration/status/form field.
+///
+/// This is the ONLY place actual (logged) duration, RPE, or Form can be
+/// corrected after logging — distinct from "Edit Planned Activity"
+/// above, which only ever edits the historical PLAN (title/date/type/
+/// planned start time/planned duration/notes/location) and never
+/// touches `LoggedActivity`/`ActivityReflection` at all. See
+/// `ActivityDetailView`'s own doc comment for the full action/entity
+/// mapping.
 struct LoggedActivityEditFormView: View {
     @Bindable var viewModel: ActivityDetailViewModel
     @Environment(\.dismiss) private var dismiss
@@ -299,6 +346,17 @@ struct LoggedActivityEditFormView: View {
                 }
 
                 Section {
+                    // Review follow-up: only offered for outcomes where
+                    // actual duration is meaningful (Completed/Partially
+                    // completed) — `canEditLoggedDuration` mirrors the
+                    // exact same rule `TrainingValidator.requiresActualDuration(for:)`
+                    // applies at initial logging. Hidden entirely for
+                    // Missed/Cancelled, where the stored value is only
+                    // the schema's "nothing to measure" placeholder.
+                    if viewModel.canEditLoggedDuration {
+                        DurationPickerView(durationMinutes: $viewModel.editLoggedDurationMinutes)
+                    }
+
                     Picker("RPE", selection: $viewModel.editLoggedPerceivedExertion) {
                         Text("Not set").tag(Int?.none)
                         ForEach(1...10, id: \.self) { value in
@@ -310,12 +368,16 @@ struct LoggedActivityEditFormView: View {
                     // Same neutral 1-5 "Form" scale as logging itself
                     // (`LogActivityView`'s `sessionFormPicker`), but
                     // WITH a "Not set" option here (unlike that initial
-                    // logging picker) — editing must be able to clear an
-                    // existing Form rating back to unset, which
-                    // `correctLoggedActivity` already supports
-                    // (`sessionForm: nil` on an existing reflection
-                    // clears `bodyFeeling`, never deletes the
-                    // reflection itself).
+                    // logging picker) — the sheet may OPEN on "Not set"
+                    // (a legacy activity with no historical Form value).
+                    // Review follow-up: this does NOT mean Form can
+                    // actually be saved as unset for an outcome that
+                    // requires it — `saveLoggedActivityEdit()` runs the
+                    // EXACT SAME `TrainingValidator.validateForm(_:for:)`
+                    // rule initial logging uses, keyed off this
+                    // activity's own canonical status, and blocks Save
+                    // (never silently clears the canonical value) until
+                    // a real value is chosen whenever Form is required.
                     Picker("Form", selection: $viewModel.editLoggedSessionForm) {
                         Text("Not set").tag(Int?.none)
                         ForEach(1...5, id: \.self) { value in

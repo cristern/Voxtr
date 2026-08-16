@@ -59,11 +59,13 @@ public final class WeeklyHistoryViewModel {
         load()
     }
 
-    /// Every planned activity actually completed (a `LoggedActivity`
-    /// references it) — reuses `PlannedActivityCompletion.isCompleted`
-    /// directly, no re-derivation.
+    /// Every planned activity actually completed. Review follow-up
+    /// (cancellation sanity check): uses `PlannedActivityCompletion.isGenuinelyCompleted`,
+    /// not the broader `isCompleted` (which also counts Missed and
+    /// Cancelled as "resolved") — a cancelled or missed planned
+    /// activity must never inflate this count.
     public var completedFromPlanCount: Int {
-        result?.plannedActivities.filter(\.isCompleted).count ?? 0
+        result?.plannedActivities.filter(\.isGenuinelyCompleted).count ?? 0
     }
 
     public var plannedCount: Int {

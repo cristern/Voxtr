@@ -120,15 +120,20 @@ public final class TrainingRepository {
         return try modelContext.fetch(FetchDescriptor<LoggedActivity>()).first { $0.id == rawId }
     }
 
-    /// Corrects the RPE (perceivedExertion) already recorded on an
-    /// existing `LoggedActivity` — the only currently-editable
-    /// `LoggedActivity` field this work package's own scope asks for
-    /// (Edit Logged Activity -> RPE + Form). Mutates the SAME entity in
-    /// place then saves — never delete+reinsert — the exact pattern
+    /// Corrects the actual duration and RPE (perceivedExertion) already
+    /// recorded on an existing `LoggedActivity`. Review follow-up:
+    /// duration is now correctable alongside RPE — since
+    /// `durationMinutes` is canonical training truth, required at
+    /// initial logging for Completed/PartiallyCompleted, and the
+    /// schema's own non-optional `Int`, a data-entry mistake caught
+    /// after logging would otherwise be permanently uncorrectable.
+    /// Mutates the SAME entity in place then saves — never
+    /// delete+reinsert — the exact pattern
     /// `PlanningService.editPlannedActivity` already established for
     /// `PlannedActivity`, preserving the entity's own stable id and
     /// every other field untouched.
-    public func updateLoggedActivity(_ activity: LoggedActivity, perceivedExertion: Int?) throws {
+    public func updateLoggedActivity(_ activity: LoggedActivity, durationMinutes: Int, perceivedExertion: Int?) throws {
+        activity.durationMinutes = durationMinutes
         activity.perceivedExertion = perceivedExertion
         activity.updatedAt = .now
         try modelContext.save()

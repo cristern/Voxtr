@@ -73,6 +73,71 @@ struct WeeklyHistoryViewModelTests {
         #expect(viewModel.additionalLoggedActivities.first?.title == "Unplanned jog")
     }
 
+    /// Review follow-up (cancellation sanity check): a cancelled planned
+    /// activity is still counted in `plannedCount` (the plan itself is
+    /// preserved, never deleted) but must NEVER inflate `completedFromPlanCount` —
+    /// `.cancelled` and `.missed` are both "resolved" (an outcome
+    /// exists) but neither is "completed training."
+    @Test("completedFromPlanCount excludes Cancelled and Missed planned activities — cancellation is never counted as completed training")
+    @MainActor
+    func completedFromPlanCountExcludesCancelledAndMissed() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = WeeklyReviewCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository,
+            weeklyReflectionRepository: weeklyReflectionRepository,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService
+        )
+        let planning = PlanningService(repository: planningRepository)
+        let training = TrainingService(repository: trainingRepository)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
+        let completed = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Completed run", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        let cancelled = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Cancelled swim", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        let missed = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Missed session", localDate: Self.weekStart, timeZoneId: Self.oslo
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: completed.plannedActivityId,
+            activityType: .individualTraining, title: "Completed run",
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            durationMinutes: 40, status: .completed
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: cancelled.plannedActivityId,
+            activityType: .individualTraining, title: "Cancelled swim",
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            durationMinutes: 1, status: .cancelled
+        )
+        _ = try training.logActivity(
+            athleteId: athleteId, plannedActivityId: missed.plannedActivityId,
+            activityType: .individualTraining, title: "Missed session",
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            durationMinutes: 1, status: .missed
+        )
+
+        let viewModel = WeeklyHistoryViewModel(coordinationService: coordinator, athleteId: athleteId, weekStart: Self.weekStart)
+        viewModel.load()
+
+        // The plan is preserved for all three — never deleted.
+        #expect(viewModel.plannedCount == 3)
+        // Only the genuinely completed one counts.
+        #expect(viewModel.completedFromPlanCount == 1)
+    }
+
     @Test("Focus next week is withheld when the reflection is marked privateToAthlete")
     @MainActor
     func focusWithheldWhenPrivate() throws {

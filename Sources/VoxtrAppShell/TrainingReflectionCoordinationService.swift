@@ -217,12 +217,27 @@ public final class TrainingReflectionCoordinationService {
     }
 
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
-    /// Logged Activity -> RPE + Form): the correction counterpart to
-    /// `logActivity` — corrects RPE on the `LoggedActivity` itself, and
-    /// creates-or-updates the linked `ActivityReflection`'s Form value,
-    /// reusing the SAME `LoggedActivityWithSessionForm`/`SessionFormOutcome`
-    /// result shape `logActivity` already returns rather than inventing
-    /// a second one.
+    /// Logged Activity -> RPE + Form), extended by review follow-up to
+    /// also correct actual duration: the correction counterpart to
+    /// `logActivity` — corrects duration and RPE on the `LoggedActivity`
+    /// itself, and creates-or-updates the linked `ActivityReflection`'s
+    /// Form value, reusing the SAME `LoggedActivityWithSessionForm`/
+    /// `SessionFormOutcome` result shape `logActivity` already returns
+    /// rather than inventing a second one.
+    ///
+    /// IMPORTANT — Form contract: unlike RPE (never required),
+    /// `sessionForm` here follows the EXACT SAME canonical rule as
+    /// initial logging (`TrainingValidator.requiresForm(for:)`): when
+    /// the `LoggedActivity`'s own `status` is `.completed`/
+    /// `.partiallyCompleted`, this method does NOT itself enforce that
+    /// rule (services stay free of UI-layer validation, same separation
+    /// `logActivity` already establishes) — the caller
+    /// (`ActivityDetailViewModel.saveLoggedActivityEdit()`) is
+    /// responsible for calling `TrainingValidator.validateForm(_:for:)`
+    /// BEFORE this method runs, exactly mirroring how
+    /// `LogActivityViewModel.save()` already validates before calling
+    /// `logActivity`. This method must never be the only thing standing
+    /// between a completed activity and a cleared Form value.
     ///
     /// `sessionForm: nil` when a reflection ALREADY exists clears its
     /// Form rating back to unset — the reflection itself is not
@@ -240,6 +255,7 @@ public final class TrainingReflectionCoordinationService {
         loggedActivityId: LoggedActivityId,
         athleteId: AthleteId,
         authorId: ActorId,
+        durationMinutes: Int,
         perceivedExertion: Int?,
         sessionForm: Int?,
         sessionFormVisibility: VisibilityPolicy = .sharedWithGuardians
@@ -247,6 +263,7 @@ public final class TrainingReflectionCoordinationService {
         let loggedActivity = try trainingService.correctLoggedActivity(
             loggedActivityId,
             athleteId: athleteId,
+            durationMinutes: durationMinutes,
             perceivedExertion: perceivedExertion
         )
 

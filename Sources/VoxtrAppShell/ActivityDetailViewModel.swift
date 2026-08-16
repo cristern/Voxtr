@@ -56,6 +56,19 @@ public final class ActivityDetailViewModel {
     /// inferred separately.
     public var editLoggedPerceivedExertion: Int?
     public var editLoggedSessionForm: Int?
+    /// Review follow-up: actual duration is canonical training truth,
+    /// required at initial logging for Completed/PartiallyCompleted —
+    /// without a correction path, a data-entry mistake would be
+    /// permanently uncorrectable. Prefilled from `loggedActivity.durationMinutes`
+    /// (the schema's own non-optional `Int` — never `nil`, so this
+    /// stays non-optional too, matching `editDurationMinutes` above for
+    /// the same reason). Only offered in the UI when
+    /// `canEditLoggedDuration` is true (see below) — the same
+    /// `.completed`/`.partiallyCompleted` gate `TrainingValidator.requiresActualDuration(for:)`
+    /// already establishes; `saveLoggedActivityEdit()` still sends this
+    /// value for every outcome, but it is only ever changed by the user
+    /// when the field is actually shown.
+    public var editLoggedDurationMinutes: Int = 60
 
     /// Sprint 1.1, P1 (athlete context): passed in by the caller, which
     /// already has the athlete's name (a `FamilyHomeRow`, an
@@ -173,6 +186,20 @@ public final class ActivityDetailViewModel {
     /// matching "Logged Activity Detail displays RPE/Form" itself,
     /// which shows whenever a value exists, not only for `.completed`.
     public var canEditLoggedActivity: Bool { loggedActivity != nil }
+
+    /// Review follow-up: whether the Edit Logged Activity sheet should
+    /// offer a duration correction field at all — only when the
+    /// canonical outcome is one `TrainingValidator.requiresActualDuration(for:)`
+    /// says duration is meaningful for (`.completed`/`.partiallyCompleted`).
+    /// For `.missed`/`.cancelled`, `durationMinutes` is the schema's own
+    /// documented `1`-minute placeholder for "nothing to measure" — not
+    /// a real value a parent would ever need to correct, so this stays
+    /// `false` and the field is hidden entirely rather than inviting a
+    /// meaningless edit.
+    public var canEditLoggedDuration: Bool {
+        guard let outcomeStatus else { return false }
+        return TrainingValidator.requiresActualDuration(for: outcomeStatus)
+    }
 
     public func prefillEditForm() {
         editTitle = activity.title
@@ -292,32 +319,60 @@ public final class ActivityDetailViewModel {
     }
 
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
-    /// Logged Activity -> RPE + Form): loads the exact canonical values
-    /// this screen already displays read-only — never re-derived,
-    /// never a second source of truth.
+    /// Logged Activity -> RPE + Form), extended by review follow-up for
+    /// duration: loads the exact canonical values this screen already
+    /// displays read-only — never re-derived, never a second source of
+    /// truth. `editLoggedDurationMinutes` is prefilled from the real
+    /// stored value regardless of `canEditLoggedDuration` — harmless
+    /// when the field isn't shown, since `saveLoggedActivityEdit()`
+    /// then sends back the exact same untouched value.
     public func prefillLoggedActivityEditForm() {
         editLoggedPerceivedExertion = perceivedExertion
         editLoggedSessionForm = formValue
+        editLoggedDurationMinutes = loggedActivity?.durationMinutes ?? 60
     }
 
-    /// Corrects RPE on the canonical `LoggedActivity` and creates-or-
-    /// updates the linked `ActivityReflection`'s Form value, via
-    /// `TrainingReflectionCoordinationService.correctLoggedActivity` —
-    /// see that method's own doc comment for the exact create-vs-update
+    /// Corrects duration and RPE on the canonical `LoggedActivity` and
+    /// creates-or-updates the linked `ActivityReflection`'s Form value,
+    /// via `TrainingReflectionCoordinationService.correctLoggedActivity`
+    /// — see that method's own doc comment for the exact create-vs-update
     /// decision (a legacy logged activity with no reflection yet gets
     /// one created only if a Form value is actually entered; nothing is
     /// fabricated). Updates this screen's own `loggedActivity`/
     /// `activityReflection` in place on success, so the read-only
     /// summary above reflects the change immediately.
+    ///
+    /// Review follow-up: validates duration and Form BEFORE calling the
+    /// coordinator — using the EXACT SAME `TrainingValidator` functions
+    /// `LogActivityViewModel.save()` uses for initial logging
+    /// (`validateActualDuration(_:for:)`/`validateForm(_:for:)`, both
+    /// keyed off the `LoggedActivity`'s own canonical `status`), never a
+    /// separate edit-only rule. This is what makes it impossible to
+    /// correct a `.completed`/`.partiallyCompleted` activity's Form back
+    /// to unset, or its duration to something invalid — including the
+    /// legacy case where `editLoggedSessionForm` opens `nil` (no
+    /// historical value, or a private reflection this actor cannot
+    /// see): the sheet may OPEN that way, but Save is blocked until a
+    /// valid value is actually entered, exactly the "safe to open,
+    /// blocked to commit" contract required.
     @discardableResult
     public func saveLoggedActivityEdit() -> Bool {
         errorMessage = nil
         guard let loggedActivity else { return false }
+        if let durationError = TrainingValidator.validateActualDuration(editLoggedDurationMinutes, for: loggedActivity.status) {
+            errorMessage = durationError
+            return false
+        }
+        if let formError = TrainingValidator.validateForm(editLoggedSessionForm, for: loggedActivity.status) {
+            errorMessage = formError
+            return false
+        }
         do {
             let result = try trainingReflectionCoordinationService.correctLoggedActivity(
                 loggedActivityId: loggedActivity.loggedActivityId,
                 athleteId: athleteId,
                 authorId: deletedByActorId,
+                durationMinutes: max(1, min(1440, editLoggedDurationMinutes)),
                 perceivedExertion: editLoggedPerceivedExertion,
                 sessionForm: editLoggedSessionForm
             )
@@ -328,7 +383,7 @@ public final class ActivityDetailViewModel {
             case .saved(let reflection):
                 self.activityReflection = reflection
             case .failed:
-                errorMessage = "RPE saved. Form could not be saved — tap Save to try again."
+                errorMessage = "Duration and RPE saved. Form could not be saved — tap Save to try again."
                 return false
             }
             return true
