@@ -129,7 +129,6 @@ public struct WeeklyPlanningView: View {
                     NavigationLink {
                         ActivityDetailViewLoader(
                             plannedActivity: activity,
-                            isCompleted: false,
                             athleteId: viewModel.athleteId,
                             athleteDisplayName: athleteDisplayName,
                             actorId: actorId,

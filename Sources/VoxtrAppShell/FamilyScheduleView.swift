@@ -79,7 +79,6 @@ public struct FamilyScheduleView: View {
             NavigationLink {
                 ActivityDetailViewLoader(
                     plannedActivity: familyRow.plannedActivity,
-                    isCompleted: familyRow.isCompleted,
                     athleteId: familyRow.athleteId,
                     athleteDisplayName: familyRow.athleteName,
                     actorId: actorId,

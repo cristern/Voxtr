@@ -415,7 +415,6 @@ public struct FamilyHomeContentView: View {
     private func activityDetail(for row: FamilyHomeRow) -> some View {
         ActivityDetailViewLoader(
             plannedActivity: row.plannedActivity,
-            isCompleted: row.isCompleted,
             athleteId: row.athleteId,
             athleteDisplayName: row.athleteName,
             actorId: ActorId(rawValue: family.participant.id),

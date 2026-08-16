@@ -21,9 +21,18 @@ import VoxtrPlanningDomain
 /// (a `FamilyHomeRow`, an `athleteDisplayName` property already on the
 /// calling view, etc.), so this never duplicates athlete state or
 /// re-fetches it from a repository.
+///
+/// Post-mutation navigation and stale-state consistency audit (One
+/// Truth closeout): this loader no longer accepts an `isCompleted`
+/// parameter from its caller. It already fetches the canonical
+/// `LoggedActivity` relationship (`loggedActivityDetail(forPlannedActivity:)`,
+/// below) to populate RPE/Form — completion state is derived from that
+/// SAME fetch, never from a row's own possibly-stale snapshot. A caller
+/// row's own `isCompleted` remains meaningful for that row's OWN display
+/// (e.g. "Completed" text in a list), but must never be threaded into
+/// this loader as if it were canonical.
 public struct ActivityDetailViewLoader: View {
     let plannedActivity: PlannedActivity
-    let isCompleted: Bool
     let athleteId: AthleteId
     let athleteDisplayName: String
     let actorId: ActorId
@@ -43,7 +52,6 @@ public struct ActivityDetailViewLoader: View {
 
     public init(
         plannedActivity: PlannedActivity,
-        isCompleted: Bool,
         athleteId: AthleteId,
         athleteDisplayName: String,
         actorId: ActorId,
@@ -52,7 +60,6 @@ public struct ActivityDetailViewLoader: View {
         onActivityLogged: @escaping () -> Void = {}
     ) {
         self.plannedActivity = plannedActivity
-        self.isCompleted = isCompleted
         self.athleteId = athleteId
         self.athleteDisplayName = athleteDisplayName
         self.actorId = actorId
@@ -81,6 +88,21 @@ public struct ActivityDetailViewLoader: View {
             let loggedDetail = (try? trainingReflectionCoordinationService.loggedActivityDetail(
                 forPlannedActivity: plannedActivity.plannedActivityId
             )) ?? nil
+            // Post-mutation navigation and stale-state consistency
+            // audit (One Truth closeout): completion state is derived
+            // from this same canonical relationship lookup, never from
+            // a caller-supplied snapshot — this loader used to accept
+            // an `isCompleted: Bool` parameter and trust it outright,
+            // which meant a caller whose own row data hadn't been
+            // reloaded yet (or, for Weekly Planning, a value that was
+            // simply hardcoded `false`) could override genuine canonical
+            // reality with a stale or wrong one. `loggedDetail?.loggedActivity
+            // != nil` is exactly the same rule
+            // `TrainingPlanningCoordinationService.plannedActivitiesWithCompletion`
+            // already uses everywhere else in this app (`!links.isEmpty`,
+            // over the identical `fetchLoggedActivities(forPlannedActivity:)`
+            // relationship) — not a second, competing completion model.
+            let isCompleted = loggedDetail?.loggedActivity != nil
             viewModel = ActivityDetailViewModel(
                 activity: plannedActivity,
                 isCompleted: isCompleted,

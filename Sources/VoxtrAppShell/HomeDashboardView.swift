@@ -240,7 +240,6 @@ public struct HomeDashboardView: View {
             NavigationLink {
                 ActivityDetailViewLoader(
                     plannedActivity: familyHomeRow.plannedActivity,
-                    isCompleted: familyHomeRow.isCompleted,
                     athleteId: athleteId,
                     athleteDisplayName: athleteDisplayName,
                     actorId: committedByActorId,

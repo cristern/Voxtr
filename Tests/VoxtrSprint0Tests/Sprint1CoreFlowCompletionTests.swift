@@ -188,6 +188,115 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(reloadCallCount == 0)
     }
 
+    // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion
+
+    /// The exact defect this closeout fixes: `ActivityDetailViewLoader`
+    /// used to trust a caller-provided `isCompleted` snapshot outright,
+    /// even after separately fetching the canonical `LoggedActivity`
+    /// relationship for RPE/Form. `WeeklyPlanningView` passed a
+    /// hardcoded `false` unconditionally — so opening Activity Detail
+    /// for an activity ALREADY logged elsewhere would show it as
+    /// "Ready to log" again. This test mirrors the loader's corrected
+    /// derivation directly (`detail?.loggedActivity != nil`, the exact
+    /// rule `TrainingPlanningCoordinationService.plannedActivitiesWithCompletion`
+    /// already uses everywhere else — `!links.isEmpty` over the same
+    /// `fetchLoggedActivities(forPlannedActivity:)` relationship): a
+    /// stale/wrong caller flag of `false` must never suppress genuine
+    /// canonical completion.
+    @Test("Canonical fetched LoggedActivity determines completion — supersedes a stale caller-provided false (fixes Weekly Planning's hardcoded false)")
+    @MainActor
+    func canonicalLoggedActivityDeterminesCompletionDespiteStaleCallerFlag() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: activity.title, startedAt: .now, perceivedExertion: 6, authorId: ActorId(), sessionForm: 4
+        )
+
+        // Mirrors ActivityDetailViewLoader.onAppear's own derivation
+        // exactly — never a hardcoded/stale caller boolean.
+        let detail = try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId)
+        let derivedIsCompleted = detail?.loggedActivity != nil
+
+        #expect(derivedIsCompleted == true)
+
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: derivedIsCompleted,
+            loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(viewModel.isCompleted == true)
+        // RPE/Form loading is unaffected by this fix — still resolved
+        // from the same canonical fetch, alongside completion.
+        #expect(viewModel.perceivedExertion == 6)
+        #expect(viewModel.formValue == 4)
+        // Exact relationship preserved — not inferred from title/date.
+        #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
+        #expect(detail?.loggedActivity.plannedActivityId == activity.plannedActivityId)
+    }
+
+    /// The mirror case: a caller flag of `true` must never fabricate
+    /// completion when no canonical `LoggedActivity` actually exists —
+    /// "no title/date inference, no duplicate state authority" applies
+    /// in both directions.
+    @Test("No canonical LoggedActivity means Activity Detail never falsely claims completion, even if a caller flag said true")
+    @MainActor
+    func noCanonicalLoggedActivityMeansNotCompletedDespiteStaleCallerFlag() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        // Never logged — no LoggedActivity exists for this PlannedActivity.
+
+        let detail = try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId)
+        let derivedIsCompleted = detail?.loggedActivity != nil
+
+        #expect(derivedIsCompleted == false)
+
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: derivedIsCompleted,
+            loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(viewModel.isCompleted == false)
+        #expect(viewModel.perceivedExertion == nil)
+        #expect(viewModel.formValue == nil)
+    }
+
     // MARK: - VX-022 closeout: Activity Detail RPE / Form
 
     /// Builds an `ActivityDetailViewModel` the same way `ActivityDetailViewLoader`

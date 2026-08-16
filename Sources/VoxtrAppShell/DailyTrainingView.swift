@@ -58,7 +58,6 @@ public struct DailyTrainingView: View {
                             NavigationLink {
                                 ActivityDetailViewLoader(
                                 plannedActivity: item.plannedActivity,
-                                isCompleted: item.isCompleted,
                                 athleteId: viewModel.athleteId,
                                 athleteDisplayName: athleteDisplayName,
                                 actorId: actorId,
