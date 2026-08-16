@@ -1,4 +1,5 @@
 import Foundation
+import VoxtrCoreContracts
 
 /// S3.3 requirement: "Surface validation and service errors without
 /// crashing." `LoggedActivity`'s own `precondition`s (durationMinutes
@@ -41,6 +42,39 @@ public enum TrainingValidator {
     public static func validateForm(_ value: Int?) -> String? {
         guard let value else { return TrainingStrings.formRequired }
         guard (1...5).contains(value) else { return TrainingStrings.invalidForm }
+        return nil
+    }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup: whether
+    /// actual/logged duration is required for a given outcome —
+    /// `.completed`/`.partiallyCompleted` genuinely happened, so a real
+    /// duration is meaningful and required; `.missed`/`.cancelled`
+    /// represent "this did not take place," so there is nothing to
+    /// measure and duration stays optional; `.scheduled` is not a
+    /// logging outcome at all (never reached through the logging flow)
+    /// but is included for exhaustiveness rather than left to a
+    /// `default` case that would silently swallow a future new case.
+    public static func requiresActualDuration(for status: ActivityStatus) -> Bool {
+        switch status {
+        case .completed, .partiallyCompleted:
+            return true
+        case .missed, .cancelled, .scheduled:
+            return false
+        }
+    }
+
+    /// Mirrors `validateForm`'s exact shape: required only for outcomes
+    /// `requiresActualDuration(for:)` says need one, checked at the
+    /// UI/orchestration boundary before anything is created — the same
+    /// "required at this layer, not by making the domain field
+    /// non-optional" principle `validateForm`'s own doc comment already
+    /// establishes (`LoggedActivity.durationMinutes` itself stays the
+    /// schema's existing non-optional `Int`; this only governs what the
+    /// UI must collect before it ever calls the service).
+    public static func validateActualDuration(_ value: Int?, for status: ActivityStatus) -> String? {
+        guard requiresActualDuration(for: status) else { return nil }
+        guard let value else { return TrainingStrings.actualDurationRequired }
+        guard (1...1440).contains(value) else { return TrainingStrings.invalidDuration }
         return nil
     }
 }

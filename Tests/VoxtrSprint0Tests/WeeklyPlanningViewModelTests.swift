@@ -64,6 +64,54 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("Planned/Logged Activity lifecycle consistency cleanup: adding an activity with 'Has duration' on persists the entered planned duration and resets the form")
+    @MainActor
+    func addActivityWithDurationPersistsPlannedDuration() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Endurance run"
+        viewModel.newActivityHasDuration = true
+        viewModel.newActivityDurationMinutes = 45
+
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.first?.plannedDurationMinutes == 45)
+        // Resets to the toggle's own default off-state, not the
+        // previously entered value carried over into the next add.
+        #expect(viewModel.newActivityHasDuration == false)
+        #expect(viewModel.newActivityDurationMinutes == 60)
+    }
+
+    @Test("Planned/Logged Activity lifecycle consistency cleanup: adding an activity with 'Has duration' left off leaves plannedDurationMinutes nil — never fabricated")
+    @MainActor
+    func addActivityWithoutDurationLeavesPlannedDurationNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Endurance run"
+
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.first?.plannedDurationMinutes == nil)
+    }
+
     @Test("Adding an activity with an empty title surfaces an error and does not persist")
     @MainActor
     func addActivityWithEmptyTitleSurfacesError() throws {

@@ -35,6 +35,15 @@ public enum TrainingStrings {
         String(localized: "training.error.invalidForm", defaultValue: "Form must be between 1 and 5.")
     }
 
+    /// Planned/Logged Activity lifecycle consistency cleanup: actual
+    /// duration is required for a completed (or partially completed)
+    /// log — the same "required at the UI/orchestration boundary, not
+    /// silently defaulted" contract `formRequired` above already
+    /// establishes for Form. See `TrainingValidator.validateActualDuration`.
+    public static var actualDurationRequired: String {
+        String(localized: "training.error.actualDurationRequired", defaultValue: "Duration is required.")
+    }
+
     public static var plannedActivityAlreadyLinked: String {
         String(
             localized: "training.error.alreadyLinked",

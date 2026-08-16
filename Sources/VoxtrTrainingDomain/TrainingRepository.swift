@@ -110,4 +110,27 @@ public final class TrainingRepository {
             .filter { $0.plannedActivityId == rawId }
             .sorted(by: Self.deterministicOrder)
     }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup (Edit
+    /// Logged Activity): looked up by the entity's own stable id, never
+    /// by title/date — the same identity rule every other fetch in this
+    /// project already follows.
+    public func fetchLoggedActivity(byId loggedActivityId: LoggedActivityId) throws -> LoggedActivity? {
+        let rawId = loggedActivityId.rawValue
+        return try modelContext.fetch(FetchDescriptor<LoggedActivity>()).first { $0.id == rawId }
+    }
+
+    /// Corrects the RPE (perceivedExertion) already recorded on an
+    /// existing `LoggedActivity` — the only currently-editable
+    /// `LoggedActivity` field this work package's own scope asks for
+    /// (Edit Logged Activity -> RPE + Form). Mutates the SAME entity in
+    /// place then saves — never delete+reinsert — the exact pattern
+    /// `PlanningService.editPlannedActivity` already established for
+    /// `PlannedActivity`, preserving the entity's own stable id and
+    /// every other field untouched.
+    public func updateLoggedActivity(_ activity: LoggedActivity, perceivedExertion: Int?) throws {
+        activity.perceivedExertion = perceivedExertion
+        activity.updatedAt = .now
+        try modelContext.save()
+    }
 }

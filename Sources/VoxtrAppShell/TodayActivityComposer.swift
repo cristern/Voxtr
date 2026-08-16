@@ -83,11 +83,12 @@ public enum TodayActivityRow: Identifiable {
     /// therefore `RecurringActivitySuggestion.plannedDurationMinutes`,
     /// projected from it) is guaranteed — both default to `nil` with no
     /// precondition requiring a value, only a range check when one is
-    /// present. A 60-minute (or any other) fallback here would let
-    /// Vǫxtr claim NOW status for an activity it has no actual basis to
-    /// believe is still in progress. Callers must treat `nil` as "end
-    /// unknown," never as "no limit" — see `nowNextState`'s own
-    /// handling.
+    /// present. This property itself never fabricates a duration — the
+    /// canonical value, or nothing. Callers that need a bounded NOW
+    /// window even when duration is genuinely unknown use
+    /// `nowPresentationEndLocalTimeSortKey(fallbackDurationMinutes:)`
+    /// below instead, which wraps this property without changing what
+    /// it means.
     public var endLocalTimeSortKey: Int? {
         guard startLocalTimeSortKey != Int.max else { return nil }
         let durationMinutes: Int?
@@ -98,6 +99,27 @@ public enum TodayActivityRow: Identifiable {
         }
         guard let durationMinutes else { return nil }
         return startLocalTimeSortKey + durationMinutes
+    }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup (NOW
+    /// fallback): a presentation-only variant of `endLocalTimeSortKey`
+    /// above for NOW classification specifically — without this, an
+    /// activity with a start time but no planned duration could never
+    /// become NOW at all, no matter how long ago it started, which
+    /// reads as a genuine gap rather than "duration honestly unknown."
+    ///
+    /// `endLocalTimeSortKey` itself is UNCHANGED and still means exactly
+    /// what its own doc comment says — this method never mutates it,
+    /// never derives a value that reaches `PlannedActivity`/`LoggedActivity`
+    /// storage, and is read by nothing except NOW/NEXT presentation.
+    /// `fallbackDurationMinutes` is applied only when a real duration is
+    /// genuinely absent (`endLocalTimeSortKey == nil`) AND a start time
+    /// exists; with no start time this still correctly returns `nil` —
+    /// "it cannot be NOW" is about the start-time requirement, which
+    /// this never relaxes, only the duration half.
+    public func nowPresentationEndLocalTimeSortKey(fallbackDurationMinutes: Int) -> Int? {
+        guard startLocalTimeSortKey != Int.max else { return nil }
+        return endLocalTimeSortKey ?? (startLocalTimeSortKey + fallbackDurationMinutes)
     }
 
     /// Fix (Family Home sorting regression): a generic, domain-meaningful

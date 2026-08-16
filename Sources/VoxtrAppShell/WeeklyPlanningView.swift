@@ -171,6 +171,11 @@ public struct WeeklyPlanningView: View {
                         DatePicker("Start time", selection: $viewModel.newActivityStartTime, displayedComponents: .hourAndMinute)
                             .accessibilityIdentifier("planning.newActivityStartTimePicker")
                     }
+                    Toggle("Has duration", isOn: $viewModel.newActivityHasDuration)
+                        .accessibilityIdentifier("planning.newActivityHasDurationToggle")
+                    if viewModel.newActivityHasDuration {
+                        DurationPickerView(durationMinutes: $viewModel.newActivityDurationMinutes)
+                    }
                     TextField("Location (optional)", text: $viewModel.newActivityLocation)
                         .accessibilityIdentifier("planning.newActivityLocationField")
                     Button("Add activity") {

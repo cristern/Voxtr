@@ -8,6 +8,8 @@ public struct ActivityDetailView: View {
     @State private var isEditing: Bool = false
     @State private var isLogging: Bool = false
     @State private var isPresentingDeleteConfirmation: Bool = false
+    @State private var isPresentingCancelConfirmation: Bool = false
+    @State private var isEditingLoggedActivity: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     public init(viewModel: ActivityDetailViewModel) {
@@ -37,7 +39,8 @@ public struct ActivityDetailView: View {
                 if let notes = viewModel.activity.notes, !notes.isEmpty {
                     LabeledContent("Notes", value: notes)
                 }
-                LabeledContent("Status", value: viewModel.isCompleted ? "Completed" : "Ready to log")
+                LabeledContent("Status", value: statusText)
+                    .accessibilityIdentifier("activityDetail.statusRow")
                 // VX-022 closeout: factual training data actually
                 // recorded — RPE from the canonical LoggedActivity
                 // field, Form from ActivityReflection.bodyFeeling for
@@ -55,7 +58,7 @@ public struct ActivityDetailView: View {
             .accessibilityIdentifier("activityDetail.summary")
 
             Section {
-                if viewModel.isCompleted {
+                if viewModel.outcomeStatus != nil {
                     // Activity Completion & Review Flow package: the
                     // "Log Activity" button used to remain visible and
                     // tappable even after the activity was already
@@ -71,14 +74,28 @@ public struct ActivityDetailView: View {
                     // confirmation closes that gap at the UI layer,
                     // where it belongs alongside the existing service-
                     // layer protection.
-                    Label("Logged", systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    //
+                    // Planned/Logged Activity lifecycle consistency
+                    // cleanup: now driven by `outcomeStatus` (the
+                    // canonical `LoggedActivity.status`), not the old
+                    // binary `isCompleted`, so Cancelled is shown
+                    // distinctly rather than as "Logged".
+                    Label(statusText, systemImage: outcomeIndicatorSystemImage)
+                        .foregroundStyle(outcomeIndicatorColor)
                         .accessibilityIdentifier("activityDetail.loggedIndicator")
                 } else {
                     Button("Log Activity") {
                         isLogging = true
                     }
                     .accessibilityIdentifier("activityDetail.logActivityButton")
+                }
+
+                if viewModel.canEditLoggedActivity {
+                    Button("Edit Logged Activity") {
+                        viewModel.prefillLoggedActivityEditForm()
+                        isEditingLoggedActivity = true
+                    }
+                    .accessibilityIdentifier("activityDetail.editLoggedActivityButton")
                 }
 
                 if viewModel.canEditOrDelete {
@@ -97,11 +114,26 @@ public struct ActivityDetailView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                // Planned/Logged Activity lifecycle consistency cleanup:
+                // Cancel is a training-time determination, never gated
+                // by the plan's draft/committed state (unlike Edit/
+                // Delete above) — only by whether an outcome has
+                // already been resolved (`canCancel`).
+                if viewModel.canCancel {
+                    Button("Cancel Activity", role: .destructive) {
+                        isPresentingCancelConfirmation = true
+                    }
+                    .accessibilityIdentifier("activityDetail.cancelActivityButton")
+                }
             }
         }
         .navigationTitle(viewModel.activity.title)
         .sheet(isPresented: $isEditing) {
             ActivityEditFormView(viewModel: viewModel)
+        }
+        .sheet(isPresented: $isEditingLoggedActivity) {
+            LoggedActivityEditFormView(viewModel: viewModel)
         }
         .sheet(isPresented: $isLogging) {
             // Athlete Home stale-state fix, single-owner closeout:
@@ -131,6 +163,49 @@ public struct ActivityDetailView: View {
                 }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Cancel this activity?",
+            isPresented: $isPresentingCancelConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel Activity", role: .destructive) {
+                viewModel.cancelActivity()
+            }
+            Button("Keep", role: .cancel) {}
+        }
+    }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup: the
+    /// user-facing status text, driven entirely by the canonical
+    /// `outcomeStatus` (`LoggedActivity.status`) rather than the old
+    /// binary `isCompleted` — so Cancelled/Missed/Partially completed
+    /// are all shown distinctly, not collapsed into "Completed".
+    private var statusText: String {
+        switch viewModel.outcomeStatus {
+        case .none, .scheduled: return "Ready to log"
+        case .completed: return "Completed"
+        case .partiallyCompleted: return "Partially completed"
+        case .missed: return "Missed"
+        case .cancelled: return "Cancelled"
+        }
+    }
+
+    private var outcomeIndicatorSystemImage: String {
+        switch viewModel.outcomeStatus {
+        case .completed, .partiallyCompleted: return "checkmark.circle.fill"
+        case .missed: return "exclamationmark.circle.fill"
+        case .cancelled: return "xmark.circle.fill"
+        case .none, .scheduled: return "circle"
+        }
+    }
+
+    private var outcomeIndicatorColor: Color {
+        switch viewModel.outcomeStatus {
+        case .completed, .partiallyCompleted: return .green
+        case .missed: return .orange
+        case .cancelled: return .secondary
+        case .none, .scheduled: return .primary
         }
     }
 }
@@ -191,6 +266,78 @@ struct ActivityEditFormView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .accessibilityIdentifier("activityDetail.cancelEditButton")
+                }
+            }
+        }
+    }
+}
+
+/// Planned/Logged Activity lifecycle consistency cleanup (Edit Logged
+/// Activity -> RPE + Form): a separate sheet, matching
+/// `ActivityEditFormView`'s own established shape, reusing
+/// `ActivityDetailViewModel`'s own edit fields directly (no duplicate
+/// editing logic). Loads the exact canonical RPE/Form values already
+/// displayed read-only on the parent screen (via
+/// `prefillLoggedActivityEditForm()`, called before this sheet is
+/// presented) and writes back through
+/// `TrainingReflectionCoordinationService.correctLoggedActivity` (via
+/// `saveLoggedActivityEdit()`) — never a second, locally-tracked
+/// duration/status/form field.
+struct LoggedActivityEditFormView: View {
+    @Bindable var viewModel: ActivityDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let errorMessage = viewModel.errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("activityDetail.editLoggedActivity.errorMessage")
+                    }
+                }
+
+                Section {
+                    Picker("RPE", selection: $viewModel.editLoggedPerceivedExertion) {
+                        Text("Not set").tag(Int?.none)
+                        ForEach(1...10, id: \.self) { value in
+                            Text("\(value)").tag(Int?.some(value))
+                        }
+                    }
+                    .accessibilityIdentifier("activityDetail.editLoggedActivity.rpePicker")
+
+                    // Same neutral 1-5 "Form" scale as logging itself
+                    // (`LogActivityView`'s `sessionFormPicker`), but
+                    // WITH a "Not set" option here (unlike that initial
+                    // logging picker) — editing must be able to clear an
+                    // existing Form rating back to unset, which
+                    // `correctLoggedActivity` already supports
+                    // (`sessionForm: nil` on an existing reflection
+                    // clears `bodyFeeling`, never deletes the
+                    // reflection itself).
+                    Picker("Form", selection: $viewModel.editLoggedSessionForm) {
+                        Text("Not set").tag(Int?.none)
+                        ForEach(1...5, id: \.self) { value in
+                            Text("\(value)").tag(Int?.some(value))
+                        }
+                    }
+                    .accessibilityIdentifier("activityDetail.editLoggedActivity.sessionFormPicker")
+                }
+            }
+            .navigationTitle("Edit Logged Activity")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        if viewModel.saveLoggedActivityEdit() {
+                            dismiss()
+                        }
+                    }
+                    .accessibilityIdentifier("activityDetail.editLoggedActivity.saveButton")
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("activityDetail.editLoggedActivity.cancelButton")
                 }
             }
         }

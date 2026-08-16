@@ -215,4 +215,69 @@ public final class TrainingReflectionCoordinationService {
         let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivity.loggedActivityId)
         return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
     }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup (Edit
+    /// Logged Activity -> RPE + Form): the correction counterpart to
+    /// `logActivity` — corrects RPE on the `LoggedActivity` itself, and
+    /// creates-or-updates the linked `ActivityReflection`'s Form value,
+    /// reusing the SAME `LoggedActivityWithSessionForm`/`SessionFormOutcome`
+    /// result shape `logActivity` already returns rather than inventing
+    /// a second one.
+    ///
+    /// `sessionForm: nil` when a reflection ALREADY exists clears its
+    /// Form rating back to unset — the reflection itself is not
+    /// deleted, since other reflection content (energy/satisfaction/
+    /// notes) may still exist on it. `sessionForm: nil` when NO
+    /// reflection exists yet (a legacy logged activity, or one logged
+    /// as not-completed where Form was never required) creates nothing —
+    /// "do not fabricate values": a log with no Form entered stays that
+    /// way until the user actually enters one.
+    ///
+    /// Athlete-scoped throughout — never touches a `LoggedActivity`/
+    /// `ActivityReflection` belonging to a different athlete.
+    @discardableResult
+    public func correctLoggedActivity(
+        loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId,
+        authorId: ActorId,
+        perceivedExertion: Int?,
+        sessionForm: Int?,
+        sessionFormVisibility: VisibilityPolicy = .sharedWithGuardians
+    ) throws -> LoggedActivityWithSessionForm {
+        let loggedActivity = try trainingService.correctLoggedActivity(
+            loggedActivityId,
+            athleteId: athleteId,
+            perceivedExertion: perceivedExertion
+        )
+
+        if let existingReflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivityId) {
+            do {
+                let updated = try reflectionService.updateActivityReflection(
+                    existingReflection.reflectionId,
+                    athleteId: athleteId,
+                    bodyFeeling: sessionForm
+                )
+                return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .saved(updated))
+            } catch {
+                return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .failed(error))
+            }
+        }
+
+        guard let sessionForm else {
+            return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .notRequested)
+        }
+
+        do {
+            let reflection = try recordSessionForm(
+                athleteId: athleteId,
+                loggedActivityId: loggedActivityId,
+                authorId: authorId,
+                bodyFeeling: sessionForm,
+                visibility: sessionFormVisibility
+            )
+            return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .saved(reflection))
+        } catch {
+            return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .failed(error))
+        }
+    }
 }

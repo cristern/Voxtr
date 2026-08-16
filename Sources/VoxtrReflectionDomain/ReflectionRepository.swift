@@ -104,6 +104,27 @@ public final class ReflectionRepository {
             .sorted(by: Self.reflectionOrder)
     }
 
+    /// Planned/Logged Activity lifecycle consistency cleanup (Edit
+    /// Logged Activity): looked up by the entity's own stable id, never
+    /// by title/date.
+    public func fetchActivityReflection(byId reflectionId: ReflectionId) throws -> ActivityReflection? {
+        let rawId = reflectionId.rawValue
+        return try modelContext.fetch(FetchDescriptor<ActivityReflection>()).first { $0.id == rawId }
+    }
+
+    /// Corrects the Form value (`bodyFeeling`) already recorded on an
+    /// existing `ActivityReflection`. Mutates the SAME entity in place
+    /// then saves — never delete+reinsert, preserving the entity's own
+    /// stable id and every other field (energy/satisfaction/notes/
+    /// visibility) untouched. `bodyFeeling: nil` clears the Form rating
+    /// back to unset without deleting the reflection itself — other
+    /// reflection content may still exist on it.
+    public func updateActivityReflection(_ reflection: ActivityReflection, bodyFeeling: Int?) throws {
+        reflection.bodyFeeling = bodyFeeling
+        reflection.updatedAt = .now
+        try modelContext.save()
+    }
+
     /// Ordered deterministically by `localDate`, then `id` — same
     /// pattern `PlanningRepository`/`TrainingRepository` already use.
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {

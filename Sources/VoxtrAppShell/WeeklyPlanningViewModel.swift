@@ -22,6 +22,18 @@ public final class WeeklyPlanningViewModel {
     public var newActivityLocation: String = ""
     public var newActivityHasStartTime: Bool = false
     public var newActivityStartTime: Date = .now
+    /// Planned/Logged Activity lifecycle consistency cleanup: planned
+    /// duration is optional at the domain level
+    /// (`PlannedActivity.plannedDurationMinutes: Int?`), but the user
+    /// must still be able to enter it wherever a `PlannedActivity` can
+    /// be created — the same "Has X" Toggle + `DurationPickerView`
+    /// pattern `ActivityDetailViewModel.editHasDuration`/`editDurationMinutes`
+    /// (Edit Planned Activity) and `recurringFormHasDuration`/
+    /// `recurringFormDurationMinutes` (recurring activities) already
+    /// establish for this exact optional-duration shape — reused here,
+    /// not a second representation.
+    public var newActivityHasDuration: Bool = false
+    public var newActivityDurationMinutes: Int = 60
     /// Post-mutation navigation and stale-state consistency audit
     /// (Issue B): increments on every SUCCESSFUL `addActivity()` only —
     /// never on validation failure or persistence failure. Same "simple
@@ -154,6 +166,7 @@ public final class WeeklyPlanningViewModel {
                 localDate: localDate,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
                 startLocalTime: newActivityHasStartTime ? Self.localTime(from: newActivityStartTime) : nil,
+                plannedDurationMinutes: newActivityHasDuration ? newActivityDurationMinutes : nil,
                 location: newActivityLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newActivityLocation
             )
             newActivityTitle = ""
@@ -161,6 +174,8 @@ public final class WeeklyPlanningViewModel {
             newActivityLocation = ""
             newActivityHasStartTime = false
             newActivityStartTime = .now
+            newActivityHasDuration = false
+            newActivityDurationMinutes = 60
             try reloadActivities(for: weekPlan)
             successfulAddActivityTrigger += 1
         } catch let error as PlanningServiceError {

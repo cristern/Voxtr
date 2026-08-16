@@ -46,7 +46,15 @@ public final class LogActivityViewModel {
     /// never re-logs.
     public private(set) var sessionFormPendingRetry: Bool = false
 
-    public var durationMinutes: Int
+    /// Planned/Logged Activity lifecycle consistency cleanup: actual
+    /// duration is required for a completed log, not required for a
+    /// not-completed (missed) one — see `TrainingValidator.validateActualDuration`.
+    /// `nil` unless the planned activity itself has a planned duration
+    /// (prefilled below as a suggested starting point the parent can
+    /// still correct) — never fabricated as a hardcoded fallback the
+    /// way this used to default to 60. The saved value is canonical
+    /// training truth; it is never re-derived from the plan afterward.
+    public var durationMinutes: Int?
     public var perceivedExertion: Int?
     public var notes: String = ""
     public var isCompleted: Bool = true
@@ -80,7 +88,10 @@ public final class LogActivityViewModel {
         self.onLogged = onLogged
         // Prefilled from the plan itself where a sensible starting
         // value exists — the parent only adjusts if reality differed.
-        self.durationMinutes = plannedActivity.plannedDurationMinutes ?? 60
+        // `nil` (not a fabricated fallback) when the plan itself has no
+        // duration; `save()` requires an explicit value before a
+        // completed log can succeed.
+        self.durationMinutes = plannedActivity.plannedDurationMinutes
     }
 
     @discardableResult
@@ -111,6 +122,17 @@ public final class LogActivityViewModel {
             }
         }
 
+        // Planned/Logged Activity lifecycle consistency cleanup: actual
+        // duration is required for a completed log — checked here,
+        // before anything is created, mirroring the Form check below
+        // exactly. Not required when logging as not completed (missed —
+        // nothing happened to measure).
+        let outcomeStatus: ActivityStatus = isCompleted ? .completed : .missed
+        if let durationError = TrainingValidator.validateActualDuration(durationMinutes, for: outcomeStatus) {
+            errorMessage = durationError
+            return false
+        }
+
         // VX-022: Form is required for a COMPLETED log — checked here,
         // before anything is created, so a completed log can never be
         // reported as saved without it. Not required when logging as
@@ -129,8 +151,13 @@ public final class LogActivityViewModel {
                 activityType: plannedActivity.activityType,
                 title: plannedActivity.title,
                 startedAt: Self.startedAt(for: plannedActivity),
-                durationMinutes: max(1, min(1440, durationMinutes)),
-                status: isCompleted ? .completed : .missed,
+                // Validated above when required (completed); when not
+                // required and left unset (missed), `1` is the schema's
+                // own documented minimum placeholder — never a
+                // fabricated real duration (see `TrainingService`'s own
+                // doc comment on this exact convention).
+                durationMinutes: durationMinutes.map { max(1, min(1440, $0)) } ?? 1,
+                status: outcomeStatus,
                 perceivedExertion: perceivedExertion,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
                 authorId: authorId,

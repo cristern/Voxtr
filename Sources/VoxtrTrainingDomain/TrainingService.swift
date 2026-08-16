@@ -6,6 +6,11 @@ import VoxtrCoreContracts
 /// link would duplicate one that already exists.
 public enum TrainingServiceError: Error, Equatable {
     case plannedActivityAlreadyLinked
+    /// Planned/Logged Activity lifecycle consistency cleanup: thrown by
+    /// `correctLoggedActivity` when no `LoggedActivity` exists for the
+    /// given id, or exists but belongs to a different athlete —
+    /// athlete isolation, never inferred from title/date.
+    case loggedActivityNotFound
 }
 
 /// S3.0/S3.1: the domain-level use case for logging completed
@@ -112,5 +117,26 @@ public final class TrainingService {
         let startOfDay = calendar.startOfDay(for: referenceDate)
         let endOfDay = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: startOfDay) ?? referenceDate
         return try repository.fetchLoggedActivities(forAthlete: athleteId, from: startOfDay, to: endOfDay)
+    }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup (Edit
+    /// Logged Activity -> RPE + Form): corrects the RPE already
+    /// recorded on an existing `LoggedActivity`. Athlete-scoped: only
+    /// ever operates on a `LoggedActivity` that already belongs to
+    /// `athleteId` — the same isolation every other athlete-scoped
+    /// method here already provides. Never creates a `LoggedActivity`;
+    /// `logActivity` remains the only way one comes into existence.
+    @discardableResult
+    public func correctLoggedActivity(
+        _ loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId,
+        perceivedExertion: Int?
+    ) throws -> LoggedActivity {
+        guard let activity = try repository.fetchLoggedActivity(byId: loggedActivityId),
+              activity.athleteId == athleteId.rawValue else {
+            throw TrainingServiceError.loggedActivityNotFound
+        }
+        try repository.updateLoggedActivity(activity, perceivedExertion: perceivedExertion)
+        return activity
     }
 }

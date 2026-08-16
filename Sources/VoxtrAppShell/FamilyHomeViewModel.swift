@@ -277,15 +277,25 @@ public final class FamilyHomeViewModel {
     /// activity that ended hours ago but hasn't been logged yet must
     /// not still occupy NOW.
     ///
-    /// `endLocalTimeSortKey` is `nil` when duration is genuinely
-    /// unknown (neither `PlannedActivity` nor `RecurringPlannedActivity`
-    /// guarantees a duration) — such a row can NEVER be classified NOW,
-    /// since Vǫxtr has no actual basis to claim it's still in progress.
+    /// Planned/Logged Activity lifecycle consistency cleanup (NOW
+    /// fallback): a row with a start time but genuinely unknown
+    /// duration used to NEVER be classified NOW at all, no matter how
+    /// long ago it started — a real presentation gap, not a faithful
+    /// "we don't know," since a parent watching the schedule has no way
+    /// to tell "not happening" from "duration wasn't entered." NOW now
+    /// uses `nowPresentationEndLocalTimeSortKey(fallbackDurationMinutes:)`
+    /// instead of `endLocalTimeSortKey` directly (see that method's own
+    /// doc comment): a real planned/logged duration still wins whenever
+    /// one exists; only when duration is genuinely absent does a
+    /// `nowFallbackDurationMinutes`-minute presentation window apply,
+    /// and only when a start time exists at all — a row with no start
+    /// time is still never NOW. This fallback is read/presentation-only:
+    /// never written to `PlannedActivity.plannedDurationMinutes` or
+    /// `LoggedActivity.durationMinutes`, and never reaches Statistics.
     /// It also can't be NEXT once its start has passed (NEXT requires
-    /// `start > now`). It simply falls out of Now/Next entirely once
-    /// started with no known end — remaining visible in Today's own
-    /// full list, just not occupying this slot; never a fabricated end
-    /// time standing in for real information Vǫxtr doesn't have.
+    /// `start > now`) — a row with no start time simply falls out of
+    /// Now/Next entirely, remaining visible in Today's own full list,
+    /// just not occupying this slot.
     /// NEXT/TOMORROW both take every row sharing the single earliest
     /// remaining start time — not one arbitrary winner — so genuinely
     /// simultaneous/closely-timed activities across different children
@@ -294,6 +304,13 @@ public final class FamilyHomeViewModel {
     public var nowNextState: NowNextState {
         nowNextState(referenceDate: .now, calendar: .current)
     }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup: the
+    /// presentation-only NOW window applied when a row has a start time
+    /// but no real planned/logged duration — see `nowNextState`'s own
+    /// doc comment. Never persisted, never read by anything outside
+    /// this NOW/NEXT computation.
+    private static let nowFallbackDurationMinutes = 60
 
     /// Maintainability fix: the underlying logic, with an injectable
     /// `referenceDate`/`calendar` — exists so tests can construct a
@@ -310,7 +327,7 @@ public final class FamilyHomeViewModel {
         let activeToday = rows.filter { !$0.isCompletedOrLogged && $0.startLocalTimeSortKey != Int.max }
 
         let underway = activeToday.filter { row in
-            guard let end = row.endLocalTimeSortKey else { return false }
+            guard let end = row.nowPresentationEndLocalTimeSortKey(fallbackDurationMinutes: Self.nowFallbackDurationMinutes) else { return false }
             return row.startLocalTimeSortKey <= nowMinutes && nowMinutes < end
         }
         if !underway.isEmpty {

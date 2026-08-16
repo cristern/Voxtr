@@ -15,6 +15,11 @@ import VoxtrCoreContracts
 public enum ReflectionServiceError: Error, Equatable {
     case activityReflectionAlreadyExists
     case invalidField(String)
+    /// Planned/Logged Activity lifecycle consistency cleanup: thrown by
+    /// `updateActivityReflection` when no `ActivityReflection` exists
+    /// for the given id, or exists but belongs to a different athlete —
+    /// athlete isolation, never inferred from title/date.
+    case activityReflectionNotFound
 }
 
 /// S4.0 scope only: the domain-level use case for recording reflections
@@ -115,6 +120,33 @@ public final class ReflectionService {
     /// result.
     public func fetchActivityReflection(forLoggedActivity loggedActivityId: LoggedActivityId) throws -> ActivityReflection? {
         try repository.fetchActivityReflections(forLoggedActivity: loggedActivityId).first
+    }
+
+    /// Planned/Logged Activity lifecycle consistency cleanup (Edit
+    /// Logged Activity -> RPE + Form): corrects the Form value
+    /// (`bodyFeeling`) already recorded on an existing
+    /// `ActivityReflection`. Athlete-scoped, same isolation guarantee
+    /// every other athlete-scoped method here already provides. Never
+    /// creates an `ActivityReflection` — `recordActivityReflection`
+    /// remains the only way one comes into existence; a legacy logged
+    /// activity with no reflection yet is the caller's job to detect
+    /// (via `fetchActivityReflection(forLoggedActivity:)`) and route to
+    /// `recordActivityReflection` instead, never fabricated here.
+    @discardableResult
+    public func updateActivityReflection(
+        _ reflectionId: ReflectionId,
+        athleteId: AthleteId,
+        bodyFeeling: Int?
+    ) throws -> ActivityReflection {
+        guard let reflection = try repository.fetchActivityReflection(byId: reflectionId),
+              reflection.athleteId == athleteId.rawValue else {
+            throw ReflectionServiceError.activityReflectionNotFound
+        }
+        if let bodyFeeling, !(1...5).contains(bodyFeeling) {
+            throw ReflectionServiceError.invalidField("bodyFeeling must be 1-5")
+        }
+        try repository.updateActivityReflection(reflection, bodyFeeling: bodyFeeling)
+        return reflection
     }
 
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {

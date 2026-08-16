@@ -150,6 +150,10 @@ struct Sprint1CoreFlowCompletionTests {
         )
 
         let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
+        // Planned/Logged Activity lifecycle consistency cleanup: actual
+        // duration is required for a completed log; `activity` itself
+        // has no planned duration, so it must be entered explicitly.
+        logViewModel.durationMinutes = 45
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
@@ -582,6 +586,232 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.formValue == 4)
     }
 
+    // MARK: - Planned/Logged Activity lifecycle consistency cleanup: Edit Logged Activity (RPE + Form)
+
+    @Test("prefillLoggedActivityEditForm loads the exact existing canonical RPE and Form values")
+    @MainActor
+    func prefillLoggedActivityEditFormLoadsExistingValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
+        )
+
+        viewModel.prefillLoggedActivityEditForm()
+
+        #expect(viewModel.editLoggedPerceivedExertion == 7)
+        #expect(viewModel.editLoggedSessionForm == 4)
+    }
+
+    @Test("saveLoggedActivityEdit persists a changed RPE to the canonical LoggedActivity.perceivedExertion")
+    @MainActor
+    func saveLoggedActivityEditPersistsChangedRPE() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: trainingRepository),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
+        )
+        viewModel.prefillLoggedActivityEditForm()
+        viewModel.editLoggedPerceivedExertion = 9
+
+        #expect(viewModel.saveLoggedActivityEdit())
+
+        #expect(viewModel.perceivedExertion == 9)
+        let stored = try #require(try trainingRepository.fetchLoggedActivities(forAthlete: athleteId).first)
+        #expect(stored.perceivedExertion == 9)
+    }
+
+    @Test("saveLoggedActivityEdit persists a changed Form to the exact linked ActivityReflection.bodyFeeling")
+    @MainActor
+    func saveLoggedActivityEditPersistsChangedForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
+        )
+        viewModel.prefillLoggedActivityEditForm()
+        viewModel.editLoggedSessionForm = 2
+
+        #expect(viewModel.saveLoggedActivityEdit())
+
+        #expect(viewModel.formValue == 2)
+        let loggedActivityId = try #require(viewModel.loggedActivity?.loggedActivityId)
+        let reflection = try #require(try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivityId))
+        #expect(reflection.bodyFeeling == 2)
+        // Exactly one reflection for this LoggedActivity — updated in
+        // place, never a second one created.
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId).count == 1)
+    }
+
+    @Test("Edit Logged Activity never touches another athlete's LoggedActivity — athlete isolation preserved")
+    @MainActor
+    func editLoggedActivityEnforcesAthleteIsolation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: trainingRepository),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
+        )
+        // A view model wired to a DIFFERENT athlete but pointed at the
+        // same LoggedActivity via loggedActivity's identity — mirrors
+        // the coordinator-level isolation guard from underneath the
+        // screen the user would actually interact with.
+        let otherAthleteViewModel = ActivityDetailViewModel(
+            activity: viewModel.activity, isCompleted: true, loggedActivity: viewModel.loggedActivity,
+            weekPlanId: weekPlan.weekPlanId, athleteId: AthleteId(), athleteDisplayName: "Someone Else",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+        otherAthleteViewModel.prefillLoggedActivityEditForm()
+        otherAthleteViewModel.editLoggedPerceivedExertion = 1
+
+        #expect(otherAthleteViewModel.saveLoggedActivityEdit() == false)
+        #expect(otherAthleteViewModel.errorMessage != nil)
+
+        // Untouched.
+        let stored = try #require(try trainingRepository.fetchLoggedActivities(forAthlete: athleteId).first)
+        #expect(stored.perceivedExertion == 7)
+    }
+
+    // MARK: - Planned/Logged Activity lifecycle consistency cleanup: Cancel
+
+    @Test("canCancel is true before any outcome is resolved and false once the activity has an outcome")
+    @MainActor
+    func canCancelReflectsWhetherAnOutcomeIsResolved() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(viewModel.canCancel == true)
+        #expect(viewModel.cancelActivity())
+        #expect(viewModel.canCancel == false)
+    }
+
+    @Test("cancelActivity links a LoggedActivity with status .cancelled, updates outcomeStatus, and never deletes the PlannedActivity")
+    @MainActor
+    func cancelActivityUpdatesOutcomeStatusWithoutDeletingThePlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+
+        #expect(viewModel.cancelActivity())
+
+        #expect(viewModel.outcomeStatus == .cancelled)
+        #expect(viewModel.isCompleted == true)
+        #expect(reloadCallCount == 1)
+        // Never a delete — the PlannedActivity itself is untouched and
+        // still resolvable from the WeekPlan.
+        #expect(viewModel.isDeleted == false)
+        let stillPlanned = try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(stillPlanned.contains { $0.plannedActivityId == activity.plannedActivityId })
+    }
+
+    @Test("Cancelling twice surfaces an error on the retry and never creates a duplicate LoggedActivity")
+    @MainActor
+    func cancellingTwiceSurfacesErrorOnRetry() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: trainingRepository),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(viewModel.cancelActivity())
+        #expect(viewModel.cancelActivity() == false)
+        #expect(viewModel.errorMessage != nil)
+        #expect(try trainingRepository.fetchLoggedActivities(forAthlete: athleteId).count == 1)
+    }
+
     /// Item 7: logging via the canonical flow preserves the
     /// PlannedActivity linkage automatically — the user never has to
     /// manually reconnect a completed activity to its plan.
@@ -658,6 +888,10 @@ struct Sprint1CoreFlowCompletionTests {
             onLogged: {}
         )
         #expect(logViewModel.isCompleted) // default — this is the completed-logging path.
+        // Planned/Logged Activity lifecycle consistency cleanup: actual
+        // duration is required for a completed log; `activity` itself
+        // has no planned duration, so it must be entered explicitly.
+        logViewModel.durationMinutes = 45
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
@@ -756,6 +990,90 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(links.count == 1)
         #expect(links.first?.status == .missed)
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
+    }
+
+    // MARK: - Planned/Logged Activity lifecycle consistency cleanup: actual duration required for Completed
+
+    @Test("Logging a completed planned activity with no duration entered is blocked entirely — nothing is created")
+    @MainActor
+    func loggingCompletedPlannedActivityWithoutDurationIsBlocked() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            // plannedDurationMinutes deliberately omitted.
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        logViewModel.sessionForm = 3
+        // durationMinutes left nil — nothing to prefill from, nothing entered.
+
+        #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(logViewModel.didLog == false)
+        #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId).isEmpty)
+    }
+
+    @Test("Logging prefills actual duration from the planned duration but the user's changed value is what actually saves — never re-derived from the plan")
+    @MainActor
+    func loggingPrefillsPlannedDurationButSavesTheChangedActualValue() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        // Prefilled from the plan — the parent hasn't touched it yet.
+        #expect(logViewModel.durationMinutes == 30)
+
+        // Reality differed — the parent corrects it before saving.
+        logViewModel.durationMinutes = 50
+        logViewModel.sessionForm = 3
+
+        #expect(logViewModel.save())
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        // The saved actual duration is the corrected value, not the
+        // original planned one — canonical training truth, never
+        // silently re-derived from the plan.
+        #expect(links.first?.durationMinutes == 50)
+        #expect(activity.plannedDurationMinutes == 30)
     }
 
     /// Item 7: Location — save/reload round-trip, and that it remains

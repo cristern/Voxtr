@@ -536,6 +536,10 @@ struct HomeDashboardViewModelTests {
             }
         )
         let logViewModel = detailViewModel.makeLogActivityViewModel()
+        // Planned/Logged Activity lifecycle consistency cleanup: actual
+        // duration is required for a completed log; `activity` itself
+        // has no planned duration, so it must be entered explicitly.
+        logViewModel.durationMinutes = 45
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
@@ -621,6 +625,10 @@ struct HomeDashboardViewModelTests {
             onActivityLogged: { homeDashboardViewModelA.loadTodayActivityRows() }
         )
         let logA = detailViewModelA.makeLogActivityViewModel()
+        // Planned/Logged Activity lifecycle consistency cleanup: actual
+        // duration is required for a completed log; `activityA` has no
+        // planned duration, so it must be entered explicitly.
+        logA.durationMinutes = 45
         logA.sessionForm = 3
         #expect(logA.save())
 
