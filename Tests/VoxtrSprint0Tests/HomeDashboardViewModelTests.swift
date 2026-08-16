@@ -464,4 +464,248 @@ struct HomeDashboardViewModelTests {
         #expect(trainingProvider.callCount == 1)
         #expect(coachingProvider.callCount == 1)
     }
+
+    // MARK: - Athlete Home stale-state fix (post-mutation navigation)
+
+    /// Reproduces the exact TestFlight-reported gap end to end, using
+    /// the same production construction `HomeDashboardView.todayActivityRow`
+    /// itself uses: `ActivityDetailViewModel` (the same type
+    /// `ActivityDetailViewLoader` constructs) wired with
+    /// `onActivityLogged` calling `HomeDashboardViewModel`'s own
+    /// `loadTodaysTraining()`/`loadTodayActivityRows()` — exactly what
+    /// `HomeDashboardView`'s row does. A real `LogActivityViewModel.save()`
+    /// through the canonical `TrainingReflectionCoordinationService`
+    /// path must cause `HomeDashboardViewModel`'s OWN read/composition
+    /// to reflect the fresh canonical `LoggedActivity` relationship —
+    /// never a stale "not yet logged" presentation.
+    @Test("A successful planned-activity log causes HomeDashboardViewModel's canonical read to reflect logged state")
+    @MainActor
+    func successfulLogReflectsInHomeDashboardCanonicalState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: today, timeZoneId: Self.oslo
+        )
+
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            )
+        )
+        homeDashboardViewModel.loadTodaysTraining()
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        guard case .loaded(let rowsBefore) = homeDashboardViewModel.todayActivityState,
+              case .planned(let plannedRowBefore) = rowsBefore.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the activity before logging")
+            return
+        }
+        #expect(plannedRowBefore.isCompleted == false)
+
+        // Mirrors HomeDashboardView.todayActivityRow's own
+        // onActivityLogged wiring exactly.
+        let detailViewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            onActivityLogged: {
+                homeDashboardViewModel.loadTodaysTraining()
+                homeDashboardViewModel.loadTodayActivityRows()
+            }
+        )
+        let logViewModel = detailViewModel.makeLogActivityViewModel()
+        logViewModel.sessionForm = 3
+
+        #expect(logViewModel.save())
+
+        guard case .loaded(let rowsAfter) = homeDashboardViewModel.todayActivityState,
+              case .planned(let plannedRowAfter) = rowsAfter.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the activity after logging")
+            return
+        }
+        #expect(plannedRowAfter.isCompleted == true)
+
+        guard case .loaded(let trainingAfter) = homeDashboardViewModel.todaysTrainingState else {
+            Issue.record("Expected .loaded after logging")
+            return
+        }
+        #expect(trainingAfter.first { $0.plannedActivity.plannedActivityId == activity.plannedActivityId }?.isCompleted == true)
+    }
+
+    /// Athlete isolation: two athletes, each with their own planned
+    /// activity today. Logging one athlete's activity, through the
+    /// exact same `onActivityLogged`-driven reload, must never mark a
+    /// DIFFERENT athlete's own planned activity as completed — the
+    /// canonical read is always scoped by the exact `AthleteId`, never
+    /// inferred from title/date or shared across athletes.
+    @Test("Logging one athlete's planned activity never marks a different athlete's own planned activity as completed")
+    @MainActor
+    func loggingOneAthleteNeverAffectsAnother() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlanA = try planningService.getOrCreateWeekPlan(athleteId: athleteA, weekStart: weekStart)
+        let weekPlanB = try planningService.getOrCreateWeekPlan(athleteId: athleteB, weekStart: weekStart)
+        let activityA = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanA.weekPlanId, athleteId: athleteA, activityType: .individualTraining,
+            title: "Athlete A run", localDate: today, timeZoneId: Self.oslo
+        )
+        let activityB = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanB.weekPlanId, athleteId: athleteB, activityType: .individualTraining,
+            title: "Athlete B run", localDate: today, timeZoneId: Self.oslo
+        )
+
+        func makeComposer() -> TodayActivityComposer {
+            TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            )
+        }
+        let homeDashboardViewModelA = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteA, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteA, weekStart: weekStart, todayActivityComposer: makeComposer()
+        )
+        let homeDashboardViewModelB = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteB, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteB, weekStart: weekStart, todayActivityComposer: makeComposer()
+        )
+        homeDashboardViewModelA.loadTodayActivityRows()
+        homeDashboardViewModelB.loadTodayActivityRows()
+
+        let detailViewModelA = ActivityDetailViewModel(
+            activity: activityA, isCompleted: false, weekPlanId: weekPlanA.weekPlanId,
+            athleteId: athleteA, athleteDisplayName: "Athlete A", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            onActivityLogged: { homeDashboardViewModelA.loadTodayActivityRows() }
+        )
+        let logA = detailViewModelA.makeLogActivityViewModel()
+        logA.sessionForm = 3
+        #expect(logA.save())
+
+        guard case .loaded(let rowsA) = homeDashboardViewModelA.todayActivityState,
+              case .planned(let rowA) = rowsA.first(where: { $0.id == activityA.id.uuidString }) else {
+            Issue.record("Expected a .planned row for athlete A's activity")
+            return
+        }
+        #expect(rowA.isCompleted == true)
+
+        // Reloaded fresh for athlete B — never touched by athlete A's
+        // log or reload.
+        homeDashboardViewModelB.loadTodayActivityRows()
+        guard case .loaded(let rowsB) = homeDashboardViewModelB.todayActivityState,
+              case .planned(let rowB) = rowsB.first(where: { $0.id == activityB.id.uuidString }) else {
+            Issue.record("Expected a .planned row for athlete B's activity")
+            return
+        }
+        #expect(rowB.isCompleted == false)
+    }
+
+    /// Failure must not trigger a success refresh/navigation path: when
+    /// `save()` fails (Form required but missing for a completed log),
+    /// `onActivityLogged` must never fire, and HomeDashboardViewModel's
+    /// own canonical state must still show the activity as not
+    /// completed — never a false "logged" presentation.
+    @Test("A failed planned-activity log does not produce a false completed presentation and does not trigger a reload")
+    @MainActor
+    func failedLogDoesNotProduceFalseCompletedPresentation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: today, timeZoneId: Self.oslo
+        )
+
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            )
+        )
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        var reloadCallCount = 0
+        let detailViewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            onActivityLogged: {
+                reloadCallCount += 1
+                homeDashboardViewModel.loadTodayActivityRows()
+            }
+        )
+        let logViewModel = detailViewModel.makeLogActivityViewModel()
+        // sessionForm left nil — Form is required for a completed log.
+
+        #expect(logViewModel.save() == false)
+        #expect(reloadCallCount == 0)
+
+        guard case .loaded(let rows) = homeDashboardViewModel.todayActivityState,
+              case .planned(let row) = rows.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the activity")
+            return
+        }
+        #expect(row.isCompleted == false)
+    }
 }

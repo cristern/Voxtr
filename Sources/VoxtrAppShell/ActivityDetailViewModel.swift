@@ -190,7 +190,20 @@ public final class ActivityDetailViewModel {
 
     /// Builds the logging ViewModel with every planned-activity value
     /// already known, prefilled — Part 4's own core requirement.
-    public func makeLogActivityViewModel() -> LogActivityViewModel {
+    ///
+    /// `onDismiss` (Athlete Home stale-state fix): `ActivityDetailView`
+    /// passes its own `@Environment(\.dismiss)` here, called
+    /// SYNCHRONOUSLY in the same `onLogged` closure as
+    /// `onActivityLogged()` — the exact timing
+    /// `RecurringOccurrencePreviewView`'s own already-verified-working
+    /// `onLogged: { onActivityLogged(); dismiss() }` already uses,
+    /// rather than waiting for a separate, later render pass to detect
+    /// `isCompleted`'s change and dismiss reactively (still preserved
+    /// below as a redundant safety net — this closure is additive, not
+    /// a replacement). Defaulted to a no-op so existing callers/tests
+    /// that only care about `isCompleted`/`onActivityLogged` are
+    /// unaffected.
+    public func makeLogActivityViewModel(onDismiss: @escaping () -> Void = {}) -> LogActivityViewModel {
         LogActivityViewModel(
             plannedActivity: activity,
             athleteId: athleteId,
@@ -204,6 +217,7 @@ public final class ActivityDetailViewModel {
             onLogged: { [weak self] in
                 self?.isCompleted = true
                 self?.onActivityLogged()
+                onDismiss()
             }
         )
     }

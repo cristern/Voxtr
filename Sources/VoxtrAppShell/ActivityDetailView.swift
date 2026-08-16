@@ -104,7 +104,15 @@ public struct ActivityDetailView: View {
             ActivityEditFormView(viewModel: viewModel)
         }
         .sheet(isPresented: $isLogging) {
-            LogActivityView(viewModel: viewModel.makeLogActivityViewModel())
+            // Athlete Home stale-state fix: `onDismiss` fires this
+            // screen's own dismiss() SYNCHRONOUSLY, in the same
+            // `onLogged` closure that fires `onActivityLogged()` — the
+            // moment a save genuinely succeeds, not on a later render
+            // pass. `.onChange(of: isCompleted)` below is kept as a
+            // redundant safety net; both call dismiss() at most once in
+            // practice, and a second dismiss() call on an
+            // already-dismissing view is a harmless no-op.
+            LogActivityView(viewModel: viewModel.makeLogActivityViewModel(onDismiss: { dismiss() }))
         }
         .onChange(of: viewModel.isCompleted) { wasCompleted, isCompleted in
             // Fires only on the true transition from not-yet-logged to
