@@ -30,6 +30,24 @@ public struct LoggedActivityWithSessionForm {
     }
 }
 
+/// VX-022 closeout (Activity Detail): the `LoggedActivity` for a given
+/// `PlannedActivity`, paired with its `ActivityReflection` if one
+/// exists — both fetched purely by stable typed-ID relationship, never
+/// by title/date matching. `reflection` is the raw, unfiltered entity;
+/// visibility gating (e.g. `.privateToAthlete`) is the caller's job,
+/// same separation `WeeklyReviewResult`/`PlannedActivityCompletion`
+/// already establish (assemble canonical data here, enforce privacy at
+/// the point of display).
+public struct LoggedActivityDetail {
+    public let loggedActivity: LoggedActivity
+    public let reflection: ActivityReflection?
+
+    public init(loggedActivity: LoggedActivity, reflection: ActivityReflection?) {
+        self.loggedActivity = loggedActivity
+        self.reflection = reflection
+    }
+}
+
 /// VX-022 (Session Form): the one place `TrainingService` (Training) and
 /// `ReflectionService` (Reflection) are used together to log a completed
 /// activity together with its 1-5 Session Form self-rating — same
@@ -177,5 +195,24 @@ public final class TrainingReflectionCoordinationService {
             visibility: visibility,
             bodyFeeling: bodyFeeling
         )
+    }
+
+    /// VX-022 closeout (Activity Detail): the read-side counterpart to
+    /// `logActivity` above — resolves the `LoggedActivity` for a
+    /// `PlannedActivity` (via `TrainingService.fetchLoggedActivities(forPlannedActivity:)`,
+    /// the same canonical relationship lookup `TrainingPlanningCoordinationService`
+    /// already derives completion from) and, if one exists, its linked
+    /// `ActivityReflection` (via `ReflectionService.fetchActivityReflection(forLoggedActivity:)`).
+    /// `nil` when no `LoggedActivity` exists yet — not an error, the
+    /// same "nothing to show yet" meaning used throughout this
+    /// codebase. A `LoggedActivityId` is a globally unique typed ID
+    /// scoped to exactly one athlete, so this lookup can never surface
+    /// another athlete's or another activity's data.
+    public func loggedActivityDetail(forPlannedActivity plannedActivityId: PlannedActivityId) throws -> LoggedActivityDetail? {
+        guard let loggedActivity = try trainingService.fetchLoggedActivities(forPlannedActivity: plannedActivityId).first else {
+            return nil
+        }
+        let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivity.loggedActivityId)
+        return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
     }
 }

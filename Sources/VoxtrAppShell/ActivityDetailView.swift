@@ -38,6 +38,19 @@ public struct ActivityDetailView: View {
                     LabeledContent("Notes", value: notes)
                 }
                 LabeledContent("Status", value: viewModel.isCompleted ? "Completed" : "Ready to log")
+                // VX-022 closeout: factual training data actually
+                // recorded — RPE from the canonical LoggedActivity
+                // field, Form from ActivityReflection.bodyFeeling for
+                // this exact LoggedActivity. Shown only when a value
+                // exists; no interpretation, no color, no scoring.
+                if let rpe = viewModel.perceivedExertion {
+                    LabeledContent("RPE", value: "\(rpe) / 10")
+                        .accessibilityIdentifier("activityDetail.rpeRow")
+                }
+                if let form = viewModel.formValue {
+                    LabeledContent("Form", value: "\(form) / 5")
+                        .accessibilityIdentifier("activityDetail.formRow")
+                }
             }
             .accessibilityIdentifier("activityDetail.summary")
 

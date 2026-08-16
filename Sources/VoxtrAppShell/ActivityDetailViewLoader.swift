@@ -62,9 +62,18 @@ public struct ActivityDetailViewLoader: View {
             let weekPlanId = WeekPlanId(rawValue: plannedActivity.weekPlanId)
             let fetchedWeekPlan = try? planningService.fetchWeekPlan(byId: weekPlanId)
             let isDraft = (fetchedWeekPlan ?? nil)?.status == .draft
+            // VX-022 closeout: resolves the exact LoggedActivity (for
+            // RPE) and its linked ActivityReflection (for Form), same
+            // local-loading-step pattern as the WeekPlan fetch above —
+            // nil when nothing has been logged yet, never an error.
+            let loggedDetail = (try? trainingReflectionCoordinationService.loggedActivityDetail(
+                forPlannedActivity: plannedActivity.plannedActivityId
+            )) ?? nil
             viewModel = ActivityDetailViewModel(
                 activity: plannedActivity,
                 isCompleted: isCompleted,
+                loggedActivity: loggedDetail?.loggedActivity,
+                activityReflection: loggedDetail?.reflection,
                 weekPlanId: weekPlanId,
                 athleteId: athleteId,
                 athleteDisplayName: athleteDisplayName,

@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAppShell
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -140,5 +141,114 @@ struct TrainingReflectionCoordinationServiceTests {
         let allLogged = try trainingRepository.fetchLoggedActivities(forAthlete: athleteId)
         #expect(allLogged.first?.loggedActivityId == loggedActivityId)
         #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId).count == 1)
+    }
+
+    // MARK: - VX-022 closeout: loggedActivityDetail (Activity Detail read path)
+
+    @Test("loggedActivityDetail resolves the exact LoggedActivity and its linked ActivityReflection for a PlannedActivity")
+    @MainActor
+    func loggedActivityDetailResolvesLoggedActivityAndReflection() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: "Morning run", startedAt: .now, perceivedExertion: 7, authorId: authorId, sessionForm: 4
+        )
+
+        let detail = try #require(try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId))
+        #expect(detail.loggedActivity.loggedActivityId == result.loggedActivity.loggedActivityId)
+        #expect(detail.loggedActivity.perceivedExertion == 7)
+        #expect(detail.reflection?.bodyFeeling == 4)
+        #expect(detail.reflection?.loggedActivityId == result.loggedActivity.id)
+    }
+
+    @Test("loggedActivityDetail returns nil when nothing has been logged for that PlannedActivity")
+    @MainActor
+    func loggedActivityDetailReturnsNilWhenNothingLogged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Not yet logged", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId) == nil)
+    }
+
+    @Test("loggedActivityDetail never mixes up two different PlannedActivities' LoggedActivity/reflection data")
+    @MainActor
+    func loggedActivityDetailNeverCrossesActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activityA = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Session A", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let activityB = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Session B", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activityA.plannedActivityId, activityType: .individualTraining,
+            title: "Session A", startedAt: .now, perceivedExertion: 3, authorId: authorId, sessionForm: 2
+        )
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activityB.plannedActivityId, activityType: .individualTraining,
+            title: "Session B", startedAt: .now, perceivedExertion: 8, authorId: authorId, sessionForm: 5
+        )
+
+        let detailA = try #require(try coordinator.loggedActivityDetail(forPlannedActivity: activityA.plannedActivityId))
+        let detailB = try #require(try coordinator.loggedActivityDetail(forPlannedActivity: activityB.plannedActivityId))
+
+        #expect(detailA.loggedActivity.perceivedExertion == 3)
+        #expect(detailA.reflection?.bodyFeeling == 2)
+        #expect(detailB.loggedActivity.perceivedExertion == 8)
+        #expect(detailB.reflection?.bodyFeeling == 5)
+        #expect(detailA.loggedActivity.loggedActivityId != detailB.loggedActivity.loggedActivityId)
     }
 }

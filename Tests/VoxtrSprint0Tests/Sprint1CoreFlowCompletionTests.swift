@@ -96,6 +96,279 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.activity.location == "Nadderud Stadion")
     }
 
+    // MARK: - VX-022 closeout: Activity Detail RPE / Form
+
+    /// Builds an `ActivityDetailViewModel` the same way `ActivityDetailViewLoader`
+    /// does — resolving `loggedActivity`/`activityReflection` externally
+    /// via `TrainingReflectionCoordinationService.loggedActivityDetail(forPlannedActivity:)`
+    /// before construction — for tests that need a fully-wired instance.
+    @MainActor
+    private static func makeCompletedActivityDetailViewModel(
+        athleteId: AthleteId,
+        planningService: PlanningService,
+        weekPlan: WeekPlan,
+        coordinator: TrainingReflectionCoordinationService,
+        perceivedExertion: Int?,
+        sessionForm: Int?,
+        sessionFormVisibility: VisibilityPolicy = .sharedWithGuardians
+    ) throws -> ActivityDetailViewModel {
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: "Morning run", startedAt: .now, perceivedExertion: perceivedExertion, authorId: ActorId(),
+            sessionForm: sessionForm, sessionFormVisibility: sessionFormVisibility
+        )
+        let detail = try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId)
+        return ActivityDetailViewModel(
+            activity: activity, isCompleted: true, loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+    }
+
+    @Test("Activity Detail exposes the exact stored RPE for a logged activity")
+    @MainActor
+    func activityDetailExposesStoredRPE() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: nil
+        )
+
+        #expect(viewModel.perceivedExertion == 7)
+    }
+
+    @Test("Activity Detail omits RPE when none was recorded")
+    @MainActor
+    func activityDetailOmitsNilRPE() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: nil
+        )
+
+        #expect(viewModel.perceivedExertion == nil)
+    }
+
+    @Test("Activity Detail exposes ActivityReflection.bodyFeeling as Form, linked to the exact LoggedActivity")
+    @MainActor
+    func activityDetailExposesFormFromExactLoggedActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 4
+        )
+
+        #expect(viewModel.formValue == 4)
+    }
+
+    @Test("Activity Detail never shows another logged activity's Form value")
+    @MainActor
+    func activityDetailNeverShowsAnotherActivitysForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModelA = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 2
+        )
+        let viewModelB = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 5
+        )
+
+        #expect(viewModelA.formValue == 2)
+        #expect(viewModelB.formValue == 5)
+        #expect(viewModelA.activity.plannedActivityId != viewModelB.activity.plannedActivityId)
+    }
+
+    @Test("Activity Detail never shows another athlete's Form value")
+    @MainActor
+    func activityDetailNeverShowsAnotherAthletesForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let otherWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: otherAthleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 3
+        )
+        _ = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: otherAthleteId, planningService: planningService, weekPlan: otherWeekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 5
+        )
+
+        #expect(viewModel.formValue == 3)
+    }
+
+    @Test("Activity Detail omits Form when no reflection exists for the logged activity")
+    @MainActor
+    func activityDetailOmitsFormWhenNoReflectionExists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: nil
+        )
+
+        #expect(viewModel.formValue == nil)
+    }
+
+    @Test("Activity Detail omits Form when a reflection exists but bodyFeeling itself is nil")
+    @MainActor
+    func activityDetailOmitsFormWhenBodyFeelingNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
+            activityType: .individualTraining, title: "Morning run", startedAt: .now
+        )
+        // A genuine, valid ActivityReflection whose meaningful content
+        // is text, not bodyFeeling — proves ReflectionService still
+        // allows this (the entity is not narrowed to VX-022's use
+        // case), and that Activity Detail correctly omits Form for it.
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, learningNote: "Felt strong on the last interval."
+        )
+
+        let detail = try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId)
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: true, loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(detail?.reflection != nil) // the reflection genuinely exists...
+        #expect(viewModel.formValue == nil) // ...but Form is correctly omitted.
+    }
+
+    @Test("Activity Detail never exposes Form when the reflection's visibility is privateToAthlete — hidden, not treated as missing")
+    @MainActor
+    func activityDetailHidesPrivateToAthleteForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: nil, sessionForm: 4, sessionFormVisibility: .privateToAthlete
+        )
+
+        // The reflection genuinely exists with a real bodyFeeling value
+        // — privacy hides it from display, it is not silently treated
+        // as if the data never existed at the persistence layer.
+        #expect(viewModel.formValue == nil)
+    }
+
+    @Test("Activity Detail's RPE and Form coexist correctly alongside unchanged Athlete/Activity/Date/Status fields")
+    @MainActor
+    func activityDetailRPEAndFormCoexistWithExistingFields() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+
+        let viewModel = try Self.makeCompletedActivityDetailViewModel(
+            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
+        )
+
+        #expect(viewModel.athleteDisplayName == "Oliver")
+        #expect(viewModel.activity.title == "Morning run")
+        #expect(viewModel.activity.localDate == TrainingPlanningCoordinationService.today())
+        #expect(viewModel.isCompleted == true)
+        #expect(viewModel.perceivedExertion == 7)
+        #expect(viewModel.formValue == 4)
+    }
+
     /// Item 7: logging via the canonical flow preserves the
     /// PlannedActivity linkage automatically — the user never has to
     /// manually reconnect a completed activity to its plan.

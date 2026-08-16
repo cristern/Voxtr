@@ -1,6 +1,8 @@
 import Foundation
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// Sprint 1 (Daily Use Foundation), Part 3. The ONE Activity Detail
 /// screen every planned activity opens into, regardless of entry point
@@ -15,6 +17,17 @@ public final class ActivityDetailViewModel {
     public private(set) var isCompleted: Bool
     public private(set) var errorMessage: String?
     public private(set) var isDeleted: Bool = false
+    /// VX-022 closeout: the exact `LoggedActivity` this `PlannedActivity`
+    /// resolved to, if any — resolved by `ActivityDetailViewLoader` via
+    /// `TrainingReflectionCoordinationService.loggedActivityDetail(forPlannedActivity:)`
+    /// before this view model is constructed, the same "small, local
+    /// loading step" pattern already used for `isWeekPlanDraft`. Never
+    /// fetched by this type itself.
+    private let loggedActivity: LoggedActivity?
+    /// The `ActivityReflection` linked to `loggedActivity` above, if
+    /// one exists — raw/unfiltered; `formValue` below applies the
+    /// existing privacy gate before exposing its content.
+    private let activityReflection: ActivityReflection?
 
     // Edit form fields — prefilled from `activity` on open, matching
     // WeeklyPlanningView's own established edit-sheet convention.
@@ -44,6 +57,8 @@ public final class ActivityDetailViewModel {
     public init(
         activity: PlannedActivity,
         isCompleted: Bool,
+        loggedActivity: LoggedActivity? = nil,
+        activityReflection: ActivityReflection? = nil,
         weekPlanId: WeekPlanId,
         athleteId: AthleteId,
         athleteDisplayName: String,
@@ -54,6 +69,8 @@ public final class ActivityDetailViewModel {
     ) {
         self.activity = activity
         self.isCompleted = isCompleted
+        self.loggedActivity = loggedActivity
+        self.activityReflection = activityReflection
         self.weekPlanId = weekPlanId
         self.athleteId = athleteId
         self.athleteDisplayName = athleteDisplayName
@@ -62,6 +79,29 @@ public final class ActivityDetailViewModel {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         prefillEditForm()
+    }
+
+    /// RPE — read directly from the canonical `LoggedActivity` field,
+    /// never duplicated elsewhere. `nil` when no `LoggedActivity` exists
+    /// yet, or one exists but no RPE was recorded for it.
+    public var perceivedExertion: Int? {
+        loggedActivity?.perceivedExertion
+    }
+
+    /// Form — `ActivityReflection.bodyFeeling` for the EXACT
+    /// `LoggedActivity` this screen represents, linked by stable typed
+    /// ID (never inferred from title/date/list position). `nil` when:
+    /// no reflection exists, the reflection has no `bodyFeeling`, or
+    /// the reflection's own `visibility` is `.privateToAthlete` — the
+    /// same existing gate `FamilyHomeViewModel.loadFocusThisWeek()`/
+    /// `WeeklyHistoryViewModel.focusNextWeekIfPermitted` already
+    /// established for reflection content, not a new privacy rule
+    /// invented for this screen.
+    public var formValue: Int? {
+        guard let activityReflection, activityReflection.visibility != .privateToAthlete else {
+            return nil
+        }
+        return activityReflection.bodyFeeling
     }
 
     /// Whether Edit/Delete are currently offered — mirrors
