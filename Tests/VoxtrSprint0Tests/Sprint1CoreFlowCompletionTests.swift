@@ -128,6 +128,7 @@ struct Sprint1CoreFlowCompletionTests {
         )
         logViewModel.durationMinutes = 45
         logViewModel.perceivedExertion = 6
+        logViewModel.sessionForm = 4 // VX-022: required for a completed log.
         #expect(logViewModel.save())
         #expect(loggedFlag)
 
@@ -137,13 +138,14 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(links.first?.perceivedExertion == 6)
     }
 
-    /// VX-022 (Session Form): logging a planned activity with a Session
-    /// Form value stores it as `ActivityReflection.bodyFeeling`, linked
-    /// to the exact `LoggedActivity` this save created by its stable
-    /// typed ID — never inferred from title/date.
-    @Test("Logging a planned activity with Session Form stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity")
+    /// VX-022 (Form / Session Form): logging a completed planned
+    /// activity with a Form value stores it as
+    /// `ActivityReflection.bodyFeeling`, linked to the exact
+    /// `LoggedActivity` this save created by its stable typed ID —
+    /// never inferred from title/date.
+    @Test("Logging a completed planned activity with Form stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity, visible to guardians by default")
     @MainActor
-    func loggingPlannedActivityWithSessionFormStoresBodyFeeling() throws {
+    func loggingCompletedPlannedActivityWithFormStoresBodyFeeling() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -169,6 +171,7 @@ struct Sprint1CoreFlowCompletionTests {
             ),
             onLogged: {}
         )
+        #expect(logViewModel.isCompleted) // default — this is the completed-logging path.
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
@@ -181,6 +184,92 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(reflection?.bodyFeeling == 3)
         #expect(reflection?.loggedActivityId == loggedActivity.id)
         #expect(reflection?.athleteId == athleteId.rawValue)
+        // VX-022 correction: family-first MVP default, not
+        // privateToAthlete.
+        #expect(reflection?.visibility == .sharedWithGuardians)
+    }
+
+    /// VX-022 correction: Form is required for the V1 Log Activity flow
+    /// ("Form is required for completed training/match/competition
+    /// logging") — a completed log must not be reported as saved
+    /// without it, and nothing (not even the LoggedActivity) should be
+    /// created when it's missing.
+    @Test("Logging a completed planned activity without Form is blocked entirely — nothing is created")
+    @MainActor
+    func loggingCompletedPlannedActivityWithoutFormIsBlocked() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        // sessionForm left nil — Form is required for a completed log.
+
+        #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(logViewModel.didLog == false)
+        #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId).isEmpty)
+    }
+
+    /// VX-022 correction: Form is required for COMPLETED logging
+    /// specifically — logging as NOT completed represents a session
+    /// that didn't happen, so there is nothing to rate, and Form must
+    /// not block that path.
+    @Test("Logging a planned activity as NOT completed does not require Form")
+    @MainActor
+    func loggingNotCompletedPlannedActivityDoesNotRequireForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        logViewModel.isCompleted = false
+        // sessionForm left nil — must not block a not-completed log.
+
+        #expect(logViewModel.save())
+        #expect(logViewModel.errorMessage == nil)
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.status == .missed)
+        #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 
     /// Item 7: Location — save/reload round-trip, and that it remains

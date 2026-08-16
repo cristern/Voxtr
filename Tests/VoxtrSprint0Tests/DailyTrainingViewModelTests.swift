@@ -73,6 +73,7 @@ struct DailyTrainingViewModelTests {
         viewModel.load()
         viewModel.newLogTitle = "Easy jog"
         viewModel.newLogDurationMinutes = 30
+        viewModel.newLogSessionForm = 3 // VX-022: required for every log through this flow.
 
         viewModel.logActivity()
 
@@ -186,6 +187,7 @@ struct DailyTrainingViewModelTests {
         #expect(viewModel.plannedActivities.first?.isCompleted == false)
 
         viewModel.newLogTitle = "Endurance run"
+        viewModel.newLogSessionForm = 3 // VX-022: required for every log through this flow.
         viewModel.selectedPlannedActivityId = plannedActivity.plannedActivityId
         viewModel.logActivity()
 
@@ -231,6 +233,7 @@ struct DailyTrainingViewModelTests {
         )
 
         viewModel.newLogTitle = "Second attempt"
+        viewModel.newLogSessionForm = 3 // VX-022: valid, so this test genuinely exercises duplicate-link rejection, not the Form-required check.
         viewModel.selectedPlannedActivityId = plannedActivity.plannedActivityId
         viewModel.logActivity()
 
@@ -238,11 +241,11 @@ struct DailyTrainingViewModelTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
     }
 
-    // MARK: - VX-022: Session Form
+    // MARK: - VX-022: Form (Session Form)
 
-    @Test("Logging with a Session Form value stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity")
+    @Test("Logging with a Form value stores it as ActivityReflection.bodyFeeling, linked to the exact LoggedActivity, visible to guardians by default")
     @MainActor
-    func logActivityWithSessionFormStoresBodyFeeling() throws {
+    func logActivityWithFormStoresBodyFeeling() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -284,11 +287,18 @@ struct DailyTrainingViewModelTests {
         #expect(reflection?.bodyFeeling == 4)
         #expect(reflection?.loggedActivityId == loggedActivity.id)
         #expect(reflection?.athleteId == athleteId.rawValue)
+        // VX-022 correction: the family-first MVP default, not a
+        // hard-coded privateToAthlete — no canonical visibility
+        // resolver is actually wired up anywhere in this codebase
+        // (verified: AthleteSettings.defaultReflectionVisibility and
+        // PrivacyPreference.defaultReflectionVisibility both exist only
+        // as schema, with no repository/service exposing either).
+        #expect(reflection?.visibility == .sharedWithGuardians)
     }
 
-    @Test("Logging without a Session Form value preserves existing behavior — no reflection is created")
+    @Test("Logging without a Form value is blocked entirely — every log through this flow is a completed session, so Form is required and nothing is created without it")
     @MainActor
-    func logActivityWithoutSessionFormCreatesNoReflection() throws {
+    func logActivityWithoutFormIsBlockedEntirely() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -311,14 +321,16 @@ struct DailyTrainingViewModelTests {
             athleteId: athleteId
         )
         viewModel.newLogTitle = "Easy jog"
-        // newLogSessionForm left nil — omission must be fully supported.
+        // newLogSessionForm left nil — Form is required for this flow.
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage == nil)
-        let logged = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
-        #expect(logged.count == 1)
+        #expect(viewModel.errorMessage != nil)
+        // Blocked at the orchestration boundary, before anything is
+        // created — not a partial log, not a reflection-write failure.
+        #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).isEmpty)
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
+        #expect(viewModel.sessionFormPendingRetry == false)
     }
 
     @Test("Athlete isolation: a Session Form reflection for one athlete's log never appears under another athlete")
@@ -355,68 +367,21 @@ struct DailyTrainingViewModelTests {
         #expect(try reflectionService.fetchActivityReflections(forAthlete: otherAthleteId).isEmpty)
     }
 
-    @Test("A reflection save failure after a successful log preserves the LoggedActivity and never creates a duplicate on retry")
+    // Note: the retry-after-a-genuine-reflection-failure /
+    // never-duplicates-the-LoggedActivity scenario now lives in
+    // TrainingReflectionCoordinationServiceTests.swift, which calls the
+    // coordinator directly. It can no longer be exercised through this
+    // ViewModel's public API using an out-of-range value: the VX-022
+    // correction added TrainingValidator.validateForm as an upfront
+    // check in logActivity() itself (below), which now rejects an
+    // out-of-range Form before the coordinator — and therefore before
+    // any LoggedActivity — is ever created. The coordinator's own
+    // retry/no-duplicate safety net is unchanged and still fully
+    // covered, just at the layer that actually owns it.
+
+    @Test("An out-of-range Form value is rejected through controlled validation at the orchestration boundary, before anything is created")
     @MainActor
-    func reflectionFailureAfterLoggingIsRetriedWithoutDuplicatingTheActivity() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let planningRepository = PlanningRepository(modelContext: container.mainContext)
-        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
-        let trainingService = TrainingService(repository: trainingRepository)
-        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
-        let reflectionService = ReflectionService(repository: reflectionRepository)
-        let coordinationService = TrainingPlanningCoordinationService(
-            planningRepository: planningRepository,
-            trainingRepository: trainingRepository
-        )
-        let coordinator = TrainingReflectionCoordinationService(
-            trainingService: trainingService, reflectionService: reflectionService
-        )
-        let athleteId = AthleteId()
-        let authorId = ActorId()
-        let viewModel = DailyTrainingViewModel(
-            trainingService: trainingService,
-            coordinationService: coordinationService,
-            trainingReflectionCoordinationService: coordinator,
-            authorId: authorId,
-            athleteId: athleteId
-        )
-        // A Session Form value outside the entity's own 1-5 bound
-        // deterministically forces ReflectionService to throw
-        // .invalidField on the FIRST attempt — TrainingService.logActivity
-        // itself has no such validation, so the LoggedActivity is
-        // genuinely created and preserved, while the reflection write
-        // fails. This exercises the real failure path (not a simulated
-        // stand-in): the same `ReflectionService.recordActivityReflection`
-        // call the retry below also goes through.
-        viewModel.newLogTitle = "Match day"
-        viewModel.newLogSessionForm = 99
-        viewModel.logActivity()
-
-        #expect(viewModel.sessionFormPendingRetry == true)
-        #expect(viewModel.errorMessage != nil)
-        let loggedAfterFirstAttempt = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
-        #expect(loggedAfterFirstAttempt.count == 1)
-        let loggedActivityId = try #require(loggedAfterFirstAttempt.first).loggedActivityId
-        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId).isEmpty)
-
-        // Retry with a corrected value — never silently discarded, and
-        // must retry ONLY the reflection write, never re-log.
-        viewModel.newLogSessionForm = 4
-        viewModel.logActivity()
-
-        #expect(viewModel.sessionFormPendingRetry == false)
-        let loggedAfterRetry = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
-        #expect(loggedAfterRetry.count == 1)
-        #expect(loggedAfterRetry.first?.loggedActivityId == loggedActivityId)
-        let reflections = try reflectionService.fetchActivityReflections(forLoggedActivity: loggedActivityId)
-        #expect(reflections.count == 1)
-        #expect(reflections.first?.bodyFeeling == 4)
-    }
-
-    @Test("An out-of-range Session Form value is rejected through controlled validation, not a crash")
-    @MainActor
-    func invalidSessionFormValueIsRejectedViaControlledError() throws {
+    func invalidFormValueIsRejectedBeforeAnythingIsCreated() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -439,16 +404,19 @@ struct DailyTrainingViewModelTests {
             athleteId: athleteId
         )
         viewModel.newLogTitle = "Match day"
+        // Never reachable via the Picker (which offers only 1-5) — this
+        // simulates programmatic misuse to prove the controlled,
+        // non-crashing rejection still exists as a safety net.
         viewModel.newLogSessionForm = 0
 
         viewModel.logActivity()
 
-        // Never crashes — surfaced as a controlled, catchable error via
-        // the same ReflectionService.recordActivityReflection path
-        // WeeklyReflectionService's own .invalidField already
-        // established, and the activity itself is still preserved.
-        #expect(viewModel.sessionFormPendingRetry == true)
-        #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).count == 1)
+        // Never crashes — and, per the VX-022 correction, never even
+        // reaches TrainingService.logActivity: nothing is created at
+        // all, not even a LoggedActivity without its reflection.
+        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.sessionFormPendingRetry == false)
+        #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).isEmpty)
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 }

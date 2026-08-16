@@ -32,8 +32,8 @@ public struct LoggedActivityWithSessionForm {
 
 /// VX-022 (Session Form): the one place `TrainingService` (Training) and
 /// `ReflectionService` (Reflection) are used together to log a completed
-/// activity together with its optional 1-5 Session Form self-rating —
-/// same reasoning `TrainingPlanningCoordinationService`/
+/// activity together with its 1-5 Session Form self-rating — same
+/// reasoning `TrainingPlanningCoordinationService`/
 /// `WeeklyReviewCoordinationService` already established for their own
 /// cross-domain pairs. Session Form itself introduces no new entity or
 /// persistence model: it is stored as the existing
@@ -41,6 +41,36 @@ public struct LoggedActivityWithSessionForm {
 /// `ReflectionService.recordActivityReflection` path, linked to the
 /// exact `LoggedActivity` this call creates by its stable, typed ID —
 /// never by title/date matching.
+///
+/// `sessionForm` on `logActivity` below stays `Int?` at THIS layer —
+/// this type is a reusable "log, then optionally attach a reflection"
+/// primitive, not itself the place that owns the V1 product policy of
+/// requiring Form. The approved V1 contract ("Form is required for
+/// completed training/match/competition logging") is enforced one
+/// layer up, at the UI/orchestration boundary
+/// (`TrainingValidator.validateForm`, called by `LogActivityViewModel.save()`
+/// and `DailyTrainingViewModel.logActivity()` before this method is
+/// ever invoked) — never here, and never by making
+/// `ActivityReflection.bodyFeeling` itself non-optional, since
+/// `ActivityReflection` also carries reflection content unrelated to
+/// Session Form (energy, satisfaction, free text) that has no
+/// bodyFeeling at all.
+///
+/// VISIBILITY: `sessionFormVisibility` defaults to `.sharedWithGuardians`,
+/// not `.privateToAthlete`. Investigated before choosing this: neither
+/// `AthleteSettings.defaultReflectionVisibility` nor
+/// `PrivacyPreference.defaultReflectionVisibility` (the two schema-level
+/// settings that exist for exactly this) has ANY repository or service
+/// method exposing it anywhere in this codebase — both are
+/// schema-registered but otherwise fully unreachable, so there is no
+/// existing canonical resolver to call without building new plumbing,
+/// which is explicitly out of scope for VX-022. `.sharedWithGuardians`
+/// is the documented family-first MVP default, and is also the one
+/// real, already-established default elsewhere in this exact domain
+/// package (`ReflectionRepository.insertParentObservation`/
+/// `ParentObservation`'s own default) — `WeeklyReflectionFormViewModel`'s
+/// local `.privateToAthlete` choice is a single form's own decision, not
+/// a canonical policy source, and is deliberately NOT copied here.
 ///
 /// ATOMICITY: logging a `LoggedActivity` and recording its
 /// `ActivityReflection` are two separate SwiftData writes — this
@@ -91,7 +121,7 @@ public final class TrainingReflectionCoordinationService {
         notes: String? = nil,
         authorId: ActorId,
         sessionForm: Int?,
-        sessionFormVisibility: VisibilityPolicy = .privateToAthlete
+        sessionFormVisibility: VisibilityPolicy = .sharedWithGuardians
     ) throws -> LoggedActivityWithSessionForm {
         let loggedActivity = try trainingService.logActivity(
             athleteId: athleteId,
@@ -138,7 +168,7 @@ public final class TrainingReflectionCoordinationService {
         loggedActivityId: LoggedActivityId,
         authorId: ActorId,
         bodyFeeling: Int,
-        visibility: VisibilityPolicy = .privateToAthlete
+        visibility: VisibilityPolicy = .sharedWithGuardians
     ) throws -> ActivityReflection {
         try reflectionService.recordActivityReflection(
             athleteId: athleteId,

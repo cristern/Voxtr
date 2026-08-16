@@ -19,11 +19,18 @@ import VoxtrTrainingDomain
 /// distinct "intensity" concept is truly wanted, not something to
 /// paper over here.
 ///
-/// VX-022 (Session Form): a separate, optional 1-5 self-rating,
+/// VX-022 (Session Form): the "Form" field — a separate 1-5 self-rating,
 /// captured alongside the log and stored as `ActivityReflection.bodyFeeling`
 /// via `TrainingReflectionCoordinationService` — not a new field on
 /// `LoggedActivity` itself. See that type's own doc comment for the
 /// exact atomicity/retry contract `save()` below implements.
+///
+/// Required for a COMPLETED log (the approved V1 contract: "Form is
+/// required for completed training/match/competition logging") —
+/// `save()` blocks with `TrainingValidator.validateForm` before
+/// anything is created whenever `isCompleted` is true. When logging as
+/// NOT completed (`isCompleted == false`, i.e. `.missed`), nothing
+/// happened to rate, so Form is not required in that case.
 @MainActor
 @Observable
 public final class LogActivityViewModel {
@@ -43,6 +50,8 @@ public final class LogActivityViewModel {
     public var perceivedExertion: Int?
     public var notes: String = ""
     public var isCompleted: Bool = true
+    /// "Form" in the UI — required when `isCompleted` is true; see this
+    /// type's own doc comment.
     public var sessionForm: Int?
 
     private let athleteId: AthleteId
@@ -97,9 +106,18 @@ public final class LogActivityViewModel {
                 return true
             } catch {
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Session Form could not be saved — tap Save to try again."
+                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
                 return false
             }
+        }
+
+        // VX-022: Form is required for a COMPLETED log — checked here,
+        // before anything is created, so a completed log can never be
+        // reported as saved without it. Not required when logging as
+        // not completed (nothing happened to rate).
+        if isCompleted, let formError = TrainingValidator.validateForm(sessionForm) {
+            errorMessage = formError
+            return false
         }
 
         do {
@@ -128,7 +146,7 @@ public final class LogActivityViewModel {
                 return true
             case .failed:
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Session Form could not be saved — tap Save to try again."
+                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
                 return false
             }
         } catch TrainingServiceError.plannedActivityAlreadyLinked {

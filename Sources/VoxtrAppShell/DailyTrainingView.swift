@@ -161,11 +161,12 @@ public struct DailyTrainingView: View {
                 }
                 .accessibilityIdentifier("training.newLogExertionPicker")
 
-                // VX-022 (Session Form): neutral 1-5 scale, same Picker
-                // shape as RPE above — no failure/success labeling, no
-                // scoring or readiness language.
-                Picker("Session Form", selection: $viewModel.newLogSessionForm) {
-                    Text("Not set").tag(Int?.none)
+                // VX-022: "Form" — required for every log through this
+                // flow (always a completed session). Neutral 1-5 scale,
+                // no failure/success labeling, no scoring or readiness
+                // language, same Picker shape as RPE above. No "Not
+                // set" option — Form is required, not optional.
+                Picker("Form", selection: $viewModel.newLogSessionForm) {
                     ForEach(1...5, id: \.self) { value in
                         Text("\(value)").tag(Int?.some(value))
                     }

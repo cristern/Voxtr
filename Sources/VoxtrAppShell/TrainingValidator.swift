@@ -28,4 +28,19 @@ public enum TrainingValidator {
         guard value.count <= 500 else { return TrainingStrings.notesTooLong }
         return nil
     }
+
+    /// VX-022: Form is required for the V1 Log Activity flow (approved
+    /// product contract) — enforced here, at the UI/orchestration
+    /// boundary, before `TrainingReflectionCoordinationService.logActivity`
+    /// is ever called. Deliberately NOT enforced by making
+    /// `ActivityReflection.bodyFeeling` non-optional at the domain
+    /// level: `ActivityReflection` also carries reflection content that
+    /// has no bodyFeeling at all (see `ReflectionRepositoryAndServiceTests`'s
+    /// text-only-reflection coverage), so narrowing the entity itself
+    /// would break other, unrelated reflection use cases.
+    public static func validateForm(_ value: Int?) -> String? {
+        guard let value else { return TrainingStrings.formRequired }
+        guard (1...5).contains(value) else { return TrainingStrings.invalidForm }
+        return nil
+    }
 }

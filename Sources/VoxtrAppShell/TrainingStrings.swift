@@ -23,6 +23,18 @@ public enum TrainingStrings {
         String(localized: "training.error.notesTooLong", defaultValue: "Notes must be 500 characters or fewer.")
     }
 
+    /// VX-022: Form is required for the Log Activity flow — this is the
+    /// UI/orchestration-boundary message when it was left unset, not a
+    /// domain-level constraint (`ActivityReflection.bodyFeeling` itself
+    /// stays optional; see `TrainingValidator.validateForm`).
+    public static var formRequired: String {
+        String(localized: "training.error.formRequired", defaultValue: "Form is required.")
+    }
+
+    public static var invalidForm: String {
+        String(localized: "training.error.invalidForm", defaultValue: "Form must be between 1 and 5.")
+    }
+
     public static var plannedActivityAlreadyLinked: String {
         String(
             localized: "training.error.alreadyLinked",

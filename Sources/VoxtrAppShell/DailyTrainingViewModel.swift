@@ -36,8 +36,10 @@ public final class DailyTrainingViewModel {
     public var newLogDurationMinutes: Int = 60
     public var newLogPerceivedExertion: Int?
     public var newLogNotes: String = ""
-    /// VX-022 (Session Form): optional 1-5 self-rating, stored as
-    /// `ActivityReflection.bodyFeeling` via
+    /// VX-022 (Session Form): the "Form" field in the UI — a required
+    /// 1-5 self-rating (every log through this flow represents a
+    /// completed session; there is no "not completed" state here),
+    /// stored as `ActivityReflection.bodyFeeling` via
     /// `TrainingReflectionCoordinationService` — see that type's own
     /// doc comment for the atomicity/retry contract `logActivity()`
     /// below implements.
@@ -155,7 +157,7 @@ public final class DailyTrainingViewModel {
                 load()
             } catch {
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Session Form could not be saved — tap Log activity to try again."
+                errorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
             }
             return
         }
@@ -172,6 +174,14 @@ public final class DailyTrainingViewModel {
         let notesOrNil = trimmedNotes.isEmpty ? nil : trimmedNotes
         if let notesError = TrainingValidator.validateNotes(notesOrNil) {
             errorMessage = notesError
+            return
+        }
+        // VX-022: every log through this flow represents a completed
+        // session (no "not completed" state here) — Form is
+        // unconditionally required, checked before anything is
+        // created, so a log can never be reported as saved without it.
+        if let formError = TrainingValidator.validateForm(newLogSessionForm) {
+            errorMessage = formError
             return
         }
 
@@ -213,7 +223,7 @@ public final class DailyTrainingViewModel {
                 // silently discarded.
                 pendingSessionFormLoggedActivityId = result.loggedActivity.loggedActivityId
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Session Form could not be saved — tap Log activity to try again."
+                errorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
             }
         } catch let error as TrainingServiceError {
             errorMessage = Self.message(for: error)

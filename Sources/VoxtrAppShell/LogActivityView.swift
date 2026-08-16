@@ -43,13 +43,13 @@ public struct LogActivityView: View {
                     }
                     .accessibilityIdentifier("logActivity.rpePicker")
 
-                    // VX-022 (Session Form): neutral 1-5 scale — no
-                    // failure/success labeling, no scoring or
-                    // readiness language, matching the Design System's
-                    // existing Picker convention (same shape as RPE
-                    // above).
-                    Picker("Session Form", selection: $viewModel.sessionForm) {
-                        Text("Not set").tag(Int?.none)
+                    // VX-022: "Form" — required when Completed is on
+                    // (nothing to rate for a not-completed log). Neutral
+                    // 1-5 scale, no failure/success labeling, no scoring
+                    // or readiness language, same Picker shape as RPE
+                    // above. No "Not set" option — Form is required, not
+                    // optional, for the V1 contract.
+                    Picker("Form", selection: $viewModel.sessionForm) {
                         ForEach(1...5, id: \.self) { value in
                             Text("\(value)").tag(Int?.some(value))
                         }
