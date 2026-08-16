@@ -57,15 +57,17 @@ public final class ActivityDetailViewModel {
     /// explicit signal back to whichever screen pushed this one (Family
     /// Home, Athlete Home, Daily Training, Family Schedule, Weekly
     /// Planning), fired the moment a log genuinely succeeds — never a
-    /// mere `.onAppear` refire assumption. This screen already pops
-    /// itself on successful log (`ActivityDetailView`'s own
-    /// `.onChange(of: isCompleted)`); this closure is the deterministic
-    /// counterpart that tells the screen being popped BACK TO to reload
-    /// its own authoritative data, the same "explicit success signal,
-    /// not implicit SwiftUI lifecycle" principle `successfulLogTrigger`/
-    /// `onLogged` already establish elsewhere in this exact flow.
-    /// Defaulted to a no-op so existing construction sites/tests are
-    /// unaffected.
+    /// mere `.onAppear` refire assumption. This screen also pops itself
+    /// on successful log, synchronously, via the SAME `onLogged`
+    /// closure (see `makeLogActivityViewModel`'s own `onDismiss`
+    /// parameter) — the returning host is signaled to reload BEFORE
+    /// this screen dismisses, never after. This closure is the
+    /// deterministic counterpart that tells the screen being popped
+    /// BACK TO to reload its own authoritative data, the same "explicit
+    /// success signal, not implicit SwiftUI lifecycle" principle
+    /// `successfulLogTrigger`/`onLogged` already establish elsewhere in
+    /// this exact flow. Defaulted to a no-op so existing construction
+    /// sites/tests are unaffected.
     private let onActivityLogged: () -> Void
 
     public init(
@@ -191,18 +193,22 @@ public final class ActivityDetailViewModel {
     /// Builds the logging ViewModel with every planned-activity value
     /// already known, prefilled — Part 4's own core requirement.
     ///
-    /// `onDismiss` (Athlete Home stale-state fix): `ActivityDetailView`
-    /// passes its own `@Environment(\.dismiss)` here, called
-    /// SYNCHRONOUSLY in the same `onLogged` closure as
-    /// `onActivityLogged()` — the exact timing
+    /// `onDismiss` (Athlete Home stale-state fix, single-owner
+    /// closeout): `ActivityDetailView` passes its own
+    /// `@Environment(\.dismiss)` here, called SYNCHRONOUSLY in the same
+    /// `onLogged` closure as `onActivityLogged()` — the exact timing
     /// `RecurringOccurrencePreviewView`'s own already-verified-working
-    /// `onLogged: { onActivityLogged(); dismiss() }` already uses,
-    /// rather than waiting for a separate, later render pass to detect
-    /// `isCompleted`'s change and dismiss reactively (still preserved
-    /// below as a redundant safety net — this closure is additive, not
-    /// a replacement). Defaulted to a no-op so existing callers/tests
-    /// that only care about `isCompleted`/`onActivityLogged` are
-    /// unaffected.
+    /// `onLogged: { onActivityLogged(); dismiss() }` already uses. This
+    /// is now the ONE place a successful log dismisses
+    /// `ActivityDetailView` — `isCompleted` is `private(set)` and this
+    /// closure (line below) is its only mutation site anywhere in this
+    /// codebase, so `ActivityDetailView` no longer also observes
+    /// `isCompleted` via `.onChange` to dismiss reactively; that
+    /// would-be second, independent trigger was removed rather than
+    /// kept as a "safety net" — a successful log has exactly one
+    /// navigation owner, not two. Defaulted to a no-op so existing
+    /// callers/tests that only care about `isCompleted`/`onActivityLogged`
+    /// are unaffected.
     public func makeLogActivityViewModel(onDismiss: @escaping () -> Void = {}) -> LogActivityViewModel {
         LogActivityViewModel(
             plannedActivity: activity,

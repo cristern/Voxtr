@@ -102,15 +102,26 @@ struct Sprint1CoreFlowCompletionTests {
     /// `ActivityDetailViewModel.makeLogActivityViewModel()` must not
     /// only flip `isCompleted` locally — it must also fire the explicit
     /// `onActivityLogged` signal the screen that pushed Activity Detail
-    /// relies on to reload its own authoritative data. Exercised at the
-    /// ViewModel/contract level (not via real SwiftUI navigation, which
-    /// is not something Swift Testing can drive) — this is the
-    /// deterministic, testable half of the fix; the SwiftUI wiring at
-    /// each of the 5 call sites is what actually connects this signal
-    /// to each source screen's own `load`/`refresh` method.
-    @Test("A successful log fires onActivityLogged, so the screen that pushed Activity Detail can reload its own data")
+    /// relies on to reload its own authoritative data, THEN dismiss
+    /// itself exactly once via `onDismiss` — never the other order,
+    /// never twice. `callOrder` (not two separate counters) proves both
+    /// the count AND the ordering in one assertion: the returning host
+    /// must reread canonical state before this screen disappears, and
+    /// `isCompleted` — `private(set)`, mutated in exactly one place in
+    /// this whole codebase (the same `onLogged` closure both `onActivityLogged`
+    /// and `onDismiss` fire from) — has no other transition that could
+    /// cause a second, independent dismiss trigger; `ActivityDetailView`
+    /// no longer keeps a separate `.onChange(of: isCompleted)` observer
+    /// for exactly that reason. Exercised at the ViewModel/contract
+    /// level (not via real SwiftUI navigation, which is not something
+    /// Swift Testing can drive) — this is the deterministic, testable
+    /// half of the fix; the SwiftUI wiring at each of the 5 call sites
+    /// is what actually connects `onActivityLogged` to each source
+    /// screen's own `load`/`refresh` method, and `onDismiss` to
+    /// `ActivityDetailView`'s own `@Environment(\.dismiss)`.
+    @Test("A successful log fires onActivityLogged then dismisses exactly once, in that order")
     @MainActor
-    func successfulLogFiresOnActivityLoggedCallback() throws {
+    func successfulLogFiresOnActivityLoggedThenDismissesExactlyOnce() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -129,30 +140,31 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var reloadCallCount = 0
+        var callOrder: [String] = []
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { reloadCallCount += 1 }
+            onActivityLogged: { callOrder.append("reload") }
         )
 
-        let logViewModel = viewModel.makeLogActivityViewModel()
+        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
         #expect(viewModel.isCompleted == true)
-        #expect(reloadCallCount == 1)
+        #expect(callOrder == ["reload", "dismiss"])
     }
 
     /// A failed log (Form required but missing) must neither flip
-    /// `isCompleted` nor fire `onActivityLogged` — the same "no false
-    /// refresh on failure" contract required for the successful path
-    /// above.
-    @Test("A failed log does not fire onActivityLogged and does not flip isCompleted")
+    /// `isCompleted`, nor fire `onActivityLogged`, nor dismiss — the
+    /// same "no false refresh/navigation on failure" contract required
+    /// for the successful path above, now covering the dismiss half
+    /// too.
+    @Test("A failed log fires neither onActivityLogged nor dismiss, and does not flip isCompleted")
     @MainActor
-    func failedLogDoesNotFireOnActivityLoggedCallback() throws {
+    func failedLogFiresNeitherOnActivityLoggedNorDismiss() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -171,21 +183,21 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var reloadCallCount = 0
+        var callOrder: [String] = []
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { reloadCallCount += 1 }
+            onActivityLogged: { callOrder.append("reload") }
         )
 
-        let logViewModel = viewModel.makeLogActivityViewModel()
+        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
         // sessionForm left nil — Form is required for a completed log.
 
         #expect(logViewModel.save() == false)
         #expect(viewModel.isCompleted == false)
-        #expect(reloadCallCount == 0)
+        #expect(callOrder.isEmpty)
     }
 
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion

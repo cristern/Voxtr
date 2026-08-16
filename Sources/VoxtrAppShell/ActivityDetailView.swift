@@ -104,24 +104,21 @@ public struct ActivityDetailView: View {
             ActivityEditFormView(viewModel: viewModel)
         }
         .sheet(isPresented: $isLogging) {
-            // Athlete Home stale-state fix: `onDismiss` fires this
-            // screen's own dismiss() SYNCHRONOUSLY, in the same
-            // `onLogged` closure that fires `onActivityLogged()` — the
-            // moment a save genuinely succeeds, not on a later render
-            // pass. `.onChange(of: isCompleted)` below is kept as a
-            // redundant safety net; both call dismiss() at most once in
-            // practice, and a second dismiss() call on an
-            // already-dismissing view is a harmless no-op.
+            // Athlete Home stale-state fix, single-owner closeout:
+            // `onDismiss` fires this screen's own dismiss()
+            // SYNCHRONOUSLY, in the same `onLogged` closure that fires
+            // `onActivityLogged()` — the moment a save genuinely
+            // succeeds. This is the ONE place a successful log
+            // dismisses this screen: `isCompleted` is `private(set)`
+            // with exactly one mutation site in the whole codebase
+            // (this same `onLogged` closure, inside
+            // `makeLogActivityViewModel`), so there is no other
+            // false->true transition a second, independent `.onChange`
+            // observer could ever legitimately fire on — keeping one
+            // here as well would just be two triggers racing to dismiss
+            // the same screen for the same event. A successful log
+            // therefore causes at most one dismiss() call.
             LogActivityView(viewModel: viewModel.makeLogActivityViewModel(onDismiss: { dismiss() }))
-        }
-        .onChange(of: viewModel.isCompleted) { wasCompleted, isCompleted in
-            // Fires only on the true transition from not-yet-logged to
-            // logged (the moment a save actually succeeds) — never on
-            // initial appearance, so opening an already-completed
-            // activity to review it never auto-dismisses.
-            if !wasCompleted && isCompleted {
-                dismiss()
-            }
         }
         .confirmationDialog(
             "Delete this planned activity?",
