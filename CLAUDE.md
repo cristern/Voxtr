@@ -45,6 +45,13 @@ Reuse canonical services/read models where they already exist.
 - Once that PR has been merged, that task branch is considered finished.
 - Any subsequent fix discovered after merge/Codemagic/TestFlight should normally use a new task branch from the latest develop rather than reusing the merged branch.
 
+### Branch lifecycle
+- Every implementation task starts from latest develop on a fresh task branch.
+- After explicit review approval and successful merge into develop, the completed task branch should be deleted from the remote repository and locally where applicable.
+- `main` and `develop` are permanent branches and must never be deleted.
+- Never delete a branch unless all intended commits are already reachable from develop.
+- A post-merge fix always uses a new branch from latest develop; never resurrect a completed branch.
+
 ## 5. Scope discipline
 - Make the smallest complete change that satisfies the approved task.
 - Do not make unrelated cleanup or speculative refactors.
@@ -79,6 +86,16 @@ Before delivery, explicitly check relevant:
 - tests affected by signature or dependency changes
 
 Do not rely only on local static reasoning when Codemagic is the authoritative compiler/test gate.
+
+### Mandatory final-diff Swift/test compile audit
+Before reporting a task ready for review:
+- reopen every changed Swift/test file after final edits;
+- resolve real declaration types rather than infer them;
+- check typed `Identifier<T>` vs `UUID`/`rawValue`, optionality, `Int` types, `LocalDate` vs `Date`, enums, initializer labels/order, closures, async/throws, actor isolation, protocols, access levels, imports, SwiftUI `@ViewBuilder`/state/bindings;
+- for every modified test comparison/assertion, resolve the static type of both sides and verify the operator is valid;
+- search an existing compiling test for unfamiliar patterns;
+- perform this against the FINAL diff;
+- do not report "ready for review" while known compile uncertainty remains.
 
 ## 8. Testing rules
 Prefer extending an existing relevant test over creating a new test file.
