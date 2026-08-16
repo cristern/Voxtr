@@ -250,7 +250,7 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.formValue == 4)
         // Exact relationship preserved — not inferred from title/date.
         #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
-        #expect(detail?.loggedActivity.plannedActivityId == activity.plannedActivityId)
+        #expect(detail?.loggedActivity.plannedActivityId == activity.plannedActivityId.rawValue)
     }
 
     /// The mirror case: a caller flag of `true` must never fabricate
