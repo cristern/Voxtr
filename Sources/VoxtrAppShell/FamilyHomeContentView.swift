@@ -19,6 +19,58 @@ enum FamilyHomeDestination: Hashable {
     case familySchedule
 }
 
+/// Athlete Home mounted-instance fix (post-mutation navigation and
+/// stale-state consistency audit, closeout): `.navigationDestination(for:)`'s
+/// closure is not guaranteed to run exactly once per push — it is an
+/// ordinary `@ViewBuilder` closure SwiftUI re-invokes on ordinary body
+/// re-evaluations of the enclosing `NavigationStack` scope, which keeps
+/// evaluating even while a pushed screen covers it. `athleteOverview(for:)`
+/// used to construct a BRAND NEW `HomeDashboardViewModel` on every such
+/// re-invocation, with no reuse across repeated calls for the same
+/// athlete. Traced instance identity end to end: the row inside
+/// `HomeDashboardView.todayActivityRow` captures whichever
+/// `HomeDashboardViewModel` was live when THAT row was last built, and
+/// calls `onActivityLogged` on it; the screen actually visible after
+/// returning from Activity Detail is bound to whatever `HomeDashboardView`
+/// value the destination closure most recently produced. Nothing in the
+/// original code guaranteed these were the same object — only
+/// `@State`'s identity-preservation contract did, and that contract
+/// depends on SwiftUI recognizing repeated destination-closure output
+/// as the same logical view, which is not something this call chain
+/// (switch → if-let → a separate helper function → a fresh
+/// `HomeDashboardViewModel(...)` call) enforces or verifies. Caching
+/// exactly one `HomeDashboardViewModel` per athlete removes the
+/// possibility entirely: `athleteOverview(for:)` now always hands back
+/// the SAME instance for the same athlete, regardless of how many times
+/// the destination closure itself happens to re-run — One Truth applied
+/// to object identity, not only to persisted data.
+///
+/// Deliberately NOT `@Observable`/`@Published` itself — a plain,
+/// non-reactive lookup table SwiftUI never needs to diff. Mutating it
+/// during body/destination-closure evaluation (the only time
+/// `athleteOverview(for:)` ever runs) is therefore safe: it never goes
+/// through a `@State` setter, unlike the individual
+/// `HomeDashboardViewModel` instances it hands out, which remain
+/// individually `@Observable` and are what `HomeDashboardView`'s own
+/// `@State` actually tracks.
+@MainActor
+final class HomeDashboardViewModelCache {
+    private var viewModelsByAthlete: [AthleteId: HomeDashboardViewModel] = [:]
+
+    /// Returns the existing `HomeDashboardViewModel` for `athleteId` if
+    /// this cache already created one, otherwise creates it via
+    /// `make()`, stores it, and returns it. `make()` is never invoked
+    /// for an athlete this cache already holds an instance for.
+    func viewModel(for athleteId: AthleteId, make: () -> HomeDashboardViewModel) -> HomeDashboardViewModel {
+        if let existing = viewModelsByAthlete[athleteId] {
+            return existing
+        }
+        let created = make()
+        viewModelsByAthlete[athleteId] = created
+        return created
+    }
+}
+
 /// The actual Family Home content — replaces the previous
 /// single-athlete `HomeDashboardView` at this position in the
 /// navigation hierarchy. `HomeDashboardView` itself is unchanged in
@@ -33,6 +85,12 @@ enum FamilyHomeDestination: Hashable {
 /// `FamilyHomeViewModel`'s own doc comment for the full explanation.
 public struct FamilyHomeContentView: View {
     @State private var viewModel: FamilyHomeViewModel
+    /// Athlete Home mounted-instance fix: see `HomeDashboardViewModelCache`'s
+    /// own doc comment. Held via `@State` only so it survives this
+    /// view's own re-renders as a stable object reference — never
+    /// reassigned after its default value, so no `@State` write ever
+    /// occurs here; only the cache's OWN internal dictionary mutates.
+    @State private var homeDashboardViewModelCache = HomeDashboardViewModelCache()
     private let family: RestoredFamily
     private let planningService: PlanningService
     private let trainingService: TrainingService
@@ -386,18 +444,20 @@ public struct FamilyHomeContentView: View {
 
     private func athleteOverview(for athlete: AthleteProfile) -> some View {
         HomeDashboardView(
-            viewModel: HomeDashboardViewModel(
-                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                coachingPresentationProvider: coachingApplicationService,
-                athleteId: athlete.athleteId,
-                athleteDisplayName: athlete.givenName,
-                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
-                todayActivityComposer: TodayActivityComposer(
-                    planningService: planningService,
-                    trainingService: trainingService,
-                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            viewModel: homeDashboardViewModelCache.viewModel(for: athlete.athleteId) {
+                HomeDashboardViewModel(
+                    trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                    coachingPresentationProvider: coachingApplicationService,
+                    athleteId: athlete.athleteId,
+                    athleteDisplayName: athlete.givenName,
+                    weekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                    todayActivityComposer: TodayActivityComposer(
+                        planningService: planningService,
+                        trainingService: trainingService,
+                        trainingPlanningCoordinationService: trainingPlanningCoordinationService
+                    )
                 )
-            ),
+            },
             athleteDisplayName: athlete.givenName,
             planningService: planningService,
             trainingService: trainingService,

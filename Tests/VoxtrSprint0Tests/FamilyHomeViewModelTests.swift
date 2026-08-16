@@ -818,3 +818,104 @@ struct FamilyHomeViewModelTests {
         #expect(!loggedActivities.isEmpty)
     }
 }
+
+/// Athlete Home mounted-instance fix (post-mutation navigation and
+/// stale-state consistency audit, closeout): targets the actual proven
+/// root cause directly — object identity — rather than re-testing that
+/// a callback was called, which the prior branch already proved
+/// insufficient (that test passed while the runtime bug remained).
+/// `FamilyHomeContentView.athleteOverview(for:)` used to construct a
+/// brand new `HomeDashboardViewModel` on every call; nothing guaranteed
+/// two calls for the SAME athlete returned the SAME instance, which is
+/// exactly what let a reload land on an orphaned object nobody was
+/// still observing. `HomeDashboardViewModelCache` is the seam that
+/// fixes this — these tests exercise it directly, by identity (`===`),
+/// not by inference from similarly-named variables.
+@Suite("HomeDashboardViewModelCache (Athlete Home mounted-instance fix)")
+struct HomeDashboardViewModelCacheTests {
+
+    @MainActor
+    private struct StubCoachingPresentationProvider: CoachingPresentationProviding {
+        struct StubError: Error {}
+        func coachingPresentation(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> CoachingPresentation {
+            throw StubError()
+        }
+    }
+
+    @MainActor
+    private func makeViewModel(
+        athleteId: AthleteId,
+        trainingPlanningCoordinationService: TrainingPlanningCoordinationService
+    ) -> HomeDashboardViewModel {
+        HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: StubCoachingPresentationProvider(),
+            athleteId: athleteId,
+            weekStart: LocalDate(year: 2026, month: 1, day: 5)
+        )
+    }
+
+    /// The exact defect this cache exists to prevent: two lookups for
+    /// the same athlete — mirroring `.navigationDestination(for:)`'s
+    /// closure being re-invoked more than once for the same pushed
+    /// value — must resolve to the SAME object, never a second,
+    /// independently-constructed one.
+    @Test("The same athleteId always resolves to the same HomeDashboardViewModel instance, never a second one")
+    @MainActor
+    func sameAthleteResolvesToSameInstance() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: PlanningRepository(modelContext: container.mainContext),
+            trainingRepository: TrainingRepository(modelContext: container.mainContext)
+        )
+        let athleteId = AthleteId()
+        let cache = HomeDashboardViewModelCache()
+
+        var makeCallCount = 0
+        let first = cache.viewModel(for: athleteId) {
+            makeCallCount += 1
+            return makeViewModel(athleteId: athleteId, trainingPlanningCoordinationService: trainingPlanningCoordinationService)
+        }
+        let second = cache.viewModel(for: athleteId) {
+            makeCallCount += 1
+            return makeViewModel(athleteId: athleteId, trainingPlanningCoordinationService: trainingPlanningCoordinationService)
+        }
+        let third = cache.viewModel(for: athleteId) {
+            makeCallCount += 1
+            return makeViewModel(athleteId: athleteId, trainingPlanningCoordinationService: trainingPlanningCoordinationService)
+        }
+
+        // Proven by actual object identity, not by comparing loaded
+        // state or inferring from variable names.
+        #expect(first === second)
+        #expect(second === third)
+        #expect(makeCallCount == 1)
+    }
+
+    /// The isolation half of the same guarantee: caching per athlete
+    /// must never collapse two different athletes onto one shared
+    /// instance.
+    @Test("Two different athletes never share the same HomeDashboardViewModel instance")
+    @MainActor
+    func differentAthletesResolveToDifferentInstances() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: PlanningRepository(modelContext: container.mainContext),
+            trainingRepository: TrainingRepository(modelContext: container.mainContext)
+        )
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+        let cache = HomeDashboardViewModelCache()
+
+        let viewModelA = cache.viewModel(for: athleteA) {
+            makeViewModel(athleteId: athleteA, trainingPlanningCoordinationService: trainingPlanningCoordinationService)
+        }
+        let viewModelB = cache.viewModel(for: athleteB) {
+            makeViewModel(athleteId: athleteB, trainingPlanningCoordinationService: trainingPlanningCoordinationService)
+        }
+
+        #expect(viewModelA !== viewModelB)
+        #expect(viewModelA.athleteId == athleteA)
+        #expect(viewModelB.athleteId == athleteB)
+    }
+}
