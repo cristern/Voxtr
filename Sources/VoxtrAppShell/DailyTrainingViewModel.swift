@@ -236,6 +236,21 @@ public final class DailyTrainingViewModel {
         switch error {
         case .plannedActivityAlreadyLinked:
             return TrainingStrings.plannedActivityAlreadyLinked
+        case .loggedActivityNotFound:
+            // Codemagic compile-fix: `.loggedActivityNotFound` is thrown
+            // only by `TrainingService.correctLoggedActivity` — a
+            // capability this ViewModel's own `logActivity()` above
+            // never calls (it only ever creates a LoggedActivity via
+            // `logActivity`, never corrects an existing one), so this
+            // case is unreachable through this exact call site. Handled
+            // explicitly anyway, since `error` here is the full
+            // `TrainingServiceError` type and this switch must stay
+            // exhaustive against it. No dedicated message exists for
+            // this case in this ViewModel, so this reuses the same
+            // controlled fallback already used a few lines up for any
+            // non-`TrainingServiceError` failure — not a new message,
+            // not a new product flow.
+            return TrainingStrings.genericError
         }
     }
 }
