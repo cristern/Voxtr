@@ -1118,4 +1118,230 @@ struct HomeDashboardViewModelTests {
         broadcaster.activityChanged(for: athleteId)
         #expect(survivorTrainingProvider.callCount == 1)
     }
+
+    // MARK: - P0 crash fix: delete no longer leaves stale/deleted-entity state
+
+    /// Reproduces the shared layer both TestFlight repros (Family Home →
+    /// Activity → Delete, Athlete Home → Activity → Delete) go through:
+    /// `ActivityDetailViewModel.deleteActivity()`, now wired with the
+    /// SAME `onActivityLogged` reload contract `cancelActivity()`/
+    /// `reopenActivity()` already have. Proves: (1) a normal
+    /// `PlannedActivity` deletes through the shared flow and is
+    /// genuinely gone canonically, not merely locally flagged; (2) a
+    /// fresh composition afterward no longer references it; (3) no
+    /// duplicate/stale row remains, and a DIFFERENT activity for the
+    /// same athlete is untouched.
+    @Test("Deleting a normal PlannedActivity through ActivityDetailViewModel removes it from HomeDashboardViewModel's canonical composition, with no stale or duplicate row")
+    @MainActor
+    func deleteActivityRemovesItFromCanonicalComposition() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: today, timeZoneId: Self.oslo
+        )
+        let keptActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: today, timeZoneId: Self.oslo
+        )
+
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
+        )
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        guard case .loaded(let rowsBeforeDelete) = homeDashboardViewModel.todayActivityState else {
+            Issue.record("Expected .loaded before delete")
+            return
+        }
+        #expect(rowsBeforeDelete.contains { $0.id == activity.id.uuidString })
+        #expect(rowsBeforeDelete.contains { $0.id == keptActivity.id.uuidString })
+
+        let detailViewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            onActivityLogged: {
+                homeDashboardViewModel.loadTodaysTraining()
+                homeDashboardViewModel.loadTodayActivityRows()
+            }
+        )
+
+        #expect(detailViewModel.isDeleted == false)
+        #expect(detailViewModel.deleteActivity() == true)
+        // 1: genuinely gone canonically, not merely locally flagged.
+        #expect(detailViewModel.isDeleted == true)
+        let remainingActivities = try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(remainingActivities.contains { $0.plannedActivityId == activity.plannedActivityId } == false)
+
+        // 2/3: a fresh composition, reread via the SAME onActivityLogged
+        // callback every other mutation on this screen already fires, no
+        // longer references the deleted activity, no duplicate/stale
+        // row, and the OTHER activity is untouched.
+        guard case .loaded(let rowsAfterDelete) = homeDashboardViewModel.todayActivityState else {
+            Issue.record("Expected .loaded after delete")
+            return
+        }
+        #expect(rowsAfterDelete.contains { $0.id == activity.id.uuidString } == false)
+        #expect(rowsAfterDelete.filter { $0.id == activity.id.uuidString }.isEmpty)
+        #expect(rowsAfterDelete.contains { $0.id == keptActivity.id.uuidString })
+    }
+
+    /// Athlete isolation: deleting one athlete's activity, through the
+    /// exact same flow above, must never remove or otherwise affect a
+    /// DIFFERENT athlete's own canonical composition.
+    @Test("Deleting one athlete's activity never affects a different athlete's own canonical composition")
+    @MainActor
+    func deleteActivityNeverAffectsAnotherAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlanA = try planningService.getOrCreateWeekPlan(athleteId: athleteA, weekStart: weekStart)
+        let weekPlanB = try planningService.getOrCreateWeekPlan(athleteId: athleteB, weekStart: weekStart)
+        let activityA = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanA.weekPlanId, athleteId: athleteA, activityType: .individualTraining,
+            title: "Athlete A run", localDate: today, timeZoneId: Self.oslo
+        )
+        let activityB = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanB.weekPlanId, athleteId: athleteB, activityType: .individualTraining,
+            title: "Athlete B run", localDate: today, timeZoneId: Self.oslo
+        )
+
+        func makeComposer() -> TodayActivityComposer {
+            TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            )
+        }
+        let homeDashboardViewModelB = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteB, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteB, weekStart: weekStart, todayActivityComposer: makeComposer(),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
+        )
+        homeDashboardViewModelB.loadTodayActivityRows()
+        guard case .loaded(let rowsBBefore) = homeDashboardViewModelB.todayActivityState else {
+            Issue.record("Expected .loaded for athlete B before athlete A's delete")
+            return
+        }
+        #expect(rowsBBefore.contains { $0.id == activityB.id.uuidString })
+
+        let detailViewModelA = ActivityDetailViewModel(
+            activity: activityA, isCompleted: false, weekPlanId: weekPlanA.weekPlanId,
+            athleteId: athleteA, athleteDisplayName: "Athlete A", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService
+        )
+        #expect(detailViewModelA.deleteActivity() == true)
+
+        // Athlete B's own canonical composition, reread fresh, still
+        // shows their own activity — completely untouched by athlete A's
+        // delete.
+        homeDashboardViewModelB.loadTodayActivityRows()
+        guard case .loaded(let rowsBAfter) = homeDashboardViewModelB.todayActivityState else {
+            Issue.record("Expected .loaded for athlete B after athlete A's delete")
+            return
+        }
+        #expect(rowsBAfter.contains { $0.id == activityB.id.uuidString })
+    }
+
+    /// Recurring/source semantics: deleting a recurring-MATERIALIZED
+    /// `PlannedActivity` (`ActivityDetailViewModel.deleteActivity()`
+    /// treats it identically to any other planned activity — it never
+    /// inspects `externalSourceId`/`externalSourceType`) must remove
+    /// only that ONE materialized occurrence, never the
+    /// `RecurringPlannedActivity` series itself, and must make the
+    /// occurrence available to materialize again — `deriveSuggestions`'s
+    /// exclusion of already-materialized occurrences is existence-based
+    /// (is there a `PlannedActivity` with this `externalSourceId`),
+    /// so once the materialized instance is gone, the occurrence is
+    /// correctly, not accidentally, re-offered.
+    @Test("Deleting a recurring-materialized PlannedActivity removes only that occurrence, leaves the recurring series untouched, and re-offers the occurrence as a suggestion")
+    @MainActor
+    func deleteRecurringMaterializedActivityPreservesSeriesAndReoffersOccurrence() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let recurringActivity = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: Self.oslo,
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(suggestions.first)
+        let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        #expect(materialized.externalSourceType == RecurringPlannedActivity.externalSourceType)
+
+        // Once materialized, deriveSuggestions correctly excludes it.
+        #expect(try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+
+        let detailViewModel = ActivityDetailViewModel(
+            activity: materialized, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+                reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            )
+        )
+        #expect(detailViewModel.deleteActivity() == true)
+
+        // The materialized occurrence is gone...
+        let remaining = try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(remaining.contains { $0.plannedActivityId == materialized.plannedActivityId } == false)
+
+        // ...the recurring SERIES itself is completely untouched...
+        let stillEnabled = try planningService.fetchRecurringPlannedActivity(byId: recurringActivity.recurringPlannedActivityId)
+        #expect(stillEnabled?.isEnabled == true)
+
+        // ...and the occurrence is correctly available to materialize
+        // again — never permanently lost, never a duplicate series.
+        let suggestionsAfterDelete = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        #expect(suggestionsAfterDelete.contains { $0.id == suggestion.id })
+    }
 }

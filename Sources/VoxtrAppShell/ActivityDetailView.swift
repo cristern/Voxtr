@@ -67,6 +67,31 @@ public struct ActivityDetailView: View {
     }
 
     public var body: some View {
+        // P0 crash fix: once `deleteActivity()` succeeds, `viewModel.activity`
+        // refers to a SwiftData `@Model` instance already hard-deleted
+        // from the persistent store (`PlanningRepository.deletePlannedActivity`
+        // calls `modelContext.delete(activity)` then `save()`) — reading
+        // ANY of its properties afterward (`.title`, `.localDate`,
+        // `.startLocalTime`, `.location`, `.notes`, all read directly
+        // below and in `.navigationTitle`) is a fatal SwiftData runtime
+        // crash, not a catchable Swift error. `dismiss()` does not
+        // synchronously tear this view down: `deleteActivity()`'s own
+        // `errorMessage`/`isDeleted` mutations, plus the enclosing
+        // `.confirmationDialog`'s own dismissal, both drive at least one
+        // more `body` evaluation before the NavigationStack pop actually
+        // completes — ordinary SwiftUI dismiss-transition behavior, not
+        // something this screen can suppress. `isDeleted` already
+        // existed on `ActivityDetailViewModel` for exactly this signal;
+        // it was set but never consulted here. Checked first, before
+        // anything below ever touches `viewModel.activity`.
+        if viewModel.isDeleted {
+            EmptyView()
+        } else {
+            activityDetailForm
+        }
+    }
+
+    private var activityDetailForm: some View {
         Form {
             if let errorMessage = viewModel.errorMessage {
                 Section {

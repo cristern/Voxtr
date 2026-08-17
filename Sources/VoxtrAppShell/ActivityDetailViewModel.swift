@@ -252,6 +252,16 @@ public final class ActivityDetailViewModel {
         }
     }
 
+    /// P0 crash fix (same-pattern audit): `onActivityLogged()` was
+    /// missing here — the only mutation on this screen that didn't fire
+    /// it, even though `cancelActivity()`/`reopenActivity()` both
+    /// already do, for the exact same reason: the screen this was
+    /// pushed from must reread canonical state, so its own row list no
+    /// longer references the just-deleted `PlannedActivity` once this
+    /// screen pops. `loadTodaysTraining()`/`loadTodayActivityRows()`
+    /// re-fetch from the repository fresh, which naturally excludes a
+    /// hard-deleted entity — never a second, ad hoc "remove this one row
+    /// locally" mechanism.
     @discardableResult
     public func deleteActivity() -> Bool {
         errorMessage = nil
@@ -262,6 +272,7 @@ public final class ActivityDetailViewModel {
                 deletedBy: deletedByActorId
             )
             isDeleted = true
+            onActivityLogged()
             return true
         } catch {
             errorMessage = "Could not delete this activity. Please try again."
