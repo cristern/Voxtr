@@ -136,26 +136,49 @@ public struct DurationPickerView: View {
 /// While `durationMinutes` is `nil`, shows a plain row reading "Not
 /// set" — the same vocabulary this app's own optional pickers already
 /// use (e.g. the RPE `Picker`'s own `Text("Not set").tag(Int?.none)`) —
-/// instead of the real wheel picker. Tapping it starts a real duration
-/// at 60, this app's own established "reasonable starting value for an
-/// optional duration" convention (`WeeklyPlanningViewModel.newActivityDurationMinutes`,
+/// instead of the real wheel picker. Tapping it starts a real duration,
+/// seeded from whatever value was most recently cleared (if any,
+/// `lastKnownDurationMinutes` below) or otherwise this app's own
+/// established "reasonable starting value for an optional duration"
+/// convention (`WeeklyPlanningViewModel.newActivityDurationMinutes`,
 /// `ActivityDetailViewModel.editDurationMinutes`) — an explicit user
 /// action choosing to set a duration, not a value fabricated merely to
 /// satisfy the component. From that point on, the real
 /// `DurationPickerView` is shown and reused verbatim — never a second,
 /// duplicated duration-selection UI.
+///
+/// TestFlight regression fix: the bridging `Binding` handed to
+/// `DurationPickerView` previously captured `durationMinutes`'s value
+/// as a local `let` snapshot at the moment the `if let` branch was
+/// entered (`get: { value }`), instead of reading the live
+/// `durationMinutes` binding on every access. `durationBinding` below
+/// reads/writes straight through the live `@Binding` instead — no
+/// intermediate snapshot that could go stale relative to the canonical
+/// value while `DurationPickerView`'s own internal `@State` (its wheel
+/// selection, its Custom text field) drives further re-renders.
+///
+/// Also closes a real, separately-confirmed gap: the previous version
+/// had no way back from a selected duration to "Not set" at all — once
+/// non-nil, it stayed non-nil. `lastKnownDurationMinutes` remembers the
+/// value at the moment of clearing (presentation-only state, never
+/// itself read as canonical truth) purely so re-selecting after an
+/// accidental clear resumes where the user left off, rather than
+/// resetting to the generic starting seed every time.
 struct OptionalDurationPickerView: View {
     @Binding var durationMinutes: Int?
+    @State private var lastKnownDurationMinutes: Int?
 
     var body: some View {
         if let value = durationMinutes {
-            DurationPickerView(durationMinutes: Binding(
-                get: { value },
-                set: { durationMinutes = $0 }
-            ))
+            DurationPickerView(durationMinutes: durationBinding)
+            Button("Clear duration", role: .destructive) {
+                lastKnownDurationMinutes = value
+                durationMinutes = nil
+            }
+            .accessibilityIdentifier("optionalDurationPicker.clearButton")
         } else {
             Button {
-                durationMinutes = 60
+                durationMinutes = Self.seedForSelecting(lastKnownDurationMinutes: lastKnownDurationMinutes)
             } label: {
                 HStack {
                     Text("Duration")
@@ -167,5 +190,30 @@ struct OptionalDurationPickerView: View {
             }
             .accessibilityIdentifier("optionalDurationPicker.setDurationButton")
         }
+    }
+
+    /// Reads and writes straight through the live `durationMinutes`
+    /// binding on every access — see this type's own doc comment for
+    /// why that matters. Only constructed while `durationMinutes` is
+    /// already non-nil (the `if let` branch above), so the `?? 60`
+    /// fallback is never actually reached in practice; it exists only
+    /// because `DurationPickerView` requires a non-optional `Binding<Int>`
+    /// getter to type-check, never as a value this control itself relies on.
+    private var durationBinding: Binding<Int> {
+        Binding<Int>(
+            get: { durationMinutes ?? 60 },
+            set: { durationMinutes = $0 }
+        )
+    }
+
+    /// Pure rule (no `@State`/`@Binding` dependency, so directly
+    /// testable): the seed to reveal the picker with when moving from
+    /// nil to selected. Never written into canonical state on its own —
+    /// only the explicit "Not set" tap above assigns it into
+    /// `durationMinutes`, and only at that exact moment, matching the
+    /// same "explicit user action, not a fabricated default" contract
+    /// this type's own doc comment already establishes.
+    static func seedForSelecting(lastKnownDurationMinutes: Int?) -> Int {
+        lastKnownDurationMinutes ?? 60
     }
 }

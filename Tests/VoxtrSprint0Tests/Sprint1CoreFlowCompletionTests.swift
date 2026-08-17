@@ -1436,6 +1436,143 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(links.first?.durationMinutes == 45)
     }
 
+    // MARK: - TestFlight regression: OptionalDurationPickerView's nil <-> selected <-> cleared states
+
+    /// `OptionalDurationPickerView.seedForSelecting` is the one piece of
+    /// this control's logic with no `@State`/`@Binding` dependency — the
+    /// rest is SwiftUI wiring not exercisable outside a host. Proves the
+    /// actual contract: seeded from whatever was last cleared, if
+    /// anything, so a clear-then-reselect cycle resumes where the user
+    /// left off instead of silently resetting to the generic starting
+    /// value every time; falls back to the app's own established 60
+    /// only when nothing has ever been entered.
+    @Test("OptionalDurationPickerView seeds a fresh selection from the last cleared value, falling back to 60 only when nothing was ever entered")
+    func optionalDurationPickerSeedsFromLastKnownValueOrFallsBackTo60() {
+        #expect(OptionalDurationPickerView.seedForSelecting(lastKnownDurationMinutes: nil) == 60)
+        #expect(OptionalDurationPickerView.seedForSelecting(lastKnownDurationMinutes: 90) == 90)
+    }
+
+    /// Review follow-up (TestFlight regression): reproduces the full
+    /// nil -> selected -> saved flow entirely through `LogActivityViewModel`'s
+    /// own public API — the exact state transition the View's "Not set"
+    /// tap performs (`durationMinutes = OptionalDurationPickerView.seedForSelecting(...)`,
+    /// then further wheel adjustment) — proving a Completed log can
+    /// actually save once a duration has genuinely been selected, for a
+    /// plan with no planned duration at all.
+    @Test("A plan with no planned duration: selecting a duration through the same seed the View uses allows a Completed log to save")
+    @MainActor
+    func selectingDurationFromNoPlanAllowsCompletedLogToSave() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            // plannedDurationMinutes deliberately omitted.
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        #expect(logViewModel.durationMinutes == nil)
+
+        // The exact assignment OptionalDurationPickerView's "Not set" tap
+        // performs — never a fabricated 60 baked into the ViewModel itself.
+        logViewModel.durationMinutes = OptionalDurationPickerView.seedForSelecting(lastKnownDurationMinutes: nil)
+        logViewModel.sessionForm = 3
+        #expect(logViewModel.durationMinutes == 60)
+
+        #expect(logViewModel.save())
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.status == .completed)
+        #expect(links.first?.durationMinutes == 60)
+    }
+
+    /// The clearing half of the same regression: a duration that was
+    /// selected and then cleared back to nil (the View's "Clear
+    /// duration" action) must behave exactly like a duration that was
+    /// never entered — Missed can still save (duration optional), and a
+    /// Completed save is blocked again until the user genuinely
+    /// reselects.
+    @Test("Clearing a selected duration back to nil restores the exact nil-duration contract — Missed saves, Completed is blocked again")
+    @MainActor
+    func clearingSelectedDurationRestoresNilDurationContract() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+
+        // Completed half: select then clear, on its own activity —
+        // Save must be blocked again exactly as if nothing had ever
+        // been entered, never left saveable off the stale cleared value.
+        let completedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            // plannedDurationMinutes deliberately omitted.
+        )
+        let completedViewModel = LogActivityViewModel(
+            plannedActivity: completedActivity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: {}
+        )
+        completedViewModel.sessionForm = 3
+        // Select, exactly as the View would.
+        completedViewModel.durationMinutes = OptionalDurationPickerView.seedForSelecting(lastKnownDurationMinutes: nil)
+        // Then clear, exactly as the View's "Clear duration" would.
+        completedViewModel.durationMinutes = nil
+
+        #expect(completedViewModel.save() == false)
+        #expect(completedViewModel.errorMessage != nil)
+        #expect(completedViewModel.didLog == false)
+        #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: completedActivity.plannedActivityId).isEmpty)
+
+        // Missed half: never required a duration in the first place —
+        // clearing back to nil is a no-op for this outcome.
+        let missedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let missedViewModel = LogActivityViewModel(
+            plannedActivity: missedActivity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: {}
+        )
+        missedViewModel.durationMinutes = OptionalDurationPickerView.seedForSelecting(lastKnownDurationMinutes: nil)
+        missedViewModel.durationMinutes = nil
+        missedViewModel.isCompleted = false
+
+        #expect(missedViewModel.save())
+        let missedLinks = try trainingRepository.fetchLoggedActivities(forPlannedActivity: missedActivity.plannedActivityId)
+        #expect(missedLinks.first?.status == .missed)
+        #expect(missedLinks.first?.durationMinutes == 1)
+    }
+
     @Test("Logging prefills actual duration from the planned duration but the user's changed value is what actually saves — never re-derived from the plan")
     @MainActor
     func loggingPrefillsPlannedDurationButSavesTheChangedActualValue() throws {
