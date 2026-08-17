@@ -129,6 +129,7 @@ public final class LogActivityViewModel {
         // nothing happened to measure).
         let outcomeStatus: ActivityStatus = isCompleted ? .completed : .missed
         let durationIsRequired = TrainingValidator.requiresActualDuration(for: outcomeStatus)
+        let formIsRequired = TrainingValidator.requiresForm(for: outcomeStatus)
         if let durationError = TrainingValidator.validateActualDuration(durationMinutes, for: outcomeStatus) {
             errorMessage = durationError
             return false
@@ -174,9 +175,31 @@ public final class LogActivityViewModel {
                 perceivedExertion: perceivedExertion,
                 notes: notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : notes,
                 authorId: authorId,
-                sessionForm: sessionForm
+                // Review follow-up (Form-leak audit): mirrors the
+                // duration gate immediately above exactly. Switching the
+                // Outcome picker from Completed to Missed does not clear
+                // `sessionForm` in the View (only the duration picker is
+                // hidden for Missed) — a value entered while Completed
+                // was selected would otherwise still be sitting in
+                // `sessionForm` here and get recorded as this Missed
+                // log's Form rating, even though nothing happened to
+                // rate. `TrainingReflectionCoordinationService.logActivity`
+                // records whatever non-nil value it is given regardless
+                // of `status`, so this call site — not that shared
+                // primitive — is where "Form does not apply to this
+                // outcome" must be enforced.
+                sessionForm: formIsRequired ? sessionForm : nil
             )
             self.loggedActivityId = result.loggedActivity.loggedActivityId
+            if !formIsRequired {
+                // Review follow-up (Form-leak audit): also clears the
+                // local edit state, not just what was sent above — a
+                // defensive re-invocation of save() would otherwise hit
+                // the retry branch further up, which reads THIS property
+                // directly and would resurrect the stale value against
+                // the LoggedActivity just created as Missed.
+                sessionForm = nil
+            }
             didLog = true
             onLogged()
 

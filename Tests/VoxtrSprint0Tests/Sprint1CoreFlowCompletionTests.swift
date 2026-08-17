@@ -1319,6 +1319,67 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(links.first?.durationMinutes == 1)
     }
 
+    /// Review follow-up (final check before merge, item 2): the Outcome
+    /// picker lets a parent enter a Form value while "Completed" is
+    /// selected, then switch to "Missed" before saving — `sessionForm`
+    /// itself is never cleared by that switch (only the View's duration
+    /// picker is hidden for Missed). Without gating at `save()`, that
+    /// stale value would still reach `TrainingReflectionCoordinationService.logActivity`,
+    /// which records whatever non-nil Form value it is given regardless
+    /// of `status`. Nothing happened to rate for a Missed session, so it
+    /// must never be persisted as this log's `ActivityReflection.bodyFeeling`.
+    @Test("A Form value entered while Completed was selected is never persisted when the outcome is switched to Missed before saving")
+    @MainActor
+    func loggingAsMissedNeverPersistsAFormValueEnteredWhileCompletedWasSelected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity, athleteId: athleteId, athleteDisplayName: "Oliver", authorId: ActorId(),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            onLogged: {}
+        )
+        // Entered while "Completed" (the default) was still selected.
+        logViewModel.sessionForm = 4
+        // Then the parent switches the Outcome picker to "Missed" —
+        // `sessionForm` is left exactly as it was; the View never clears it.
+        logViewModel.isCompleted = false
+
+        #expect(logViewModel.save())
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        let logged = try #require(links.first)
+        #expect(logged.status == .missed)
+        #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: logged.loggedActivityId) == nil)
+        // The local edit state is cleared too, not just what was sent —
+        // guards a defensive re-invocation of save() from hitting the
+        // retry branch and resurrecting the stale value afterward.
+        #expect(logViewModel.sessionForm == nil)
+
+        // Even a defensive second save() call (e.g. a double-tap before
+        // the sheet dismisses) must not retroactively attach the stale
+        // Form value — sessionForm is nil now, so the retry branch's own
+        // `guard let sessionForm else { return true }` exits cleanly.
+        #expect(logViewModel.save())
+        #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: logged.loggedActivityId) == nil)
+    }
+
     // MARK: - Planned/Logged Activity lifecycle consistency cleanup: actual duration required for Completed
 
     @Test("Logging a completed planned activity with no duration entered is blocked entirely — nothing is created")

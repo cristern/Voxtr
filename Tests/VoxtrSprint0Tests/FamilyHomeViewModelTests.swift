@@ -574,6 +574,102 @@ struct FamilyHomeViewModelTests {
         #expect(items.first?.title == "Morning run")
     }
 
+    /// Review follow-up (final check before merge): `nowNextState`'s
+    /// eligibility gate (`!$0.isCompletedOrLogged`, unchanged by the
+    /// outcome-consistency closeout) already means "has ANY outcome
+    /// been resolved" — the same broad `isCompleted` semantic
+    /// deliberately kept for this exact purpose, distinct from the
+    /// `outcomeStatus`/`isGenuinelyCompleted` semantics `TrainingStrings.outcomeLabel`
+    /// now uses for LABELS. A Cancelled or Missed activity is
+    /// "resolved," so it is excluded from NOW/NEXT candidacy the same
+    /// way a genuinely Completed one already was — even when its own
+    /// start/duration would otherwise place it squarely in the current
+    /// NOW window. Both activities remain fully visible in Today's own
+    /// row list, correctly labelled — just never occupying the NOW/NEXT
+    /// slot.
+    @Test("Cancelled and Missed activities are never selected as NOW or NEXT, even when their start/duration would otherwise place them in the current window")
+    @MainActor
+    func cancelledAndMissedNeverSelectedAsNowOrNext() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let athlete = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athlete.athleteId, weekStart: weekStart)
+        // Same "squarely within the current window" placement as the
+        // genuinely-NOW test above — if resolution didn't exclude these,
+        // both would otherwise test as NOW.
+        let calendar = Calendar.current
+        let nowComponents = calendar.dateComponents([.hour, .minute], from: .now)
+        let nowMinutes = (nowComponents.hour ?? 0) * 60 + (nowComponents.minute ?? 0)
+        let startMinutes = max(0, nowMinutes - 5)
+        let startTime = LocalTime(hour: startMinutes / 60, minute: startMinutes % 60)
+
+        let cancelledActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .individualTraining,
+            title: "Cancelled run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), startLocalTime: startTime, plannedDurationMinutes: 30
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athlete.athleteId, plannedActivityId: cancelledActivity.plannedActivityId,
+            activityType: .individualTraining, title: "Cancelled run", startedAt: .now,
+            durationMinutes: 1, status: .cancelled
+        )
+        let missedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .individualTraining,
+            title: "Missed session", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), startLocalTime: startTime, plannedDurationMinutes: 30
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athlete.athleteId, plannedActivityId: missedActivity.plannedActivityId,
+            activityType: .individualTraining, title: "Missed session", startedAt: .now,
+            durationMinutes: 1, status: .missed
+        )
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [athlete],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.loadHome()
+
+        // Neither NOW nor NEXT — both are resolved, and their start has
+        // already passed, so the correct result is .empty.
+        guard case .empty = viewModel.nowNextState else {
+            Issue.record("Expected .empty (Cancelled/Missed never NOW/NEXT) — got \(viewModel.nowNextState)")
+            return
+        }
+
+        // Still fully present in Today's own full list, correctly
+        // labelled — never hidden, only excluded from the NOW/NEXT slot.
+        func outcomeStatus(forTitle title: String) -> ActivityStatus? {
+            for row in viewModel.rows {
+                if case .planned(let familyRow) = row, familyRow.plannedActivity.title == title {
+                    return familyRow.outcomeStatus
+                }
+            }
+            return nil
+        }
+        #expect(outcomeStatus(forTitle: "Cancelled run") == .cancelled)
+        #expect(outcomeStatus(forTitle: "Missed session") == .missed)
+    }
+
     // MARK: - Planned/Logged Activity lifecycle consistency cleanup: NOW's presentation-only 60-minute fallback
     //
     // Supersedes the previous "started, no duration -> never NOW"
