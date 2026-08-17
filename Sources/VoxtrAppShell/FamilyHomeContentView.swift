@@ -69,6 +69,24 @@ final class HomeDashboardViewModelCache {
         viewModelsByAthlete[athleteId] = created
         return created
     }
+
+    /// Recurring reopen stale-Athlete-Home fix: mutations reachable
+    /// from Family Home's OWN rows (`.activity`/`.recurringOccurrence`
+    /// below — the same underlying `TodayActivityRow`s Athlete Home
+    /// also displays, duplicated here for the family-wide view) only
+    /// ever reloaded `FamilyHomeViewModel`. If this cache already holds
+    /// a `HomeDashboardViewModel` for the affected athlete (created on
+    /// an earlier visit into Athlete Home this session, and still
+    /// mounted underneath — a `NavigationStack` push, unlike a sheet,
+    /// never tears the covered screen down), that instance was never
+    /// told to reload, so returning to it showed the outcome as it was
+    /// BEFORE the mutation. No-ops when no such instance exists yet —
+    /// never creates one merely to reload it.
+    func reloadIfCached(for athleteId: AthleteId) {
+        guard let existing = viewModelsByAthlete[athleteId] else { return }
+        existing.loadTodaysTraining()
+        existing.loadTodayActivityRows()
+    }
 }
 
 /// The actual Family Home content — replaces the previous
@@ -203,7 +221,10 @@ public struct FamilyHomeContentView: View {
                             trainingService: trainingService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                             actorId: ActorId(rawValue: family.participant.id),
-                            onActivityLogged: { viewModel.refresh() }
+                            onActivityLogged: {
+                                viewModel.refresh()
+                                homeDashboardViewModelCache.reloadIfCached(for: athleteId)
+                            }
                         )
                     }
                 case .reflection(let athleteId):
@@ -499,7 +520,10 @@ public struct FamilyHomeContentView: View {
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-            onActivityLogged: { viewModel.refresh() }
+            onActivityLogged: {
+                viewModel.refresh()
+                homeDashboardViewModelCache.reloadIfCached(for: row.athleteId)
+            }
         )
     }
 }
