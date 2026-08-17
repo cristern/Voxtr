@@ -120,6 +120,7 @@ public final class HomeDashboardViewModel {
     }
 
     public func loadTodayActivityRows() {
+        homeDashboardDebugLog("loadTodayActivityRows START instance=\(ObjectIdentifier(self)) athleteId=\(athleteId.rawValue.uuidString)")
         todayActivityState = .loading
         guard let todayActivityComposer else {
             todayActivityState = .failed
@@ -128,6 +129,13 @@ public final class HomeDashboardViewModel {
         do {
             let rows = try todayActivityComposer.todayActivities(forAthlete: athleteId, athleteName: athleteDisplayName)
             todayActivityState = .loaded(rows)
+            let summary = rows.map { row -> String in
+                if case .planned(let familyHomeRow) = row {
+                    return "\(familyHomeRow.id)=\(String(describing: familyHomeRow.outcomeStatus))"
+                }
+                return row.id
+            }.joined(separator: ", ")
+            homeDashboardDebugLog("loadTodayActivityRows DONE instance=\(ObjectIdentifier(self)) rows=[\(summary)]")
         } catch {
             todayActivityState = .failed
         }
