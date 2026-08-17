@@ -35,23 +35,23 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// `HomeDashboardViewModel` is already threaded — no global singleton,
 /// no `NotificationCenter`.
 ///
-/// ISOLATION (review follow-up, subscription cleanup): `subscribe`/
-/// `activityChanged` are `@MainActor` — every production and test call
-/// site is already on the main actor, and `activityChanged` must be, to
-/// call `AthleteActivityChangeSubscriber.athleteActivityDidChange()`
-/// (itself `@MainActor`) synchronously. `unsubscribe`, by contrast, is
-/// deliberately `nonisolated` so `HomeDashboardViewModel`'s own,
-/// ordinary (non-`isolated`) `deinit` can call it directly: a `deinit`
-/// on an `@MainActor`-isolated class cannot synchronously call another
-/// `@MainActor`-isolated method — the only two ways around that are
-/// `isolated deinit` (SE-0371, a real Swift feature, but one this
-/// investigation had no compiler available to confirm against this
-/// package's exact toolchain) or hopping via `Task { @MainActor in
-/// ... }` from `deinit` (the exact race the review flagged: the
-/// token/broadcaster must be captured into local `let`s before entering
-/// the `Task`, and the hop is genuinely asynchronous — an unbounded
-/// window during which the instance is gone but its subscription entry
-/// is still live). Rather than depend on either, this type is
+/// ISOLATION (review follow-up, subscription cleanup — and its own
+/// Codemagic-driven correction: see `ActivityChangeSubscription` below
+/// for why the deterministic-cleanup CALLER changed, not this type's own
+/// isolation shape): `subscribe`/`activityChanged` are `@MainActor` —
+/// every production and test call site is already on the main actor,
+/// and `activityChanged` must be, to call
+/// `AthleteActivityChangeSubscriber.athleteActivityDidChange()` (itself
+/// `@MainActor`) synchronously. `unsubscribe`, by contrast, is
+/// deliberately `nonisolated`, so it can be called directly, safely,
+/// from any non-isolated context — in production, that's
+/// `ActivityChangeSubscription`'s own `deinit` (see that type's own doc
+/// comment for the full reasoning: an actor-isolated class's `deinit` is
+/// itself `nonisolated` and cannot read that class's OWN isolated
+/// stored properties, which is exactly what broke the FIRST version of
+/// this fix — `HomeDashboardViewModel.deinit` reading its own
+/// `@MainActor`-isolated subscription token directly — a real Codemagic
+/// compile failure, not merely a theoretical concern). This type is
 /// `@unchecked Sendable` with `NSLock`-guarded storage — the exact
 /// pattern this package's own `DIContainer` (`VoxtrCore/DependencyInjection/DIContainer.swift`)
 /// already establishes for "must be safely callable from a non-isolated
@@ -59,8 +59,7 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// every one of `subscribe`/`unsubscribe`/`activityChanged`/`prune` —
 /// the same discipline throughout, regardless of which of those is
 /// actor-isolated and which is not — so `unsubscribe` is safe to call
-/// from literally any thread, synchronously, with no hop and no
-/// dependency on a Swift version this investigation couldn't verify.
+/// from literally any thread, synchronously, with no hop.
 ///
 /// Subscribers are held weakly: this broadcaster far outlives any
 /// individual `HomeDashboardViewModel` (a per-athlete cache in
@@ -71,8 +70,8 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// `subscribe` or `activityChanged` runs for that athlete — defensive
 /// protection for a subscriber that never gets a deterministic
 /// unregister call for some reason, not the primary cleanup mechanism
-/// for one that does (`HomeDashboardViewModel`'s own `deinit`, which
-/// calls `unsubscribe` directly).
+/// for one that does (every `HomeDashboardViewModel` does, via the
+/// `ActivityChangeSubscription` object it owns — see that type below).
 public final class AthleteActivityChangeBroadcaster: @unchecked Sendable {
     /// Explicit subscription identity — returned by `subscribe`, passed
     /// back to `unsubscribe` for deterministic cleanup. `Sendable`:
@@ -110,8 +109,9 @@ public final class AthleteActivityChangeBroadcaster: @unchecked Sendable {
     }
 
     /// `nonisolated` — see this type's own doc comment for exactly why:
-    /// this is what lets `HomeDashboardViewModel.deinit` call it
-    /// directly, synchronously, from a non-isolated context.
+    /// this is what lets `ActivityChangeSubscription`'s own `deinit`
+    /// (below) call it directly, synchronously, from a non-isolated
+    /// context.
     public nonisolated func unsubscribe(athleteId: AthleteId, token: SubscriptionToken) {
         lock.lock()
         defer { lock.unlock() }
@@ -161,5 +161,56 @@ public final class AthleteActivityChangeBroadcaster: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return subscribersByAthlete[athleteId]?.count ?? 0
+    }
+}
+
+/// Codemagic compile fix (review follow-up): owns exactly one
+/// broadcaster subscription's lifetime, so releasing THIS object
+/// deterministically unsubscribes — without requiring the owner
+/// (`HomeDashboardViewModel`, `@MainActor`-isolated) to read any of ITS
+/// OWN actor-isolated stored properties from ITS OWN `deinit`, which the
+/// compiler rejects: Swift's `deinit` for an actor-isolated class is
+/// itself `nonisolated`, and `nonisolated` code cannot read that same
+/// class's `@MainActor`-isolated stored properties — confirmed by the
+/// actual Codemagic failure this fixes ("main actor-isolated property
+/// 'activityChangeSubscriptionToken' can not be referenced from a
+/// nonisolated context"), which the previous round's local reasoning
+/// (no compiler available in this sandbox) missed.
+///
+/// Deliberately carries NO actor isolation of its own — not
+/// `@MainActor`, not any other global actor. That is what makes its own
+/// `deinit` unremarkable: with no isolation to violate, reading its own
+/// `let` stored properties from `deinit` is the completely ordinary case
+/// every non-actor-isolated Swift type's `deinit` has always supported,
+/// no special rule involved, nothing version-dependent, nothing this
+/// investigation needs a compiler to confirm.
+///
+/// `Sendable`, not `@unchecked`: every stored property is an immutable
+/// (`let`), independently `Sendable` value — `AthleteId`,
+/// `AthleteActivityChangeBroadcaster.SubscriptionToken`, and
+/// `AthleteActivityChangeBroadcaster` itself (`@unchecked Sendable`,
+/// established above) — so the compiler can verify this conformance
+/// directly.
+///
+/// Retains `broadcaster` STRONGLY — required to call `unsubscribe` from
+/// `deinit`. No cycle: `AthleteActivityChangeBroadcaster` only ever
+/// holds its subscribers (e.g. a `HomeDashboardViewModel`) WEAKLY, and
+/// never holds a reference to this subscription object at all — the
+/// broadcaster doesn't know this type exists; only the original
+/// subscriber does, by holding it strongly as ordinary `@MainActor`
+/// state.
+final class ActivityChangeSubscription: Sendable {
+    private let athleteId: AthleteId
+    private let token: AthleteActivityChangeBroadcaster.SubscriptionToken
+    private let broadcaster: AthleteActivityChangeBroadcaster
+
+    init(athleteId: AthleteId, token: AthleteActivityChangeBroadcaster.SubscriptionToken, broadcaster: AthleteActivityChangeBroadcaster) {
+        self.athleteId = athleteId
+        self.token = token
+        self.broadcaster = broadcaster
+    }
+
+    deinit {
+        broadcaster.unsubscribe(athleteId: athleteId, token: token)
     }
 }

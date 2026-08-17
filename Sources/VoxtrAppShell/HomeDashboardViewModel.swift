@@ -102,27 +102,22 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
     /// ViewModel" principle this type's own two independent load
     /// states already establish.
     private let todayActivityComposer: TodayActivityComposer?
-    /// Review follow-up (subscription cleanup): REQUIRED, not
-    /// optional/defaulted — every production `HomeDashboardViewModel`
-    /// construction site (`FamilyHomeContentView`, `HomeDashboardView`'s
-    /// own "Manage Athletes" sheet, `FamilyHomeView`, `ParentTabShellView`'s
-    /// Profile tab) is a genuine, live Athlete Home presentation with no
-    /// legitimate case for staying deaf to canonical mutations, so
-    /// letting this be silently omitted was a correctness footgun, not a
-    /// convenience worth keeping. Tests that don't care about
-    /// invalidation pass a throwaway `AthleteActivityChangeBroadcaster()`
-    /// instance, matching this suite's own established "every test
-    /// builds its own inline, no shared helper" convention.
-    private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
-    /// The token `activityChangeBroadcaster.subscribe` returned for this
-    /// exact instance — stored so `deinit` below can deterministically
-    /// unsubscribe the SAME entry it created, never inferred or
-    /// reconstructed. Optional/`var`, not `let`: `subscribe` must be
-    /// called with `self` as the subscriber, which Swift only allows
-    /// once every OTHER stored property already has a value — including
-    /// this one, so it starts `nil` and is set as the LAST statement in
-    /// `init`, once that's true.
-    private var activityChangeSubscriptionToken: AthleteActivityChangeBroadcaster.SubscriptionToken?
+    /// Codemagic compile fix (review follow-up): ordinary `@MainActor`
+    /// state — a strong reference to the ONE object whose own,
+    /// non-actor-isolated `deinit` unsubscribes this instance from
+    /// `activityChangeBroadcaster` when its subscription lifetime ends.
+    /// See `ActivityChangeSubscription`'s own doc comment for exactly
+    /// why this indirection exists: `HomeDashboardViewModel` itself
+    /// cannot have a `deinit` that reads any of its OWN
+    /// `@MainActor`-isolated stored properties (confirmed by Codemagic:
+    /// `deinit` is `nonisolated`, and `nonisolated` code cannot read
+    /// `@MainActor`-isolated state) — so it no longer has a `deinit` at
+    /// all. Optional/`var`, not `let`: constructing the subscription
+    /// requires calling `subscribe` with `self`, which Swift only
+    /// allows once every OTHER stored property already has a value —
+    /// including this one, so it starts `nil` and is set as the LAST
+    /// statement in `init`, once that's true.
+    private var activityChangeSubscription: ActivityChangeSubscription?
 
     public init(
         trainingPlanningCoordinationService: any TodaysTrainingProviding,
@@ -139,8 +134,7 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
         self.athleteDisplayName = athleteDisplayName
         self.weekStart = weekStart
         self.todayActivityComposer = todayActivityComposer
-        self.activityChangeBroadcaster = activityChangeBroadcaster
-        self.activityChangeSubscriptionToken = nil
+        self.activityChangeSubscription = nil
         // Recurring reopen stale-Athlete-Home fix (architecture round):
         // subscribes to the SAME shared broadcaster
         // TrainingReflectionCoordinationService notifies after a
@@ -148,29 +142,12 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
         // performed it — Family Home's own rows, Family Schedule, Daily
         // Training (including nested under this very screen), or this
         // screen's own navigation. Must be the LAST statement in this
-        // initializer — see this property's own doc comment for why.
-        self.activityChangeSubscriptionToken = activityChangeBroadcaster.subscribe(athleteId: athleteId, self)
-    }
-
-    /// Review follow-up (subscription cleanup): deterministic
-    /// unregistration, not reliance on the broadcaster's own weak-entry
-    /// pruning alone (that pruning stays as defensive protection for
-    /// subscribers that DON'T go through a lifecycle hook, not the only
-    /// mechanism for one that does). An ORDINARY `deinit` — not
-    /// `isolated deinit` — is what makes this safe without betting on a
-    /// Swift version this investigation had no compiler available to
-    /// verify against: `AthleteActivityChangeBroadcaster.unsubscribe`
-    /// is deliberately `nonisolated` (see that type's own doc comment),
-    /// so calling it from `deinit`, whichever context `deinit` itself
-    /// happens to run in, is always a plain, ordinary, synchronous call
-    /// to non-isolated code — never a hop, never a `Task`, never a
-    /// window where a stale entry could still fire, and never able to
-    /// affect a DIFFERENT, later subscription for the same athlete,
-    /// since every subscription owns its own unique token.
-    deinit {
-        if let activityChangeSubscriptionToken {
-            activityChangeBroadcaster.unsubscribe(athleteId: athleteId, token: activityChangeSubscriptionToken)
-        }
+        // initializer — see `activityChangeSubscription`'s own doc
+        // comment for why.
+        let token = activityChangeBroadcaster.subscribe(athleteId: athleteId, self)
+        self.activityChangeSubscription = ActivityChangeSubscription(
+            athleteId: athleteId, token: token, broadcaster: activityChangeBroadcaster
+        )
     }
 
     /// `AthleteActivityChangeSubscriber` conformance: reread canonical

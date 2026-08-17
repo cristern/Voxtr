@@ -1080,9 +1080,9 @@ struct HomeDashboardViewModelTests {
         let broadcaster = AthleteActivityChangeBroadcaster()
         let athleteId = AthleteId()
 
-        func makeViewModel() -> HomeDashboardViewModel {
+        func makeViewModel(trainingProvider: RecordingTodaysTrainingProvider) -> HomeDashboardViewModel {
             HomeDashboardViewModel(
-                trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: []),
+                trainingPlanningCoordinationService: trainingProvider,
                 coachingPresentationProvider: RecordingCoachingPresentationProvider(
                     presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: Self.weekStart, sections: [])
                 ),
@@ -1091,23 +1091,31 @@ struct HomeDashboardViewModelTests {
             )
         }
 
-        let survivor = makeViewModel()
-        var shortLived: HomeDashboardViewModel? = makeViewModel()
+        // 1: two real HomeDashboardViewModels for the same athlete.
+        let survivorTrainingProvider = RecordingTodaysTrainingProvider(activitiesToReturn: [])
+        let survivor = makeViewModel(trainingProvider: survivorTrainingProvider)
+        var shortLived: HomeDashboardViewModel? = makeViewModel(trainingProvider: RecordingTodaysTrainingProvider(activitiesToReturn: []))
+        // 2: broadcaster subscriberCount == 2.
         #expect(broadcaster.subscriberCount(for: athleteId) == 2)
 
+        // 3: release one ViewModel. Its own subscription-lifetime object
+        // (`ActivityChangeSubscription`, held only by the released
+        // HomeDashboardViewModel) is deallocated by ARC in the same,
+        // uninterrupted step — no actor hop, no `Task`, no polling — and
+        // its own ordinary `deinit` calls `unsubscribe` synchronously.
         shortLived = nil
-        // `isolated deinit` runs synchronously here: this test body is
-        // itself @MainActor-isolated, the same actor both
-        // HomeDashboardViewModel and the broadcaster are isolated to, so
-        // dropping the last reference above and observing its effect
-        // below happen on the same, uninterrupted actor turn — no `Task`,
-        // no polling, no race.
+
+        // 4: subscriberCount becomes exactly 1 — proves the released
+        // instance's cleanup removed exactly ITS OWN token, never the
+        // survivor's, concurrently-live, different token for the same
+        // athlete.
         #expect(broadcaster.subscriberCount(for: athleteId) == 1)
 
-        // The survivor's own subscription is untouched — proves
-        // `shortLived`'s cleanup removed exactly ITS OWN token, never a
-        // different, later (here: concurrently live) subscription for
-        // the same athlete.
-        #expect(survivor.athleteId == athleteId)
+        // 5: the remaining subscriber still receives future invalidation
+        // — proves the survivor's own subscription is not merely present
+        // in the count but genuinely still live/functional.
+        #expect(survivorTrainingProvider.callCount == 0)
+        broadcaster.activityChanged(for: athleteId)
+        #expect(survivorTrainingProvider.callCount == 1)
     }
 }
