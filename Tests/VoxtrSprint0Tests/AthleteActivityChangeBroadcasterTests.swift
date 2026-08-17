@@ -215,4 +215,91 @@ struct AthleteActivityChangeBroadcasterTests {
 
         #expect(stillLive.callCount == 1)
     }
+
+    // MARK: - Review follow-up: the actual emission boundary (not only a pre-write failure)
+
+    /// Answers "should invalidation fire when the activity write
+    /// succeeded even if a later reflection/form write fails, or only on
+    /// whole-method success" empirically: `logActivity`'s Session Form
+    /// sub-write is wrapped in its OWN local `do/catch` and reported via
+    /// `sessionFormOutcome: .failed`, never rethrown — so `logActivity`
+    /// itself always SUCCEEDS once the canonical `LoggedActivity` write
+    /// has, regardless of Session Form. An out-of-range `bodyFeeling`
+    /// (valid range is 1-5, enforced by `ReflectionService`'s own
+    /// validation) is the real, reachable way to make that sub-write
+    /// fail without touching persistence internals directly.
+    @Test("logActivity succeeds and emits exactly once even when the Session Form sub-write fails")
+    @MainActor
+    func logActivitySucceedsAndEmitsEvenWhenSessionFormWriteFails() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, _, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, durationMinutes: 30, authorId: ActorId(), sessionForm: 99
+        )
+
+        guard case .failed = result.sessionFormOutcome else {
+            Issue.record("Expected the Session Form sub-write to fail for an out-of-range value")
+            return
+        }
+        // The canonical LoggedActivity write is what invalidation tracks
+        // — it succeeded, so exactly one notification fires, regardless
+        // of the Session Form sub-write's own independent failure.
+        #expect(subscriber.callCount == 1)
+    }
+
+    /// Same boundary, for `correctLoggedActivity`'s "update an EXISTING
+    /// reflection" branch specifically — the un-caught
+    /// `reflectionService.fetchActivityReflection(forLoggedActivity:)`
+    /// call sitting between this method's own canonical write and its
+    /// Form update is a genuine, code-confirmed spot where the WHOLE
+    /// coordinator method could throw after the canonical write already
+    /// committed (a persistence-layer fetch failure, not reachable
+    /// through this test without faking repository internals — reported
+    /// in this round's delivery notes, not fixed, since duration/RPE
+    /// already being canonically saved by that point makes the broadcast
+    /// correct regardless of what fetchActivityReflection does next).
+    /// This test covers the REACHABLE half of that same boundary: the
+    /// local `do/catch` around `updateActivityReflection` itself, which
+    /// (like `logActivity`'s Session Form write) never rethrows.
+    @Test("correctLoggedActivity succeeds and emits exactly once even when updating an existing reflection's Form value fails")
+    @MainActor
+    func correctLoggedActivitySucceedsAndEmitsEvenWhenFormUpdateFails() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, _, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+
+        // A valid initial log, WITH a Session Form value — creates the
+        // ActivityReflection that correctLoggedActivity's "existing
+        // reflection" branch below will then try to update.
+        let logged = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, durationMinutes: 30, authorId: ActorId(), sessionForm: 3
+        )
+        #expect(subscriber.callCount == 1)
+
+        let result = try coordinator.correctLoggedActivity(
+            loggedActivityId: logged.loggedActivity.loggedActivityId, athleteId: athleteId, authorId: ActorId(),
+            durationMinutes: 45, perceivedExertion: nil, sessionForm: 99
+        )
+
+        guard case .failed = result.sessionFormOutcome else {
+            Issue.record("Expected the Form update to fail for an out-of-range value")
+            return
+        }
+        // The canonical duration/RPE write already committed — one more
+        // notification for this same athlete, on top of the one from
+        // the initial log above.
+        #expect(subscriber.callCount == 2)
+    }
 }

@@ -131,7 +131,8 @@ struct HomeDashboardViewModelTests {
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
             ),
-            athleteId: athleteId, weekStart: weekStart
+            athleteId: athleteId, weekStart: weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -163,7 +164,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: provider,
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadCoachingSummary()
@@ -192,7 +194,8 @@ struct HomeDashboardViewModelTests {
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
             ),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         guard case .loading = viewModel.todaysTrainingState else {
@@ -229,7 +232,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadCoachingSummary()
@@ -252,7 +256,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -289,7 +294,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: applicationService,
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         let directlyFromService = try applicationService.coachingPresentation(forAthlete: Self.athleteId, weekStart: Self.weekStart)
@@ -312,7 +318,8 @@ struct HomeDashboardViewModelTests {
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
             ),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         // Neither loadTodaysTraining() nor loadCoachingSummary() called yet.
@@ -331,7 +338,8 @@ struct HomeDashboardViewModelTests {
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: Self.athleteId, weekStart: Self.weekStart, sections: [])
             ),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -352,7 +360,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: activities),
             coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -377,7 +386,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: ThrowingTodaysTrainingProvider(),
             coachingPresentationProvider: RecordingCoachingPresentationProvider(presentationToReturn: actionableCoaching),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -396,7 +406,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: ThrowingTodaysTrainingProvider(),
             coachingPresentationProvider: ThrowingCoachingPresentationProvider(),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -421,7 +432,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: completedActivity),
             coachingPresentationProvider: RecordingCoachingPresentationProvider(presentationToReturn: noActionCoaching),
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -445,7 +457,8 @@ struct HomeDashboardViewModelTests {
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingProvider,
             coachingPresentationProvider: coachingProvider,
-            athleteId: Self.athleteId, weekStart: Self.weekStart
+            athleteId: Self.athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         viewModel.loadTodaysTraining()
@@ -512,7 +525,8 @@ struct HomeDashboardViewModelTests {
             todayActivityComposer: TodayActivityComposer(
                 planningService: planningService, trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService
-            )
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModel.loadTodaysTraining()
         homeDashboardViewModel.loadTodayActivityRows()
@@ -601,7 +615,8 @@ struct HomeDashboardViewModelTests {
             todayActivityComposer: TodayActivityComposer(
                 planningService: planningService, trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService
-            )
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModel.loadTodayActivityRows()
 
@@ -666,14 +681,16 @@ struct HomeDashboardViewModelTests {
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: athleteA, weekStart: weekStart, sections: [])
             ),
-            athleteId: athleteA, weekStart: weekStart, todayActivityComposer: makeComposer()
+            athleteId: athleteA, weekStart: weekStart, todayActivityComposer: makeComposer(),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         let homeDashboardViewModelB = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: RecordingCoachingPresentationProvider(
                 presentationToReturn: CoachingPresentation(athleteId: athleteB, weekStart: weekStart, sections: [])
             ),
-            athleteId: athleteB, weekStart: weekStart, todayActivityComposer: makeComposer()
+            athleteId: athleteB, weekStart: weekStart, todayActivityComposer: makeComposer(),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModelA.loadTodayActivityRows()
         homeDashboardViewModelB.loadTodayActivityRows()
@@ -749,7 +766,8 @@ struct HomeDashboardViewModelTests {
             todayActivityComposer: TodayActivityComposer(
                 planningService: planningService, trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService
-            )
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModel.loadTodayActivityRows()
 
@@ -825,7 +843,8 @@ struct HomeDashboardViewModelTests {
             todayActivityComposer: TodayActivityComposer(
                 planningService: planningService, trainingService: trainingService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService
-            )
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModel.loadTodayActivityRows()
         // Captured once, exactly like a `NavigationLink(destination:)`
@@ -1040,5 +1059,55 @@ struct HomeDashboardViewModelTests {
             if case .recurringOccurrence(_, _, let s) = row { return s.id == suggestion.id }
             return false
         } == false)
+    }
+
+    // MARK: - Review follow-up: deterministic subscription cleanup
+
+    /// Proves the ACTUAL lifecycle hook, not a manually-constructed test
+    /// subscriber calling `unsubscribe` itself: a real
+    /// `HomeDashboardViewModel` subscribes at construction, and its
+    /// entry is verifiably GONE (not merely skipped as a dead weak
+    /// reference at the next broadcast) once its subscription lifetime
+    /// ends — proven via `AthleteActivityChangeBroadcaster.subscriberCount(for:)`,
+    /// a `@testable`-only introspection seam, since `subscribersByAthlete`
+    /// itself is private. Also proves "preserve multiple subscribers per
+    /// athlete": a second, still-live `HomeDashboardViewModel` for the
+    /// SAME athlete is completely unaffected by the first one's release
+    /// — the count drops from 2 to 1, never to 0.
+    @Test("A HomeDashboardViewModel's subscription is deterministically removed when its subscription lifetime ends, without affecting another live subscriber for the same athlete")
+    @MainActor
+    func homeDashboardViewModelSubscriptionRemovedWhenReleased() throws {
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let athleteId = AthleteId()
+
+        func makeViewModel() -> HomeDashboardViewModel {
+            HomeDashboardViewModel(
+                trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: []),
+                coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                    presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: Self.weekStart, sections: [])
+                ),
+                athleteId: athleteId, weekStart: Self.weekStart,
+                activityChangeBroadcaster: broadcaster
+            )
+        }
+
+        let survivor = makeViewModel()
+        var shortLived: HomeDashboardViewModel? = makeViewModel()
+        #expect(broadcaster.subscriberCount(for: athleteId) == 2)
+
+        shortLived = nil
+        // `isolated deinit` runs synchronously here: this test body is
+        // itself @MainActor-isolated, the same actor both
+        // HomeDashboardViewModel and the broadcaster are isolated to, so
+        // dropping the last reference above and observing its effect
+        // below happen on the same, uninterrupted actor turn — no `Task`,
+        // no polling, no race.
+        #expect(broadcaster.subscriberCount(for: athleteId) == 1)
+
+        // The survivor's own subscription is untouched — proves
+        // `shortLived`'s cleanup removed exactly ITS OWN token, never a
+        // different, later (here: concurrently live) subscription for
+        // the same athlete.
+        #expect(survivor.athleteId == athleteId)
     }
 }

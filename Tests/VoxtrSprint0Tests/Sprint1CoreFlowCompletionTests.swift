@@ -1856,13 +1856,15 @@ struct Sprint1CoreFlowCompletionTests {
             trainingPlanningCoordinationService: coordinationService,
             coachingPresentationProvider: NoopCoachingPresentationProvider(),
             athleteId: oliver.athleteId,
-            weekStart: TrainingPlanningCoordinationService.weekStart()
+            weekStart: TrainingPlanningCoordinationService.weekStart(),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         let secondViewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: coordinationService,
             coachingPresentationProvider: NoopCoachingPresentationProvider(),
             athleteId: athleteTwo.athleteId,
-            weekStart: TrainingPlanningCoordinationService.weekStart()
+            weekStart: TrainingPlanningCoordinationService.weekStart(),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
 
         #expect(firstViewModel.athleteId == oliver.athleteId)

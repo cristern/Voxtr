@@ -1202,7 +1202,8 @@ struct HomeDashboardViewModelCacheTests {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             coachingPresentationProvider: StubCoachingPresentationProvider(),
             athleteId: athleteId,
-            weekStart: LocalDate(year: 2026, month: 1, day: 5)
+            weekStart: LocalDate(year: 2026, month: 1, day: 5),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
     }
 

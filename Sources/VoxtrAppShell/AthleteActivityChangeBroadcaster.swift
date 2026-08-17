@@ -7,6 +7,10 @@ import VoxtrCoreContracts
 /// this is intentionally not typed to it directly, so any future live
 /// presentation of the same `TodayActivityRow` data could subscribe the
 /// same way without `AthleteActivityChangeBroadcaster` itself changing.
+/// `@MainActor`: mutates `@Observable`/UI-facing state on the
+/// conformer, so this must always run on the main actor — matching
+/// `AthleteActivityChangeBroadcaster.activityChanged(for:)`'s own
+/// isolation below, which is the only thing that ever calls it.
 @MainActor
 public protocol AthleteActivityChangeSubscriber: AnyObject {
     func athleteActivityDidChange()
@@ -31,23 +35,53 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// `HomeDashboardViewModel` is already threaded — no global singleton,
 /// no `NotificationCenter`.
 ///
+/// ISOLATION (review follow-up, subscription cleanup): `subscribe`/
+/// `activityChanged` are `@MainActor` — every production and test call
+/// site is already on the main actor, and `activityChanged` must be, to
+/// call `AthleteActivityChangeSubscriber.athleteActivityDidChange()`
+/// (itself `@MainActor`) synchronously. `unsubscribe`, by contrast, is
+/// deliberately `nonisolated` so `HomeDashboardViewModel`'s own,
+/// ordinary (non-`isolated`) `deinit` can call it directly: a `deinit`
+/// on an `@MainActor`-isolated class cannot synchronously call another
+/// `@MainActor`-isolated method — the only two ways around that are
+/// `isolated deinit` (SE-0371, a real Swift feature, but one this
+/// investigation had no compiler available to confirm against this
+/// package's exact toolchain) or hopping via `Task { @MainActor in
+/// ... }` from `deinit` (the exact race the review flagged: the
+/// token/broadcaster must be captured into local `let`s before entering
+/// the `Task`, and the hop is genuinely asynchronous — an unbounded
+/// window during which the instance is gone but its subscription entry
+/// is still live). Rather than depend on either, this type is
+/// `@unchecked Sendable` with `NSLock`-guarded storage — the exact
+/// pattern this package's own `DIContainer` (`VoxtrCore/DependencyInjection/DIContainer.swift`)
+/// already establishes for "must be safely callable from a non-isolated
+/// context." `subscribersByAthlete` is mutated ONLY under `lock`, from
+/// every one of `subscribe`/`unsubscribe`/`activityChanged`/`prune` —
+/// the same discipline throughout, regardless of which of those is
+/// actor-isolated and which is not — so `unsubscribe` is safe to call
+/// from literally any thread, synchronously, with no hop and no
+/// dependency on a Swift version this investigation couldn't verify.
+///
 /// Subscribers are held weakly: this broadcaster far outlives any
 /// individual `HomeDashboardViewModel` (a per-athlete cache in
 /// `FamilyHomeContentView` may keep one alive for an entire app
 /// session, but plenty of others — the "Manage Athletes" sheet, Profile
 /// tab — are short-lived), so a strong reference here would leak every
 /// one ever constructed. A dead entry is pruned the next time either
-/// `subscribe` or `activityChanged` runs for that athlete — no
-/// unbounded growth from ViewModels that have already been
-/// deallocated, and no reliance on `deinit` (which cannot safely
-/// re-enter this `@MainActor` type from an arbitrary thread).
-@MainActor
-public final class AthleteActivityChangeBroadcaster {
+/// `subscribe` or `activityChanged` runs for that athlete — defensive
+/// protection for a subscriber that never gets a deterministic
+/// unregister call for some reason, not the primary cleanup mechanism
+/// for one that does (`HomeDashboardViewModel`'s own `deinit`, which
+/// calls `unsubscribe` directly).
+public final class AthleteActivityChangeBroadcaster: @unchecked Sendable {
     /// Explicit subscription identity — returned by `subscribe`, passed
-    /// back to `unsubscribe` for deterministic, opt-in early cleanup.
-    /// Never required for correctness (dead entries self-prune), only
-    /// for a caller that wants to stop listening before deallocation.
-    public struct SubscriptionToken: Hashable {
+    /// back to `unsubscribe` for deterministic cleanup. `Sendable`:
+    /// crosses between `@MainActor`-isolated call sites (`subscribe`,
+    /// most callers of `unsubscribe`) and the `nonisolated` `deinit`
+    /// context `unsubscribe` is specifically designed to also be safe
+    /// from — a plain `UUID` wrapper has no isolated state of its own,
+    /// so this is trivially and genuinely safe, not `@unchecked`.
+    public struct SubscriptionToken: Hashable, Sendable {
         private let id: UUID
 
         public init() {
@@ -59,19 +93,28 @@ public final class AthleteActivityChangeBroadcaster {
         weak var value: AthleteActivityChangeSubscriber?
     }
 
+    private let lock = NSLock()
     private var subscribersByAthlete: [AthleteId: [SubscriptionToken: WeakSubscriber]] = [:]
 
     public init() {}
 
     @discardableResult
+    @MainActor
     public func subscribe(athleteId: AthleteId, _ subscriber: AthleteActivityChangeSubscriber) -> SubscriptionToken {
-        prune(athleteId: athleteId)
+        lock.lock()
+        defer { lock.unlock() }
+        pruneLocked(athleteId: athleteId)
         let token = SubscriptionToken()
         subscribersByAthlete[athleteId, default: [:]][token] = WeakSubscriber(value: subscriber)
         return token
     }
 
-    public func unsubscribe(athleteId: AthleteId, token: SubscriptionToken) {
+    /// `nonisolated` — see this type's own doc comment for exactly why:
+    /// this is what lets `HomeDashboardViewModel.deinit` call it
+    /// directly, synchronously, from a non-isolated context.
+    public nonisolated func unsubscribe(athleteId: AthleteId, token: SubscriptionToken) {
+        lock.lock()
+        defer { lock.unlock() }
         subscribersByAthlete[athleteId]?.removeValue(forKey: token)
         if subscribersByAthlete[athleteId]?.isEmpty == true {
             subscribersByAthlete[athleteId] = nil
@@ -85,17 +128,38 @@ public final class AthleteActivityChangeBroadcaster {
     /// its own existing mechanism (`HomeDashboardViewModel.loadTodaysTraining()`/
     /// `loadTodayActivityRows()`) — this type never holds or derives any
     /// presentation data of its own.
+    @MainActor
     public func activityChanged(for athleteId: AthleteId) {
-        guard let entries = subscribersByAthlete[athleteId] else { return }
+        lock.lock()
+        let entries = subscribersByAthlete[athleteId]
+        lock.unlock()
+        guard let entries else { return }
         for entry in entries.values {
             entry.value?.athleteActivityDidChange()
         }
-        prune(athleteId: athleteId)
+        lock.lock()
+        pruneLocked(athleteId: athleteId)
+        lock.unlock()
     }
 
-    private func prune(athleteId: AthleteId) {
+    /// Caller must already hold `lock`.
+    private func pruneLocked(athleteId: AthleteId) {
         guard let entries = subscribersByAthlete[athleteId] else { return }
         let alive = entries.filter { $0.value.value != nil }
         subscribersByAthlete[athleteId] = alive.isEmpty ? nil : alive
+    }
+
+    /// Test-only introspection seam — not `public`, reachable only via
+    /// `@testable import` (the same convention `PlanningService.acceptSuggestion`'s
+    /// own test-only `saveOverride` parameter already establishes in
+    /// this codebase). The exact number of entries currently stored for
+    /// `athleteId`, including any not-yet-pruned dead ones — lets a test
+    /// prove `unsubscribe`/deinit-driven cleanup actually REMOVED an
+    /// entry, not merely that a dead weak reference is silently skipped
+    /// the next time `activityChanged` runs.
+    func subscriberCount(for athleteId: AthleteId) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return subscribersByAthlete[athleteId]?.count ?? 0
     }
 }
