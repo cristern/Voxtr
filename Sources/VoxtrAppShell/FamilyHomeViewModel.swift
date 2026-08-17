@@ -92,6 +92,20 @@ public struct AthleteFocusThisWeek: Identifiable {
     public let focus: String
 }
 
+/// VX-023 (Sleep V1): one row in Family Home's dedicated Sleep section —
+/// one per athlete with Sleep tracking ON. An athlete with tracking OFF
+/// never produces a row here at all ("no Family Home Sleep action" when
+/// disabled), rather than a row with some "disabled" state to render
+/// around. `sleepQuality == nil` means today's Sleep is missing — the UI
+/// layer, not this struct, decides what action(s) that implies (e.g.
+/// "Log Sleep" + "History" vs. "History" only).
+public struct AthleteSleepSummary: Identifiable {
+    public let id: String
+    public let athleteId: AthleteId
+    public let athleteName: String
+    public let sleepQuality: Int?
+}
+
 /// Sprint 1 integration audit fix: `RestoredFamily.activeAthletes` is a
 /// launch-time snapshot — it is never re-queried after app launch (see
 /// `AthleteFamilyManagementViewModel`'s own established doc comment on
@@ -110,7 +124,7 @@ public struct AthleteFocusThisWeek: Identifiable {
 /// longer read anywhere in that view.
 @MainActor
 @Observable
-public final class FamilyHomeViewModel {
+public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
     public private(set) var activeAthletes: [AthleteProfile]
     /// Parent Home UX / Content Contract: derived from the PRIOR
     /// week's reflection only — never the current week's. See
@@ -120,11 +134,39 @@ public final class FamilyHomeViewModel {
 
     public private(set) var rows: [TodayActivityRow] = []
     public private(set) var tomorrowRows: [TodayActivityRow] = []
+    /// VX-023: Family Home's dedicated Sleep section — see
+    /// `AthleteSleepSummary`'s own doc comment.
+    public private(set) var sleepSummaries: [AthleteSleepSummary] = []
     private let workspaceId: WorkspaceId
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
     private let todayActivityComposer: TodayActivityComposer
+    /// VX-023: optional/defaulted `nil`, same "one dependency's absence
+    /// never corrupts the rest of this ViewModel" reasoning
+    /// `HomeDashboardViewModel.sleepStatusProvider` already establishes
+    /// — every pre-existing construction site (production and test)
+    /// predates Sleep and doesn't need updating; `loadSleepSummaries()`
+    /// simply produces an empty list if none was supplied.
+    private let sleepStatusProvider: (any SleepStatusProviding)?
+    /// VX-023 (live invalidation): optional/defaulted `nil`, same
+    /// reasoning as `sleepStatusProvider` above — no broadcaster
+    /// supplied means Family Home's Sleep section simply never
+    /// subscribes, and only refreshes on explicit `refresh()` calls
+    /// (e.g. `.onAppear`), same as every pre-Sleep behavior on this
+    /// screen already works.
+    private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster?
+    /// One `SleepChangeSubscription` per currently-active athlete,
+    /// reconciled in `refreshActiveAthletes()` below whenever the
+    /// roster changes — never left dangling for an athlete that's no
+    /// longer active (removing a key here drops the last strong
+    /// reference, whose own `deinit` unsubscribes deterministically,
+    /// the same mechanism `HomeDashboardViewModel`'s own subscriptions
+    /// already rely on). `FamilyHomeViewModel` itself has no `deinit`
+    /// of its own — same reasoning as `HomeDashboardViewModel`'s own
+    /// doc comment on why: an `@MainActor`-isolated class's `deinit` is
+    /// `nonisolated` and cannot read its own isolated stored properties.
+    private var sleepChangeSubscriptions: [AthleteId: SleepChangeSubscription] = [:]
 
     public init(
         activeAthletes: [AthleteProfile],
@@ -133,7 +175,9 @@ public final class FamilyHomeViewModel {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
-        weeklyReflectionService: WeeklyReflectionService
+        weeklyReflectionService: WeeklyReflectionService,
+        sleepStatusProvider: (any SleepStatusProviding)? = nil,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil
     ) {
         self.activeAthletes = activeAthletes
         self.workspaceId = workspaceId
@@ -145,6 +189,41 @@ public final class FamilyHomeViewModel {
             trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService
         )
+        self.sleepStatusProvider = sleepStatusProvider
+        self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        // Subscribe for whatever roster was passed in at construction —
+        // refreshActiveAthletes() reconciles this further on every
+        // refresh(). Must run after every other stored property is set
+        // (subscribe(self) requires full initialization), same ordering
+        // constraint HomeDashboardViewModel's own init documents.
+        reconcileSleepSubscriptions()
+    }
+
+    /// VX-023 (live invalidation): subscribes any active athlete not
+    /// already subscribed, and drops the subscription (via dictionary
+    /// removal — see `sleepChangeSubscriptions`'s own doc comment) for
+    /// any athlete no longer active. A no-op when no broadcaster was
+    /// supplied.
+    private func reconcileSleepSubscriptions() {
+        guard let sleepChangeBroadcaster else { return }
+        let activeIds = Set(activeAthletes.map(\.athleteId))
+        for athleteId in activeIds where sleepChangeSubscriptions[athleteId] == nil {
+            let token = sleepChangeBroadcaster.subscribe(athleteId: athleteId, self)
+            sleepChangeSubscriptions[athleteId] = SleepChangeSubscription(
+                athleteId: athleteId, token: token, broadcaster: sleepChangeBroadcaster
+            )
+        }
+        for athleteId in sleepChangeSubscriptions.keys where !activeIds.contains(athleteId) {
+            sleepChangeSubscriptions.removeValue(forKey: athleteId)
+        }
+    }
+
+    /// `AthleteSleepChangeSubscriber` conformance: any active athlete's
+    /// Sleep change reloads the whole section — Family Home's Sleep
+    /// section is family-wide, not per-athlete, so there is no
+    /// per-athlete partial reload to do.
+    public func athleteSleepDidChange() {
+        loadSleepSummaries()
     }
 
     /// The single entry point the view calls on appear — refreshes the
@@ -156,6 +235,32 @@ public final class FamilyHomeViewModel {
         loadHome()
         loadTomorrow()
         loadFocusThisWeek()
+        loadSleepSummaries()
+    }
+
+    /// VX-023: one `AthleteSleepSummary` per active athlete with Sleep
+    /// tracking ON — an athlete with tracking OFF, or whose tracking
+    /// check itself fails, is simply excluded (same per-athlete failure
+    /// isolation `loadHome()`/`loadTomorrow()` already establish; one
+    /// athlete's failure never blocks another's row).
+    public func loadSleepSummaries(referenceDate: Date = .now, calendar: Calendar = .current) {
+        guard let sleepStatusProvider else {
+            sleepSummaries = []
+            return
+        }
+        let today = SleepCoordinationService.today(referenceDate: referenceDate, calendar: calendar)
+        sleepSummaries = activeAthletes.compactMap { athlete in
+            guard let enabled = try? sleepStatusProvider.isSleepTrackingEnabled(for: athlete.athleteId), enabled else {
+                return nil
+            }
+            let status = try? sleepStatusProvider.fetchDailyStatus(forAthlete: athlete.athleteId, localDate: today)
+            return AthleteSleepSummary(
+                id: athlete.athleteId.rawValue.uuidString,
+                athleteId: athlete.athleteId,
+                athleteName: athlete.givenName,
+                sleepQuality: status?.sleepQuality
+            )
+        }
     }
 
     /// Re-fetches from persistence — the same repository method and
@@ -177,6 +282,7 @@ public final class FamilyHomeViewModel {
             // snapshot, or a previous successful refresh) rather than
             // clearing it on a transient failure.
         }
+        reconcileSleepSubscriptions()
     }
 
     /// Calls the already-existing, per-athlete

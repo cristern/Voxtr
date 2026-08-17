@@ -34,13 +34,19 @@ public struct AthleteFamilyManagementView: View {
     @State private var editingAthlete: AthleteProfile?
     @Environment(\.dismiss) private var dismiss
     private let athleteHomeDestination: (AthleteProfile) -> AnyView
+    /// VX-023 (Sleep V1): same caller-supplied-destination shape as
+    /// `athleteHomeDestination` above — this view has no reason to know
+    /// how to construct `SleepCoordinationService` itself.
+    private let sleepSettingsDestination: (AthleteProfile) -> AnyView
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
-        athleteHomeDestination: @escaping (AthleteProfile) -> AnyView
+        athleteHomeDestination: @escaping (AthleteProfile) -> AnyView,
+        sleepSettingsDestination: @escaping (AthleteProfile) -> AnyView
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteHomeDestination = athleteHomeDestination
+        self.sleepSettingsDestination = sleepSettingsDestination
     }
 
     public var body: some View {
@@ -125,6 +131,15 @@ public struct AthleteFamilyManagementView: View {
                     }
                     Spacer()
                     if !athlete.isArchived {
+                        // VX-023 (Sleep V1): "Profile → Athlete → Sleep"
+                        // — a separate, explicit action alongside
+                        // Edit/Archive, never conflated with either.
+                        NavigationLink("Sleep") {
+                            sleepSettingsDestination(athlete)
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("athleteManagement.sleepSettingsButton.\(athlete.id.uuidString)")
+
                         // B. Edit athlete — a distinct, explicit action,
                         // never conflated with opening the athlete.
                         Button("Edit") {

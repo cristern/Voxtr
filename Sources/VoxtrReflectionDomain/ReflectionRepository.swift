@@ -150,6 +150,77 @@ public final class ReflectionRepository {
             .sorted(by: Self.observationOrder)
     }
 
+    /// VX-023 (Sleep V1): the canonical "one `DailyStatus` per athlete +
+    /// `LocalDate`" lookup — every DailyStatus create/update path below
+    /// goes through this first. `nil` means no signal (Sleep or
+    /// otherwise) has ever been recorded for this athlete on this date —
+    /// not the same as a recorded-but-empty day.
+    public func fetchDailyStatus(forAthlete athleteId: AthleteId, localDate: LocalDate) throws -> DailyStatus? {
+        let rawAthleteId = athleteId.rawValue
+        return try modelContext.fetch(FetchDescriptor<DailyStatus>())
+            .first { $0.athleteId == rawAthleteId && $0.localDate == localDate }
+    }
+
+    /// VX-023: every `DailyStatus` row for one athlete whose `localDate`
+    /// falls within `[from, to]` inclusive — the range-fetch History
+    /// screens page over. Ordered newest-first (`localDate` descending,
+    /// `id` as a stable tiebreaker) since Sleep History's own contract
+    /// is "newest first." Dates in the requested range with no row at
+    /// all are NOT represented here — callers that need explicit
+    /// "not logged" rows (Sleep History) fill the gaps themselves from
+    /// the requested date range, the same "fetch canonical rows, derive
+    /// presentation gaps at the call site" separation `WeeklyHistoryListViewModel`
+    /// already uses for missing weeks.
+    public func fetchDailyStatuses(forAthlete athleteId: AthleteId, from: LocalDate, to: LocalDate) throws -> [DailyStatus] {
+        let rawAthleteId = athleteId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<DailyStatus>())
+        return all
+            .filter { $0.athleteId == rawAthleteId && $0.localDate >= from && $0.localDate <= to }
+            .sorted(by: Self.dailyStatusOrder)
+    }
+
+    /// VX-023: the single canonical write path for Sleep — "if a
+    /// `DailyStatus` for that athlete/date already exists for another
+    /// wellbeing field, UPDATE the same `DailyStatus`; if Sleep is the
+    /// first signal for that athlete/date, create it." Mutates the
+    /// existing row's `sleepQuality` in place (preserving every other
+    /// field — `sleepDurationMinutes`, `energy`, `generalForm`,
+    /// `soreness`, `motivation`, `illnessFlag`, `note`, `visibility` —
+    /// completely untouched) rather than delete+reinsert, exactly the
+    /// same "mutate in place" discipline `updateActivityReflection`
+    /// above already establishes. Never creates a second row for the
+    /// same athlete/date — the `fetchDailyStatus` lookup above is always
+    /// checked first.
+    public func upsertSleepQuality(
+        athleteId: AthleteId,
+        localDate: LocalDate,
+        sleepQuality: Int,
+        visibility: VisibilityPolicy
+    ) throws -> DailyStatus {
+        if let existing = try fetchDailyStatus(forAthlete: athleteId, localDate: localDate) {
+            existing.sleepQuality = sleepQuality
+            existing.updatedAt = .now
+            try modelContext.save()
+            return existing
+        }
+        let status = DailyStatus(
+            athleteId: athleteId,
+            localDate: localDate,
+            sleepQuality: sleepQuality,
+            visibility: visibility
+        )
+        modelContext.insert(status)
+        try modelContext.save()
+        return status
+    }
+
+    private static func dailyStatusOrder(_ lhs: DailyStatus, _ rhs: DailyStatus) -> Bool {
+        if lhs.localDate != rhs.localDate {
+            return lhs.localDate > rhs.localDate
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
+    }
+
     private static func reflectionOrder(_ lhs: ActivityReflection, _ rhs: ActivityReflection) -> Bool {
         if lhs.createdAt != rhs.createdAt {
             return lhs.createdAt < rhs.createdAt

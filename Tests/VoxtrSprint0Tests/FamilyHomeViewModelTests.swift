@@ -1271,3 +1271,118 @@ struct HomeDashboardViewModelCacheTests {
         #expect(viewModelB.athleteId == athleteB)
     }
 }
+
+/// VX-023 (Sleep V1): Family Home's dedicated Sleep section. Appended as
+/// an extension for a smaller diff against an already large file — same
+/// type, same file, same `.serialized` suite.
+extension FamilyHomeViewModelTests {
+    private static func makeSleepCoordinationService(container: ModelContainer) -> SleepCoordinationService {
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        return SleepCoordinationService(reflectionService: reflectionService, athleteRepository: athleteRepository)
+    }
+
+    private static func makeAthlete(givenName: String) -> AthleteProfile {
+        AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: givenName,
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+    }
+
+    private func makeViewModel(
+        container: ModelContainer,
+        activeAthletes: [AthleteProfile],
+        sleepStatusProvider: any SleepStatusProviding,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil
+    ) -> FamilyHomeViewModel {
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        return FamilyHomeViewModel(
+            activeAthletes: activeAthletes,
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService,
+            sleepStatusProvider: sleepStatusProvider,
+            sleepChangeBroadcaster: sleepChangeBroadcaster
+        )
+    }
+
+    @Test("19: Family Home Sleep section — an athlete missing today's Sleep produces a summary with sleepQuality nil (drives 'Log Sleep' + 'History')")
+    @MainActor
+    func sleepSectionMissingSleep() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athlete = Self.makeAthlete(givenName: "Oliver")
+        let viewModel = makeViewModel(container: container, activeAthletes: [athlete], sleepStatusProvider: service)
+
+        viewModel.loadSleepSummaries()
+
+        #expect(viewModel.sleepSummaries.count == 1)
+        #expect(viewModel.sleepSummaries.first?.sleepQuality == nil)
+        #expect(viewModel.sleepSummaries.first?.athleteId == athlete.athleteId)
+    }
+
+    @Test("20: Family Home Sleep section — an athlete with today's Sleep already recorded produces a summary with the real value (drives 'History' only)")
+    @MainActor
+    func sleepSectionRecordedSleep() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athlete = Self.makeAthlete(givenName: "Emma")
+        let today = SleepCoordinationService.today()
+        _ = try service.recordSleep(athleteId: athlete.athleteId, localDate: today, sleepQuality: 5, today: today)
+        let viewModel = makeViewModel(container: container, activeAthletes: [athlete], sleepStatusProvider: service)
+
+        viewModel.loadSleepSummaries()
+
+        #expect(viewModel.sleepSummaries.first?.sleepQuality == 5)
+    }
+
+    @Test("21: a successful Sleep mutation refreshes an already-live Family Home Sleep section without requiring navigation re-entry")
+    @MainActor
+    func liveRefreshOnSleepChange() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let broadcaster = AthleteSleepChangeBroadcaster()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let sleepCoordinationServiceWithBroadcast = SleepCoordinationService(
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            sleepChangeBroadcaster: broadcaster
+        )
+        let athlete = Self.makeAthlete(givenName: "Sofia")
+        let viewModel = makeViewModel(
+            container: container, activeAthletes: [athlete],
+            sleepStatusProvider: service, sleepChangeBroadcaster: broadcaster
+        )
+        // loadSleepSummaries() directly (not refresh()) — refresh() also
+        // re-fetches the athlete roster from AthleteRepository, which
+        // this test's in-memory-only AthleteProfile was never persisted
+        // to; that DB round-trip is orthogonal to what this test proves
+        // (live Sleep-section invalidation), matching this file's own
+        // existing precedent (e.g. `homeAggregatesMultipleActiveAthletes`
+        // above calls `loadHome()` directly for the same reason).
+        viewModel.loadSleepSummaries()
+        #expect(viewModel.sleepSummaries.first?.sleepQuality == nil)
+
+        // Simulates a save made from a DIFFERENT, already-live screen
+        // (e.g. Sleep Capture) — this ViewModel's own refresh()/
+        // loadSleepSummaries() is never called again explicitly.
+        let today = SleepCoordinationService.today()
+        _ = try sleepCoordinationServiceWithBroadcast.recordSleep(
+            athleteId: athlete.athleteId, localDate: today, sleepQuality: 3, today: today
+        )
+
+        #expect(viewModel.sleepSummaries.first?.sleepQuality == 3)
+    }
+}

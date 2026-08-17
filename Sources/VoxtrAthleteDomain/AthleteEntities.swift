@@ -156,6 +156,22 @@ public extension AthleteProfile {
 
 /// Athlete-specific product behaviour, distinct from global app
 /// preferences (see VoxtrSettings.AppPreference).
+///
+/// VX-023 (Sleep V1): adds `sleepTrackingEnabled`, the ONLY field this
+/// feature needs — a per-athlete "settings extension" to an
+/// already-modeled entity, not a new canonical domain entity (the task's
+/// own explicit distinction). Every OTHER field here predates Sleep V1
+/// and remains completely unused by any repository/service/UI in this
+/// codebase (confirmed by inspection before editing) — this type itself
+/// was never registered in `AppSchema.modelTypes` and never persisted by
+/// anything until now. Because there is therefore no existing persisted
+/// row anywhere to migrate, the weekStartsOn/defaultReflectionVisibility/
+/// morningBriefEnabled/eveningCheckOutEnabled/weeklyReviewDay parameters
+/// below are given explicit, neutral defaults (never previously present)
+/// purely so a Sleep-only settings row can be constructed without this
+/// feature having to invent unrelated product decisions for fields no
+/// other code reads — not a statement that these are the "correct" final
+/// values for whatever future feature actually activates them.
 @Model
 public final class AthleteSettings {
     @Attribute(.unique) public var id: UUID
@@ -167,6 +183,17 @@ public final class AthleteSettings {
     public var eveningCheckOutEnabled: Bool
     public var weeklyReviewDay: Int
     public var weeklyReviewLocalTime: LocalTime?
+    /// VX-023: default `true` — "Sleep tracking = ON for every new/
+    /// existing athlete unless an explicit persisted setting already
+    /// says Off." Critically, this Swift default only governs a row
+    /// that's actually being CONSTRUCTED; it is never what makes an
+    /// athlete WITHOUT any `AthleteSettings` row behave as tracking ON —
+    /// that's `SleepCoordinationService.isSleepTrackingEnabled(for:)`'s
+    /// own "no row = ON" rule, a pure application-logic decision with no
+    /// SwiftData column-default/migration risk at all, since this type
+    /// has no existing persisted rows for any default value to apply to
+    /// retroactively.
+    public var sleepTrackingEnabled: Bool
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
@@ -174,13 +201,14 @@ public final class AthleteSettings {
     public init(
         id: UUID = UUID(),
         athleteId: AthleteId,
-        weekStartsOn: Int,
-        defaultReflectionVisibility: VisibilityPolicy,
+        weekStartsOn: Int = Weekday.monday.rawValue,
+        defaultReflectionVisibility: VisibilityPolicy = .sharedWithGuardians,
         preferredUnits: String = "metric",
-        morningBriefEnabled: Bool,
-        eveningCheckOutEnabled: Bool,
-        weeklyReviewDay: Int,
+        morningBriefEnabled: Bool = false,
+        eveningCheckOutEnabled: Bool = false,
+        weeklyReviewDay: Int = Weekday.sunday.rawValue,
         weeklyReviewLocalTime: LocalTime? = nil,
+        sleepTrackingEnabled: Bool = true,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
@@ -196,6 +224,7 @@ public final class AthleteSettings {
         self.eveningCheckOutEnabled = eveningCheckOutEnabled
         self.weeklyReviewDay = weeklyReviewDay
         self.weeklyReviewLocalTime = weeklyReviewLocalTime
+        self.sleepTrackingEnabled = sleepTrackingEnabled
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion

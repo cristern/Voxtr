@@ -53,6 +53,11 @@ public struct ParentTabShellView: View {
     /// the only two places in this shell that construct a
     /// `HomeDashboardViewModel`.
     public let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+    /// VX-023 (Sleep V1): same threading rationale as
+    /// `activityChangeBroadcaster` above, for the separate Sleep
+    /// coordination service/broadcaster pair.
+    public let sleepCoordinationService: SleepCoordinationService
+    public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -65,7 +70,9 @@ public struct ParentTabShellView: View {
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
         athleteFamilyManagementService: AthleteFamilyManagementService,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sleepCoordinationService: SleepCoordinationService,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -78,6 +85,8 @@ public struct ParentTabShellView: View {
         self.athleteRepository = athleteRepository
         self.athleteFamilyManagementService = athleteFamilyManagementService
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.sleepCoordinationService = sleepCoordinationService
+        self.sleepChangeBroadcaster = sleepChangeBroadcaster
     }
 
     public var body: some View {
@@ -99,7 +108,9 @@ public struct ParentTabShellView: View {
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
                 athleteFamilyManagementService: athleteFamilyManagementService,
-                activityChangeBroadcaster: activityChangeBroadcaster
+                activityChangeBroadcaster: activityChangeBroadcaster,
+                sleepCoordinationService: sleepCoordinationService,
+                sleepChangeBroadcaster: sleepChangeBroadcaster
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -189,7 +200,9 @@ public struct ParentTabShellView: View {
                                         trainingService: trainingService,
                                         trainingPlanningCoordinationService: trainingPlanningCoordinationService
                                     ),
-                                    activityChangeBroadcaster: activityChangeBroadcaster
+                                    activityChangeBroadcaster: activityChangeBroadcaster,
+                                    sleepStatusProvider: sleepCoordinationService,
+                                    sleepChangeBroadcaster: sleepChangeBroadcaster
                                 ),
                                 athleteDisplayName: athlete.givenName,
                                 planningService: planningService,
@@ -207,9 +220,20 @@ public struct ParentTabShellView: View {
                                     athleteRepository: athleteRepository,
                                     athleteFamilyManagementService: athleteFamilyManagementService
                                 ),
-                                activityChangeBroadcaster: activityChangeBroadcaster
+                                activityChangeBroadcaster: activityChangeBroadcaster,
+                                sleepCoordinationService: sleepCoordinationService,
+                                sleepChangeBroadcaster: sleepChangeBroadcaster
                             )
                         )
+                    },
+                    sleepSettingsDestination: { athlete in
+                        AnyView(AthleteSleepSettingsView(
+                            viewModel: AthleteSleepSettingsViewModel(
+                                sleepCoordinationService: sleepCoordinationService,
+                                athleteId: athlete.athleteId,
+                                athleteDisplayName: athlete.givenName
+                            )
+                        ))
                     }
                 )
             }

@@ -82,6 +82,12 @@ func homeDashboardDebugLog(_ message: @autoclosure () -> String) {}
 enum HomeDashboardDestination: Hashable {
     case activity(rowId: String)
     case recurringOccurrence(id: String)
+    /// VX-023 (Sleep V1): the canonical Sleep capture destination for
+    /// one `LocalDate` — used identically for both "log today's Sleep"
+    /// (from the Sleep card) and the morning prompt's own "log now"
+    /// action; `LocalDate` is `Hashable`, so no wrapper id is needed.
+    case sleepCapture(localDate: LocalDate)
+    case sleepHistory
 }
 
 /// Resolves a `HomeDashboardDestination` against a `TodayActivityLoadState`
@@ -138,6 +144,15 @@ public struct HomeDashboardView: View {
     /// own `viewModel` above already subscribed with whatever broadcaster
     /// its own constructor received.
     private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+    /// VX-023 (Sleep V1): threaded through to construct
+    /// `SleepCaptureViewModel`/`SleepHistoryViewModel` at this screen's
+    /// two Sleep navigation destinations, and to the "Manage Athletes"
+    /// sheet's own nested `HomeDashboardViewModel` construction below.
+    private let sleepCoordinationService: SleepCoordinationService
+    /// VX-023: threaded through only to pass to the "Manage Athletes"
+    /// sheet's own nested `HomeDashboardViewModel` construction below —
+    /// same rationale as `activityChangeBroadcaster` immediately above.
+    private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -153,7 +168,9 @@ public struct HomeDashboardView: View {
         athleteId: AthleteId,
         committedByActorId: ActorId,
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sleepCoordinationService: SleepCoordinationService,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -168,11 +185,14 @@ public struct HomeDashboardView: View {
         self.committedByActorId = committedByActorId
         self.athleteManagementViewModel = athleteManagementViewModel
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.sleepCoordinationService = sleepCoordinationService
+        self.sleepChangeBroadcaster = sleepChangeBroadcaster
     }
 
     public var body: some View {
         Form {
             welcomeSection
+            sleepSection
             trainingSection
             DailyQuoteView()
             coachingSection
@@ -205,7 +225,9 @@ public struct HomeDashboardView: View {
                                     trainingService: trainingService,
                                     trainingPlanningCoordinationService: trainingPlanningCoordinationService
                                 ),
-                                activityChangeBroadcaster: activityChangeBroadcaster
+                                activityChangeBroadcaster: activityChangeBroadcaster,
+                                sleepStatusProvider: sleepCoordinationService,
+                                sleepChangeBroadcaster: sleepChangeBroadcaster
                             ),
                             athleteDisplayName: athlete.givenName,
                             planningService: planningService,
@@ -218,7 +240,18 @@ public struct HomeDashboardView: View {
                             athleteId: athlete.athleteId,
                             committedByActorId: committedByActorId,
                             athleteManagementViewModel: athleteManagementViewModel,
-                            activityChangeBroadcaster: activityChangeBroadcaster
+                            activityChangeBroadcaster: activityChangeBroadcaster,
+                            sleepCoordinationService: sleepCoordinationService,
+                            sleepChangeBroadcaster: sleepChangeBroadcaster
+                        ))
+                    },
+                    sleepSettingsDestination: { athlete in
+                        AnyView(AthleteSleepSettingsView(
+                            viewModel: AthleteSleepSettingsViewModel(
+                                sleepCoordinationService: sleepCoordinationService,
+                                athleteId: athlete.athleteId,
+                                athleteDisplayName: athlete.givenName
+                            )
                         ))
                     }
                 )
@@ -258,6 +291,10 @@ public struct HomeDashboardView: View {
                         }
                     )
                 }
+            case .sleepCapture(let localDate):
+                sleepCaptureDestination(localDate: localDate)
+            case .sleepHistory:
+                sleepHistoryDestination
             }
         }
         .onAppear {
@@ -265,7 +302,113 @@ public struct HomeDashboardView: View {
             viewModel.loadTodaysTraining()
             viewModel.loadTodayActivityRows()
             viewModel.loadCoachingSummary()
+            viewModel.loadSleepState()
         }
+    }
+
+    /// VX-023 (Sleep V1): compact card ABOVE Reflection — "enabled +
+    /// today has Sleep -> 'Sleep / 4/5'; enabled + missing -> 'Sleep /
+    /// Sleep not logged yet'; disabled -> no card at all." Tapping opens
+    /// the SAME canonical Sleep capture used everywhere else (today's
+    /// `LocalDate`). The morning in-app prompt (below) is a SEPARATE,
+    /// additional element — this card itself never changes shape based
+    /// on prompt eligibility.
+    @ViewBuilder
+    private var sleepSection: some View {
+        switch viewModel.sleepState {
+        case .loading, .trackingDisabled, .failed:
+            EmptyView()
+        case .loaded(let sleepQuality):
+            let today = SleepCoordinationService.today()
+            Section {
+                NavigationLink(value: HomeDashboardDestination.sleepCapture(localDate: today)) {
+                    HStack {
+                        Text("Sleep")
+                        Spacer()
+                        if let sleepQuality {
+                            Text("\(sleepQuality)/5")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Sleep not logged yet")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .accessibilityIdentifier("homeDashboard.sleepCard")
+
+                if viewModel.isSleepPromptEligible() {
+                    // Lightweight, non-blocking, dismissible morning
+                    // prompt — never a phone notification (that's
+                    // VX-026/VX-027, explicitly out of scope here).
+                    // Dismissing only records local, in-memory
+                    // presentation state (`dismissSleepPrompt()`) — it
+                    // never disables Sleep tracking itself.
+                    HStack {
+                        Text("How did you sleep last night?")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Dismiss") {
+                            viewModel.dismissSleepPrompt()
+                        }
+                        .font(.caption)
+                        .accessibilityIdentifier("homeDashboard.sleepPrompt.dismissButton")
+                    }
+                    .accessibilityIdentifier("homeDashboard.sleepPrompt")
+                }
+
+                NavigationLink("Sleep History", value: HomeDashboardDestination.sleepHistory)
+                    .font(.caption)
+                    .accessibilityIdentifier("homeDashboard.sleepHistoryLink")
+            }
+            .accessibilityIdentifier("homeDashboard.sleepSection")
+        }
+    }
+
+    private func sleepCaptureDestination(localDate: LocalDate) -> some View {
+        let today = SleepCoordinationService.today()
+        let existing: Int? = {
+            if case .loaded(let sleepQuality) = viewModel.sleepState, localDate == today {
+                return sleepQuality
+            }
+            return try? sleepCoordinationService.fetchDailyStatus(forAthlete: athleteId, localDate: localDate)?.sleepQuality
+        }()
+        return SleepCaptureView(
+            viewModel: SleepCaptureViewModel(
+                sleepCoordinationService: sleepCoordinationService,
+                athleteId: athleteId,
+                athleteDisplayName: athleteDisplayName,
+                localDate: localDate,
+                existingSleepQuality: existing,
+                today: today
+            ),
+            onSaved: {
+                viewModel.loadSleepState()
+            }
+        )
+    }
+
+    private var sleepHistoryDestination: some View {
+        let today = SleepCoordinationService.today()
+        return SleepHistoryView(
+            viewModel: SleepHistoryViewModel(
+                sleepStatusProvider: sleepCoordinationService,
+                athleteId: athleteId,
+                today: today
+            ),
+            athleteDisplayName: athleteDisplayName,
+            today: today,
+            makeCaptureViewModel: { localDate, existingSleepQuality in
+                SleepCaptureViewModel(
+                    sleepCoordinationService: sleepCoordinationService,
+                    athleteId: athleteId,
+                    athleteDisplayName: athleteDisplayName,
+                    localDate: localDate,
+                    existingSleepQuality: existingSleepQuality,
+                    today: today
+                )
+            }
+        )
     }
 
     /// Sprint 1.1, P2: the `dailyFocusCard` UI section that used to live

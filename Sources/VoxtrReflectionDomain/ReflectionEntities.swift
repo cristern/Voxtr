@@ -73,7 +73,19 @@ public final class ActivityReflection {
 public final class DailyStatus {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
-    public var localDate: LocalDate
+    // VX-023 (Sleep V1): stored as an ISO date String, not `LocalDate`
+    // directly — same documented SwiftData bug already fixed for
+    // WeekPlan.weekStart, PlannedActivity.localDate, and
+    // ParentObservation.localDate (see those types' own doc comments):
+    // fetching/sorting multiple rows with a directly-stored `LocalDate`
+    // property crashes on this Xcode/OS generation. This entity was
+    // never actually persisted before this feature (not registered in
+    // AppSchema.modelTypes, no repository ever touched it) — the bug was
+    // latent, never triggered, but VX-023 is what activates it for
+    // real, so this is fixed now rather than shipping a known crash.
+    // `localDate` below is the same public `LocalDate` API this type
+    // already declared — only the storage format changes.
+    private var localDateRaw: String
     public var sleepDurationMinutes: Int?
     public var sleepQuality: Int?
     public var energy: Int?
@@ -112,7 +124,7 @@ public final class DailyStatus {
         if let n = note { precondition(n.count <= 300, "note must be 0-300 characters (v1.3 Section 10.2)") }
         self.id = id
         self.athleteId = athleteId.rawValue
-        self.localDate = localDate
+        self.localDateRaw = localDate.isoString
         self.sleepDurationMinutes = sleepDurationMinutes
         self.sleepQuality = sleepQuality
         self.energy = energy
@@ -125,6 +137,17 @@ public final class DailyStatus {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion
+    }
+
+    // VX-023: deliberately no typed `DailyStatusId` — `Identifier.swift`'s
+    // own doc comment closes that list to v1.3 Section 3's exact
+    // enumeration, and `DailyStatus` isn't in it. This entity's natural
+    // identity is (athleteId, localDate) per its own "one DailyStatus
+    // per athlete + LocalDate" contract — every lookup below is by that
+    // composite key, never by `id` alone.
+    public var localDate: LocalDate {
+        get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+        set { localDateRaw = newValue.isoString }
     }
 }
 

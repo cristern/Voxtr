@@ -17,6 +17,14 @@ enum FamilyHomeDestination: Hashable {
     case recurringOccurrence(id: String)
     case reflection(AthleteId)
     case familySchedule
+    /// VX-023 (Sleep V1): the dedicated Family Home Sleep section's own
+    /// two actions — "Log Sleep" opens the canonical capture screen for
+    /// today's date; "History" opens the same canonical Sleep History
+    /// used from Athlete Home. Never a second, Family-Home-specific
+    /// Sleep editing surface — both route to the exact same
+    /// `SleepCaptureView`/`SleepHistoryView` Athlete Home already uses.
+    case sleepCapture(AthleteId)
+    case sleepHistory(AthleteId)
 }
 
 /// Athlete Home mounted-instance fix (post-mutation navigation and
@@ -109,6 +117,13 @@ public struct FamilyHomeContentView: View {
     /// know `HomeDashboardViewModelCache` exists to keep an
     /// already-mounted Athlete Home current.
     private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+    /// VX-023 (Sleep V1): threaded to every `HomeDashboardViewModel` this
+    /// view constructs (`athleteOverview(for:)` below) and to this
+    /// view's own `FamilyHomeViewModel` — same rationale as
+    /// `activityChangeBroadcaster` above, for the separate Sleep
+    /// coordination service/broadcaster pair.
+    private let sleepCoordinationService: SleepCoordinationService
+    private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -121,7 +136,9 @@ public struct FamilyHomeContentView: View {
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sleepCoordinationService: SleepCoordinationService,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -133,6 +150,8 @@ public struct FamilyHomeContentView: View {
         self.coachingApplicationService = coachingApplicationService
         self.athleteManagementViewModel = athleteManagementViewModel
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.sleepCoordinationService = sleepCoordinationService
+        self.sleepChangeBroadcaster = sleepChangeBroadcaster
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -140,7 +159,9 @@ public struct FamilyHomeContentView: View {
             planningService: planningService,
             trainingService: trainingService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-            weeklyReflectionService: weeklyReflectionService
+            weeklyReflectionService: weeklyReflectionService,
+            sleepStatusProvider: sleepCoordinationService,
+            sleepChangeBroadcaster: sleepChangeBroadcaster
         ))
     }
 
@@ -177,6 +198,7 @@ public struct FamilyHomeContentView: View {
                 }
 
                 focusThisWeekSection
+                sleepSection
                 reflectionNavigationSection
             }
             // Naming/navigation clarity: "Family Home" always, never
@@ -237,6 +259,44 @@ public struct FamilyHomeContentView: View {
                         trainingService: trainingService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService
                     )
+                case .sleepCapture(let athleteId):
+                    if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
+                        let today = SleepCoordinationService.today()
+                        SleepCaptureView(
+                            viewModel: SleepCaptureViewModel(
+                                sleepCoordinationService: sleepCoordinationService,
+                                athleteId: athleteId,
+                                athleteDisplayName: athlete.givenName,
+                                localDate: today,
+                                existingSleepQuality: viewModel.sleepSummaries.first { $0.athleteId == athleteId }?.sleepQuality,
+                                today: today
+                            ),
+                            onSaved: { viewModel.loadSleepSummaries() }
+                        )
+                    }
+                case .sleepHistory(let athleteId):
+                    if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
+                        let today = SleepCoordinationService.today()
+                        SleepHistoryView(
+                            viewModel: SleepHistoryViewModel(
+                                sleepStatusProvider: sleepCoordinationService,
+                                athleteId: athleteId,
+                                today: today
+                            ),
+                            athleteDisplayName: athlete.givenName,
+                            today: today,
+                            makeCaptureViewModel: { localDate, existingSleepQuality in
+                                SleepCaptureViewModel(
+                                    sleepCoordinationService: sleepCoordinationService,
+                                    athleteId: athleteId,
+                                    athleteDisplayName: athlete.givenName,
+                                    localDate: localDate,
+                                    existingSleepQuality: existingSleepQuality,
+                                    today: today
+                                )
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -472,6 +532,45 @@ public struct FamilyHomeContentView: View {
         }
     }
 
+    /// VX-023 (Sleep V1): "a dedicated compact Sleep section for each
+    /// enabled athlete... missing today -> 'Log Sleep' + 'History';
+    /// already recorded -> 'History' only." An athlete with tracking OFF
+    /// simply never appears in `viewModel.sleepSummaries` (see
+    /// `FamilyHomeViewModel.loadSleepSummaries()`'s own doc comment), so
+    /// no per-athlete "disabled" branch is needed here — absence from
+    /// the list already means absence from this section.
+    @ViewBuilder
+    private var sleepSection: some View {
+        if !viewModel.sleepSummaries.isEmpty {
+            Section("Sleep") {
+                ForEach(viewModel.sleepSummaries) { summary in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(summary.athleteName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let sleepQuality = summary.sleepQuality {
+                                Text("\(sleepQuality)/5")
+                            } else {
+                                Text("Not logged yet")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if summary.sleepQuality == nil {
+                            NavigationLink("Log Sleep", value: FamilyHomeDestination.sleepCapture(summary.athleteId))
+                                .accessibilityIdentifier("familyHome.sleep.logSleepLink.\(summary.athleteId.rawValue.uuidString)")
+                        }
+                        NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
+                            .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
+                    }
+                    .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
+                }
+            }
+            .accessibilityIdentifier("familyHome.sleepSection")
+        }
+    }
+
     private func athleteOverview(for athlete: AthleteProfile) -> some View {
         HomeDashboardView(
             viewModel: homeDashboardViewModelCache.viewModel(for: athlete.athleteId) {
@@ -486,7 +585,9 @@ public struct FamilyHomeContentView: View {
                         trainingService: trainingService,
                         trainingPlanningCoordinationService: trainingPlanningCoordinationService
                     ),
-                    activityChangeBroadcaster: activityChangeBroadcaster
+                    activityChangeBroadcaster: activityChangeBroadcaster,
+                    sleepStatusProvider: sleepCoordinationService,
+                    sleepChangeBroadcaster: sleepChangeBroadcaster
                 )
             },
             athleteDisplayName: athlete.givenName,
@@ -500,7 +601,9 @@ public struct FamilyHomeContentView: View {
             athleteId: athlete.athleteId,
             committedByActorId: ActorId(rawValue: family.participant.id),
             athleteManagementViewModel: athleteManagementViewModel,
-            activityChangeBroadcaster: activityChangeBroadcaster
+            activityChangeBroadcaster: activityChangeBroadcaster,
+            sleepCoordinationService: sleepCoordinationService,
+            sleepChangeBroadcaster: sleepChangeBroadcaster
         )
     }
 

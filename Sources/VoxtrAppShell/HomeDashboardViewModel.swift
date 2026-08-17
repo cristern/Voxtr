@@ -2,6 +2,36 @@ import Foundation
 import Observation
 import VoxtrCoreContracts
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
+
+/// VX-023 (Sleep V1): the narrow read surface `HomeDashboardViewModel`
+/// needs from `SleepCoordinationService` — protocol-injected for the
+/// same testability reason `TodaysTrainingProviding`/
+/// `CoachingPresentationProviding` already are on this exact type.
+/// `SleepCoordinationService` conforms directly; nothing else needs to.
+@MainActor
+public protocol SleepStatusProviding {
+    func isSleepTrackingEnabled(for athleteId: AthleteId) throws -> Bool
+    func fetchDailyStatus(forAthlete athleteId: AthleteId, localDate: LocalDate) throws -> DailyStatus?
+    /// VX-023: the range read `SleepHistoryViewModel` pages over.
+    func fetchDailyStatuses(forAthlete athleteId: AthleteId, from: LocalDate, to: LocalDate) throws -> [DailyStatus]
+}
+
+/// VX-023: the Athlete Home Sleep card's own load state. No `.disabled`
+/// case doubling as an error state — tracking-disabled is a normal,
+/// expected outcome ("Disabled != missing"), never treated as a failure.
+/// `.loaded(sleepQuality: nil)` is "tracking on, nothing logged for
+/// today yet"; `.loaded(sleepQuality: someValue)` is "tracking on,
+/// today's Sleep already recorded." Both `.trackingDisabled` and
+/// `.failed` mean the same thing to the view — render no card — kept as
+/// distinct cases purely so tests can tell "disabled" and "could not
+/// load" apart.
+public enum SleepCardLoadState: Equatable {
+    case loading
+    case trackingDisabled
+    case loaded(sleepQuality: Int?)
+    case failed
+}
 
 /// Sprint 12: mirrors `WeeklyReviewLoadState`/`CoachingPresentationLoadState`'s
 /// exact shape — per this sprint's explicit instruction to follow
@@ -73,10 +103,13 @@ public enum DailyFocusLoadState {
 /// this type has ever had.
 @MainActor
 @Observable
-public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
+public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, AthleteSleepChangeSubscriber {
     public private(set) var todaysTrainingState: TodaysTrainingLoadState = .loading
     public private(set) var todayActivityState: TodayActivityLoadState = .loading
     public private(set) var coachingSummaryState: CoachingPresentationLoadState = .loading
+    /// VX-023: Athlete Home Sleep card state — see `SleepCardLoadState`'s
+    /// own doc comment.
+    public private(set) var sleepState: SleepCardLoadState = .loading
 
     public let athleteId: AthleteId
     public let weekStart: LocalDate
@@ -118,6 +151,22 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
     /// including this one, so it starts `nil` and is set as the LAST
     /// statement in `init`, once that's true.
     private var activityChangeSubscription: ActivityChangeSubscription?
+    /// VX-023: optional/defaulted `nil`, same reasoning as
+    /// `todayActivityComposer` immediately above — "one dependency's
+    /// absence never corrupts the rest of this ViewModel." Every
+    /// pre-existing construction site (production and test) predates
+    /// Sleep and doesn't need updating; `loadSleepState()` simply
+    /// reports `.failed` if no provider was supplied.
+    private let sleepStatusProvider: (any SleepStatusProviding)?
+    /// Mirrors `activityChangeSubscription` above, for the separate
+    /// `AthleteSleepChangeBroadcaster`. Optional because
+    /// `sleepChangeBroadcaster` itself is optional below — no
+    /// broadcaster supplied means no subscription is attempted at all.
+    private var sleepChangeSubscription: SleepChangeSubscription?
+    /// VX-023 (morning in-app prompt): the smallest local, in-memory
+    /// presentation-dismissal state — see `dismissSleepPrompt`'s own doc
+    /// comment for the exact semantics this implements.
+    private var sleepPromptDismissedLocalDate: LocalDate?
 
     public init(
         trainingPlanningCoordinationService: any TodaysTrainingProviding,
@@ -126,7 +175,9 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
         athleteDisplayName: String = "",
         weekStart: LocalDate,
         todayActivityComposer: TodayActivityComposer? = nil,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sleepStatusProvider: (any SleepStatusProviding)? = nil,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil
     ) {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.coachingPresentationProvider = coachingPresentationProvider
@@ -134,20 +185,32 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
         self.athleteDisplayName = athleteDisplayName
         self.weekStart = weekStart
         self.todayActivityComposer = todayActivityComposer
+        self.sleepStatusProvider = sleepStatusProvider
         self.activityChangeSubscription = nil
+        self.sleepChangeSubscription = nil
         // Recurring reopen stale-Athlete-Home fix (architecture round):
         // subscribes to the SAME shared broadcaster
         // TrainingReflectionCoordinationService notifies after a
         // successful canonical mutation, regardless of which screen
         // performed it — Family Home's own rows, Family Schedule, Daily
         // Training (including nested under this very screen), or this
-        // screen's own navigation. Must be the LAST statement in this
-        // initializer — see `activityChangeSubscription`'s own doc
-        // comment for why.
+        // screen's own navigation. Must be the LAST statements in this
+        // initializer (along with the Sleep subscribe immediately
+        // below) — see `activityChangeSubscription`'s own doc comment
+        // for why.
         let token = activityChangeBroadcaster.subscribe(athleteId: athleteId, self)
         self.activityChangeSubscription = ActivityChangeSubscription(
             athleteId: athleteId, token: token, broadcaster: activityChangeBroadcaster
         )
+        // VX-023: same subscribe-then-wrap pattern as above, for the
+        // separate Sleep broadcaster — only attempted if one was
+        // actually supplied.
+        if let sleepChangeBroadcaster {
+            let sleepToken = sleepChangeBroadcaster.subscribe(athleteId: athleteId, self)
+            self.sleepChangeSubscription = SleepChangeSubscription(
+                athleteId: athleteId, token: sleepToken, broadcaster: sleepChangeBroadcaster
+            )
+        }
     }
 
     /// `AthleteActivityChangeSubscriber` conformance: reread canonical
@@ -181,6 +244,65 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
         } catch {
             todayActivityState = .failed
         }
+    }
+
+    /// `AthleteSleepChangeSubscriber` conformance: reread canonical
+    /// Sleep state through the same `loadSleepState()` any other caller
+    /// uses — never a second, broadcaster-specific reload path.
+    public func athleteSleepDidChange() {
+        loadSleepState()
+    }
+
+    /// VX-023: loads the Athlete Home Sleep card's state — tracking
+    /// preference first, then (only if enabled) today's `DailyStatus`.
+    /// `referenceDate`/`calendar` are injectable, matching this file's
+    /// and package's established pattern (`FamilyHomeViewModel.nowNextState`,
+    /// `TrainingPlanningCoordinationService.today`) for deterministic,
+    /// `Date.now`-independent tests.
+    public func loadSleepState(referenceDate: Date = .now, calendar: Calendar = .current) {
+        guard let sleepStatusProvider else {
+            sleepState = .failed
+            return
+        }
+        sleepState = .loading
+        do {
+            guard try sleepStatusProvider.isSleepTrackingEnabled(for: athleteId) else {
+                sleepState = .trackingDisabled
+                return
+            }
+            let today = SleepCoordinationService.today(referenceDate: referenceDate, calendar: calendar)
+            let status = try sleepStatusProvider.fetchDailyStatus(forAthlete: athleteId, localDate: today)
+            sleepState = .loaded(sleepQuality: status?.sleepQuality)
+        } catch {
+            sleepState = .failed
+        }
+    }
+
+    /// VX-023 (morning in-app prompt): "Sleep tracking ON; today Sleep
+    /// missing; local time before 12:00" — all three checked here.
+    /// Reads `sleepState` rather than re-fetching, so this can only ever
+    /// report eligible once `loadSleepState()` has actually run and
+    /// settled into `.loaded(sleepQuality: nil)`; `.trackingDisabled`/
+    /// `.failed`/`.loading` are never eligible.
+    public func isSleepPromptEligible(referenceDate: Date = .now, calendar: Calendar = .current) -> Bool {
+        guard case .loaded(let sleepQuality) = sleepState, sleepQuality == nil else { return false }
+        guard calendar.component(.hour, from: referenceDate) < 12 else { return false }
+        let today = SleepCoordinationService.today(referenceDate: referenceDate, calendar: calendar)
+        return sleepPromptDismissedLocalDate != today
+    }
+
+    /// VX-023: "once dismissed, do not re-nag during that same local
+    /// morning/session/day" — the smallest local, in-memory presentation
+    /// state that satisfies this: a single `LocalDate?` remembered only
+    /// for this ViewModel instance's own lifetime (never persisted,
+    /// never a new persistence domain). Recorded as the CURRENT day (per
+    /// `referenceDate`), not literally "forever" — a later calendar day
+    /// naturally makes `isSleepPromptEligible` re-eligible again on its
+    /// own, since the comparison above is against that day's own
+    /// `today`. Dismissing here never disables Sleep tracking itself —
+    /// `sleepState`/`sleepStatusProvider` are completely untouched.
+    public func dismissSleepPrompt(referenceDate: Date = .now, calendar: Calendar = .current) {
+        sleepPromptDismissedLocalDate = SleepCoordinationService.today(referenceDate: referenceDate, calendar: calendar)
     }
 
     public func loadTodaysTraining() {

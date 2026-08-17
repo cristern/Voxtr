@@ -6,6 +6,12 @@ import VoxtrCoreContracts
 /// S1.2 scope only: creates and fetches `AthleteProfile`.
 /// `AthleteSettings` and `AthleteSportParticipation` are not touched —
 /// out of scope for S1.2.
+///
+/// VX-023 (Sleep V1) adds `AthleteSettings` methods below — the settings
+/// row's ONLY reachable field so far is `sleepTrackingEnabled`; every
+/// other `AthleteSettings` field remains unused by any repository/
+/// service/UI, so this repository does not expose general-purpose
+/// mutation for them.
 @MainActor
 public final class AthleteRepository {
     private let modelContext: ModelContext
@@ -107,5 +113,39 @@ public final class AthleteRepository {
     /// persists."
     public func save() throws {
         try modelContext.save()
+    }
+
+    /// VX-023: at most one `AthleteSettings` row per athlete — `nil`
+    /// when none has ever been created, which is the normal case for
+    /// every athlete that has never had a settings-affecting toggle
+    /// touched. `nil` is NOT "tracking off": callers (see
+    /// `SleepCoordinationService.isSleepTrackingEnabled(for:)`) treat a
+    /// missing row as tracking ON, never as a reason to fetch/create one
+    /// eagerly here.
+    public func fetchAthleteSettings(forAthlete athleteId: AthleteId) throws -> AthleteSettings? {
+        let rawAthleteId = athleteId.rawValue
+        return try modelContext.fetch(FetchDescriptor<AthleteSettings>()).first { $0.athleteId == rawAthleteId }
+    }
+
+    /// VX-023: sets `sleepTrackingEnabled` on the athlete's ONE
+    /// `AthleteSettings` row — mutates the existing row in place if one
+    /// already exists (preserving every other field on it untouched),
+    /// or creates a brand-new row (with this type's own neutral
+    /// defaults for every other field, per this file's own doc comment)
+    /// only when this is the very first settings-affecting toggle ever
+    /// recorded for this athlete. Never creates a second row for an
+    /// athlete that already has one.
+    @discardableResult
+    public func setSleepTrackingEnabled(athleteId: AthleteId, enabled: Bool) throws -> AthleteSettings {
+        if let existing = try fetchAthleteSettings(forAthlete: athleteId) {
+            existing.sleepTrackingEnabled = enabled
+            existing.updatedAt = .now
+            try modelContext.save()
+            return existing
+        }
+        let settings = AthleteSettings(athleteId: athleteId, sleepTrackingEnabled: enabled)
+        modelContext.insert(settings)
+        try modelContext.save()
+        return settings
     }
 }

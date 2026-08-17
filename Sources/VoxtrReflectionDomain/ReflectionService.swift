@@ -20,6 +20,11 @@ public enum ReflectionServiceError: Error, Equatable {
     /// for the given id, or exists but belongs to a different athlete —
     /// athlete isolation, never inferred from title/date.
     case activityReflectionNotFound
+    /// VX-023 (Sleep V1): thrown by `recordSleep` when `localDate` is
+    /// after the caller-supplied `today` — "future `LocalDate` must be
+    /// rejected." Historical dates (including today itself) are always
+    /// allowed.
+    case futureDateNotAllowed
 }
 
 /// S4.0 scope only: the domain-level use case for recording reflections
@@ -151,6 +156,70 @@ public final class ReflectionService {
 
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {
         try repository.fetchParentObservations(forAthlete: athleteId)
+    }
+
+    /// VX-023 (Sleep V1): the canonical Sleep write path — "if a
+    /// `DailyStatus` for that athlete/date already exists for another
+    /// wellbeing field, UPDATE the same `DailyStatus`; if Sleep is the
+    /// first signal for that athlete/date, create it through this
+    /// Reflection-domain path" (`ReflectionRepository.upsertSleepQuality`
+    /// implements the actual update-vs-create branch). `sleepQuality`
+    /// 1-5 is checked here first so an out-of-range value (0, 6, ...) is
+    /// a catchable error rather than `DailyStatus.init`'s own
+    /// `precondition` crash — same reasoning `validate(bodyFeeling:...)`
+    /// already established below for `ActivityReflection`.
+    ///
+    /// `today` is an injected `LocalDate`, not computed here — this
+    /// domain package has no `Calendar`/`Date`-to-`LocalDate` resolution
+    /// of its own (that lives in `VoxtrAppShell`, e.g.
+    /// `TrainingPlanningCoordinationService.today(referenceDate:calendar:)`).
+    /// Callers (`SleepCoordinationService`) resolve "today" once via
+    /// that existing mechanism and pass it down, keeping this method
+    /// fully deterministic for tests with no `Date.now` dependency.
+    ///
+    /// `visibility` defaults to `.sharedWithGuardians` — the same
+    /// family-first V1 default already established in this exact
+    /// package (`insertParentObservation`) and in
+    /// `TrainingReflectionCoordinationService.logActivity`'s
+    /// `sessionFormVisibility` — `DailyStatus.init` itself has no
+    /// default, so this is where that product default is applied.
+    public func recordSleep(
+        athleteId: AthleteId,
+        localDate: LocalDate,
+        sleepQuality: Int,
+        visibility: VisibilityPolicy = .sharedWithGuardians,
+        today: LocalDate
+    ) throws -> DailyStatus {
+        guard (1...5).contains(sleepQuality) else {
+            throw ReflectionServiceError.invalidField("sleepQuality must be 1-5")
+        }
+        guard localDate <= today else {
+            throw ReflectionServiceError.futureDateNotAllowed
+        }
+        return try repository.upsertSleepQuality(
+            athleteId: athleteId,
+            localDate: localDate,
+            sleepQuality: sleepQuality,
+            visibility: visibility
+        )
+    }
+
+    /// VX-023: the canonical single-date Sleep read — `nil` when no
+    /// `DailyStatus` (Sleep or otherwise) exists yet for this athlete on
+    /// this date, distinct from a row that exists but has
+    /// `sleepQuality == nil` (a wellbeing entry that never recorded
+    /// Sleep). Both cases display as "not logged" in Sleep UI, but this
+    /// method itself makes no such presentation decision.
+    public func fetchDailyStatus(forAthlete athleteId: AthleteId, localDate: LocalDate) throws -> DailyStatus? {
+        try repository.fetchDailyStatus(forAthlete: athleteId, localDate: localDate)
+    }
+
+    /// VX-023: the canonical range read Sleep History pages over —
+    /// newest-first, inclusive of both endpoints. See
+    /// `ReflectionRepository.fetchDailyStatuses(forAthlete:from:to:)`'s
+    /// own doc comment for why missing dates are NOT synthesized here.
+    public func fetchDailyStatuses(forAthlete athleteId: AthleteId, from: LocalDate, to: LocalDate) throws -> [DailyStatus] {
+        try repository.fetchDailyStatuses(forAthlete: athleteId, from: from, to: to)
     }
 
     /// S4.2: fetch observations for one LoggedActivity.

@@ -53,6 +53,10 @@ public struct FamilyHomeView: View {
     /// ultimately traces back to — passed straight through to both
     /// branches below.
     public let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+    /// VX-023 (Sleep V1): same threading rationale as
+    /// `activityChangeBroadcaster` above.
+    public let sleepCoordinationService: SleepCoordinationService
+    public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -65,7 +69,9 @@ public struct FamilyHomeView: View {
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
         athleteFamilyManagementService: AthleteFamilyManagementService,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sleepCoordinationService: SleepCoordinationService,
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -78,6 +84,8 @@ public struct FamilyHomeView: View {
         self.athleteRepository = athleteRepository
         self.athleteFamilyManagementService = athleteFamilyManagementService
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.sleepCoordinationService = sleepCoordinationService
+        self.sleepChangeBroadcaster = sleepChangeBroadcaster
     }
 
     public var body: some View {
@@ -93,13 +101,24 @@ public struct FamilyHomeView: View {
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
                 athleteManagementViewModel: makeAthleteManagementViewModel(),
-                activityChangeBroadcaster: activityChangeBroadcaster
+                activityChangeBroadcaster: activityChangeBroadcaster,
+                sleepCoordinationService: sleepCoordinationService,
+                sleepChangeBroadcaster: sleepChangeBroadcaster
             )
         } else {
             NavigationStack {
                 AthleteFamilyManagementView(
                     viewModel: makeAthleteManagementViewModel(),
-                    athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) }
+                    athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) },
+                    sleepSettingsDestination: { athlete in
+                        AnyView(AthleteSleepSettingsView(
+                            viewModel: AthleteSleepSettingsViewModel(
+                                sleepCoordinationService: sleepCoordinationService,
+                                athleteId: athlete.athleteId,
+                                athleteDisplayName: athlete.givenName
+                            )
+                        ))
+                    }
                 )
             }
         }
@@ -125,7 +144,9 @@ public struct FamilyHomeView: View {
                     trainingService: trainingService,
                     trainingPlanningCoordinationService: trainingPlanningCoordinationService
                 ),
-                activityChangeBroadcaster: activityChangeBroadcaster
+                activityChangeBroadcaster: activityChangeBroadcaster,
+                sleepStatusProvider: sleepCoordinationService,
+                sleepChangeBroadcaster: sleepChangeBroadcaster
             ),
             athleteDisplayName: athlete.givenName,
             planningService: planningService,
@@ -138,7 +159,9 @@ public struct FamilyHomeView: View {
             athleteId: athlete.athleteId,
             committedByActorId: ActorId(rawValue: family.participant.id),
             athleteManagementViewModel: makeAthleteManagementViewModel(),
-            activityChangeBroadcaster: activityChangeBroadcaster
+            activityChangeBroadcaster: activityChangeBroadcaster,
+            sleepCoordinationService: sleepCoordinationService,
+            sleepChangeBroadcaster: sleepChangeBroadcaster
         )
     }
 

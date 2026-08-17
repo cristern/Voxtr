@@ -15,7 +15,11 @@ import VoxtrCore
 /// WeeklyReflection/MonthlyReflection are out of scope). Sprint 5.0:
 /// also registers `WeeklyReflectionRepository`/`WeeklyReflectionService`
 /// (WeeklyReflection only — DailyStatus/MonthlyReflection remain out of
-/// scope).
+/// scope). VX-023 (Sleep V1) brings `DailyStatus` (Sleep field only)
+/// into scope for the SAME `ReflectionRepository`/`ReflectionService`
+/// registered here — no new module registration needed, since Sleep is
+/// a new capability on an already-registered domain, not a new domain.
+/// `MonthlyReflection` remains out of scope.
 public struct ReflectionModule: VoxtrModule {
     public static let domainID = "reflection"
 

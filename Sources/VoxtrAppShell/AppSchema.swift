@@ -24,16 +24,25 @@ import VoxtrReflectionDomain
 /// domain persistence infrastructure only). A2 (Architecture Decisions
 /// v1) adds `PlannedActivityDeletionTombstone`. Sprint 5.0 adds
 /// `WeeklyReflection`. Recurring Planned Activities adds
-/// `RecurringPlannedActivity`. This list of model *types* has been
-/// stable since (the `AthleteProfile.birthDate` crash fix and this
-/// project's later critical persistence recovery were both field-level
-/// changes to already-listed types, so neither touched this array).
+/// `RecurringPlannedActivity`. VX-023 (Sleep V1) adds `DailyStatus` and
+/// `AthleteSettings` — both types existed in source already but were
+/// never registered here and never persisted by any repository; Sleep
+/// V1 is what activates them for real. This is a type *addition*, not a
+/// field-level change to an already-listed type: per
+/// `AppSchemaVersioning.swift`'s own "HOW TO ADD" step 3, only a type
+/// addition/removal touches this array at all. No `AppSchemaV2` bump
+/// was made for this addition — `AppCurrentSchema.models` is still a
+/// live (not yet frozen) passthrough to this array, so both newly-
+/// registered types simply become part of what V1 already resolves to,
+/// consistent with this file's own "no production data at stake, first
+/// version of the simplified scheme" philosophy. There are zero existing
+/// persisted rows of either type to migrate.
 ///
 /// CRITICAL PERSISTENCE RECOVERY: this project's schema *versioning*
 /// history (`AppSchemaV1` through `AppSchemaV6`, with "frozen legacy
 /// types" for historical field shapes) was collapsed to a single
 /// `AppCurrentSchema` — see `AppSchemaVersioning.swift`'s own doc
-/// comment for the full investigation and why. `DailyStatus`, `MonthlyReflection`,
+/// comment for the full investigation and why. `MonthlyReflection`,
 /// `PlanningDecision`, and `TrainingAttachment` are NOT added here —
 /// nothing creates or persists them yet, and registering an unused type
 /// wouldn't be wrong but would misstate what's actually implemented. Do
@@ -69,6 +78,8 @@ public enum AppSchema {
             PlannedActivityDeletionTombstone.self,
             WeeklyReflection.self,
             RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
         ]
     }
 }

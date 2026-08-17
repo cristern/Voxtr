@@ -1345,3 +1345,168 @@ struct HomeDashboardViewModelTests {
         #expect(suggestionsAfterDelete.contains { $0.id == suggestion.id })
     }
 }
+
+/// VX-023 (Sleep V1): Athlete Home Sleep card + morning in-app prompt.
+/// Appended as an extension (not new members inside the struct body)
+/// purely for a smaller diff against an already very large file — same
+/// type, same file, same `.serialized` suite; `private` helpers/statics
+/// declared above remain visible here since Swift's `private` allows use
+/// from any extension of the same type in the same file.
+extension HomeDashboardViewModelTests {
+    private static func makeSleepCoordinationService(container: ModelContainer) -> SleepCoordinationService {
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        return SleepCoordinationService(reflectionService: reflectionService, athleteRepository: athleteRepository)
+    }
+
+    private func makeHomeDashboardViewModel(
+        athleteId: AthleteId,
+        sleepStatusProvider: any SleepStatusProviding
+    ) -> HomeDashboardViewModel {
+        HomeDashboardViewModel(
+            trainingPlanningCoordinationService: RecordingTodaysTrainingProvider(activitiesToReturn: []),
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: Self.weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: Self.weekStart,
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster(),
+            sleepStatusProvider: sleepStatusProvider
+        )
+    }
+
+    @Test("16: Athlete Home Sleep card — tracking enabled and today's Sleep missing loads as sleepQuality nil")
+    @MainActor
+    func sleepCardEnabledAndMissing() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.sleepState == .loaded(sleepQuality: nil))
+    }
+
+    @Test("17: Athlete Home Sleep card — tracking enabled and today's Sleep recorded loads the correct x/5 value")
+    @MainActor
+    func sleepCardEnabledAndRecorded() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let today = SleepCoordinationService.today(referenceDate: Self.morningReferenceDate, calendar: .current)
+        _ = try service.recordSleep(athleteId: athleteId, localDate: today, sleepQuality: 4, today: today)
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.sleepState == .loaded(sleepQuality: 4))
+    }
+
+    @Test("18: Athlete Home Sleep card — tracking disabled loads .trackingDisabled (no card)")
+    @MainActor
+    func sleepCardDisabled() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        try service.setSleepTrackingEnabled(athleteId: athleteId, enabled: false)
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.sleepState == .trackingDisabled)
+    }
+
+    /// A fixed morning instant (08:00) for deterministic before-noon
+    /// prompt-eligibility tests — never `Date.now`.
+    private static var morningReferenceDate: Date {
+        var components = DateComponents()
+        components.year = 2026; components.month = 8; components.day = 17
+        components.hour = 8; components.minute = 0
+        return Calendar.current.date(from: components) ?? .now
+    }
+
+    /// Same date, but after 12:00 — for the "not eligible after noon" case.
+    private static var afternoonReferenceDate: Date {
+        var components = DateComponents()
+        components.year = 2026; components.month = 8; components.day = 17
+        components.hour = 14; components.minute = 0
+        return Calendar.current.date(from: components) ?? .now
+    }
+
+    @Test("22: morning prompt is eligible when before 12:00, tracking enabled, and today's Sleep is missing")
+    @MainActor
+    func morningPromptEligibleBeforeNoonWhenMissing() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.isSleepPromptEligible(referenceDate: Self.morningReferenceDate, calendar: .current) == true)
+    }
+
+    @Test("23: morning prompt is not eligible once today's Sleep is already recorded")
+    @MainActor
+    func morningPromptNotEligibleWhenRecorded() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let today = SleepCoordinationService.today(referenceDate: Self.morningReferenceDate, calendar: .current)
+        _ = try service.recordSleep(athleteId: athleteId, localDate: today, sleepQuality: 3, today: today)
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.isSleepPromptEligible(referenceDate: Self.morningReferenceDate, calendar: .current) == false)
+    }
+
+    @Test("24: morning prompt is not eligible when Sleep tracking is disabled")
+    @MainActor
+    func morningPromptNotEligibleWhenDisabled() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        try service.setSleepTrackingEnabled(athleteId: athleteId, enabled: false)
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.isSleepPromptEligible(referenceDate: Self.morningReferenceDate, calendar: .current) == false)
+    }
+
+    @Test("25: morning prompt is not eligible after 12:00, even when Sleep is missing and tracking is enabled")
+    @MainActor
+    func morningPromptNotEligibleAfterNoon() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.afternoonReferenceDate, calendar: .current)
+
+        #expect(viewModel.isSleepPromptEligible(referenceDate: Self.afternoonReferenceDate, calendar: .current) == false)
+    }
+
+    @Test("26: a dismissed prompt does not reappear again the same morning, but is unaffected on a later day")
+    @MainActor
+    func dismissedPromptDoesNotReappearSameMorning() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+        #expect(viewModel.isSleepPromptEligible(referenceDate: Self.morningReferenceDate, calendar: .current) == true)
+
+        viewModel.dismissSleepPrompt(referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        // Later the SAME morning — still dismissed.
+        let laterSameMorning = Self.morningReferenceDate.addingTimeInterval(3600)
+        #expect(viewModel.isSleepPromptEligible(referenceDate: laterSameMorning, calendar: .current) == false)
+
+        // The NEXT day, before noon — dismissal does not carry forward
+        // ("do not persist 'dismissed forever'").
+        var nextDayComponents = DateComponents()
+        nextDayComponents.year = 2026; nextDayComponents.month = 8; nextDayComponents.day = 18
+        nextDayComponents.hour = 8; nextDayComponents.minute = 0
+        let nextMorning = Calendar.current.date(from: nextDayComponents) ?? Self.morningReferenceDate
+        #expect(viewModel.isSleepPromptEligible(referenceDate: nextMorning, calendar: .current) == true)
+    }
+}

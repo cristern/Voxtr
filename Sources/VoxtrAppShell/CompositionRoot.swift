@@ -161,6 +161,24 @@ public final class CompositionRoot {
         let coachingApplicationService = CoachingApplicationService(coachingContextService: weeklyCoachingContextService)
         container.register(CoachingApplicationService.self) { coachingApplicationService }
 
+        // VX-023 (Sleep V1): a separate, semantically distinct fan-out
+        // from activityChangeBroadcaster above — Sleep is not an
+        // activity-lifecycle mutation. See AthleteSleepChangeBroadcaster's
+        // own doc comment.
+        let sleepChangeBroadcaster = AthleteSleepChangeBroadcaster()
+        container.register(AthleteSleepChangeBroadcaster.self) { sleepChangeBroadcaster }
+
+        // VX-023: the one place AthleteRepository (Sleep tracking
+        // preference) and ReflectionService (canonical DailyStatus) are
+        // used together — same placement rationale as
+        // trainingReflectionCoordinationService above.
+        let sleepCoordinationService = SleepCoordinationService(
+            reflectionService: container.resolve(ReflectionService.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
+            sleepChangeBroadcaster: sleepChangeBroadcaster
+        )
+        container.register(SleepCoordinationService.self) { sleepCoordinationService }
+
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 
