@@ -19,6 +19,7 @@ import VoxtrPlanningDomain
 public struct WeeklyPlanningView: View {
     @State private var viewModel: WeeklyPlanningViewModel
     @State private var isManagingRecurringActivities: Bool = false
+    @State private var isPresentingReopenPlanningConfirmation: Bool = false
     private let athleteDisplayName: String
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
@@ -87,8 +88,30 @@ public struct WeeklyPlanningView: View {
                             viewModel.commit()
                         }
                         .accessibilityIdentifier("planning.commitButton")
+                    } else if viewModel.canReopenPlanning {
+                        // Reversibility principle: only offered for a
+                        // committed CURRENT or FUTURE week — a
+                        // committed HISTORICAL week never shows this,
+                        // matching `canReopenPlanning`'s own gate
+                        // exactly. Lightweight confirmation since this
+                        // reopens the SAME plan in place, not a
+                        // destructive action.
+                        Button("Reopen Planning") {
+                            isPresentingReopenPlanningConfirmation = true
+                        }
+                        .accessibilityIdentifier("planning.reopenPlanningButton")
                     }
                 }
+            }
+            .confirmationDialog(
+                "Reopen this week's plan for editing?",
+                isPresented: $isPresentingReopenPlanningConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reopen Planning") {
+                    viewModel.reopenPlanning()
+                }
+                Button("Keep Committed", role: .cancel) {}
             }
 
             if let errorMessage = viewModel.errorMessage {

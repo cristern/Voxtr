@@ -56,6 +56,21 @@ public struct RecurringOccurrencePreviewView: View {
     @State private var materializedActivity: MaterializedActivityItem?
     @State private var isPresentingCancelConfirmation = false
     @State private var errorMessage: String?
+    /// TestFlight regression fix (Log Activity -> mounted Athlete Home
+    /// still stale): `onLogged` below used to call this screen's own
+    /// `dismiss()` directly, synchronously, from inside `LogActivityViewModel.save()`
+    /// — BEFORE `save()` even returned to `LogActivityView`'s own Save
+    /// button, i.e. BEFORE `LogActivityView`'s OWN `dismiss()` (its own
+    /// `@Environment(\.dismiss)`, called immediately afterward once
+    /// `save()` returns `true`) ever ran. That popped this screen (the
+    /// sheet's OWN presenter) off the stack WHILE its sheet was still
+    /// actively presented — backwards from the well-defined "dismiss the
+    /// child sheet, THEN the parent" order — with no settled render pass
+    /// in between for the `onActivityLogged()` mutation. See
+    /// `ActivityDetailView.isDismissingAfterLog`'s own doc comment for
+    /// the full diagnosis; this is the identical pattern in this
+    /// screen's own `.sheet(item: $materializedActivity)`.
+    @State private var isDismissingAfterLog = false
     @Environment(\.dismiss) private var dismiss
 
     public init(
@@ -137,7 +152,15 @@ public struct RecurringOccurrencePreviewView: View {
                 athleteDisplayName: athleteDisplayName
             )
         }
-        .sheet(item: $materializedActivity) { item in
+        .sheet(item: $materializedActivity, onDismiss: {
+            // Fires only once LogActivityView's OWN dismiss (its Save
+            // button, or Cancel/swipe-to-dismiss) has fully finished —
+            // see `isDismissingAfterLog`'s own doc comment above.
+            if isDismissingAfterLog {
+                isDismissingAfterLog = false
+                dismiss()
+            }
+        }) { item in
             LogActivityView(
                 viewModel: LogActivityViewModel(
                     plannedActivity: item.plannedActivity,
@@ -147,7 +170,7 @@ public struct RecurringOccurrencePreviewView: View {
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     onLogged: {
                         onActivityLogged()
-                        dismiss()
+                        isDismissingAfterLog = true
                     }
                 )
             )

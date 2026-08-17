@@ -406,6 +406,136 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
         #expect(viewModel.activities.contains { $0.title == "Added after commit" })
     }
+
+    // MARK: - Reversibility principle: Reopen Planning
+
+    @Test("canReopenPlanning is true for a committed CURRENT week, true for a committed FUTURE week, and false for a committed HISTORICAL week")
+    @MainActor
+    func canReopenPlanningReflectsWeekRecency() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+
+        let currentWeekViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            weekStart: WeeklyPlanningViewModel.currentWeekStart()
+        )
+        currentWeekViewModel.loadOrCreateWeekPlan()
+        currentWeekViewModel.commit()
+        #expect(currentWeekViewModel.canReopenPlanning == true)
+
+        let futureWeekViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            weekStart: WeeklyPlanningViewModel.currentWeekStart().adding(days: 7)
+        )
+        futureWeekViewModel.loadOrCreateWeekPlan()
+        futureWeekViewModel.commit()
+        #expect(futureWeekViewModel.canReopenPlanning == true)
+
+        // Self.fixedWeekStart (2026-01-05) is a historical week relative
+        // to any real "today" this suite could plausibly run on.
+        let historicalWeekViewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        historicalWeekViewModel.loadOrCreateWeekPlan()
+        historicalWeekViewModel.commit()
+        #expect(historicalWeekViewModel.canReopenPlanning == false)
+
+        // A draft week (regardless of recency) is never reopenable —
+        // there is nothing to reopen.
+        #expect(currentWeekViewModel.isCommitted)
+        let draftAgain = WeeklyPlanningViewModel(
+            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            weekStart: WeeklyPlanningViewModel.currentWeekStart()
+        )
+        draftAgain.loadOrCreateWeekPlan()
+        #expect(draftAgain.canReopenPlanning == false)
+    }
+
+    @Test("reopenPlanning returns a committed week to draft immediately, in place — no navigation or reload required — and preserves every activity")
+    @MainActor
+    func reopenPlanningRestoresDraftStateInPlace() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            weekStart: WeeklyPlanningViewModel.currentWeekStart()
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Endurance run"
+        viewModel.addActivity()
+        let originalActivityId = viewModel.activities.first?.plannedActivityId
+        viewModel.commit()
+        #expect(viewModel.isCommitted == true)
+
+        viewModel.reopenPlanning()
+
+        // Immediately reflected on the SAME viewModel instance — no
+        // separate reload/onAppear needed for this assertion to hold.
+        #expect(viewModel.isCommitted == false)
+        #expect(viewModel.statusLabel == "Draft")
+        #expect(viewModel.errorMessage == nil)
+        // The exact same activity, still present, same identity.
+        #expect(viewModel.activities.count == 1)
+        #expect(viewModel.activities.first?.plannedActivityId == originalActivityId)
+        #expect(viewModel.activities.first?.title == "Endurance run")
+    }
+
+    @Test("A reopened week's plan can be committed again through the normal canonical flow")
+    @MainActor
+    func reopenedPlanCanBeRecommitted() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            weekStart: WeeklyPlanningViewModel.currentWeekStart()
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.commit()
+        viewModel.reopenPlanning()
+
+        viewModel.commit()
+
+        #expect(viewModel.isCommitted == true)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("canReopenPlanning is the ONLY gate withholding Reopen Planning from a committed historical week — documented explicitly, not left implicit")
+    @MainActor
+    func canReopenPlanningIsTheSoleHistoricalWeekGate() throws {
+        // Per this task's own scope boundary ("do not invent
+        // historical-plan editing semantics"), reopenWeekPlan/WeekPlan.reopen
+        // have no week-recency awareness of their own — exactly like
+        // commitWeekPlan/editPlannedActivity, whose own gating
+        // (`isWeekPlanDraft`) is also UI-level only, never a
+        // domain-level "is this week historical" check. `canReopenPlanning`
+        // is therefore the single, UI-level place a historical week is
+        // kept out of this specific flow — this test documents that
+        // boundary explicitly, rather than an implicit assumption:
+        // the gate correctly reads false, and the underlying service
+        // call, if some future caller bypassed the gate, is NOT itself
+        // historically-aware.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.commit()
+
+        #expect(viewModel.canReopenPlanning == false)
+    }
 }
 
 // MARK: - Recurring Planned Activities

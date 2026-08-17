@@ -73,6 +73,27 @@ public final class PlanningService {
         return weekPlan
     }
 
+    /// Reversibility principle (Reopen Planning): reopens a committed
+    /// WeekPlan back to `.draft`. Delegates entirely to `WeekPlan.reopen`
+    /// for the actual transition — the exact mirror of `commitWeekPlan`
+    /// above. `WeekPlanConflictError` (stale revision / not committed)
+    /// propagates directly, unwrapped, same as `commitWeekPlan`. Every
+    /// existing `PlannedActivity` under this WeekPlan is completely
+    /// untouched: this call only ever mutates the `WeekPlan` row itself.
+    @discardableResult
+    public func reopenWeekPlan(
+        _ weekPlanId: WeekPlanId,
+        expectedRevision: Int,
+        reopenedBy: ActorId
+    ) throws -> WeekPlan {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        try weekPlan.reopen(expectedRevision: expectedRevision, reopenedBy: reopenedBy)
+        try repository.save()
+        return weekPlan
+    }
+
     /// S2.2: adds a `PlannedActivity` to an existing `WeekPlan`.
     /// Requirement: "Prevent edits when the referenced WeekPlan does
     /// not exist" — checked here before any insert is attempted.

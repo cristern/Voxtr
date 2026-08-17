@@ -1090,6 +1090,169 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(try trainingRepository.fetchLoggedActivities(forAthlete: athleteId).count == 1)
     }
 
+    // MARK: - Reversibility principle: Reopen Activity (undo Cancel)
+
+    @Test("canReopen is true only once cancelled, false before cancellation and false once logged normally")
+    @MainActor
+    func canReopenReflectsCancelledOutcomeOnly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator
+        )
+
+        #expect(viewModel.canReopen == false)
+        #expect(viewModel.cancelActivity())
+        #expect(viewModel.canReopen == true)
+    }
+
+    @Test("reopenActivity removes the cancelled LoggedActivity link, restores the unresolved state, and never deletes or duplicates the PlannedActivity")
+    @MainActor
+    func reopenActivityRestoresUnresolvedStateWithoutTouchingThePlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: trainingRepository),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+        #expect(viewModel.cancelActivity())
+        #expect(reloadCallCount == 1)
+
+        #expect(viewModel.reopenActivity())
+
+        // The exact SAME PlannedActivity identity — never deleted,
+        // never duplicated.
+        #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
+        #expect(viewModel.outcomeStatus == nil)
+        #expect(viewModel.isCompleted == false)
+        #expect(viewModel.canCancel == true)
+        #expect(viewModel.canReopen == false)
+        // The reload signal fires again — same contract Log/Cancel
+        // already establish, so a mounted host screen picks up the
+        // now-unresolved state immediately.
+        #expect(reloadCallCount == 2)
+        #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId).isEmpty)
+        let stillPlanned = try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(stillPlanned.count == 1)
+        #expect(stillPlanned.first?.plannedActivityId == activity.plannedActivityId)
+    }
+
+    @Test("A reopened activity can be logged again through the normal canonical flow")
+    @MainActor
+    func reopenedActivityCanBeLoggedAgain() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: trainingRepository),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator
+        )
+        #expect(viewModel.cancelActivity())
+        #expect(viewModel.reopenActivity())
+
+        let logViewModel = viewModel.makeLogActivityViewModel()
+        logViewModel.sessionForm = 4
+        #expect(logViewModel.save())
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.status == .completed)
+    }
+
+    @Test("reopenActivity is a no-op that fails cleanly on an activity that was never cancelled")
+    @MainActor
+    func reopenActivityFailsCleanlyWhenNotCancelled() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        // Never cancelled or logged — outcomeStatus is nil.
+        let unresolvedViewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService, trainingReflectionCoordinationService: coordinator
+        )
+        #expect(unresolvedViewModel.reopenActivity() == false)
+
+        // Completed — never reopenable through this action.
+        let completedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let completedLogged = try TrainingService(repository: TrainingRepository(modelContext: container.mainContext)).logActivity(
+            athleteId: athleteId, plannedActivityId: completedActivity.plannedActivityId,
+            activityType: .individualTraining, title: completedActivity.title, startedAt: .now,
+            durationMinutes: 40, status: .completed
+        )
+        let completedViewModel = ActivityDetailViewModel(
+            activity: completedActivity, isCompleted: true, loggedActivity: completedLogged,
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
+            trainingReflectionCoordinationService: coordinator
+        )
+        #expect(completedViewModel.canReopen == false)
+        #expect(completedViewModel.reopenActivity() == false)
+        #expect(completedViewModel.outcomeStatus == .completed)
+    }
+
     /// Item 7: logging via the canonical flow preserves the
     /// PlannedActivity linkage automatically — the user never has to
     /// manually reconnect a completed activity to its plan.

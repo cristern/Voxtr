@@ -11,6 +11,14 @@ public enum TrainingServiceError: Error, Equatable {
     /// given id, or exists but belongs to a different athlete —
     /// athlete isolation, never inferred from title/date.
     case loggedActivityNotFound
+    /// Reversibility principle (Reopen Activity): thrown by
+    /// `reopenCancelledActivity` when the `LoggedActivity` it was asked
+    /// to reopen exists and belongs to the caller's athlete, but its
+    /// `status` is not `.cancelled` — this lifecycle command is
+    /// deliberately narrow to undoing an erroneous cancellation only,
+    /// never a way to un-complete or un-miss a genuinely resolved
+    /// outcome.
+    case activityNotCancelled
 }
 
 /// S3.0/S3.1: the domain-level use case for logging completed
@@ -145,5 +153,32 @@ public final class TrainingService {
         }
         try repository.updateLoggedActivity(activity, durationMinutes: durationMinutes, perceivedExertion: perceivedExertion)
         return activity
+    }
+
+    /// Reversibility principle: undoes an erroneous cancellation.
+    /// Cancellation is represented as a `PlannedActivity` with a linked
+    /// `LoggedActivity(status: .cancelled)` — never a flag on
+    /// `PlannedActivity` itself. Reopening therefore means removing
+    /// exactly that `LoggedActivity`, never touching the
+    /// `PlannedActivity` it was linked to: the plan's own stable
+    /// identity, title, date, and every other field are completely
+    /// unaffected, and it becomes unresolved (`outcomeStatus == nil`)
+    /// again the moment this returns — loggable, cancellable again, or
+    /// editable, exactly like any other never-yet-resolved planned
+    /// activity. Athlete-scoped and status-scoped: throws
+    /// `.loggedActivityNotFound` for a missing or cross-athlete id (the
+    /// same isolation `correctLoggedActivity` above already enforces),
+    /// and `.activityNotCancelled` for any other status — this command
+    /// can never un-complete or un-miss a genuinely resolved outcome,
+    /// only undo a cancellation.
+    public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+        guard let activity = try repository.fetchLoggedActivity(byId: loggedActivityId),
+              activity.athleteId == athleteId.rawValue else {
+            throw TrainingServiceError.loggedActivityNotFound
+        }
+        guard activity.status == .cancelled else {
+            throw TrainingServiceError.activityNotCancelled
+        }
+        try repository.deleteLoggedActivity(activity)
     }
 }

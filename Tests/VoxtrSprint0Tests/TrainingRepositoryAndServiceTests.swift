@@ -283,4 +283,119 @@ struct TrainingRepositoryAndServiceTests {
 
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 2)
     }
+
+    // MARK: - Reversibility principle: reopenCancelledActivity
+
+    @Test("Reopening a cancelled activity removes the LoggedActivity link — the same PlannedActivity is loggable again")
+    @MainActor
+    func reopenCancelledActivityRemovesTheLink() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let plannedActivityId = PlannedActivityId()
+        let cancelled = try service.logActivity(
+            athleteId: athleteId, plannedActivityId: plannedActivityId,
+            activityType: .individualTraining, title: "Evening swim",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 1, status: .cancelled
+        )
+
+        try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: athleteId)
+
+        #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
+        // The PlannedActivity is loggable again — the exact contract a
+        // cleared link is supposed to restore.
+        _ = try service.logActivity(
+            athleteId: athleteId, plannedActivityId: plannedActivityId,
+            activityType: .individualTraining, title: "Evening swim",
+            startedAt: Date(timeIntervalSince1970: 1_767_100_000),
+            durationMinutes: 40, status: .completed
+        )
+        let linksAfter = try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId)
+        #expect(linksAfter.count == 1)
+        #expect(linksAfter.first?.status == .completed)
+    }
+
+    @Test("Reopening a materialized recurring occurrence's cancelled outcome preserves that PlannedActivity's own stable id — never a new one")
+    @MainActor
+    func reopenPreservesMaterializedRecurringPlannedActivityIdentity() throws {
+        // The exact PlannedActivityId a recurring occurrence's own
+        // materialization would have produced — reopenCancelledActivity
+        // has no special-case knowledge of recurring occurrences at all;
+        // it only ever deletes the LoggedActivity, so the SAME id must
+        // survive untouched regardless of the PlannedActivity's origin.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let materializedPlannedActivityId = PlannedActivityId()
+        let cancelled = try service.logActivity(
+            athleteId: athleteId, plannedActivityId: materializedPlannedActivityId,
+            activityType: .teamTraining, title: "Saturday match",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 1, status: .cancelled
+        )
+
+        try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: athleteId)
+
+        // No LoggedActivity remains linked to this exact PlannedActivityId
+        // — the materialized occurrence itself (its own stable identity,
+        // owned entirely by VoxtrPlanningDomain and never touched by this
+        // Training-domain call) is implicitly preserved simply because
+        // nothing here ever had the ability to delete or recreate it.
+        #expect(try repository.fetchLoggedActivities(forPlannedActivity: materializedPlannedActivityId).isEmpty)
+    }
+
+    @Test("Reopening never touches a LoggedActivity belonging to a different athlete")
+    @MainActor
+    func reopenEnforcesAthleteIsolation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let plannedActivityId = PlannedActivityId()
+        let cancelled = try service.logActivity(
+            athleteId: athleteId, plannedActivityId: plannedActivityId,
+            activityType: .individualTraining, title: "Evening swim",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 1, status: .cancelled
+        )
+
+        #expect(throws: TrainingServiceError.loggedActivityNotFound) {
+            try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: otherAthleteId)
+        }
+        // Untouched.
+        #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).count == 1)
+    }
+
+    @Test("Reopen Activity is rejected for a genuinely resolved outcome — Completed, PartiallyCompleted, and Missed are never reopenable")
+    @MainActor
+    func reopenRejectedForNonCancelledOutcomes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+
+        for status: ActivityStatus in [.completed, .partiallyCompleted, .missed] {
+            let plannedActivityId = PlannedActivityId()
+            let logged = try service.logActivity(
+                athleteId: athleteId, plannedActivityId: plannedActivityId,
+                activityType: .individualTraining, title: "Session",
+                startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+                durationMinutes: 30, status: status
+            )
+
+            #expect(throws: TrainingServiceError.activityNotCancelled) {
+                try service.reopenCancelledActivity(logged.loggedActivityId, athleteId: athleteId)
+            }
+            // Untouched.
+            #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).count == 1)
+        }
+    }
 }

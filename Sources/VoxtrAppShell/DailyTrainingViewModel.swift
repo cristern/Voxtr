@@ -251,6 +251,15 @@ public final class DailyTrainingViewModel {
             // non-`TrainingServiceError` failure — not a new message,
             // not a new product flow.
             return TrainingStrings.genericError
+        case .activityNotCancelled:
+            // Reversibility principle (Reopen Activity): thrown only by
+            // `TrainingService.reopenCancelledActivity`, a capability
+            // this ViewModel's own `logActivity()` never calls (it only
+            // ever creates a `LoggedActivity`, never reopens one) — same
+            // "unreachable through this exact call site, handled anyway
+            // for exhaustiveness" reasoning as `.loggedActivityNotFound`
+            // directly above.
+            return TrainingStrings.genericError
         }
     }
 }

@@ -127,6 +127,19 @@ public final class WeeklyPlanningViewModel {
         isCommitted ? PlanningStrings.committedStatus : PlanningStrings.draftStatus
     }
 
+    /// Reversibility principle (Reopen Planning): offered ONLY for a
+    /// committed CURRENT or FUTURE week — never a historical one. This
+    /// screen only ever shows one week at a time (`weekStart`, switched
+    /// via `switchToWeek(_:)`), so "the current/future week" is simply
+    /// "not before the real current week," using the SAME canonical
+    /// `currentWeekStart()` every other current-week check in this app
+    /// already uses. Historical weeks are deliberately left under
+    /// existing historical/read behavior — this task does not invent
+    /// historical-plan editing semantics.
+    public var canReopenPlanning: Bool {
+        isCommitted && weekStart >= Self.currentWeekStart()
+    }
+
     /// Loads the athlete's current-week plan, creating a draft if none
     /// exists yet, then loads its activities and recurring-activity
     /// suggestions. Call once when the view appears.
@@ -242,6 +255,35 @@ public final class WeeklyPlanningViewModel {
                 committedBy: committedByActorId
             )
             self.weekPlan = committed
+        } catch is WeekPlanConflictError {
+            errorMessage = PlanningStrings.genericServiceError
+        } catch let error as PlanningServiceError {
+            errorMessage = Self.message(for: error)
+        } catch {
+            errorMessage = PlanningStrings.genericServiceError
+        }
+    }
+
+    /// Reversibility principle (Reopen Planning): the exact mirror of
+    /// `commit()` above, for the reverse transition. Reassigns `self.weekPlan`
+    /// to the SAME entity `service.reopenWeekPlan` returns (never
+    /// reloaded/reconstructed from a fresh fetch, never a different
+    /// object) — `isCommitted`/`canReopenPlanning` recompute immediately
+    /// from that reassignment since both are `@Observable`-tracked
+    /// computed properties, so the currently-selected week becomes
+    /// editable without navigating away or waiting on `.onAppear`.
+    /// `activities` is untouched — this call never mutates
+    /// `PlannedActivity` rows, so there is nothing to reload.
+    public func reopenPlanning() {
+        guard let weekPlan else { return }
+        errorMessage = nil
+        do {
+            let reopened = try service.reopenWeekPlan(
+                weekPlan.weekPlanId,
+                expectedRevision: weekPlan.revision,
+                reopenedBy: committedByActorId
+            )
+            self.weekPlan = reopened
         } catch is WeekPlanConflictError {
             errorMessage = PlanningStrings.genericServiceError
         } catch let error as PlanningServiceError {

@@ -376,6 +376,122 @@ struct PlanningServiceTests {
         #expect(weekPlan.status == .draft)
         #expect(weekPlan.revision == 1)
     }
+
+    // MARK: - Reversibility principle: reopenWeekPlan
+
+    @Test("Reopening a committed WeekPlan returns it to draft, increments revision, and clears committedAt/committedBy")
+    @MainActor
+    func reopenTransitionsCommittedBackToDraft() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+        #expect(weekPlan.status == .committed)
+        #expect(weekPlan.revision == 2)
+
+        let reopened = try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+
+        #expect(reopened.status == .draft)
+        #expect(reopened.revision == 3)
+        #expect(reopened.committedAt == nil)
+        #expect(reopened.committedBy == nil)
+        // The SAME WeekPlan entity — never deleted or recreated.
+        #expect(reopened.weekPlanId == weekPlan.weekPlanId)
+    }
+
+    @Test("Reopening a WeekPlan that was never committed is rejected")
+    @MainActor
+    func reopenRejectedWhenNotCommitted() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: WeekPlanConflictError.notCommitted) {
+            try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, reopenedBy: ActorId())
+        }
+        #expect(weekPlan.status == .draft)
+        #expect(weekPlan.revision == 1)
+    }
+
+    @Test("A stale expectedRevision on reopen is rejected as a conflict, and the plan is left unchanged")
+    @MainActor
+    func staleRevisionOnReopenRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(throws: WeekPlanConflictError.staleRevision(expected: 99, actual: 2)) {
+            try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 99, reopenedBy: ActorId())
+        }
+        #expect(weekPlan.status == .committed)
+        #expect(weekPlan.revision == 2)
+    }
+
+    @Test("Reopening a WeekPlan preserves every existing PlannedActivity's own identity — never deletes, recreates, or duplicates")
+    @MainActor
+    func reopenPreservesPlannedActivityIdentities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+
+        let activitiesAfter = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(activitiesAfter.count == 1)
+        #expect(activitiesAfter.first?.plannedActivityId == activity.plannedActivityId)
+        #expect(activitiesAfter.first?.title == "Endurance run")
+    }
+
+    @Test("A reopened WeekPlan can be edited again and committed again")
+    @MainActor
+    func reopenedWeekPlanCanBeEditedAndRecommitted() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+        try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+
+        // Editable again — this would have thrown weekPlanNotDraft while
+        // still committed.
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .individualTraining, title: "Endurance run (corrected)",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        #expect(edited.title == "Endurance run (corrected)")
+
+        let recommitted = try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 3, committedBy: ActorId())
+        #expect(recommitted.status == .committed)
+        #expect(recommitted.revision == 4)
+    }
 }
 
 // MARK: - Recurring Planned Activities

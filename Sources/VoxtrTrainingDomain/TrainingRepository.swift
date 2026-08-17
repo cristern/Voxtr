@@ -138,4 +138,17 @@ public final class TrainingRepository {
         activity.updatedAt = .now
         try modelContext.save()
     }
+
+    /// Reversibility principle (Reopen Activity): a plain, low-level
+    /// removal primitive — not itself exposed as a general UI
+    /// capability. `TrainingService.reopenCancelledActivity` is the one
+    /// caller, and only after verifying athlete ownership and that the
+    /// `LoggedActivity` being removed is genuinely `.cancelled`. The
+    /// linked `PlannedActivity` (if any) is completely untouched — this
+    /// only ever removes the `LoggedActivity` row itself, the same
+    /// entity `insertLoggedActivity` above creates.
+    public func deleteLoggedActivity(_ activity: LoggedActivity) throws {
+        modelContext.delete(activity)
+        try modelContext.save()
+    }
 }

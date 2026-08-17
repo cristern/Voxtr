@@ -180,6 +180,13 @@ public final class ActivityDetailViewModel {
     /// own `!isCompleted` gate already does.
     public var canCancel: Bool { !isCompleted }
 
+    /// Reversibility principle: "Reopen Activity" is offered ONLY for a
+    /// canonical outcome of exactly `.cancelled` — never Completed,
+    /// PartiallyCompleted, or Missed. Undoing an erroneous cancellation
+    /// is the one approved reversible case here; a genuinely resolved
+    /// training outcome is never reopenable through this action.
+    public var canReopen: Bool { outcomeStatus == .cancelled }
+
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
     /// Logged Activity -> RPE + Form): offered whenever a
     /// `LoggedActivity` exists, regardless of its specific outcome —
@@ -314,6 +321,36 @@ public final class ActivityDetailViewModel {
             return false
         } catch {
             errorMessage = "Could not cancel this activity. Please try again."
+            return false
+        }
+    }
+
+    /// Reversibility principle: undoes an erroneous cancellation.
+    /// Removes exactly the `.cancelled` `LoggedActivity` this screen
+    /// already resolved via the canonical `loggedActivity` relationship
+    /// (never a second lookup, never title/date matching) through
+    /// `TrainingReflectionCoordinationService.reopenCancelledActivity` —
+    /// the SAME `PlannedActivity` (`activity` here is never reassigned
+    /// or recreated) becomes unresolved again: `loggedActivity` and
+    /// `outcomeStatus` return to `nil`, `isCompleted` returns to `false`,
+    /// so Log Activity and Cancel Activity both become available again
+    /// exactly as they were before the erroneous cancellation, and
+    /// `onActivityLogged()` fires the SAME reload signal a successful
+    /// cancel/log already fires, so the mounted screen this was pushed
+    /// from picks up the unresolved state immediately.
+    @discardableResult
+    public func reopenActivity() -> Bool {
+        errorMessage = nil
+        guard let loggedActivity, canReopen else { return false }
+        do {
+            try trainingReflectionCoordinationService.reopenCancelledActivity(loggedActivity.loggedActivityId, athleteId: athleteId)
+            self.loggedActivity = nil
+            self.activityReflection = nil
+            isCompleted = false
+            onActivityLogged()
+            return true
+        } catch {
+            errorMessage = "Could not reopen this activity. Please try again."
             return false
         }
     }

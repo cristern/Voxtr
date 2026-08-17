@@ -89,6 +89,11 @@ public final class WeekPlan {
 public enum WeekPlanConflictError: Error, Sendable, Equatable {
     case staleRevision(expected: Int, actual: Int)
     case alreadyCommitted
+    /// Reversibility principle (Reopen Planning): thrown by `WeekPlan.reopen`
+    /// when the plan isn't currently `.committed` — the mirror of
+    /// `alreadyCommitted` above for the reverse transition. A `.draft`
+    /// or `.closed` plan is never reopenable through this action.
+    case notCommitted
 }
 
 public extension WeekPlan {
@@ -114,6 +119,35 @@ public extension WeekPlan {
         revision += 1
         updatedAt = .now
         return WeekPlanCommitted(weekPlanId: weekPlanId, athleteId: AthleteId(rawValue: athleteId), revision: revision)
+    }
+
+    /// Reversibility principle (Reopen Planning): the ONLY sanctioned
+    /// way to transition a WeekPlan from `.committed` back to `.draft` —
+    /// the exact mirror of `commit` above, using the SAME `status`/
+    /// `revision`/`committedAt`/`committedBy` fields already established
+    /// for commitment, never a second, parallel commitment model. A
+    /// plan that isn't `.committed` throws `.notCommitted`; a stale
+    /// caller-held revision throws `.staleRevision`, exactly like
+    /// `commit`'s own optimistic-concurrency guard. On success,
+    /// `status` returns to `.draft` and `committedAt`/`committedBy` are
+    /// cleared back to `nil` — this is a controlled lifecycle
+    /// transition, not a reset: `PlannedActivity` rows belonging to
+    /// this WeekPlan are never touched, deleted, or recreated by this
+    /// method, since it only ever mutates `WeekPlan`'s own fields.
+    @discardableResult
+    func reopen(expectedRevision: Int, reopenedBy: ActorId) throws -> WeekPlanReopened {
+        guard status == .committed else {
+            throw WeekPlanConflictError.notCommitted
+        }
+        guard revision == expectedRevision else {
+            throw WeekPlanConflictError.staleRevision(expected: expectedRevision, actual: revision)
+        }
+        status = .draft
+        committedAt = nil
+        committedBy = nil
+        revision += 1
+        updatedAt = .now
+        return WeekPlanReopened(weekPlanId: weekPlanId, athleteId: AthleteId(rawValue: athleteId), revision: revision)
     }
 }
 
@@ -278,6 +312,17 @@ public struct WeekPlanCommitted: DomainEvent {
     public let committedAt: Date
     public init(weekPlanId: WeekPlanId, athleteId: AthleteId, revision: Int, committedAt: Date = .now) {
         self.weekPlanId = weekPlanId; self.athleteId = athleteId; self.revision = revision; self.committedAt = committedAt
+    }
+}
+
+public struct WeekPlanReopened: DomainEvent {
+    public static let eventName = "planning.weekPlanReopened"
+    public let weekPlanId: WeekPlanId
+    public let athleteId: AthleteId
+    public let revision: Int
+    public let reopenedAt: Date
+    public init(weekPlanId: WeekPlanId, athleteId: AthleteId, revision: Int, reopenedAt: Date = .now) {
+        self.weekPlanId = weekPlanId; self.athleteId = athleteId; self.revision = revision; self.reopenedAt = reopenedAt
     }
 }
 

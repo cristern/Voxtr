@@ -297,4 +297,15 @@ public final class TrainingReflectionCoordinationService {
             return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .failed(error))
         }
     }
+
+    /// Reversibility principle (Reopen Activity): a pure passthrough to
+    /// `TrainingService.reopenCancelledActivity`, same as
+    /// `correctLoggedActivity` above is for `TrainingService.correctLoggedActivity` —
+    /// this coordinator stays the one place `ActivityDetailViewModel`
+    /// mutates a `LoggedActivity` through, even for a mutation with no
+    /// reflection involvement at all (cancellation never records a
+    /// Session Form, so there is nothing here to clean up).
+    public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+        try trainingService.reopenCancelledActivity(loggedActivityId, athleteId: athleteId)
+    }
 }
