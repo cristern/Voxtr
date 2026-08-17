@@ -217,7 +217,8 @@ public final class TodayActivityComposer {
                 athleteId: athleteId,
                 athleteName: athleteName,
                 plannedActivity: completion.plannedActivity,
-                isCompleted: completion.isCompleted
+                isCompleted: completion.isCompleted,
+                loggedActivity: completion.loggedActivity
             ))
         })
 

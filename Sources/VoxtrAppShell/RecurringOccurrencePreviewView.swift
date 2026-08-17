@@ -54,6 +54,7 @@ public struct RecurringOccurrencePreviewView: View {
 
     @State private var editSheetItem: RecurringEditSheetItem?
     @State private var materializedActivity: MaterializedActivityItem?
+    @State private var isPresentingCancelConfirmation = false
     @State private var errorMessage: String?
     @Environment(\.dismiss) private var dismiss
 
@@ -111,6 +112,21 @@ public struct RecurringOccurrencePreviewView: View {
                     openEditForm()
                 }
                 .accessibilityIdentifier("recurringOccurrence.editRecurringButton")
+                // Activity outcome consistency closeout (item A): a
+                // single occurrence, cancelled — never the recurring
+                // series itself ("Edit Recurring Definition" above
+                // remains the only way to change the series). Only
+                // offered before this occurrence has any outcome —
+                // matches the normal planned-activity "Cancel Activity"
+                // action's own `canCancel` gate (`!isCompleted`); a
+                // materialized-but-unresolved occurrence stops being
+                // presented as `.recurringOccurrence` at all (this
+                // screen is only ever reached for one), so there is no
+                // separate "already resolved" state to check here.
+                Button("Cancel Activity", role: .destructive) {
+                    isPresentingCancelConfirmation = true
+                }
+                .accessibilityIdentifier("recurringOccurrence.cancelActivityButton")
             }
         }
         .navigationTitle("\(athleteDisplayName) · Recurring Activity")
@@ -135,6 +151,16 @@ public struct RecurringOccurrencePreviewView: View {
                     }
                 )
             )
+        }
+        .confirmationDialog(
+            "Cancel this activity?",
+            isPresented: $isPresentingCancelConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Cancel Activity", role: .destructive) {
+                cancelOccurrence()
+            }
+            Button("Keep", role: .cancel) {}
         }
         .onAppear {
             checkForStaleness()
@@ -229,6 +255,87 @@ public struct RecurringOccurrencePreviewView: View {
         } catch {
             errorMessage = "Could not open this activity. Please try again."
         }
+    }
+
+    /// Activity outcome consistency closeout (item A): cancels this ONE
+    /// occurrence — "this occurrence will not take place," never the
+    /// recurring series (the `RecurringPlannedActivity` definition
+    /// itself is completely untouched; only "Edit Recurring Definition"
+    /// above changes it). Reuses the EXACT SAME two canonical paths
+    /// already established elsewhere, not a second recurring-cancellation
+    /// model:
+    /// - `PlanningService.materializeOrFetchExisting` — the same
+    ///   idempotent materialization `materializeAndOpen()` above already
+    ///   uses, so a real `PlannedActivity` with stable identity exists
+    ///   exactly once, linked back to this occurrence by the same
+    ///   `externalSourceId`/`externalSourceType` pair every other
+    ///   materialization already establishes.
+    /// - `TrainingReflectionCoordinationService.logActivity(status: .cancelled)`
+    ///   — the exact same call `ActivityDetailViewModel.cancelActivity()`
+    ///   makes for a normal planned activity, linked to the newly-
+    ///   materialized `PlannedActivity` by its own stable typed ID.
+    ///
+    /// Duplicate protection falls out of both paths' own existing
+    /// guarantees, not anything new: `materializeOrFetchExisting` always
+    /// resolves to the SAME `PlannedActivity` on repeat calls (never a
+    /// second one for the same occurrence), and `TrainingService.logActivity`
+    /// already rejects a second `LoggedActivity` link to that same
+    /// `PlannedActivity` via `plannedActivityAlreadyLinked` — so a
+    /// repeated cancel attempt, or a cancel after this occurrence was
+    /// already logged/cancelled by another screen, is rejected the same
+    /// way a duplicate normal-activity cancel already is.
+    ///
+    /// Dismisses on success (unlike `ActivityDetailViewModel.cancelActivity()`,
+    /// which stays open and updates in place): this screen's own content
+    /// is static text ("hasn't been added to a specific week's plan
+    /// yet"), which becomes false the moment this occurrence is
+    /// materialized and resolved — there is no dynamic state here for it
+    /// to update into, the same reason `materializeAndOpen()`'s own
+    /// `onLogged` already dismisses on a successful log.
+    private func cancelOccurrence() {
+        errorMessage = nil
+        do {
+            let weekStart = TrainingPlanningCoordinationService.weekStart(containing: suggestion.occurrenceDate)
+            let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: suggestion.athleteId, weekStart: weekStart)
+            let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+            _ = try trainingReflectionCoordinationService.logActivity(
+                athleteId: suggestion.athleteId,
+                plannedActivityId: materialized.plannedActivityId,
+                sportId: materialized.sportId.map(SportId.init(rawValue:)),
+                categoryIds: materialized.categoryIds.map(ActivityCategoryId.init(rawValue:)),
+                activityType: materialized.activityType,
+                title: materialized.title,
+                startedAt: Self.startedAt(for: materialized),
+                durationMinutes: 1,
+                status: .cancelled,
+                authorId: actorId,
+                sessionForm: nil
+            )
+            onActivityLogged()
+            dismiss()
+        } catch TrainingServiceError.plannedActivityAlreadyLinked {
+            errorMessage = "This activity has already been logged."
+        } catch {
+            errorMessage = "Could not cancel this activity. Please try again."
+        }
+    }
+
+    /// The materialized activity's own date/time, combined into a
+    /// single `Date` — same derivation `ActivityDetailViewModel.startedAt(for:)`/
+    /// `LogActivityViewModel.startedAt(for:)` already establish for the
+    /// exact same purpose, reused here rather than duplicated with
+    /// different logic.
+    private static func startedAt(for activity: PlannedActivity) -> Date {
+        var components = DateComponents(
+            year: activity.localDate.year,
+            month: activity.localDate.month,
+            day: activity.localDate.day
+        )
+        if let startTime = activity.startLocalTime {
+            components.hour = startTime.hour
+            components.minute = startTime.minute
+        }
+        return Calendar.current.date(from: components) ?? .now
     }
 
     /// Fetches the real `RecurringPlannedActivity` definition (the

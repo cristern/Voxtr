@@ -1,4 +1,5 @@
 import Foundation
+import VoxtrCoreContracts
 
 /// S3.3: centralizes Daily Training's user-facing strings that are
 /// built as plain `String` values (validation/error messages, status
@@ -57,6 +58,38 @@ public enum TrainingStrings {
 
     public static var notCompletedLabel: String {
         String(localized: "training.plannedActivity.notCompleted", defaultValue: "Not yet logged")
+    }
+
+    /// Activity outcome consistency closeout (item B): Family Home,
+    /// Athlete Home, and Family Schedule all independently displayed
+    /// "Completed" for ANY resolved outcome (the loose `FamilyHomeRow.isCompleted`
+    /// semantic), so a Cancelled or Missed activity showed as Completed —
+    /// exactly the reported bug. This is the one canonical mapping all
+    /// three now share, rather than tripling the same switch across
+    /// three view files.
+    public static var partiallyCompletedLabel: String {
+        String(localized: "training.plannedActivity.partiallyCompleted", defaultValue: "Partially completed")
+    }
+
+    public static var missedLabel: String {
+        String(localized: "training.plannedActivity.missed", defaultValue: "Missed")
+    }
+
+    public static var cancelledLabel: String {
+        String(localized: "training.plannedActivity.cancelled", defaultValue: "Cancelled")
+    }
+
+    /// `nil` (no `LoggedActivity` at all — nothing resolved yet) maps to
+    /// `notCompletedLabel` ("Not yet logged"), the same label already
+    /// used everywhere else in this file for that exact meaning.
+    public static func outcomeLabel(for status: ActivityStatus?) -> String {
+        switch status {
+        case .none, .scheduled: return notCompletedLabel
+        case .completed: return completedLabel
+        case .partiallyCompleted: return partiallyCompletedLabel
+        case .missed: return missedLabel
+        case .cancelled: return cancelledLabel
+        }
     }
 
     public static var noneOptionLabel: String {

@@ -130,7 +130,8 @@ public final class FamilyScheduleViewModel {
                         athleteId: athlete.athleteId,
                         athleteName: athlete.givenName,
                         plannedActivity: completion.plannedActivity,
-                        isCompleted: completion.isCompleted
+                        isCompleted: completion.isCompleted,
+                        loggedActivity: completion.loggedActivity
                     ))
                 })
             } catch {

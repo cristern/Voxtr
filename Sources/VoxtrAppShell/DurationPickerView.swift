@@ -117,3 +117,55 @@ public struct DurationPickerView: View {
         durationMinutes = parsed
     }
 }
+
+/// Activity outcome consistency closeout (item D): a small,
+/// optional-aware wrapper around `DurationPickerView` above —
+/// `DurationPickerView` itself stays `Binding<Int>`-only, completely
+/// UNCHANGED, and every existing call site (Weekly Plan Add, Edit
+/// Planned Activity, Edit Logged Activity, recurring activity forms)
+/// keeps using it directly via the already-established "Has X" Toggle +
+/// conditionally-shown `DurationPickerView` pattern, where the field's
+/// requiredness is a user-chosen toggle. `LogActivityView`'s actual
+/// duration doesn't fit that pattern — its requiredness is driven by
+/// the Outcome picker next to it, not a dedicated toggle — and,
+/// crucially, it must visibly represent "no duration selected yet"
+/// rather than showing a fabricated starting value (60) that
+/// `durationMinutes` doesn't actually contain (the exact reported bug:
+/// Save was correctly blocked while the picker visibly showed 60).
+///
+/// While `durationMinutes` is `nil`, shows a plain row reading "Not
+/// set" — the same vocabulary this app's own optional pickers already
+/// use (e.g. the RPE `Picker`'s own `Text("Not set").tag(Int?.none)`) —
+/// instead of the real wheel picker. Tapping it starts a real duration
+/// at 60, this app's own established "reasonable starting value for an
+/// optional duration" convention (`WeeklyPlanningViewModel.newActivityDurationMinutes`,
+/// `ActivityDetailViewModel.editDurationMinutes`) — an explicit user
+/// action choosing to set a duration, not a value fabricated merely to
+/// satisfy the component. From that point on, the real
+/// `DurationPickerView` is shown and reused verbatim — never a second,
+/// duplicated duration-selection UI.
+struct OptionalDurationPickerView: View {
+    @Binding var durationMinutes: Int?
+
+    var body: some View {
+        if let value = durationMinutes {
+            DurationPickerView(durationMinutes: Binding(
+                get: { value },
+                set: { durationMinutes = $0 }
+            ))
+        } else {
+            Button {
+                durationMinutes = 60
+            } label: {
+                HStack {
+                    Text("Duration")
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Text("Not set")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .accessibilityIdentifier("optionalDurationPicker.setDurationButton")
+        }
+    }
+}

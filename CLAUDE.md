@@ -97,6 +97,15 @@ Before reporting a task ready for review:
 - perform this against the FINAL diff;
 - do not report "ready for review" while known compile uncertainty remains.
 
+### Repo-wide enum consumer audit
+Whenever an enum case is added, removed, renamed, or changes meaning:
+- inspect the final enum declaration and list all cases;
+- search the ENTIRE repository for consumers of that enum, not only files in the task diff;
+- inspect every exhaustive switch and verify it against the final declaration;
+- do not add `default` merely to silence compiler exhaustiveness;
+- inspect non-switch consumers where changed case semantics can affect behavior;
+- this audit is mandatory even when the affected consumer file was untouched by the task.
+
 ## 8. Testing rules
 Prefer extending an existing relevant test over creating a new test file.
 

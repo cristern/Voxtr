@@ -7,6 +7,7 @@ import VoxtrCoreContracts
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -701,5 +702,159 @@ struct Sprint12BTests {
             activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90
         )
         #expect(try !trainingService.fetchLoggedActivities(forPlannedActivity: materialized.plannedActivityId).isEmpty)
+    }
+
+    // MARK: - Activity outcome consistency closeout (item A): recurring occurrence cancellation
+    //
+    // `RecurringOccurrencePreviewView.cancelOccurrence()` is embedded
+    // directly in a SwiftUI View with no separate ViewModel — the same
+    // reason `checkForStaleness()` above is tested by exercising the
+    // exact canonical service calls it performs, not the View itself.
+    // These tests mirror that established pattern for cancellation:
+    // `materializeOrFetchExisting` then `logActivity(status: .cancelled)`.
+
+    @Test("Cancelling one recurring occurrence materializes it and links a .cancelled LoggedActivity, leaving the RecurringPlannedActivity definition completely untouched")
+    @MainActor
+    func cancellingOneOccurrenceLeavesTheSeriesUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+
+        let recurring = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(suggestions.first)
+
+        // The exact sequence `cancelOccurrence()` performs.
+        let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
+            activityType: materialized.activityType, title: materialized.title, startedAt: .now,
+            durationMinutes: 1, status: .cancelled, authorId: ActorId(), sessionForm: nil
+        )
+
+        #expect(result.loggedActivity.status == .cancelled)
+        #expect(result.loggedActivity.plannedActivityId == materialized.plannedActivityId.rawValue)
+
+        // The series definition itself — never mutated by cancelling
+        // one occurrence.
+        let stillDefined = try #require(try planningService.fetchRecurringPlannedActivity(byId: recurring.recurringPlannedActivityId))
+        #expect(stillDefined.isEnabled == true)
+        #expect(stillDefined.weekdays == [today.weekday])
+    }
+
+    @Test("A cancelled occurrence is no longer offered as a recurring suggestion, and instead resolves as .planned with a .cancelled outcome — never presented as unresolved/loggable again")
+    @MainActor
+    func cancelledOccurrenceNoLongerPresentedAsUnresolved() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestion = try #require(try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
+            activityType: materialized.activityType, title: materialized.title, startedAt: .now,
+            durationMinutes: 1, status: .cancelled, authorId: ActorId(), sessionForm: nil
+        )
+
+        // Never offered again as an unmaterialized suggestion.
+        let remainingSuggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        #expect(remainingSuggestions.isEmpty)
+
+        // Resolves as .planned, with the real outcome — via the exact
+        // same canonical composer every Home/Schedule screen reads
+        // from, never a second lookup.
+        let completions = try trainingPlanningCoordinationService.plannedActivitiesWithCompletion(
+            forAthlete: athleteId, on: today
+        )
+        let completion = try #require(completions.first { $0.plannedActivity.plannedActivityId == materialized.plannedActivityId })
+        #expect(completion.loggedActivity?.status == .cancelled)
+        #expect(completion.isGenuinelyCompleted == false)
+    }
+
+    @Test("Cancelling the same occurrence twice is rejected — never a duplicate LoggedActivity")
+    @MainActor
+    func cancellingSameOccurrenceTwiceIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+
+        _ = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestion = try #require(try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+
+        // Same idempotent materialization `cancelOccurrence()` relies
+        // on — a repeat attempt (e.g. a double-tap) resolves to the
+        // SAME PlannedActivity, never a second one.
+        let firstMaterialize = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        let secondMaterialize = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        #expect(firstMaterialize.plannedActivityId == secondMaterialize.plannedActivityId)
+
+        _ = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: firstMaterialize.plannedActivityId,
+            activityType: firstMaterialize.activityType, title: firstMaterialize.title, startedAt: .now,
+            durationMinutes: 1, status: .cancelled, authorId: ActorId(), sessionForm: nil
+        )
+
+        #expect(throws: TrainingServiceError.plannedActivityAlreadyLinked) {
+            try coordinator.logActivity(
+                athleteId: athleteId, plannedActivityId: firstMaterialize.plannedActivityId,
+                activityType: firstMaterialize.activityType, title: firstMaterialize.title, startedAt: .now,
+                durationMinutes: 1, status: .cancelled, authorId: ActorId(), sessionForm: nil
+            )
+        }
+        #expect(try trainingService.fetchLoggedActivities(forPlannedActivity: firstMaterialize.plannedActivityId).count == 1)
     }
 }

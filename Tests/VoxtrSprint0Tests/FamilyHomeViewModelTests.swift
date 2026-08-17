@@ -74,6 +74,91 @@ struct FamilyHomeViewModelTests {
         #expect(Set(viewModel.rows.map(\.athleteName)) == ["Oliver", "Emma"])
     }
 
+    /// Activity outcome consistency closeout (item B): Family Home used
+    /// to show ANY resolved outcome as "Completed" (`FamilyHomeRow.isCompleted`'s
+    /// own loose "an outcome was resolved" meaning) — a Cancelled or
+    /// Missed activity displayed as Completed. `FamilyHomeRow.outcomeStatus`
+    /// (backed by the real `LoggedActivity` the row composed through)
+    /// is what the view now reads instead. Two athletes, two different
+    /// outcomes, proves both the correct mapping AND that one athlete's
+    /// outcome is never attributed to another's row.
+    @Test("Family Home composition exposes the real outcome per row — Cancelled/Missed/Completed are never conflated, and never cross athlete boundaries")
+    @MainActor
+    func familyHomeExposesRealOutcomePerAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let oliverWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: oliver.athleteId, weekStart: weekStart)
+        let oliverActivity = try planningService.addPlannedActivity(
+            toWeekPlan: oliverWeekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .individualTraining,
+            title: "Oliver's run", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let emmaWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: emma.athleteId, weekStart: weekStart)
+        let emmaActivity = try planningService.addPlannedActivity(
+            toWeekPlan: emmaWeekPlan.weekPlanId, athleteId: emma.athleteId, activityType: .individualTraining,
+            title: "Emma's swim", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        _ = try trainingService.logActivity(
+            athleteId: oliver.athleteId, plannedActivityId: oliverActivity.plannedActivityId,
+            activityType: .individualTraining, title: "Oliver's run", startedAt: .now,
+            durationMinutes: 40, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: emma.athleteId, plannedActivityId: emmaActivity.plannedActivityId,
+            activityType: .individualTraining, title: "Emma's swim", startedAt: .now,
+            durationMinutes: 1, status: .cancelled
+        )
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [oliver, emma],
+            workspaceId: WorkspaceId(),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext),
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.loadHome()
+
+        func outcomeStatus(forAthleteId athleteId: AthleteId) -> ActivityStatus? {
+            for row in viewModel.rows {
+                if case .planned(let familyRow) = row, familyRow.athleteId == athleteId {
+                    return familyRow.outcomeStatus
+                }
+            }
+            return nil
+        }
+
+        #expect(outcomeStatus(forAthleteId: oliver.athleteId) == .completed)
+        #expect(outcomeStatus(forAthleteId: emma.athleteId) == .cancelled)
+        #expect(TrainingStrings.outcomeLabel(for: .completed) == TrainingStrings.completedLabel)
+        #expect(TrainingStrings.outcomeLabel(for: .cancelled) == TrainingStrings.cancelledLabel)
+        #expect(TrainingStrings.outcomeLabel(for: .missed) == TrainingStrings.missedLabel)
+        // Never fabricated: Cancelled is never Completed.
+        #expect(TrainingStrings.outcomeLabel(for: .cancelled) != TrainingStrings.completedLabel)
+    }
+
     @Test("Home rows are sorted chronologically, with completed activities grouped after upcoming ones")
     @MainActor
     func homeOrderingChronologicalWithCompletedLast() throws {

@@ -93,7 +93,7 @@ public struct FamilyScheduleView: View {
                     subtitle: Self.rowSubtitle(
                         startLocalTime: familyRow.plannedActivity.startLocalTime,
                         location: familyRow.plannedActivity.location,
-                        isCompleted: familyRow.isCompleted
+                        outcomeStatus: familyRow.outcomeStatus
                     )
                 )
             }
@@ -114,7 +114,7 @@ public struct FamilyScheduleView: View {
                     rowContent(
                         athleteName: athleteName,
                         title: suggestion.title,
-                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location, isCompleted: false)
+                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location, outcomeStatus: nil)
                     )
                     Spacer()
                     Text("Recurring")
@@ -156,7 +156,14 @@ public struct FamilyScheduleView: View {
         "\(WeeklyPlanningView.weekdayLabel(for: date.weekday)) · \(date.isoString)"
     }
 
-    private static func rowSubtitle(startLocalTime: LocalTime?, location: String?, isCompleted: Bool) -> String {
+    /// Activity outcome consistency closeout (item B): `outcomeStatus`,
+    /// not a blanket `isCompleted` Bool — a Cancelled or Missed activity
+    /// must never show as Completed here, the same fix already applied
+    /// to Family Home's/Athlete Home's equivalent labels. `nil` (never
+    /// logged, including every recurring suggestion — inherently
+    /// unresolved) appends nothing, matching this function's prior
+    /// behavior for that exact case.
+    private static func rowSubtitle(startLocalTime: LocalTime?, location: String?, outcomeStatus: ActivityStatus?) -> String {
         var parts: [String] = []
         if let startLocalTime {
             parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
@@ -164,8 +171,8 @@ public struct FamilyScheduleView: View {
         if let location, !location.isEmpty {
             parts.append(location)
         }
-        if isCompleted {
-            parts.append("Completed")
+        if let outcomeStatus {
+            parts.append(TrainingStrings.outcomeLabel(for: outcomeStatus))
         }
         return parts.isEmpty ? "Ready to log" : parts.joined(separator: " · ")
     }

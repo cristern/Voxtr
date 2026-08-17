@@ -1349,6 +1349,13 @@ struct Sprint1CoreFlowCompletionTests {
             ),
             onLogged: {}
         )
+        // Activity outcome consistency closeout (item D): the plan has
+        // no duration, so the ViewModel's own canonical edit state must
+        // genuinely be nil — never fabricated to 60. (The View-layer
+        // `OptionalDurationPickerView` is what makes this visible as
+        // "Not set" instead of a misleading pre-selected 60; this
+        // asserts the state it reads from.)
+        #expect(logViewModel.durationMinutes == nil)
         logViewModel.sessionForm = 3
         // durationMinutes left nil — nothing to prefill from, nothing entered.
 
@@ -1356,6 +1363,16 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(logViewModel.errorMessage != nil)
         #expect(logViewModel.didLog == false)
         #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId).isEmpty)
+
+        // Explicitly choosing a value (the "Set duration" tap, then
+        // adjusting) allows the same save to succeed — nil is a valid,
+        // recoverable editing state, not a dead end.
+        logViewModel.durationMinutes = 45
+        #expect(logViewModel.save())
+        #expect(logViewModel.didLog == true)
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.durationMinutes == 45)
     }
 
     @Test("Logging prefills actual duration from the planned duration but the user's changed value is what actually saves — never re-derived from the plan")

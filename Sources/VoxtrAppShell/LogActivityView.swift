@@ -12,23 +12,6 @@ public struct LogActivityView: View {
         _viewModel = State(initialValue: viewModel)
     }
 
-    /// Planned/Logged Activity lifecycle consistency cleanup:
-    /// `DurationPickerView` binds to a non-optional `Int` (the same
-    /// shared component reused everywhere duration is entered — not
-    /// rewritten for this one case). `viewModel.durationMinutes` is
-    /// `Int?` (unset unless the plan prefilled it), so this bridges the
-    /// two: displays a sensible starting value when nothing has been
-    /// entered yet, but only WRITES to `durationMinutes` once the user
-    /// actually interacts with the picker — an untouched nil is exactly
-    /// what `save()`'s own required-for-completed validation is there
-    /// to catch, not something this binding papers over.
-    private var durationMinutesBinding: Binding<Int> {
-        Binding(
-            get: { viewModel.durationMinutes ?? 60 },
-            set: { viewModel.durationMinutes = $0 }
-        )
-    }
-
     public var body: some View {
         NavigationStack {
             Form {
@@ -50,7 +33,40 @@ public struct LogActivityView: View {
                 .accessibilityIdentifier("logActivity.plannedContext")
 
                 Section("How did it go?") {
-                    DurationPickerView(durationMinutes: durationMinutesBinding)
+                    // Activity outcome consistency closeout (item C):
+                    // an explicit, clearly-labelled "Outcome" control —
+                    // the previous "Completed" Toggle gave no visible
+                    // way to discover Missed at all (off just read as
+                    // "not yet marked completed", not as a distinct
+                    // outcome). Persistence is UNCHANGED: `isCompleted`
+                    // still drives `save()`'s own canonical `.completed`/
+                    // `.missed` derivation exactly as before — only the
+                    // control's presentation changed. Cancelled remains
+                    // its own separate action (Activity Detail's "Cancel
+                    // Activity"), never duplicated here; Partially
+                    // Completed stays unexposed — no reachable flow
+                    // produces it yet.
+                    Picker("Outcome", selection: $viewModel.isCompleted) {
+                        Text("Completed").tag(true)
+                        Text("Missed").tag(false)
+                    }
+                    .pickerStyle(.segmented)
+                    .accessibilityIdentifier("logActivity.outcomePicker")
+
+                    // Activity outcome consistency closeout (item D):
+                    // `OptionalDurationPickerView` (below), not a
+                    // `Binding<Int>` bridge defaulting to 60 — that
+                    // bridge made the UI SHOW 60 as though it were the
+                    // current value even when `viewModel.durationMinutes`
+                    // was genuinely nil (no planned duration, nothing
+                    // entered yet), while `save()`'s own validation
+                    // still correctly rejected it — a visible value the
+                    // canonical edit state didn't actually contain. Only
+                    // shown for Completed — Missed never requires or
+                    // asks for duration.
+                    if viewModel.isCompleted {
+                        OptionalDurationPickerView(durationMinutes: $viewModel.durationMinutes)
+                    }
 
                     Picker("RPE", selection: $viewModel.perceivedExertion) {
                         Text("Not set").tag(Int?.none)
@@ -72,9 +88,6 @@ public struct LogActivityView: View {
                         }
                     }
                     .accessibilityIdentifier("logActivity.sessionFormPicker")
-
-                    Toggle("Completed", isOn: $viewModel.isCompleted)
-                        .accessibilityIdentifier("logActivity.completedToggle")
 
                     TextField("Notes", text: $viewModel.notes, axis: .vertical)
                         .accessibilityIdentifier("logActivity.notesField")

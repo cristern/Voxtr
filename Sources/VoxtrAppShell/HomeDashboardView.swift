@@ -262,7 +262,12 @@ public struct HomeDashboardView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing) {
-                        Text(familyHomeRow.isCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
+                        // Activity outcome consistency closeout (item B):
+                        // the real outcome — a Cancelled or Missed
+                        // activity must never show as Completed here,
+                        // the same fix already applied to Family Home's
+                        // equivalent row label.
+                        Text(TrainingStrings.outcomeLabel(for: familyHomeRow.outcomeStatus))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         if familyHomeRow.isFromRecurring {

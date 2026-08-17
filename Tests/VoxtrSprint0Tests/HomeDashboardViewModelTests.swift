@@ -523,6 +523,7 @@ struct HomeDashboardViewModelTests {
             return
         }
         #expect(plannedRowBefore.isCompleted == false)
+        #expect(plannedRowBefore.outcomeStatus == nil)
 
         // Mirrors HomeDashboardView.todayActivityRow's own
         // onActivityLogged wiring exactly.
@@ -550,12 +551,71 @@ struct HomeDashboardViewModelTests {
             return
         }
         #expect(plannedRowAfter.isCompleted == true)
+        #expect(plannedRowAfter.outcomeStatus == .completed)
 
         guard case .loaded(let trainingAfter) = homeDashboardViewModel.todaysTrainingState else {
             Issue.record("Expected .loaded after logging")
             return
         }
         #expect(trainingAfter.first { $0.plannedActivity.plannedActivityId == activity.plannedActivityId }?.isCompleted == true)
+    }
+
+    /// Activity outcome consistency closeout (item B): Athlete Home
+    /// (`HomeDashboardView`) used the same loose `familyHomeRow.isCompleted`
+    /// binary to choose between `TrainingStrings.completedLabel`/
+    /// `notCompletedLabel` — a Cancelled activity displayed as
+    /// Completed. `outcomeStatus` (backed by the real `LoggedActivity`)
+    /// is the fix.
+    @Test("A Cancelled planned activity is exposed with outcomeStatus == .cancelled on HomeDashboardViewModel's canonical read — never .completed")
+    @MainActor
+    func cancelledActivityExposesCancelledOutcomeOnHomeDashboard() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: today, timeZoneId: Self.oslo
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
+            activityType: .individualTraining, title: "Evening swim", startedAt: .now,
+            durationMinutes: 1, status: .cancelled
+        )
+
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            )
+        )
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        guard case .loaded(let rows) = homeDashboardViewModel.todayActivityState,
+              case .planned(let row) = rows.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the cancelled activity")
+            return
+        }
+        // Still "resolved" (an outcome exists — never offered as Log
+        // Activity again)...
+        #expect(row.isCompleted == true)
+        // ...but the REAL outcome is Cancelled, never Completed.
+        #expect(row.outcomeStatus == .cancelled)
+        #expect(TrainingStrings.outcomeLabel(for: row.outcomeStatus) == TrainingStrings.cancelledLabel)
     }
 
     /// Athlete isolation: two athletes, each with their own planned

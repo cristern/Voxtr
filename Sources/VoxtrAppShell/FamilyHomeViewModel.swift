@@ -15,6 +15,39 @@ public struct FamilyHomeRow: Identifiable {
     public let athleteName: String
     public let plannedActivity: PlannedActivity
     public let isCompleted: Bool
+    /// Activity outcome consistency closeout: the exact `LoggedActivity`
+    /// this row resolved to, if any — carried through directly from
+    /// `PlannedActivityCompletion.loggedActivity` (never a second,
+    /// separate lookup). `isCompleted` above only ever meant "an
+    /// outcome was resolved" (any status, including Missed/Cancelled) —
+    /// correct for gating "is there still something to log," but wrong
+    /// for display, which needs the REAL outcome. `outcomeStatus` below
+    /// is what every display consumer must use instead.
+    public let loggedActivity: LoggedActivity?
+
+    /// The canonical outcome — `nil` exactly when nothing has been
+    /// logged yet, matching `isCompleted == false`. Never a second,
+    /// locally-derived flag; mirrors `ActivityDetailViewModel.outcomeStatus`'s
+    /// own exact reasoning for the same problem on that screen.
+    public var outcomeStatus: ActivityStatus? {
+        loggedActivity?.status
+    }
+
+    public init(
+        id: String,
+        athleteId: AthleteId,
+        athleteName: String,
+        plannedActivity: PlannedActivity,
+        isCompleted: Bool,
+        loggedActivity: LoggedActivity? = nil
+    ) {
+        self.id = id
+        self.athleteId = athleteId
+        self.athleteName = athleteName
+        self.plannedActivity = plannedActivity
+        self.isCompleted = isCompleted
+        self.loggedActivity = loggedActivity
+    }
 
     /// Recurring cancel/materialization fix: identifies a
     /// `PlannedActivity` that originated from a recurring definition —

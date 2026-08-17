@@ -355,8 +355,16 @@ public struct FamilyHomeContentView: View {
                     }
                     Spacer()
                     VStack(alignment: .trailing) {
-                        if row.isCompleted {
-                            Text("Completed")
+                        // Activity outcome consistency closeout (item B):
+                        // the real outcome, not a blanket "Completed" for
+                        // any resolved status — a Cancelled or Missed
+                        // activity must never show as Completed here.
+                        // Hidden entirely when unresolved (`outcomeStatus == nil`),
+                        // matching this row's prior behavior for that
+                        // case exactly — `rowSubtitle` below already
+                        // conveys "Ready to log" there.
+                        if let outcomeStatus = row.outcomeStatus {
+                            Text(TrainingStrings.outcomeLabel(for: outcomeStatus))
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -377,15 +385,26 @@ public struct FamilyHomeContentView: View {
     /// comment previously said so.
     private static func rowSubtitle(for row: FamilyHomeRow) -> String {
         var parts: [String] = []
-        if row.isCompleted {
+        // Activity outcome consistency closeout (item B): the planned
+        // duration summary is only meaningful for a GENUINELY completed
+        // outcome — showing "30 min" next to a Cancelled/Missed activity
+        // (even though 30 is the plan's own value, never the placeholder)
+        // would still read as if training happened. Same root cause as
+        // the trailing label above, in this same function.
+        switch row.outcomeStatus {
+        case .completed, .partiallyCompleted:
             if let duration = row.plannedActivity.plannedDurationMinutes {
                 parts.append("\(duration) min")
             }
             parts.append(row.plannedActivity.localDate.isoString)
-        } else if let startTime = row.plannedActivity.startLocalTime {
-            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
-        } else {
-            parts.append("Ready to log")
+        case .missed, .cancelled:
+            parts.append(row.plannedActivity.localDate.isoString)
+        case .none, .scheduled:
+            if let startTime = row.plannedActivity.startLocalTime {
+                parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+            } else {
+                parts.append("Ready to log")
+            }
         }
         if let location = row.plannedActivity.location, !location.isEmpty {
             parts.append(location)
