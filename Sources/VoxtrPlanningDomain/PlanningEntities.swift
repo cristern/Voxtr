@@ -94,6 +94,14 @@ public enum WeekPlanConflictError: Error, Sendable, Equatable {
     /// `alreadyCommitted` above for the reverse transition. A `.draft`
     /// or `.closed` plan is never reopenable through this action.
     case notCommitted
+    /// Reversibility principle (Reopen Planning, review follow-up):
+    /// thrown by `WeekPlan.reopen` when `weekStart` is before the
+    /// caller-supplied `currentWeekStart` — the domain/service-level
+    /// enforcement of "normal Reopen Planning is allowed only for the
+    /// current or a future week," so this invariant cannot be bypassed
+    /// by calling `PlanningService.reopenWeekPlan`/`WeekPlan.reopen`
+    /// directly, skipping `WeeklyPlanningViewModel.canReopenPlanning`.
+    case historicalWeekNotReopenable
 }
 
 public extension WeekPlan {
@@ -134,10 +142,32 @@ public extension WeekPlan {
     /// transition, not a reset: `PlannedActivity` rows belonging to
     /// this WeekPlan are never touched, deleted, or recreated by this
     /// method, since it only ever mutates `WeekPlan`'s own fields.
+    ///
+    /// Review follow-up: `currentWeekStart` is the canonical current
+    /// week's own `LocalDate`, computed by the caller (the app-shell
+    /// layer already owns the one canonical `Date.now`-based Monday-
+    /// Sunday week computation — `TrainingPlanningCoordinationService.weekStart(...)`
+    /// / `WeeklyPlanningViewModel.currentWeekStart()`) and passed in
+    /// here, the same "domain accepts already-computed `LocalDate`
+    /// values, never reads wall-clock time itself" convention
+    /// `PlanningService.deriveSuggestions(from:through:)` already
+    /// establishes. A `WeekPlan` whose own `weekStart` is before
+    /// `currentWeekStart` — a historical, already-past week — throws
+    /// `.historicalWeekNotReopenable`, enforced HERE at the entity/
+    /// domain boundary so it cannot be bypassed by calling this method
+    /// (or `PlanningService.reopenWeekPlan`) directly, skipping
+    /// `WeeklyPlanningViewModel.canReopenPlanning`'s own UI-level gate —
+    /// that gate remains useful presentation gating, but is no longer
+    /// the sole enforcement. Checked after `.committed`/before
+    /// `staleRevision`, mirroring `commit`'s own "status, then
+    /// revision" check order.
     @discardableResult
-    func reopen(expectedRevision: Int, reopenedBy: ActorId) throws -> WeekPlanReopened {
+    func reopen(expectedRevision: Int, reopenedBy: ActorId, currentWeekStart: LocalDate) throws -> WeekPlanReopened {
         guard status == .committed else {
             throw WeekPlanConflictError.notCommitted
+        }
+        guard weekStart >= currentWeekStart else {
+            throw WeekPlanConflictError.historicalWeekNotReopenable
         }
         guard revision == expectedRevision else {
             throw WeekPlanConflictError.staleRevision(expected: expectedRevision, actual: revision)

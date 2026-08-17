@@ -274,6 +274,14 @@ public final class WeeklyPlanningViewModel {
     /// editable without navigating away or waiting on `.onAppear`.
     /// `activities` is untouched — this call never mutates
     /// `PlannedActivity` rows, so there is nothing to reload.
+    ///
+    /// Review follow-up: `canReopenPlanning` above is UI presentation
+    /// gating only, not the authoritative check — passes the SAME
+    /// canonical `Self.currentWeekStart()` `canReopenPlanning` itself
+    /// reads through to `service.reopenWeekPlan`, which forwards it to
+    /// `WeekPlan.reopen` — the actual, non-bypassable enforcement now
+    /// lives at the domain boundary; this call site merely supplies the
+    /// one wall-clock read the domain itself is never allowed to make.
     public func reopenPlanning() {
         guard let weekPlan else { return }
         errorMessage = nil
@@ -281,7 +289,8 @@ public final class WeeklyPlanningViewModel {
             let reopened = try service.reopenWeekPlan(
                 weekPlan.weekPlanId,
                 expectedRevision: weekPlan.revision,
-                reopenedBy: committedByActorId
+                reopenedBy: committedByActorId,
+                currentWeekStart: Self.currentWeekStart()
             )
             self.weekPlan = reopened
         } catch is WeekPlanConflictError {

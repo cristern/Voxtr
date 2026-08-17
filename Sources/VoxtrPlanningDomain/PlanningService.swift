@@ -76,20 +76,30 @@ public final class PlanningService {
     /// Reversibility principle (Reopen Planning): reopens a committed
     /// WeekPlan back to `.draft`. Delegates entirely to `WeekPlan.reopen`
     /// for the actual transition — the exact mirror of `commitWeekPlan`
-    /// above. `WeekPlanConflictError` (stale revision / not committed)
-    /// propagates directly, unwrapped, same as `commitWeekPlan`. Every
-    /// existing `PlannedActivity` under this WeekPlan is completely
-    /// untouched: this call only ever mutates the `WeekPlan` row itself.
+    /// above. `WeekPlanConflictError` (stale revision / not committed /
+    /// historical week) propagates directly, unwrapped, same as
+    /// `commitWeekPlan`. Every existing `PlannedActivity` under this
+    /// WeekPlan is completely untouched: this call only ever mutates
+    /// the `WeekPlan` row itself.
+    ///
+    /// Review follow-up: `currentWeekStart` is required, not defaulted —
+    /// this service never computes "what is the current week" itself
+    /// (that stays the app-shell layer's own canonical, `Date.now`-based
+    /// computation), it only ever forwards whatever `LocalDate` the
+    /// caller supplies straight through to `WeekPlan.reopen`, which is
+    /// where the historical-week check actually lives and cannot be
+    /// bypassed.
     @discardableResult
     public func reopenWeekPlan(
         _ weekPlanId: WeekPlanId,
         expectedRevision: Int,
-        reopenedBy: ActorId
+        reopenedBy: ActorId,
+        currentWeekStart: LocalDate
     ) throws -> WeekPlan {
         guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
         }
-        try weekPlan.reopen(expectedRevision: expectedRevision, reopenedBy: reopenedBy)
+        try weekPlan.reopen(expectedRevision: expectedRevision, reopenedBy: reopenedBy, currentWeekStart: currentWeekStart)
         try repository.save()
         return weekPlan
     }

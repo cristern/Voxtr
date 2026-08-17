@@ -508,21 +508,21 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
-    @Test("canReopenPlanning is the ONLY gate withholding Reopen Planning from a committed historical week — documented explicitly, not left implicit")
+    @Test("canReopenPlanning hides Reopen Planning for a committed historical week, AND reopenPlanning() itself is rejected by the domain if called anyway")
     @MainActor
-    func canReopenPlanningIsTheSoleHistoricalWeekGate() throws {
-        // Per this task's own scope boundary ("do not invent
-        // historical-plan editing semantics"), reopenWeekPlan/WeekPlan.reopen
-        // have no week-recency awareness of their own — exactly like
-        // commitWeekPlan/editPlannedActivity, whose own gating
-        // (`isWeekPlanDraft`) is also UI-level only, never a
-        // domain-level "is this week historical" check. `canReopenPlanning`
-        // is therefore the single, UI-level place a historical week is
-        // kept out of this specific flow — this test documents that
-        // boundary explicitly, rather than an implicit assumption:
-        // the gate correctly reads false, and the underlying service
-        // call, if some future caller bypassed the gate, is NOT itself
-        // historically-aware.
+    func canReopenPlanningReflectsDomainEnforcedHistoricalRejection() throws {
+        // Review follow-up: the historical-week restriction is no
+        // longer a ViewModel/UI-only convenience — WeekPlan.reopen
+        // itself now rejects a historical week via
+        // WeekPlanConflictError.historicalWeekNotReopenable (see
+        // PlanningServiceTests.reopenRejectedForHistoricalWeekAtDomainBoundary
+        // for the direct domain-level proof). This test proves the
+        // SAME rejection surfaces correctly through
+        // WeeklyPlanningViewModel.reopenPlanning() even when called
+        // despite canReopenPlanning already reading false — canReopenPlanning
+        // remains useful presentation gating (so the button is never
+        // shown), but is no longer the only thing standing between a
+        // historical week and being reopened.
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = PlanningRepository(modelContext: container.mainContext)
@@ -533,8 +533,13 @@ struct WeeklyPlanningViewModelTests {
         )
         viewModel.loadOrCreateWeekPlan()
         viewModel.commit()
-
         #expect(viewModel.canReopenPlanning == false)
+
+        // Called anyway, bypassing the UI gate entirely.
+        viewModel.reopenPlanning()
+
+        #expect(viewModel.isCommitted == true)
+        #expect(viewModel.errorMessage != nil)
     }
 }
 

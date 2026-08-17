@@ -392,7 +392,9 @@ struct PlanningServiceTests {
         #expect(weekPlan.status == .committed)
         #expect(weekPlan.revision == 2)
 
-        let reopened = try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+        let reopened = try service.reopenWeekPlan(
+            weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart
+        )
 
         #expect(reopened.status == .draft)
         #expect(reopened.revision == 3)
@@ -413,7 +415,9 @@ struct PlanningServiceTests {
         let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
 
         #expect(throws: WeekPlanConflictError.notCommitted) {
-            try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, reopenedBy: ActorId())
+            try service.reopenWeekPlan(
+                weekPlan.weekPlanId, expectedRevision: 1, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart
+            )
         }
         #expect(weekPlan.status == .draft)
         #expect(weekPlan.revision == 1)
@@ -431,7 +435,9 @@ struct PlanningServiceTests {
         try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
 
         #expect(throws: WeekPlanConflictError.staleRevision(expected: 99, actual: 2)) {
-            try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 99, reopenedBy: ActorId())
+            try service.reopenWeekPlan(
+                weekPlan.weekPlanId, expectedRevision: 99, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart
+            )
         }
         #expect(weekPlan.status == .committed)
         #expect(weekPlan.revision == 2)
@@ -453,7 +459,9 @@ struct PlanningServiceTests {
         )
         try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
 
-        try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+        try service.reopenWeekPlan(
+            weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart
+        )
 
         let activitiesAfter = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
         #expect(activitiesAfter.count == 1)
@@ -476,7 +484,9 @@ struct PlanningServiceTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
         try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
-        try service.reopenWeekPlan(weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId())
+        try service.reopenWeekPlan(
+            weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart
+        )
 
         // Editable again — this would have thrown weekPlanNotDraft while
         // still committed.
@@ -491,6 +501,102 @@ struct PlanningServiceTests {
         let recommitted = try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 3, committedBy: ActorId())
         #expect(recommitted.status == .committed)
         #expect(recommitted.revision == 4)
+    }
+
+    // MARK: - Review follow-up: historical-week reopen is rejected at the domain/service boundary
+
+    /// Closes the exact gap the review flagged: `WeeklyPlanningViewModel.canReopenPlanning`
+    /// alone was the only place "current/future only" was enforced —
+    /// calling `PlanningService.reopenWeekPlan`/`WeekPlan.reopen`
+    /// directly, bypassing that ViewModel entirely, could still reopen
+    /// a committed HISTORICAL week. This test calls the service
+    /// directly, exactly as a bypass would, with a real committed
+    /// historical week (2026-01-05, unambiguously before any real
+    /// "today" this suite could run on) and the actual current
+    /// canonical week supplied as `currentWeekStart` — the same
+    /// `TrainingPlanningCoordinationService.weekStart()` the ViewModel
+    /// itself uses, not a second computation.
+    @Test("Reopening a committed HISTORICAL week is rejected at the service/domain boundary, even when the ViewModel-level gate is bypassed entirely")
+    @MainActor
+    func reopenRejectedForHistoricalWeekAtDomainBoundary() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let historicalWeekStart = LocalDate(year: 2026, month: 1, day: 5)
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: historicalWeekStart)
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        #expect(throws: WeekPlanConflictError.historicalWeekNotReopenable) {
+            try service.reopenWeekPlan(
+                weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(),
+                currentWeekStart: TrainingPlanningCoordinationService.weekStart()
+            )
+        }
+        // Untouched — still committed, same revision.
+        #expect(weekPlan.status == .committed)
+        #expect(weekPlan.revision == 2)
+    }
+
+    @Test("Reopening a committed CURRENT week succeeds when the real canonical current week is supplied")
+    @MainActor
+    func reopenSucceedsForCurrentWeekAtDomainBoundary() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let currentWeekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: currentWeekStart)
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        let reopened = try service.reopenWeekPlan(
+            weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: currentWeekStart
+        )
+
+        #expect(reopened.status == .draft)
+    }
+
+    @Test("Reopening a committed FUTURE week succeeds when the real canonical current week is supplied")
+    @MainActor
+    func reopenSucceedsForFutureWeekAtDomainBoundary() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let currentWeekStart = TrainingPlanningCoordinationService.weekStart()
+        let futureWeekStart = currentWeekStart.adding(days: 14)
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: futureWeekStart)
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        let reopened = try service.reopenWeekPlan(
+            weekPlan.weekPlanId, expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: currentWeekStart
+        )
+
+        #expect(reopened.status == .draft)
+    }
+
+    @Test("WeekPlan.reopen returns a WeekPlanReopened event carrying the exact WeekPlan identity and the post-transition revision")
+    @MainActor
+    func reopenReturnsWeekPlanReopenedEventWithCorrectIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        try service.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: 1, committedBy: ActorId())
+
+        let event = try weekPlan.reopen(expectedRevision: 2, reopenedBy: ActorId(), currentWeekStart: weekPlan.weekStart)
+
+        #expect(event.weekPlanId == weekPlan.weekPlanId)
+        #expect(event.athleteId == athleteId)
+        // The event's own revision is the POST-transition value, matching
+        // WeekPlanCommitted's own established convention for this field.
+        #expect(event.revision == weekPlan.revision)
+        #expect(event.revision == 3)
     }
 }
 
