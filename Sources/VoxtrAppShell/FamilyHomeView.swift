@@ -47,6 +47,12 @@ public struct FamilyHomeView: View {
     public let coachingApplicationService: CoachingApplicationService
     public let athleteRepository: AthleteRepository
     public let athleteFamilyManagementService: AthleteFamilyManagementService
+    /// Recurring reopen stale-Athlete-Home fix (architecture round): the
+    /// one shared instance every `HomeDashboardViewModel`/
+    /// `TrainingReflectionCoordinationService` this app constructs
+    /// ultimately traces back to — passed straight through to both
+    /// branches below.
+    public let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -58,7 +64,8 @@ public struct FamilyHomeView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
-        athleteFamilyManagementService: AthleteFamilyManagementService
+        athleteFamilyManagementService: AthleteFamilyManagementService,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -70,6 +77,7 @@ public struct FamilyHomeView: View {
         self.coachingApplicationService = coachingApplicationService
         self.athleteRepository = athleteRepository
         self.athleteFamilyManagementService = athleteFamilyManagementService
+        self.activityChangeBroadcaster = activityChangeBroadcaster
     }
 
     public var body: some View {
@@ -84,7 +92,8 @@ public struct FamilyHomeView: View {
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
-                athleteManagementViewModel: makeAthleteManagementViewModel()
+                athleteManagementViewModel: makeAthleteManagementViewModel(),
+                activityChangeBroadcaster: activityChangeBroadcaster
             )
         } else {
             NavigationStack {
@@ -115,7 +124,8 @@ public struct FamilyHomeView: View {
                     planningService: planningService,
                     trainingService: trainingService,
                     trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                )
+                ),
+                activityChangeBroadcaster: activityChangeBroadcaster
             ),
             athleteDisplayName: athlete.givenName,
             planningService: planningService,
@@ -127,7 +137,8 @@ public struct FamilyHomeView: View {
             coachingApplicationService: coachingApplicationService,
             athleteId: athlete.athleteId,
             committedByActorId: ActorId(rawValue: family.participant.id),
-            athleteManagementViewModel: makeAthleteManagementViewModel()
+            athleteManagementViewModel: makeAthleteManagementViewModel(),
+            activityChangeBroadcaster: activityChangeBroadcaster
         )
     }
 

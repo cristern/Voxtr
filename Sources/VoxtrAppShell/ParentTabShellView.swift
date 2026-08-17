@@ -47,6 +47,12 @@ public struct ParentTabShellView: View {
     public let coachingApplicationService: CoachingApplicationService
     public let athleteRepository: AthleteRepository
     public let athleteFamilyManagementService: AthleteFamilyManagementService
+    /// Recurring reopen stale-Athlete-Home fix (architecture round): the
+    /// one shared instance for this app run — threaded to the Home tab
+    /// and the Profile tab's own Athlete Overview construction below,
+    /// the only two places in this shell that construct a
+    /// `HomeDashboardViewModel`.
+    public let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -58,7 +64,8 @@ public struct ParentTabShellView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
-        athleteFamilyManagementService: AthleteFamilyManagementService
+        athleteFamilyManagementService: AthleteFamilyManagementService,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -70,6 +77,7 @@ public struct ParentTabShellView: View {
         self.coachingApplicationService = coachingApplicationService
         self.athleteRepository = athleteRepository
         self.athleteFamilyManagementService = athleteFamilyManagementService
+        self.activityChangeBroadcaster = activityChangeBroadcaster
     }
 
     public var body: some View {
@@ -90,7 +98,8 @@ public struct ParentTabShellView: View {
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
-                athleteFamilyManagementService: athleteFamilyManagementService
+                athleteFamilyManagementService: athleteFamilyManagementService,
+                activityChangeBroadcaster: activityChangeBroadcaster
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -179,7 +188,8 @@ public struct ParentTabShellView: View {
                                         planningService: planningService,
                                         trainingService: trainingService,
                                         trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                                    )
+                                    ),
+                                    activityChangeBroadcaster: activityChangeBroadcaster
                                 ),
                                 athleteDisplayName: athlete.givenName,
                                 planningService: planningService,
@@ -196,7 +206,8 @@ public struct ParentTabShellView: View {
                                     participantId: family.participant.id,
                                     athleteRepository: athleteRepository,
                                     athleteFamilyManagementService: athleteFamilyManagementService
-                                )
+                                ),
+                                activityChangeBroadcaster: activityChangeBroadcaster
                             )
                         )
                     }

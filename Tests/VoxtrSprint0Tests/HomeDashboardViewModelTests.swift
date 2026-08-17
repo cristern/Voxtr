@@ -898,4 +898,147 @@ struct HomeDashboardViewModelTests {
         // anything remembered from a previous call.
         #expect(HomeDashboardRowResolver.recurringSuggestion(forId: suggestion.id, in: emptyState) == nil)
     }
+
+    // MARK: - Recurring reopen stale-Athlete-Home fix (architecture round)
+
+    /// Reproduces the exact TestFlight-reported shape end to end, and
+    /// proves the shared-broadcaster redesign closes it regardless of
+    /// origin: a recurring occurrence is materialized+cancelled, then
+    /// reopened through a SEPARATE `TrainingReflectionCoordinationService`
+    /// instance — never through this `HomeDashboardViewModel`'s own
+    /// `onActivityLogged` wiring, standing in for "the mutation happened
+    /// via Family Home's own row, Family Schedule, or Daily Training
+    /// nested under this very screen" — the mutation origin never
+    /// determines whether this ViewModel goes stale, since both
+    /// coordinator instances share the SAME `AthleteActivityChangeBroadcaster`,
+    /// exactly as `CompositionRoot` wires it in production. Also proves:
+    /// same materialized `PlannedActivity` identity, no linked
+    /// `LoggedActivity`, recurring series/provenance unchanged, and no
+    /// duplicate recurring suggestion/materialization.
+    @Test("A HomeDashboardViewModel already showing a cancelled recurring occurrence becomes canonical unresolved state after a reopen triggered outside its own navigation subtree")
+    @MainActor
+    func recurringReopenOutsideOwnSubtreeInvalidatesLiveViewModel() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+
+        // The ONE shared broadcaster, exactly as CompositionRoot builds
+        // it once and hands it to every TrainingReflectionCoordinationService
+        // AND every HomeDashboardViewModel this app run constructs.
+        let activityChangeBroadcaster = AthleteActivityChangeBroadcaster()
+
+        // The coordinator this test's "Athlete Home" screen itself would
+        // use for its OWN navigation (unused for the mutation below —
+        // the reopen deliberately goes through a DIFFERENT instance).
+        let athleteHomeCoordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService,
+            activityChangeBroadcaster: activityChangeBroadcaster
+        )
+        // A SEPARATE coordinator instance, standing in for whichever
+        // OTHER screen actually performs the mutation — sharing the same
+        // TrainingService/ReflectionService (same canonical persistence)
+        // and the same broadcaster, but never the same object identity
+        // as athleteHomeCoordinator.
+        let otherScreenCoordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService,
+            activityChangeBroadcaster: activityChangeBroadcaster
+        )
+
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let recurringActivity = try planningService.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Hockey Camp", activityType: .teamTraining,
+            weekdays: [today.weekday], timeZoneId: Self.oslo,
+            effectiveStartDate: LocalDate(year: 2020, month: 1, day: 1),
+            effectiveEndDate: LocalDate(year: 2030, month: 1, day: 1)
+        )
+        let suggestions = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
+        let suggestion = try #require(suggestions.first)
+
+        // "Cancel this occurrence" (RecurringOccurrencePreviewView.cancelOccurrence()):
+        // materialize, then link a .cancelled LoggedActivity — through
+        // whichever coordinator; persistence is canonical regardless.
+        let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        let cancelResult = try otherScreenCoordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
+            activityType: materialized.activityType, title: materialized.title, startedAt: .now,
+            durationMinutes: 1, status: .cancelled, authorId: ActorId(), sessionForm: nil
+        )
+
+        // Athlete Home: constructed WITH the shared broadcaster, so its
+        // HomeDashboardViewModel subscribes for this athleteId at
+        // construction — matching production's
+        // FamilyHomeContentView.athleteOverview(for:)/HomeDashboardView's
+        // own "Manage Athletes" sheet/ParentTabShellView's Profile tab,
+        // every one of which now passes activityChangeBroadcaster
+        // through.
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            ),
+            activityChangeBroadcaster: activityChangeBroadcaster
+        )
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        guard case .loaded(let rowsAfterCancel) = homeDashboardViewModel.todayActivityState,
+              case .planned(let cancelledRow) = rowsAfterCancel.first(where: { $0.id == materialized.plannedActivityId.rawValue.uuidString }) else {
+            Issue.record("Expected a .planned cancelled row on HomeDashboardViewModel")
+            return
+        }
+        #expect(cancelledRow.outcomeStatus == .cancelled)
+
+        // The reopen: through otherScreenCoordinator — a DIFFERENT
+        // TrainingReflectionCoordinationService instance than
+        // athleteHomeCoordinator (which HomeDashboardViewModel's own
+        // navigation would use) — never through
+        // homeDashboardViewModel.loadTodaysTraining()/loadTodayActivityRows()
+        // directly, and never through athleteHomeCoordinator at all.
+        try otherScreenCoordinator.reopenCancelledActivity(
+            cancelResult.loggedActivity.loggedActivityId, athleteId: athleteId
+        )
+        // athleteHomeCoordinator exists only to prove it was never the
+        // one that performed this mutation.
+        _ = athleteHomeCoordinator
+
+        // No explicit reload call on homeDashboardViewModel anywhere
+        // above or below this line — the broadcaster already invalidated
+        // it synchronously, inside the call to reopenCancelledActivity.
+        guard case .loaded(let freshRows) = homeDashboardViewModel.todayActivityState,
+              case .planned(let freshRow) = freshRows.first(where: { $0.id == materialized.plannedActivityId.rawValue.uuidString }) else {
+            Issue.record("Expected the fresh .planned row after the broadcaster's automatic reload")
+            return
+        }
+        // 7: same materialized PlannedActivity identity throughout.
+        #expect(freshRow.plannedActivity.plannedActivityId == materialized.plannedActivityId)
+        // No linked LoggedActivity — genuinely unresolved again.
+        #expect(freshRow.outcomeStatus == nil)
+        #expect(freshRow.isCompleted == false)
+        // Recurring series/provenance untouched.
+        #expect(freshRow.isFromRecurring == true)
+        #expect(freshRow.plannedActivity.externalSourceType == RecurringPlannedActivity.externalSourceType)
+        let stillEnabled = try planningService.fetchRecurringPlannedActivity(byId: recurringActivity.recurringPlannedActivityId)
+        #expect(stillEnabled?.isEnabled == true)
+        // 8: exactly one visible canonical row for this occurrence —
+        // never a duplicate recurring suggestion/materialization.
+        #expect(freshRows.filter { $0.id == materialized.plannedActivityId.rawValue.uuidString }.count == 1)
+        #expect(freshRows.contains { row in
+            if case .recurringOccurrence(_, _, let s) = row { return s.id == suggestion.id }
+            return false
+        } == false)
+    }
 }

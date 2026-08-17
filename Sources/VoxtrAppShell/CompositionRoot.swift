@@ -119,13 +119,22 @@ public final class CompositionRoot {
         )
         container.register(TrainingPlanningCoordinationService.self) { trainingPlanningCoordinationService }
 
+        // Recurring reopen stale-Athlete-Home fix (architecture round):
+        // the ONE shared invalidation fan-out for this app run, built
+        // before trainingReflectionCoordinationService below so it can
+        // be handed to it directly. See AthleteActivityChangeBroadcaster's
+        // own doc comment for the full contract.
+        let activityChangeBroadcaster = AthleteActivityChangeBroadcaster()
+        container.register(AthleteActivityChangeBroadcaster.self) { activityChangeBroadcaster }
+
         // VX-022 (Session Form): the one place TrainingService and
         // ReflectionService are used together to log an activity with
         // its optional Session Form value — same placement rationale as
         // trainingPlanningCoordinationService immediately above.
         let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
             trainingService: container.resolve(TrainingService.self),
-            reflectionService: container.resolve(ReflectionService.self)
+            reflectionService: container.resolve(ReflectionService.self),
+            activityChangeBroadcaster: activityChangeBroadcaster
         )
         container.register(TrainingReflectionCoordinationService.self) { trainingReflectionCoordinationService }
 

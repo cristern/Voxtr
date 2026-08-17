@@ -100,6 +100,15 @@ public struct FamilyHomeContentView: View {
     private let weeklyReflectionService: WeeklyReflectionService
     private let coachingApplicationService: CoachingApplicationService
     private let athleteManagementViewModel: AthleteFamilyManagementViewModel
+    /// Recurring reopen stale-Athlete-Home fix (architecture round):
+    /// passed straight through to every `HomeDashboardViewModel` this
+    /// view constructs (`athleteOverview(for:)` below) so each one
+    /// subscribes to canonical activity-lifecycle mutations regardless
+    /// of which screen performs them — this view's own
+    /// `.recurringOccurrence`/`.activity` destinations no longer need to
+    /// know `HomeDashboardViewModelCache` exists to keep an
+    /// already-mounted Athlete Home current.
+    private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
 
     public init(
         family: RestoredFamily,
@@ -111,7 +120,8 @@ public struct FamilyHomeContentView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
-        athleteManagementViewModel: AthleteFamilyManagementViewModel
+        athleteManagementViewModel: AthleteFamilyManagementViewModel,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     ) {
         self.family = family
         self.planningService = planningService
@@ -122,6 +132,7 @@ public struct FamilyHomeContentView: View {
         self.weeklyReflectionService = weeklyReflectionService
         self.coachingApplicationService = coachingApplicationService
         self.athleteManagementViewModel = athleteManagementViewModel
+        self.activityChangeBroadcaster = activityChangeBroadcaster
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -474,7 +485,8 @@ public struct FamilyHomeContentView: View {
                         planningService: planningService,
                         trainingService: trainingService,
                         trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                    )
+                    ),
+                    activityChangeBroadcaster: activityChangeBroadcaster
                 )
             },
             athleteDisplayName: athlete.givenName,
@@ -487,7 +499,8 @@ public struct FamilyHomeContentView: View {
             coachingApplicationService: coachingApplicationService,
             athleteId: athlete.athleteId,
             committedByActorId: ActorId(rawValue: family.participant.id),
-            athleteManagementViewModel: athleteManagementViewModel
+            athleteManagementViewModel: athleteManagementViewModel,
+            activityChangeBroadcaster: activityChangeBroadcaster
         )
     }
 

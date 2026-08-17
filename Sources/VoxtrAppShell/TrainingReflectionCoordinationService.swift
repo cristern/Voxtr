@@ -109,10 +109,25 @@ public struct LoggedActivityDetail {
 public final class TrainingReflectionCoordinationService {
     private let trainingService: TrainingService
     private let reflectionService: ReflectionService
+    /// Recurring reopen stale-Athlete-Home fix (architecture round): the
+    /// single fan-out point told "athlete X's canonical activity state
+    /// changed" after each of this type's three mutating methods below
+    /// succeeds — never on a thrown failure, and never for the Session
+    /// Form sub-write alone (see each call site's own placement).
+    /// Optional and defaulted to `nil` so the many existing construction
+    /// sites (production and test) that predate this feature don't all
+    /// need updating — this coordinator's own mutations remain fully
+    /// correct with no broadcaster present, they simply notify no one.
+    private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster?
 
-    public init(trainingService: TrainingService, reflectionService: ReflectionService) {
+    public init(
+        trainingService: TrainingService,
+        reflectionService: ReflectionService,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil
+    ) {
         self.trainingService = trainingService
         self.reflectionService = reflectionService
+        self.activityChangeBroadcaster = activityChangeBroadcaster
     }
 
     /// Logs a completed activity through the canonical `TrainingService.logActivity`
@@ -156,6 +171,11 @@ public final class TrainingReflectionCoordinationService {
             source: source,
             notes: notes
         )
+        // The canonical write already succeeded — broadcast now,
+        // regardless of the Session Form sub-write's own outcome below
+        // (it never affects outcomeStatus/isCompleted, the fields live
+        // TodayActivityRow/FamilyHomeRow presentation actually reads).
+        activityChangeBroadcaster?.activityChanged(for: athleteId)
 
         guard let sessionForm else {
             return LoggedActivityWithSessionForm(loggedActivity: loggedActivity, sessionFormOutcome: .notRequested)
@@ -266,6 +286,10 @@ public final class TrainingReflectionCoordinationService {
             durationMinutes: durationMinutes,
             perceivedExertion: perceivedExertion
         )
+        // Same placement reasoning as logActivity above: the canonical
+        // duration/RPE write already succeeded, independent of the
+        // Form sub-write below.
+        activityChangeBroadcaster?.activityChanged(for: athleteId)
 
         if let existingReflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivityId) {
             do {
@@ -307,5 +331,9 @@ public final class TrainingReflectionCoordinationService {
     /// Session Form, so there is nothing here to clean up).
     public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
         try trainingService.reopenCancelledActivity(loggedActivityId, athleteId: athleteId)
+        // Only reached once the delete above has already succeeded — a
+        // thrown .loggedActivityNotFound/.activityNotCancelled never
+        // reaches this line, so a failed reopen broadcasts nothing.
+        activityChangeBroadcaster?.activityChanged(for: athleteId)
     }
 }

@@ -73,7 +73,7 @@ public enum DailyFocusLoadState {
 /// this type has ever had.
 @MainActor
 @Observable
-public final class HomeDashboardViewModel {
+public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber {
     public private(set) var todaysTrainingState: TodaysTrainingLoadState = .loading
     public private(set) var todayActivityState: TodayActivityLoadState = .loading
     public private(set) var coachingSummaryState: CoachingPresentationLoadState = .loading
@@ -109,7 +109,8 @@ public final class HomeDashboardViewModel {
         athleteId: AthleteId,
         athleteDisplayName: String = "",
         weekStart: LocalDate,
-        todayActivityComposer: TodayActivityComposer? = nil
+        todayActivityComposer: TodayActivityComposer? = nil,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil
     ) {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.coachingPresentationProvider = coachingPresentationProvider
@@ -117,6 +118,29 @@ public final class HomeDashboardViewModel {
         self.athleteDisplayName = athleteDisplayName
         self.weekStart = weekStart
         self.todayActivityComposer = todayActivityComposer
+        // Recurring reopen stale-Athlete-Home fix (architecture round):
+        // subscribes to the SAME shared broadcaster
+        // TrainingReflectionCoordinationService notifies after a
+        // successful canonical mutation, regardless of which screen
+        // performed it — Family Home's own rows, Family Schedule, Daily
+        // Training (including nested under this very screen), or this
+        // screen's own navigation. Optional/defaulted so existing
+        // construction sites and tests that predate this feature are
+        // unaffected; without one, this instance simply never learns
+        // about a mutation it didn't itself trigger via its own
+        // onActivityLogged wiring, exactly its pre-existing behavior.
+        activityChangeBroadcaster?.subscribe(athleteId: athleteId, self)
+    }
+
+    /// `AthleteActivityChangeSubscriber` conformance: reread canonical
+    /// state through the exact same two calls this screen's own
+    /// `onActivityLogged` wiring already makes — never a second,
+    /// broadcaster-specific reload path. Coaching is deliberately not
+    /// reloaded here either, matching every existing `onActivityLogged`
+    /// closure in this codebase, none of which reload coaching.
+    public func athleteActivityDidChange() {
+        loadTodaysTraining()
+        loadTodayActivityRows()
     }
 
     public func loadTodayActivityRows() {

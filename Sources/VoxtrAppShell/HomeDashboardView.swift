@@ -132,6 +132,12 @@ public struct HomeDashboardView: View {
     private let athleteId: AthleteId
     private let committedByActorId: ActorId
     private let athleteManagementViewModel: AthleteFamilyManagementViewModel
+    /// Recurring reopen stale-Athlete-Home fix (architecture round):
+    /// threaded through only to pass to the "Manage Athletes" sheet's
+    /// own `HomeDashboardViewModel` construction below — this screen's
+    /// own `viewModel` above already subscribed with whatever broadcaster
+    /// its own constructor received.
+    private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -146,7 +152,8 @@ public struct HomeDashboardView: View {
         coachingApplicationService: CoachingApplicationService,
         athleteId: AthleteId,
         committedByActorId: ActorId,
-        athleteManagementViewModel: AthleteFamilyManagementViewModel
+        athleteManagementViewModel: AthleteFamilyManagementViewModel,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -160,6 +167,7 @@ public struct HomeDashboardView: View {
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
         self.athleteManagementViewModel = athleteManagementViewModel
+        self.activityChangeBroadcaster = activityChangeBroadcaster
     }
 
     public var body: some View {
@@ -196,7 +204,8 @@ public struct HomeDashboardView: View {
                                     planningService: planningService,
                                     trainingService: trainingService,
                                     trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                                )
+                                ),
+                                activityChangeBroadcaster: activityChangeBroadcaster
                             ),
                             athleteDisplayName: athlete.givenName,
                             planningService: planningService,
@@ -208,7 +217,8 @@ public struct HomeDashboardView: View {
                             coachingApplicationService: coachingApplicationService,
                             athleteId: athlete.athleteId,
                             committedByActorId: committedByActorId,
-                            athleteManagementViewModel: athleteManagementViewModel
+                            athleteManagementViewModel: athleteManagementViewModel,
+                            activityChangeBroadcaster: activityChangeBroadcaster
                         ))
                     }
                 )
