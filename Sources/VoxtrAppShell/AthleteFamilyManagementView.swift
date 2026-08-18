@@ -310,7 +310,19 @@ struct AthleteSettingsView: View {
             // shown and changed directly here rather than behind a
             // second navigation push (see this screen's own doc
             // comment for why).
-            Section("Settings") {
+            //
+            // Codemagic compile fix: `Section("Settings") { ... }
+            // footer: { ... }` does not match any real SwiftUI
+            // `Section` initializer — the `LocalizedStringKey`/`String`
+            // title convenience initializer has no footer-accepting
+            // overload; only the closures-only `header:`/`footer:`
+            // form does. Fixed by supplying `Text("Settings")` as an
+            // explicit `header:` closure instead of a positional
+            // String, matching the exact `Section { content } footer:
+            // { footer }` shape `FamilyHomeContentView.swift`'s
+            // reflection section already uses successfully, with a
+            // `header:` closure added.
+            Section {
                 Picker("Development stage", selection: developmentStageBinding) {
                     Text("Parent-led").tag(DevelopmentStage.parentLed)
                     Text("Shared ownership").tag(DevelopmentStage.sharedOwnership)
@@ -329,6 +341,8 @@ struct AthleteSettingsView: View {
                     set: { sleepSettingsViewModel.setTrackingEnabled($0) }
                 ))
                 .accessibilityIdentifier("athleteSettings.sleepToggle.\(athlete.id.uuidString)")
+            } header: {
+                Text("Settings")
             } footer: {
                 Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept.")
             }
