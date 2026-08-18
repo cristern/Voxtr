@@ -215,8 +215,20 @@ public struct AthleteFamilyManagementView: View {
 /// place — is reflected here automatically on return, with no manual
 /// refresh/reload needed). Development Stage moved OUT of this card —
 /// it is configuration, not identity, and now sits in its own row at
-/// the same level as Sleep (see the doc comment on that row below for
-/// why it still opens the same edit sheet under the hood).
+/// the same level as Sleep.
+///
+/// Round 9 review correction: Development Stage first reused the full
+/// `AthleteFormView` sheet (same screen the Profile card opens),
+/// which wrongly exposed identity-editing fields from what's meant to
+/// be a pure configuration entry point — Profile identity data vs.
+/// athlete configuration is an intentional distinction, not one this
+/// row should blur. It now pushes `AthleteDevelopmentStageView`
+/// instead — the smallest focused edit surface for
+/// `AthleteProfile.developmentStage` alone, reusing the exact same
+/// `editAthlete(_:)` mutation/service path (see that view's own doc
+/// comment) rather than a new model or a changed mutation contract.
+/// `AthleteFormView` itself now shows only Name/Family name/Birth
+/// date, for both this hub's Profile card and Add Athlete.
 ///
 /// Each concept gets its own `Form` `Section`, Archive last and
 /// visually separated — this is deliberate so a future concept (e.g.
@@ -263,32 +275,13 @@ struct AthleteSettingsView: View {
 
             // Configuration — deliberately separate from the identity
             // facts above (see this hub's own doc comment). Development
-            // Stage has no dedicated edit screen of its own; the
-            // smallest existing canonical mechanism that already
-            // supports editing it is the very same `AthleteFormView`
-            // the Profile card above opens, so this row reuses that
-            // sheet rather than inventing a new, separate
-            // Development-Stage-only edit surface this round wasn't
-            // asked to build. Reported as a known tradeoff, not a
-            // silent shortcut: opening either row currently shows the
-            // same full form.
+            // Stage pushes its own small, focused edit surface — never
+            // the Profile card's identity-editing form.
             Section {
-                Button {
-                    viewModel.prefill(from: athlete)
-                    isPresentingForm = true
-                } label: {
-                    HStack {
-                        Text("Development stage")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                    }
-                    .contentShape(Rectangle())
+                NavigationLink("Development stage") {
+                    AthleteDevelopmentStageView(viewModel: viewModel, athlete: athlete)
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("athleteSettings.developmentStageButton.\(athlete.id.uuidString)")
+                .accessibilityIdentifier("athleteSettings.developmentStageLink.\(athlete.id.uuidString)")
 
                 NavigationLink("Sleep") {
                     sleepSettingsDestination(athlete)
@@ -341,6 +334,71 @@ enum AthleteBirthDateFormatter {
     }
 }
 
+/// Round 9 review correction: the smallest focused edit surface for
+/// the existing canonical `AthleteProfile.developmentStage` — a single
+/// `Picker`, nothing else. No new model, no new service method, no
+/// change to `DevelopmentStage` semantics: this reuses the exact same
+/// `AthleteFamilyManagementViewModel.editAthlete(_:)` mutation/service
+/// path `AthleteFormView` already uses. `prefill(from:)` (called
+/// `onAppear`) captures the athlete's CURRENT Name/Family name/Birth
+/// date/Preferred name into that shared ViewModel form state, so
+/// selecting a new stage and submitting resubmits every other field
+/// unchanged — only Development Stage actually changes, matching
+/// `AthleteFormView`'s own established "prefill, then submit the whole
+/// record" mechanism, just exposed through a one-field screen.
+///
+/// No own `NavigationStack` — designed to be pushed, matching
+/// `sleepSettingsDestination`'s own destination shape, never sheeted
+/// (which would nest a second `NavigationStack` inside `AthleteFormView`'s
+/// own). Commits immediately on selection, no separate Save action —
+/// the same "settings row commits immediately" convention
+/// `AthleteSleepSettingsView`'s tracking Toggle already establishes,
+/// rather than inventing a second edit-flow shape.
+struct AthleteDevelopmentStageView: View {
+    @Bindable var viewModel: AthleteFamilyManagementViewModel
+    let athlete: AthleteProfile
+
+    var body: some View {
+        Form {
+            if let errorMessage = viewModel.errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("athleteDevelopmentStage.errorMessage")
+                }
+            }
+            Section {
+                Picker("Development stage", selection: developmentStageBinding) {
+                    Text("Parent-led").tag(DevelopmentStage.parentLed)
+                    Text("Shared ownership").tag(DevelopmentStage.sharedOwnership)
+                    Text("Guided independence").tag(DevelopmentStage.guidedIndependence)
+                    Text("Athlete-led").tag(DevelopmentStage.athleteLed)
+                }
+                .accessibilityIdentifier("athleteDevelopmentStage.picker")
+            }
+        }
+        .navigationTitle("Development Stage")
+        .onAppear {
+            viewModel.prefill(from: athlete)
+        }
+    }
+
+    /// Setting this binding both updates the shared form state AND
+    /// commits it via `editAthlete(_:)` in the same action — `prefill`
+    /// (called `onAppear`, a plain property assignment) never goes
+    /// through this binding's setter, so only a genuine user selection
+    /// triggers a save.
+    private var developmentStageBinding: Binding<DevelopmentStage> {
+        Binding(
+            get: { viewModel.developmentStage },
+            set: { newValue in
+                viewModel.developmentStage = newValue
+                viewModel.editAthlete(athlete)
+            }
+        )
+    }
+}
+
 /// The create/edit form itself — one form, reused for both, matching
 /// this project's established pattern (e.g.
 /// `RecurringActivityFormView`) of reusing one form's fields for add
@@ -362,15 +420,19 @@ enum AthleteBirthDateFormatter {
 /// underlying `preferredName` column itself is retained as
 /// technical/domain cleanup debt — reported, not touched, this round.
 ///
-/// This form is also reused, unchanged, as the destination for BOTH
-/// the athlete configuration hub's "Profile" card AND its "Development
-/// stage" row (see `AthleteSettingsView` above) — there is no separate,
-/// dedicated Development-Stage-only edit screen, and this round's
-/// instructions explicitly call for reusing "the smallest existing
-/// canonical presentation/edit pattern if already supported" rather
-/// than inventing one. This is a deliberate, reported tradeoff (see
-/// this task's delivery report): opening either entry point currently
-/// shows this same full form, Development Stage picker included.
+/// Round 9 review correction: Development Stage no longer reuses this
+/// form — it has its own focused edit surface,
+/// `AthleteDevelopmentStageView` (see that type's own doc comment),
+/// reached from the configuration hub's separate "Development stage"
+/// row. This form is now exclusively Name/Family name/Birth date —
+/// the athlete configuration hub's Profile card opens exactly this,
+/// nothing more — for both Add Athlete and Edit Athlete (a newly
+/// added athlete keeps whatever `developmentStage` the shared
+/// ViewModel form state currently holds, i.e. `resetForm()`'s
+/// `.parentLed` default, changeable afterward through the hub's own
+/// Development Stage row — this form was never the only place that
+/// could be set, and removing it here is what "Profile card opens
+/// only identity fields" requires).
 struct AthleteFormView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let editingAthlete: AthleteProfile?
@@ -394,13 +456,6 @@ struct AthleteFormView: View {
                         .accessibilityIdentifier("athleteManagement.familyNameField")
                     DatePicker("Birth date", selection: $viewModel.birthDate, displayedComponents: .date)
                         .accessibilityIdentifier("athleteManagement.birthDatePicker")
-                    Picker("Development stage", selection: $viewModel.developmentStage) {
-                        Text("Parent-led").tag(DevelopmentStage.parentLed)
-                        Text("Shared ownership").tag(DevelopmentStage.sharedOwnership)
-                        Text("Guided independence").tag(DevelopmentStage.guidedIndependence)
-                        Text("Athlete-led").tag(DevelopmentStage.athleteLed)
-                    }
-                    .accessibilityIdentifier("athleteManagement.developmentStagePicker")
                 }
             }
             .navigationTitle(editingAthlete == nil ? "Add Athlete" : "Edit Athlete")
