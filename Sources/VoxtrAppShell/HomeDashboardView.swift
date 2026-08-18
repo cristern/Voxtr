@@ -43,12 +43,20 @@ func homeDashboardDebugLog(_ message: @autoclosure () -> String) {}
 /// this sprint — only their position in this list changed.
 ///
 /// Every section here reuses an already-existing destination or
-/// service — `WeeklyPlanningView`/`DailyTrainingView`/`WeeklyReviewView`
-/// are exactly the same screens `FamilyHomeView` already linked to,
-/// constructed the same way. This view adds no new navigation
-/// destinations, only a new place to reach the existing ones from,
-/// plus two small summaries (today's training, coaching) built purely
-/// from what `HomeDashboardViewModel` already loaded.
+/// service — `WeeklyReviewView` (via the Coaching summary) is exactly
+/// the same screen `FamilyHomeView` already links to, constructed the
+/// same way. This view adds no new navigation destinations, only two
+/// small summaries (today's activities, coaching) built purely from
+/// what `HomeDashboardViewModel` already loaded.
+///
+/// Athlete Home "Now" restructure round: this screen no longer links
+/// to `WeeklyPlanningView`/`DailyTrainingView` at all — both permanent
+/// "menu" rows into Plan/Training's own dedicated tabs were removed
+/// (see `todaySection`'s and the removed `planningSection`'s own doc
+/// comments) in favor of showing today's actual activity content
+/// directly. Neither destination was changed or made unreachable —
+/// both keep their own independent construction site in
+/// `ParentTabShellView`.
 ///
 /// TestFlight regression fix (stale mounted Athlete Home after Log/Cancel):
 /// `todayActivityRow(_:)`'s `.planned`/`.recurringOccurrence` cases used
@@ -87,7 +95,14 @@ enum HomeDashboardDestination: Hashable {
     /// (from the Sleep card) and the morning prompt's own "log now"
     /// action; `LocalDate` is `Hashable`, so no wrapper id is needed.
     case sleepCapture(localDate: LocalDate)
-    case sleepHistory
+    // Athlete Home "Now" restructure round (Part C, Sleep compaction):
+    // `.sleepHistory` and its `sleepHistoryDestination` view were
+    // removed together with the standalone "Sleep History" row that
+    // was their only trigger in this file — see `sleepSection`'s own
+    // doc comment. `SleepHistoryView` itself is untouched and remains
+    // reachable via Family Home's own separate "Sleep History" entry
+    // point (`FamilyHomeContentView`), so this is a same-file
+    // dead-code removal, not a destination removed from the app.
 }
 
 /// Resolves a `HomeDashboardDestination` against a `TodayActivityLoadState`
@@ -131,6 +146,16 @@ public struct HomeDashboardView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Athlete Home "Now" restructure round: this property is no
+    /// longer read anywhere in this file's body — its only use was
+    /// constructing the now-removed "Daily Training" `NavigationLink`'s
+    /// destination (see `todaySection`'s doc comment). Left in the
+    /// initializer deliberately rather than removed: dropping it would
+    /// change this view's public `init` signature, which would require
+    /// editing its one construction site in `FamilyHomeContentView.swift`
+    /// — out of this round's explicit scope ("Do not change: Family
+    /// Home"). Reported as follow-up cleanup, not silently expanded
+    /// into.
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
@@ -145,9 +170,13 @@ public struct HomeDashboardView: View {
     /// its own constructor received.
     private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     /// VX-023 (Sleep V1): threaded through to construct
-    /// `SleepCaptureViewModel`/`SleepHistoryViewModel` at this screen's
-    /// two Sleep navigation destinations, and to the "Manage Athletes"
-    /// sheet's own nested `HomeDashboardViewModel` construction below.
+    /// `SleepCaptureViewModel` at this screen's Sleep capture
+    /// destination, and to the "Manage Athletes" sheet's own nested
+    /// `HomeDashboardViewModel`/`AthleteSleepSettingsViewModel`
+    /// construction below. Athlete Home "Now" restructure round: this
+    /// screen's separate Sleep History destination/link was removed
+    /// (see `sleepSection`'s own doc comment) — only one Sleep
+    /// navigation destination remains here now.
     private let sleepCoordinationService: SleepCoordinationService
     /// VX-023: threaded through only to pass to the "Manage Athletes"
     /// sheet's own nested `HomeDashboardViewModel` construction below —
@@ -191,12 +220,19 @@ public struct HomeDashboardView: View {
 
     public var body: some View {
         Form {
-            welcomeSection
+            // Athlete Home "Now" restructure round: target hierarchy is
+            // Today, Sleep, existing contextual Coaching content,
+            // Reflection lower — see this round's own doc comments on
+            // `todaySection`/`sleepSection` for what changed in each.
+            // `DailyQuoteView()` and `coachingSection` are unmodified by
+            // this round and keep their prior relative position
+            // (immediately adjacent to each other) — neither is named
+            // in this round's approved hierarchy, so neither was moved
+            // or redesigned, only the sections around them.
+            todaySection
             sleepSection
-            trainingSection
             DailyQuoteView()
             coachingSection
-            planningSection
             reflectionSection
         }
         .navigationTitle("\(athleteDisplayName) Home")
@@ -281,8 +317,6 @@ public struct HomeDashboardView: View {
                 }
             case .sleepCapture(let localDate):
                 sleepCaptureDestination(localDate: localDate)
-            case .sleepHistory:
-                sleepHistoryDestination
             }
         }
         .onAppear {
@@ -294,13 +328,25 @@ public struct HomeDashboardView: View {
         }
     }
 
-    /// VX-023 (Sleep V1): compact card ABOVE Reflection — "enabled +
-    /// today has Sleep -> 'Sleep / 4/5'; enabled + missing -> 'Sleep /
-    /// Sleep not logged yet'; disabled -> no card at all." Tapping opens
-    /// the SAME canonical Sleep capture used everywhere else (today's
+    /// VX-023 (Sleep V1): compact card — "enabled + today has Sleep ->
+    /// 'Sleep / 4/5'; enabled + missing -> 'Sleep / Sleep not logged
+    /// yet'; disabled -> no card at all." Tapping opens the SAME
+    /// canonical Sleep capture used everywhere else (today's
     /// `LocalDate`). The morning in-app prompt (below) is a SEPARATE,
     /// additional element — this card itself never changes shape based
     /// on prompt eligibility.
+    ///
+    /// Athlete Home "Now" restructure round (Part C): this used to be
+    /// followed by a second, separate "Sleep History" row/link. Removed
+    /// — "one compact Sleep row/card only" per that round's approved
+    /// direction. The remaining "Sleep" row's own destination is
+    /// UNCHANGED (still today's `.sleepCapture`, exactly as before);
+    /// only the extra row disappeared. `SleepHistoryView` itself,
+    /// `SleepHistoryViewModel`, and Sleep history semantics are
+    /// untouched — Family Home still links to Sleep History directly
+    /// (`FamilyHomeContentView`'s own separate entry point), so the
+    /// full history list remains reachable in the app; it is simply no
+    /// longer duplicated as a second row on this screen.
     @ViewBuilder
     private var sleepSection: some View {
         switch viewModel.sleepState {
@@ -344,10 +390,6 @@ public struct HomeDashboardView: View {
                     }
                     .accessibilityIdentifier("homeDashboard.sleepPrompt")
                 }
-
-                NavigationLink("Sleep History", value: HomeDashboardDestination.sleepHistory)
-                    .font(.caption)
-                    .accessibilityIdentifier("homeDashboard.sleepHistoryLink")
             }
             .accessibilityIdentifier("homeDashboard.sleepSection")
         }
@@ -376,29 +418,6 @@ public struct HomeDashboardView: View {
         )
     }
 
-    private var sleepHistoryDestination: some View {
-        let today = SleepCoordinationService.today()
-        return SleepHistoryView(
-            viewModel: SleepHistoryViewModel(
-                sleepStatusProvider: sleepCoordinationService,
-                athleteId: athleteId,
-                today: today
-            ),
-            athleteDisplayName: athleteDisplayName,
-            today: today,
-            makeCaptureViewModel: { localDate, existingSleepQuality in
-                SleepCaptureViewModel(
-                    sleepCoordinationService: sleepCoordinationService,
-                    athleteId: athleteId,
-                    athleteDisplayName: athleteDisplayName,
-                    localDate: localDate,
-                    existingSleepQuality: existingSleepQuality,
-                    today: today
-                )
-            }
-        )
-    }
-
     /// Sprint 1.1, P2: the `dailyFocusCard` UI section that used to live
     /// here (`DailyFocusCardView`) was removed — it duplicated
     /// `trainingSection`'s own "Strength — Not yet logged" content with
@@ -411,17 +430,18 @@ public struct HomeDashboardView: View {
     /// package's own explicit constraint. A future, genuinely
     /// contextual Daily Focus (reflection/load/recommendation-based) is
     /// out of scope here.
-
-    private var welcomeSection: some View {
-        Section {
-            Text(athleteDisplayName)
-                .accessibilityIdentifier("homeDashboard.athleteName")
-            Text(viewModel.weekStart.isoString)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("homeDashboard.weekStart")
-        }
-    }
+    ///
+    /// Athlete Home "Now" restructure round (Part A): the separate
+    /// `welcomeSection` card that used to sit here — a large,
+    /// standalone "Victor / 2026-08-17" block — is removed entirely.
+    /// It duplicated the athlete's identity, which the navigation title
+    /// (`"\(athleteDisplayName) Home"`) already states, and its date
+    /// was the week's Monday (`weekStart.isoString`), not today. The
+    /// compact replacement — today's actual date, secondary-styled —
+    /// now lives at the top of `todaySection` below, per this round's
+    /// own preferred direction ("a small secondary date line near the
+    /// top / Today section"). No second athlete-identity presentation
+    /// was introduced.
 
     /// A summary, not the entire Weekly Review — shows only the
     /// highest-priority section. "Highest-priority" here means
@@ -478,29 +498,23 @@ public struct HomeDashboardView: View {
         }
     }
 
-    private var planningSection: some View {
-        Section("Planning") {
-            NavigationLink("Weekly Plan") {
-                WeeklyPlanningView(
-                    viewModel: WeeklyPlanningViewModel(
-                        service: planningService,
-                        athleteId: athleteId,
-                        committedByActorId: committedByActorId
-                    ),
-                    athleteDisplayName: athleteDisplayName,
-                    planningService: planningService,
-                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    actorId: committedByActorId
-                )
-            }
-            .accessibilityIdentifier("homeDashboard.weeklyPlanLink")
-        }
-    }
+    /// Athlete Home "Now" restructure round (Part D): the permanent
+    /// "Planning / Weekly Plan >" menu row that used to live here is
+    /// removed — Plan already has its own dedicated top-level tab
+    /// (`ParentTabShellView`, which constructs `WeeklyPlanningView`
+    /// independently of this screen), so this was a duplicate,
+    /// permanent navigation entry rather than "Now" content. Per this
+    /// round's explicit instruction, nothing replaces it — no new
+    /// planning insight/card was invented, and `WeeklyPlanningView`/
+    /// `WeeklyPlanningViewModel`/Planning semantics are all untouched
+    /// and remain fully reachable via the Plan tab.
 
-    /// Shows today's planned activities (with completion state already
-    /// derived by `TrainingPlanningCoordinationService`, never
-    /// recomputed here) alongside the shortcut to the full Daily
-    /// Training screen.
+    /// Renders one row of today's activities (with completion state
+    /// already derived by `TrainingPlanningCoordinationService`, never
+    /// recomputed here). The permanent "Daily Training >" shortcut that
+    /// used to sit below these rows in `todaySection` was removed in
+    /// the Athlete Home "Now" restructure round (Part B/ownership) —
+    /// Training already has its own dedicated top-level tab.
     @ViewBuilder
     private func todayActivityRow(_ row: TodayActivityRow) -> some View {
         switch row {
@@ -567,8 +581,38 @@ public struct HomeDashboardView: View {
         }
     }
 
-    private var trainingSection: some View {
-        Section("Training") {
+    /// Athlete Home "Now" restructure round (Parts A/B): the primary
+    /// section, first in the Form. Two things merged into one section
+    /// here, deliberately:
+    ///
+    /// 1. The compact date line that replaces the removed
+    ///    `welcomeSection` card (Part A) — today's actual date
+    ///    (`TrainingPlanningCoordinationService.today()`, the same
+    ///    canonical "today" this screen's Sleep card already computes
+    ///    with), formatted via `Self.todayDateLabel(for:)` below, which
+    ///    composes two already-established formatting techniques
+    ///    (`WeeklyPlanningView.weekdayLabel(for:)`, and the
+    ///    `Calendar(identifier: .gregorian)`/`monthSymbols` technique
+    ///    `AthleteBirthDateFormatter` already establishes) — not a new
+    ///    date computation.
+    /// 2. What used to be `trainingSection`'s activity rows (Part B) —
+    ///    same `viewModel.todayActivityState`/`todayActivityRow(_:)` as
+    ///    before, the exact canonical, already-deduplicated "today" read
+    ///    model `TodayActivityComposer` already provides (shared with
+    ///    Family Home) — reused verbatim, not recomputed. The permanent
+    ///    "Daily Training >" menu link that used to sit at the bottom of
+    ///    this section is removed (Training already has its own
+    ///    dedicated top-level tab, same reasoning as Part D's Weekly
+    ///    Plan row removal below) and a `.loaded([])` empty state ("No
+    ///    training today") is now shown explicitly rather than rendering
+    ///    nothing.
+    private var todaySection: some View {
+        Section("Today") {
+            Text(Self.todayDateLabel(for: TrainingPlanningCoordinationService.today()))
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("homeDashboard.todayDateLabel")
+
             switch viewModel.todayActivityState {
             case .loading:
                 EmptyView()
@@ -577,37 +621,28 @@ public struct HomeDashboardView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("homeDashboard.todaysTraining.unavailable")
             case .loaded(let rows):
-                if !rows.isEmpty {
+                if rows.isEmpty {
+                    Text("No training today")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("homeDashboard.today.noTrainingToday")
+                } else {
                     ForEach(rows) { row in
                         todayActivityRow(row)
                     }
                 }
             }
-
-            NavigationLink("Daily Training") {
-                DailyTrainingView(
-                    viewModel: DailyTrainingViewModel(
-                        trainingService: trainingService,
-                        coordinationService: trainingPlanningCoordinationService,
-                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                        authorId: committedByActorId,
-                        athleteId: athleteId,
-                        athleteDisplayName: athleteDisplayName,
-                        todayActivityComposer: TodayActivityComposer(
-                            planningService: planningService,
-                            trainingService: trainingService,
-                            trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                        )
-                    ),
-                    planningService: planningService,
-                    trainingService: trainingService,
-                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    actorId: committedByActorId,
-                    athleteDisplayName: athleteDisplayName
-                )
-            }
-            .accessibilityIdentifier("homeDashboard.dailyTrainingLink")
         }
+    }
+
+    /// See `todaySection`'s own doc comment for the two existing
+    /// techniques this composes — purely presentational, no new date
+    /// arithmetic. "Tuesday, 18 August": weekday name, day, full month;
+    /// no year, matching this round's own approved target concept.
+    private static func todayDateLabel(for today: LocalDate) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        let month = formatter.monthSymbols[today.month - 1]
+        return "\(WeeklyPlanningView.weekdayLabel(for: today.weekday)), \(today.day) \(month)"
     }
 
     private var reflectionSection: some View {

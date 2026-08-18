@@ -1345,6 +1345,56 @@ struct HomeDashboardViewModelTests {
         let suggestionsAfterDelete = try planningService.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId)
         #expect(suggestionsAfterDelete.contains { $0.id == suggestion.id })
     }
+
+    /// Athlete Home "Now" restructure round (Part B): backs the new
+    /// "No training today" empty state — proves the canonical
+    /// composition genuinely represents "nothing today" as
+    /// `.loaded([])`, not `.failed` or some other state, for an athlete
+    /// with no planned activity, no applicable recurring occurrence,
+    /// and no unplanned logged activity today. `TodayActivityLoadState`
+    /// has no separate "empty" case by design (see its own doc
+    /// comment) — an empty array already means this; this test is the
+    /// smallest proof that the real composition actually produces one
+    /// when there is truly nothing to show, which the View's new empty
+    /// state (`todaySection` in `HomeDashboardView`) depends on.
+    @Test("Today activity state for an athlete with nothing planned, recurring, or logged today is .loaded([]) — 'no training today'")
+    @MainActor
+    func todayActivityStateEmptyWhenNothingScheduledToday() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        // Deliberately no planned activity, no recurring definition, no
+        // logged activity created for this athlete at all.
+
+        let homeDashboardViewModel = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            todayActivityComposer: TodayActivityComposer(
+                planningService: planningService, trainingService: trainingService,
+                trainingPlanningCoordinationService: trainingPlanningCoordinationService
+            ),
+            activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
+        )
+
+        homeDashboardViewModel.loadTodayActivityRows()
+
+        guard case .loaded(let rows) = homeDashboardViewModel.todayActivityState else {
+            Issue.record("Expected .loaded([]), not .failed or .loading")
+            return
+        }
+        #expect(rows.isEmpty)
+    }
 }
 
 /// VX-023 (Sleep V1): Athlete Home Sleep card + morning in-app prompt.
