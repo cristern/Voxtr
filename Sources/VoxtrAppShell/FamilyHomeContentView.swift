@@ -541,60 +541,42 @@ public struct FamilyHomeContentView: View {
     /// VX-023 (Sleep V1) UX polish, round 2: Family Home Sleep is
     /// primarily a MONITORING surface, not a second place to record
     /// Sleep — recording stays on Athlete Home, so there is still no
-    /// "Log Sleep" action here. "History" is now ALWAYS shown for an
-    /// enabled athlete, whether or not today is recorded — round 1
-    /// incorrectly hid it whenever today's Sleep was missing, when the
-    /// actual product contract only ever asked to remove "Log Sleep"
-    /// from this surface. Both states share the same second-line
-    /// layout: a leading status (`"x/5"` or `"Not logged yet"`) with
-    /// `Spacer()` pinning "History" to the trailing edge — no fixed
-    /// widths, so this reflows normally under Dynamic Type. An athlete
-    /// with tracking OFF simply never appears in
-    /// `viewModel.sleepSummaries` (see
+    /// "Log Sleep" action here. An athlete with tracking OFF simply
+    /// never appears in `viewModel.sleepSummaries` (see
     /// `FamilyHomeViewModel.loadSleepSummaries()`'s own doc comment), so
     /// no per-athlete "disabled" branch is needed here — absence from
     /// the list already means absence from this section.
     ///
-    /// Round 3 (TestFlight): round 2's `Spacer()` alone still left
-    /// "History" pulled toward the leading edge. Proven cause, by
-    /// direct comparison with `familyHomeRow` below (the one other row
-    /// in this file that successfully pins trailing content to the
-    /// true row edge): `familyHomeRow`'s trailing-Spacer `HStack` is
-    /// the LABEL of a `NavigationLink`, and a List/Form row proposes
-    /// its FULL width to a `NavigationLink`/`Button` label placed
-    /// directly in row content — but this row's second-line `HStack`
-    /// is a plain, non-interactive container with "History" merely
-    /// nested as one of its children, not wrapping it. A plain nested
-    /// container like that is sized at its own INTRINSIC (content-hugging)
-    /// width rather than the row's available width, so `Spacer()` had
-    /// no real remaining width to expand into. The fix claims that
-    /// width explicitly and responsively — `.frame(maxWidth: .infinity,
-    /// alignment: .leading)` on the `HStack` itself, the standard
-    /// SwiftUI idiom for "take all available row width" (not a fixed
-    /// size, not a geometry hack) — after which `Spacer()` has real
-    /// room to push "History" to the actual trailing edge, still fully
-    /// responsive under Dynamic Type.
+    /// Round 4 (TestFlight): two prior rounds tried to lay out a
+    /// visible trailing "History" label next to the status text and
+    /// never got it to sit at the true trailing edge cleanly. Approved
+    /// correction removes that visible label entirely — the row/status
+    /// itself IS the navigation affordance, exactly like this file's
+    /// own `familyHomeRow` below already does for its own rows (whole
+    /// row wrapped as one `NavigationLink(value:)`'s label). This also
+    /// retires the entire alignment problem rather than re-fixing it:
+    /// with no second interactive element competing for trailing space,
+    /// there is nothing left to misalign. Same destination as before —
+    /// `FamilyHomeDestination.sleepHistory(_:)`, the same canonical
+    /// Sleep History `SleepHistoryView` Athlete Home already uses, no
+    /// new destination.
     @ViewBuilder
     private var sleepSection: some View {
         if !viewModel.sleepSummaries.isEmpty {
             Section("Sleep") {
                 ForEach(viewModel.sleepSummaries) { summary in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(summary.athleteName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        HStack {
+                    NavigationLink(value: FamilyHomeDestination.sleepHistory(summary.athleteId)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(summary.athleteName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                             if let sleepQuality = summary.sleepQuality {
                                 Text("\(sleepQuality)/5")
                             } else {
                                 Text("Not logged yet")
                                     .foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
-                                .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
                 }

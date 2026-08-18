@@ -203,11 +203,26 @@ public struct AthleteFamilyManagementView: View {
 /// new configuration surface, no new persistence path, and Archive's
 /// own behavior (immediate, no confirmation dialog) is unchanged.
 ///
+/// Round 9 (TestFlight IA correction): a plain "Profile >" navigation
+/// row read as an unnecessary extra hierarchy level. Approved
+/// correction — the athlete's core profile facts (Name, Family name,
+/// Birth date) are now shown directly, read-only, in a tappable card
+/// at the top of this hub; tapping it opens the same `AthleteFormView`
+/// sheet as before. This is presentation only: the values shown are
+/// read straight off the SAME canonical `AthleteProfile` reference
+/// this hub was handed (a SwiftData `@Model` reference type, so a
+/// successful edit — which mutates that exact managed object in
+/// place — is reflected here automatically on return, with no manual
+/// refresh/reload needed). Development Stage moved OUT of this card —
+/// it is configuration, not identity, and now sits in its own row at
+/// the same level as Sleep (see the doc comment on that row below for
+/// why it still opens the same edit sheet under the hood).
+///
 /// Each concept gets its own `Form` `Section`, Archive last and
 /// visually separated — this is deliberate so a future concept (e.g.
 /// Notifications, explicitly NOT implemented this round) can be added
-/// as one more `Section` between Sleep and Archive without touching
-/// Manage Athletes or this hub's own structure again.
+/// as one more row without touching Manage Athletes or this hub's own
+/// structure again.
 struct AthleteSettingsView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let athlete: AthleteProfile
@@ -216,18 +231,65 @@ struct AthleteSettingsView: View {
 
     var body: some View {
         Form {
+            // PROFILE CARD — identity/profile facts only (Name, Family
+            // name, Birth date), reused directly off `athlete`, never a
+            // second copy of this data. Tapping anywhere on the card
+            // opens the existing Edit Athlete form.
             Section {
-                // "Profile", not "Edit Profile" — this row simply IS
-                // the athlete's profile; tapping it opens the existing
-                // Add/Edit form (reused verbatim, no duplicated fields).
-                Button("Profile") {
+                Button {
                     viewModel.prefill(from: athlete)
                     isPresentingForm = true
+                } label: {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            profileField(label: "Name", value: athlete.givenName)
+                            // "Not set" matches this app's own existing
+                            // vocabulary for an absent optional value
+                            // (see `OptionalDurationPickerView`'s "Not
+                            // set" row) — calm, not a fabricated name.
+                            profileField(label: "Family name", value: athlete.familyName ?? "Not set")
+                            profileField(label: "Birth date", value: AthleteBirthDateFormatter.label(for: athlete.birthDate))
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
                 }
-                .accessibilityIdentifier("athleteSettings.profileButton.\(athlete.id.uuidString)")
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("athleteSettings.profileCard.\(athlete.id.uuidString)")
             }
 
+            // Configuration — deliberately separate from the identity
+            // facts above (see this hub's own doc comment). Development
+            // Stage has no dedicated edit screen of its own; the
+            // smallest existing canonical mechanism that already
+            // supports editing it is the very same `AthleteFormView`
+            // the Profile card above opens, so this row reuses that
+            // sheet rather than inventing a new, separate
+            // Development-Stage-only edit surface this round wasn't
+            // asked to build. Reported as a known tradeoff, not a
+            // silent shortcut: opening either row currently shows the
+            // same full form.
             Section {
+                Button {
+                    viewModel.prefill(from: athlete)
+                    isPresentingForm = true
+                } label: {
+                    HStack {
+                        Text("Development stage")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("athleteSettings.developmentStageButton.\(athlete.id.uuidString)")
+
                 NavigationLink("Sleep") {
                     sleepSettingsDestination(athlete)
                 }
@@ -249,12 +311,66 @@ struct AthleteSettingsView: View {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
         }
     }
+
+    private func profileField(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .foregroundStyle(.primary)
+        }
+    }
+}
+
+/// TestFlight IA correction (Athlete configuration hub): "day Month
+/// year" formatting for the read-only birth date on the Profile card —
+/// same locale-independent technique `SleepHistoryDateFormatter`/
+/// `WeekIdentityFormatter` already establish elsewhere in this app (a
+/// fresh `DateFormatter` supplies only the calendar's month-name
+/// table; the day/year digits always come from `LocalDate`'s own
+/// stored `Int`s, never `Calendar.current`) — extended here to the one
+/// shape neither of those existing formatters produces (an absolute
+/// date with its year), not a new, unrelated convention.
+enum AthleteBirthDateFormatter {
+    static func label(for localDate: LocalDate) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        let month = formatter.monthSymbols[localDate.month - 1]
+        return "\(localDate.day) \(month) \(localDate.year)"
+    }
 }
 
 /// The create/edit form itself — one form, reused for both, matching
 /// this project's established pattern (e.g.
 /// `RecurringActivityFormView`) of reusing one form's fields for add
 /// vs. edit rather than building two.
+///
+/// TestFlight simplification round: "Preferred name" is removed from
+/// this UI — approved V1 editable profile fields are Name, Family name
+/// (optional), and Birth date only. `AthleteProfile.preferredName` IS a
+/// persisted field (confirmed by inspecting `AthleteEntities.swift`),
+/// so this is deliberately UI-only: no schema change, no data deletion.
+/// `AthleteFamilyManagementViewModel.preferredName`/`prefill(from:)`/
+/// `editAthlete(_:)`/`addAthlete()` are left completely unchanged —
+/// `prefill(from:)` still captures an existing athlete's persisted
+/// `preferredName` into that ViewModel field even though no control
+/// here edits it, so a Save with this field simply absent from the UI
+/// round-trips the athlete's existing value unchanged rather than
+/// erasing it (a new athlete added through this form gets `nil`,
+/// exactly as if a user had left the old optional field blank). The
+/// underlying `preferredName` column itself is retained as
+/// technical/domain cleanup debt — reported, not touched, this round.
+///
+/// This form is also reused, unchanged, as the destination for BOTH
+/// the athlete configuration hub's "Profile" card AND its "Development
+/// stage" row (see `AthleteSettingsView` above) — there is no separate,
+/// dedicated Development-Stage-only edit screen, and this round's
+/// instructions explicitly call for reusing "the smallest existing
+/// canonical presentation/edit pattern if already supported" rather
+/// than inventing one. This is a deliberate, reported tradeoff (see
+/// this task's delivery report): opening either entry point currently
+/// shows this same full form, Development Stage picker included.
 struct AthleteFormView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let editingAthlete: AthleteProfile?
@@ -276,8 +392,6 @@ struct AthleteFormView: View {
                         .accessibilityIdentifier("athleteManagement.givenNameField")
                     TextField("Family name (optional)", text: $viewModel.familyName)
                         .accessibilityIdentifier("athleteManagement.familyNameField")
-                    TextField("Preferred name (optional)", text: $viewModel.preferredName)
-                        .accessibilityIdentifier("athleteManagement.preferredNameField")
                     DatePicker("Birth date", selection: $viewModel.birthDate, displayedComponents: .date)
                         .accessibilityIdentifier("athleteManagement.birthDatePicker")
                     Picker("Development stage", selection: $viewModel.developmentStage) {

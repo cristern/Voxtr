@@ -1321,15 +1321,17 @@ extension FamilyHomeViewModelTests {
         )
     }
 
-    /// Round 7 (Family Home Sleep polish): `FamilyHomeContentView.sleepSection`
-    /// builds an unconditional "History" `NavigationLink` for every
-    /// entry in `sleepSummaries` — see that file's own doc comment.
+    /// Round 4 (Family Home Sleep polish, TestFlight): `FamilyHomeContentView.sleepSection`
+    /// wraps each row's entire content in one `NavigationLink(value:)`
+    /// to `FamilyHomeDestination.sleepHistory(_:)` — no visible
+    /// "History" text anymore (removed this round; the row/status
+    /// itself is the affordance) — see that file's own doc comment.
     /// This test proves the underlying, ViewModel-level composition
-    /// state that link depends on (a summary is still emitted for a
-    /// missing-Sleep athlete, with `sleepQuality == nil` driving "Not
-    /// logged yet"); it does not itself inspect rendered View content
-    /// or button placement.
-    @Test("19: Family Home Sleep section — an athlete missing today's Sleep still produces a summary (sleepQuality nil drives 'Not logged yet'; every summary here always has a History destination, never a Log Sleep action)")
+    /// state that navigation depends on (a summary is still emitted
+    /// for a missing-Sleep athlete, with `sleepQuality == nil` driving
+    /// "Not logged yet"); it does not itself inspect rendered View
+    /// content or navigation-affordance placement.
+    @Test("19: Family Home Sleep section — an athlete missing today's Sleep still produces a summary (sleepQuality nil drives 'Not logged yet'; every summary here always routes to Sleep History, never a Log Sleep action)")
     @MainActor
     func sleepSectionMissingSleep() throws {
         let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
@@ -1344,11 +1346,12 @@ extension FamilyHomeViewModelTests {
         #expect(viewModel.sleepSummaries.first?.athleteId == athlete.athleteId)
     }
 
-    /// Round 7: same composition-state proof as test 19 above, for the
+    /// Round 4: same composition-state proof as test 19 above, for the
     /// recorded-Sleep branch — a summary is still emitted with the real
     /// `sleepQuality`, which is what `sleepSection` reads to show
-    /// "x/5" alongside the same always-present History link.
-    @Test("20: Family Home Sleep section — an athlete with today's Sleep already recorded produces a summary with the real value (drives 'x/5', with the same always-present History destination as the missing-Sleep case)")
+    /// "x/5", the row still routing to the same Sleep History
+    /// destination as the missing-Sleep case.
+    @Test("20: Family Home Sleep section — an athlete with today's Sleep already recorded produces a summary with the real value (drives 'x/5', routing to the same Sleep History destination as the missing-Sleep case)")
     @MainActor
     func sleepSectionRecordedSleep() throws {
         let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
