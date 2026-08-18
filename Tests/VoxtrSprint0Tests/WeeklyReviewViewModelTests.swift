@@ -272,4 +272,35 @@ struct WeeklyReviewViewModelTests {
         #expect(viewModel.athleteId == athleteId)
         #expect(viewModel.weekStart == Self.weekStart)
     }
+
+    /// Weekday-scan round: proves the exact mechanism the Logged
+    /// activities section's weekday caption depends on —
+    /// `WeeklyReviewView.localDate(for:)` converts a `LoggedActivity.startedAt`
+    /// instant into the correct calendar day, whose `.weekday` then
+    /// drives `WeeklyPlanningView.weekdayLabel(for:)`. Uses an explicit
+    /// UTC calendar (not `.current`) so this is deterministic regardless
+    /// of the machine/CI's local time zone — the same "no
+    /// Calendar.current for exact-result assertions" rule this test
+    /// suite's own persistence tests already follow. Jan 5, 2026 is a
+    /// Monday, matching `WeeklyPlanningViewModelTests`'s own
+    /// `fixedWeekStart` fixture; Jan 11, 2026 is that week's Sunday —
+    /// together these cover both Vǫxtr week boundaries, not just an
+    /// arbitrary midweek day.
+    @Test("WeeklyReviewView.localDate(for:) derives the correct calendar day — and therefore the correct weekday — from a LoggedActivity's startedAt instant")
+    func loggedActivityStartedAtDerivesCorrectWeekday() {
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+
+        let mondayNoon = utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 5, hour: 12))!
+        let mondayDerived = WeeklyReviewView.localDate(for: mondayNoon, calendar: utcCalendar)
+        #expect(mondayDerived == LocalDate(year: 2026, month: 1, day: 5))
+        #expect(mondayDerived.weekday == .monday)
+        #expect(WeeklyPlanningView.weekdayLabel(for: mondayDerived.weekday) == "Monday")
+
+        let sundayNoon = utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 11, hour: 12))!
+        let sundayDerived = WeeklyReviewView.localDate(for: sundayNoon, calendar: utcCalendar)
+        #expect(sundayDerived == LocalDate(year: 2026, month: 1, day: 11))
+        #expect(sundayDerived.weekday == .sunday)
+        #expect(WeeklyPlanningView.weekdayLabel(for: sundayDerived.weekday) == "Sunday")
+    }
 }

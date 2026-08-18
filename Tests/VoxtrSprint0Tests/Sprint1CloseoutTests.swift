@@ -149,6 +149,38 @@ struct Sprint1CloseoutTests {
         #expect(WeeklyPlanningView.weekdayLabel(for: .monday) != WeeklyPlanningView.weekdayLabel(for: .friday))
     }
 
+    /// Weekday-scan round (Weekly Plan/Review presentation): proves the
+    /// full `weekdayLabel(for:)` mapping used by every planned/logged
+    /// activity row this round touches, plus that `LocalDate.weekday`
+    /// correctly identifies Vǫxtr's own Monday-start/Sunday-end week
+    /// boundaries — not just that formatting is internally consistent
+    /// (the existing test above), but that it's actually CORRECT for
+    /// known calendar dates. `LocalDate.weekday` computes via a
+    /// UTC-anchored `Calendar` (see that property's own doc comment),
+    /// so this needs no explicit calendar/time zone injection to stay
+    /// deterministic. Jan 5, 2026 is the same Monday
+    /// `WeeklyPlanningViewModelTests`'s own `fixedWeekStart` fixture
+    /// already establishes; Jan 11, 2026 is that week's Sunday.
+    @Test("weekdayLabel(for:) is correct for every case, and LocalDate.weekday correctly identifies Vǫxtr's Monday/Sunday week boundaries")
+    @MainActor
+    func weekdayLabelMatchesKnownCalendarDatesAtWeekBoundaries() {
+        #expect(WeeklyPlanningView.weekdayLabel(for: .monday) == "Monday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .tuesday) == "Tuesday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .wednesday) == "Wednesday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .thursday) == "Thursday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .friday) == "Friday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .saturday) == "Saturday")
+        #expect(WeeklyPlanningView.weekdayLabel(for: .sunday) == "Sunday")
+
+        let weekStartMonday = LocalDate(year: 2026, month: 1, day: 5)
+        #expect(weekStartMonday.weekday == .monday)
+        #expect(WeeklyPlanningView.weekdayLabel(for: weekStartMonday.weekday) == "Monday")
+
+        let weekEndSunday = LocalDate(year: 2026, month: 1, day: 11)
+        #expect(weekEndSunday.weekday == .sunday)
+        #expect(WeeklyPlanningView.weekdayLabel(for: weekEndSunday.weekday) == "Sunday")
+    }
+
     /// Item 5: Daily Training's duration state uses the shared
     /// component's domain representation, starting at a sensible
     /// default rather than the old validation-floor value.

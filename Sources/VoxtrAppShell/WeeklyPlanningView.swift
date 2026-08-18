@@ -76,44 +76,6 @@ public struct WeeklyPlanningView: View {
                 .accessibilityIdentifier("planning.weekIdentityBar")
             }
 
-            Section {
-                HStack {
-                    Text(viewModel.statusLabel)
-                        .font(.headline)
-                        .foregroundStyle(viewModel.isCommitted ? .green : .orange)
-                        .accessibilityIdentifier("planning.statusLabel")
-                    Spacer()
-                    if !viewModel.isCommitted {
-                        Button("Commit week") {
-                            viewModel.commit()
-                        }
-                        .accessibilityIdentifier("planning.commitButton")
-                    } else if viewModel.canReopenPlanning {
-                        // Reversibility principle: only offered for a
-                        // committed CURRENT or FUTURE week — a
-                        // committed HISTORICAL week never shows this,
-                        // matching `canReopenPlanning`'s own gate
-                        // exactly. Lightweight confirmation since this
-                        // reopens the SAME plan in place, not a
-                        // destructive action.
-                        Button("Reopen Planning") {
-                            isPresentingReopenPlanningConfirmation = true
-                        }
-                        .accessibilityIdentifier("planning.reopenPlanningButton")
-                    }
-                }
-            }
-            .confirmationDialog(
-                "Reopen this week's plan for editing?",
-                isPresented: $isPresentingReopenPlanningConfirmation,
-                titleVisibility: .visible
-            ) {
-                Button("Reopen Planning") {
-                    viewModel.reopenPlanning()
-                }
-                Button("Keep Committed", role: .cancel) {}
-            }
-
             if let errorMessage = viewModel.errorMessage {
                 Section {
                     Text(errorMessage)
@@ -207,6 +169,51 @@ public struct WeeklyPlanningView: View {
                     .accessibilityIdentifier("planning.addActivityButton")
                 }
             }
+
+            // Weekday-scan / status-placement round: moved from just
+            // below the week identity bar to the bottom of the screen
+            // — the plan's content (activity list, add form) now reads
+            // first, and commit status/action reads as a conclusion to
+            // that content rather than the leading thing the user sees.
+            // Same state, same actions, same `.confirmationDialog` —
+            // only the position in the Form changed.
+            Section {
+                HStack {
+                    Text(viewModel.statusLabel)
+                        .font(.headline)
+                        .foregroundStyle(viewModel.isCommitted ? .green : .orange)
+                        .accessibilityIdentifier("planning.statusLabel")
+                    Spacer()
+                    if !viewModel.isCommitted {
+                        Button("Commit week") {
+                            viewModel.commit()
+                        }
+                        .accessibilityIdentifier("planning.commitButton")
+                    } else if viewModel.canReopenPlanning {
+                        // Reversibility principle: only offered for a
+                        // committed CURRENT or FUTURE week — a
+                        // committed HISTORICAL week never shows this,
+                        // matching `canReopenPlanning`'s own gate
+                        // exactly. Lightweight confirmation since this
+                        // reopens the SAME plan in place, not a
+                        // destructive action.
+                        Button("Reopen Planning") {
+                            isPresentingReopenPlanningConfirmation = true
+                        }
+                        .accessibilityIdentifier("planning.reopenPlanningButton")
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Reopen this week's plan for editing?",
+                isPresented: $isPresentingReopenPlanningConfirmation,
+                titleVisibility: .visible
+            ) {
+                Button("Reopen Planning") {
+                    viewModel.reopenPlanning()
+                }
+                Button("Keep Committed", role: .cancel) {}
+            }
         }
         .navigationTitle("\(athleteDisplayName) Weekly Plan")
         .toolbar {
@@ -255,8 +262,15 @@ public struct WeeklyPlanningView: View {
     /// planned), and location (when set) — everywhere the domain model
     /// already represents these, they're shown, not replaced with a
     /// generic label.
+    ///
+    /// Weekday-scan round: leads with `weekdayLabel(for:)` — the same
+    /// canonical formatter this file already uses for recurring
+    /// suggestions/weekday multi-select below — instead of the raw ISO
+    /// date string, so a row's day is legible at a glance rather than
+    /// requiring the reader to parse "2026-08-19". This replaces the
+    /// date text rather than adding to it, so nothing is duplicated.
     private static func rowSubtitle(for activity: PlannedActivity) -> String {
-        var parts: [String] = [activity.localDate.isoString]
+        var parts: [String] = [weekdayLabel(for: activity.localDate.weekday)]
         if let startTime = activity.startLocalTime {
             parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
         }
@@ -266,11 +280,18 @@ public struct WeeklyPlanningView: View {
         return parts.joined(separator: " · ")
     }
 
-    /// Weekday/date, start time (if present), and duration (if present)
-    /// for one suggestion — everything the suggestion row displays
-    /// besides its title.
+    /// Weekday, start time (if present), and duration (if present) for
+    /// one suggestion — everything the suggestion row displays besides
+    /// its title.
+    ///
+    /// Weekday-scan round: dropped the redundant `occurrenceDate.isoString`
+    /// that used to follow the weekday label here — showing both the
+    /// weekday word and its raw ISO date together was exactly the
+    /// "duplicate date text" this round's own presentation principle
+    /// asks not to do; the weekday label alone is what
+    /// `rowSubtitle(for:)` above now also settles on.
     private static func suggestionSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
-        var parts: [String] = [weekdayLabel(for: suggestion.occurrenceDate.weekday), suggestion.occurrenceDate.isoString]
+        var parts: [String] = [weekdayLabel(for: suggestion.occurrenceDate.weekday)]
         if let startLocalTime = suggestion.startLocalTime {
             parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
         }

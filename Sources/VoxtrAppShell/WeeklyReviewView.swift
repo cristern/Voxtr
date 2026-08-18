@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrCoachingDomain
@@ -135,6 +136,19 @@ public struct WeeklyReviewView: View {
             } else {
                 ForEach(result.plannedActivities, id: \.plannedActivity.id) { item in
                     VStack(alignment: .leading, spacing: 2) {
+                        // Weekday-scan round: this row previously had
+                        // no date/weekday text at all — the user could
+                        // only infer which day an item belonged to from
+                        // list position. Leads with the same canonical
+                        // `weekdayLabel(for:)` formatter
+                        // `WeeklyPlanningView`'s own planned-activity
+                        // rows already use, derived from the SAME
+                        // canonical `PlannedActivity.localDate` this
+                        // section was already reading nothing else
+                        // from.
+                        Text(WeeklyPlanningView.weekdayLabel(for: item.plannedActivity.localDate.weekday))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         HStack {
                             Text(item.plannedActivity.title)
                             Spacer()
@@ -208,6 +222,20 @@ public struct WeeklyReviewView: View {
             } else {
                 ForEach(result.loggedActivities, id: \.id) { activity in
                     VStack(alignment: .leading) {
+                        // Weekday-scan round: same principle as
+                        // `plannedActivitiesSection` above — a leading
+                        // weekday caption so both sections read the
+                        // same way. `LoggedActivity.startedAt` is a
+                        // `Date`, not a `LocalDate` (unlike
+                        // `PlannedActivity`), so this is derived via
+                        // `Self.localDate(for:)` below, which is the
+                        // existing domain contract already used
+                        // elsewhere in this app for this exact
+                        // `Date` -> `LocalDate` conversion — see that
+                        // helper's own doc comment.
+                        Text(WeeklyPlanningView.weekdayLabel(for: Self.localDate(for: activity.startedAt).weekday))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         Text(activity.title)
                         // Review follow-up (duration/logged-consumer
                         // audit): reuses the SAME `actualSubtitle`
@@ -223,6 +251,25 @@ public struct WeeklyReviewView: View {
                 }
             }
         }
+    }
+
+    /// Weekday-scan round: `LoggedActivity.startedAt` is a `Date`
+    /// (a real instant, needed for lifecycle/ordering elsewhere), not a
+    /// `LocalDate` — this derives the calendar day it falls on using
+    /// the SAME `calendar.dateComponents([.year, .month, .day], from:)`
+    /// technique `TrainingPlanningCoordinationService.today(referenceDate:)`/
+    /// `.weekStart(referenceDate:)` already establish for this exact
+    /// `Date` -> `LocalDate` conversion — not a new algorithm, just
+    /// applied here to a logged activity's own start time rather than
+    /// "now". Kept local to this file (rather than reusing
+    /// `.today(referenceDate:)` directly) since calling something named
+    /// "today" with an arbitrary past date would read as a mistake even
+    /// though it's mechanically identical. Internal, not `private` — so
+    /// this conversion is directly unit-testable (see
+    /// `WeeklyReviewViewModelTests`).
+    static func localDate(for date: Date, calendar: Calendar = .current) -> LocalDate {
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        return LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
     }
 
     private func reflectionSection(_ result: WeeklyReviewResult) -> some View {
