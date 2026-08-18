@@ -1321,7 +1321,7 @@ extension FamilyHomeViewModelTests {
         )
     }
 
-    @Test("19: Family Home Sleep section — an athlete missing today's Sleep produces a summary with sleepQuality nil (drives 'Log Sleep' + 'History')")
+    @Test("19: Family Home Sleep section — an athlete missing today's Sleep produces a summary with sleepQuality nil (drives 'Not logged yet', with no Log Sleep or History action for that row)")
     @MainActor
     func sleepSectionMissingSleep() throws {
         let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()

@@ -17,13 +17,19 @@ enum FamilyHomeDestination: Hashable {
     case recurringOccurrence(id: String)
     case reflection(AthleteId)
     case familySchedule
-    /// VX-023 (Sleep V1): the dedicated Family Home Sleep section's own
-    /// two actions — "Log Sleep" opens the canonical capture screen for
-    /// today's date; "History" opens the same canonical Sleep History
-    /// used from Athlete Home. Never a second, Family-Home-specific
-    /// Sleep editing surface — both route to the exact same
-    /// `SleepCaptureView`/`SleepHistoryView` Athlete Home already uses.
+    /// VX-023 (Sleep V1) UX polish: Family Home Sleep is a monitoring
+    /// surface — Athlete Home is the one place Sleep gets recorded, so
+    /// the Family Home Sleep section no longer offers a "Log Sleep"
+    /// action, and nothing in `FamilyHomeContentView` currently pushes
+    /// this destination. Retained (not deleted) rather than removed
+    /// outright, since deleting it wasn't part of this presentation-only
+    /// change; if it stays unreachable, removing it is a follow-up, not
+    /// a decision to make silently here.
     case sleepCapture(AthleteId)
+    /// "History" opens the same canonical Sleep History used from
+    /// Athlete Home — never a second, Family-Home-specific Sleep
+    /// surface; both route to the exact same `SleepHistoryView` Athlete
+    /// Home already uses.
     case sleepHistory(AthleteId)
 }
 
@@ -532,9 +538,16 @@ public struct FamilyHomeContentView: View {
         }
     }
 
-    /// VX-023 (Sleep V1): "a dedicated compact Sleep section for each
-    /// enabled athlete... missing today -> 'Log Sleep' + 'History';
-    /// already recorded -> 'History' only." An athlete with tracking OFF
+    /// VX-023 (Sleep V1) UX polish (TestFlight-verified, presentation
+    /// only): Family Home Sleep is primarily a MONITORING surface, not
+    /// a second place to record Sleep — recording stays on Athlete Home.
+    /// Recorded -> athlete name, "x/5", and "History" as a secondary
+    /// action pinned to the trailing edge via `Spacer()` (no fixed
+    /// widths, so this reflows normally under Dynamic Type). Missing ->
+    /// athlete name and a single-line "Not logged yet" status only — no
+    /// "Log Sleep" action here at all (that read as a second entry
+    /// point competing with Athlete Home) and no "History" link for a
+    /// day with nothing recorded yet. An athlete with tracking OFF
     /// simply never appears in `viewModel.sleepSummaries` (see
     /// `FamilyHomeViewModel.loadSleepSummaries()`'s own doc comment), so
     /// no per-athlete "disabled" branch is needed here — absence from
@@ -544,25 +557,21 @@ public struct FamilyHomeContentView: View {
         if !viewModel.sleepSummaries.isEmpty {
             Section("Sleep") {
                 ForEach(viewModel.sleepSummaries) { summary in
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(summary.athleteName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if let sleepQuality = summary.sleepQuality {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(summary.athleteName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if let sleepQuality = summary.sleepQuality {
+                            HStack {
                                 Text("\(sleepQuality)/5")
-                            } else {
-                                Text("Not logged yet")
-                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
+                                    .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
                             }
+                        } else {
+                            Text("Not logged yet")
+                                .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        if summary.sleepQuality == nil {
-                            NavigationLink("Log Sleep", value: FamilyHomeDestination.sleepCapture(summary.athleteId))
-                                .accessibilityIdentifier("familyHome.sleep.logSleepLink.\(summary.athleteId.rawValue.uuidString)")
-                        }
-                        NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
-                            .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
                     }
                     .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
                 }
