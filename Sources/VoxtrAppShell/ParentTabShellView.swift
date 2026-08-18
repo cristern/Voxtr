@@ -142,9 +142,9 @@ public struct ParentTabShellView: View {
             // smallest coherent root that reuses existing
             // functionality is explicit athlete selection into the
             // existing per-athlete screens — the same shape
-            // `AthleteFamilyManagementView`'s own `athleteHomeDestination`
-            // already establishes for Home's zero-active-athletes
-            // branch, reused here rather than invented anew.
+            // `FamilyHomeContentView`'s own `athleteOverview(for:)`
+            // already establishes for Family Home's per-athlete Home
+            // navigation, reused here rather than invented anew.
             ParentTrainingTabView(
                 family: family,
                 planningService: planningService,
@@ -174,10 +174,10 @@ public struct ParentTabShellView: View {
             // configured?" — AthleteFamilyManagementView already covers
             // family/athlete configuration; reused verbatim, wrapped in
             // exactly one new NavigationStack since it has none of its
-            // own. The athleteHomeDestination closure reuses the exact
-            // same canonical Athlete Home construction FamilyHomeView's
-            // own zero-active-athletes branch already establishes — not
-            // a second implementation.
+            // own. Round 8: an athlete row here opens that athlete's
+            // configuration hub directly — Profile owns people +
+            // configuration, never Athlete Home (that stays reachable
+            // only through the Home experience).
             NavigationStack {
                 AthleteFamilyManagementView(
                     viewModel: AthleteFamilyManagementViewModel(
@@ -187,46 +187,6 @@ public struct ParentTabShellView: View {
                         athleteFamilyManagementService: athleteFamilyManagementService
                     ),
                     presentationMode: .navigation,
-                    athleteHomeDestination: { athlete in
-                        AnyView(
-                            HomeDashboardView(
-                                viewModel: HomeDashboardViewModel(
-                                    trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                                    coachingPresentationProvider: coachingApplicationService,
-                                    athleteId: athlete.athleteId,
-                                    athleteDisplayName: athlete.givenName,
-                                    weekStart: WeeklyPlanningViewModel.currentWeekStart(),
-                                    todayActivityComposer: TodayActivityComposer(
-                                        planningService: planningService,
-                                        trainingService: trainingService,
-                                        trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                                    ),
-                                    activityChangeBroadcaster: activityChangeBroadcaster,
-                                    sleepStatusProvider: sleepCoordinationService,
-                                    sleepChangeBroadcaster: sleepChangeBroadcaster
-                                ),
-                                athleteDisplayName: athlete.givenName,
-                                planningService: planningService,
-                                trainingService: trainingService,
-                                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                                weeklyReviewCoordinationService: weeklyReviewCoordinationService,
-                                weeklyReflectionService: weeklyReflectionService,
-                                coachingApplicationService: coachingApplicationService,
-                                athleteId: athlete.athleteId,
-                                committedByActorId: ActorId(rawValue: family.participant.id),
-                                athleteManagementViewModel: AthleteFamilyManagementViewModel(
-                                    workspaceId: WorkspaceId(rawValue: family.workspace.id),
-                                    participantId: family.participant.id,
-                                    athleteRepository: athleteRepository,
-                                    athleteFamilyManagementService: athleteFamilyManagementService
-                                ),
-                                activityChangeBroadcaster: activityChangeBroadcaster,
-                                sleepCoordinationService: sleepCoordinationService,
-                                sleepChangeBroadcaster: sleepChangeBroadcaster
-                            )
-                        )
-                    },
                     sleepSettingsDestination: { athlete in
                         AnyView(AthleteSleepSettingsView(
                             viewModel: AthleteSleepSettingsViewModel(

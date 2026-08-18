@@ -208,44 +208,33 @@ public struct HomeDashboardView: View {
                 .accessibilityIdentifier("home.manageAthletesButton")
             }
         }
+        // Round 8 (TestFlight IA correction) modal-entry-point audit,
+        // answered from the actual code: (1) this button/sheet exists
+        // because Athlete Home is a screen a parent can be pushed deep
+        // into from Family Home, with no NavigationStack of its own to
+        // reach Profile's Manage Athletes through — the sheet was the
+        // only way to reach athlete management without leaving Athlete
+        // Home; its original value was letting a parent jump straight
+        // into ANOTHER athlete's Home from here via `athleteHomeDestination`.
+        // (2) That specific value is gone now that Manage Athletes'
+        // row opens the athlete's configuration hub instead of Athlete
+        // Home (see `AthleteFamilyManagementView`'s own round 8 doc
+        // comment) — quick-switching to another athlete's configuration
+        // mid-Athlete-Home is a materially different, less obviously
+        // useful action, so this entry point's purpose is genuinely
+        // less clear under the new IA. Per this round's explicit
+        // instruction, left in place rather than removed or redesigned
+        // — reported here as follow-up to evaluate, not resolved
+        // silently. (3) It still works correctly either way: the sheet
+        // now uniformly reuses the same `AthleteFamilyManagementView`
+        // row → `AthleteSettingsView` destination as every other call
+        // site, and `presentationMode: .modal` is unchanged, so "Done"
+        // still dismisses it.
         .sheet(isPresented: $isManagingAthletes) {
             NavigationStack {
                 AthleteFamilyManagementView(
                     viewModel: athleteManagementViewModel,
                     presentationMode: .modal,
-                    athleteHomeDestination: { athlete in
-                        AnyView(HomeDashboardView(
-                            viewModel: HomeDashboardViewModel(
-                                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                                coachingPresentationProvider: coachingApplicationService,
-                                athleteId: athlete.athleteId,
-                                athleteDisplayName: athlete.givenName,
-                                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
-                                todayActivityComposer: TodayActivityComposer(
-                                    planningService: planningService,
-                                    trainingService: trainingService,
-                                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                                ),
-                                activityChangeBroadcaster: activityChangeBroadcaster,
-                                sleepStatusProvider: sleepCoordinationService,
-                                sleepChangeBroadcaster: sleepChangeBroadcaster
-                            ),
-                            athleteDisplayName: athlete.givenName,
-                            planningService: planningService,
-                            trainingService: trainingService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
-                            weeklyReflectionService: weeklyReflectionService,
-                            coachingApplicationService: coachingApplicationService,
-                            athleteId: athlete.athleteId,
-                            committedByActorId: committedByActorId,
-                            athleteManagementViewModel: athleteManagementViewModel,
-                            activityChangeBroadcaster: activityChangeBroadcaster,
-                            sleepCoordinationService: sleepCoordinationService,
-                            sleepChangeBroadcaster: sleepChangeBroadcaster
-                        ))
-                    },
                     sleepSettingsDestination: { athlete in
                         AnyView(AthleteSleepSettingsView(
                             viewModel: AthleteSleepSettingsViewModel(

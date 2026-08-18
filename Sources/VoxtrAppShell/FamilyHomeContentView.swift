@@ -554,6 +554,26 @@ public struct FamilyHomeContentView: View {
     /// `FamilyHomeViewModel.loadSleepSummaries()`'s own doc comment), so
     /// no per-athlete "disabled" branch is needed here — absence from
     /// the list already means absence from this section.
+    ///
+    /// Round 3 (TestFlight): round 2's `Spacer()` alone still left
+    /// "History" pulled toward the leading edge. Proven cause, by
+    /// direct comparison with `familyHomeRow` below (the one other row
+    /// in this file that successfully pins trailing content to the
+    /// true row edge): `familyHomeRow`'s trailing-Spacer `HStack` is
+    /// the LABEL of a `NavigationLink`, and a List/Form row proposes
+    /// its FULL width to a `NavigationLink`/`Button` label placed
+    /// directly in row content — but this row's second-line `HStack`
+    /// is a plain, non-interactive container with "History" merely
+    /// nested as one of its children, not wrapping it. A plain nested
+    /// container like that is sized at its own INTRINSIC (content-hugging)
+    /// width rather than the row's available width, so `Spacer()` had
+    /// no real remaining width to expand into. The fix claims that
+    /// width explicitly and responsively — `.frame(maxWidth: .infinity,
+    /// alignment: .leading)` on the `HStack` itself, the standard
+    /// SwiftUI idiom for "take all available row width" (not a fixed
+    /// size, not a geometry hack) — after which `Spacer()` has real
+    /// room to push "History" to the actual trailing edge, still fully
+    /// responsive under Dynamic Type.
     @ViewBuilder
     private var sleepSection: some View {
         if !viewModel.sleepSummaries.isEmpty {
@@ -574,6 +594,7 @@ public struct FamilyHomeContentView: View {
                             NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
                                 .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
                 }

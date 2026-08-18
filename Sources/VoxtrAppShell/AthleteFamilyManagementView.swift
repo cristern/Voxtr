@@ -22,12 +22,10 @@ import VoxtrAthleteDomain
 /// supplies one only where it's genuinely needed (root-level
 /// presentation when zero athletes exist, or a sheet presentation),
 /// and never where it isn't (a pushed destination already inside one).
-/// Tapping a row now pushes `athleteHomeDestination(athlete)` — the
-/// SAME canonical Athlete Home (`HomeDashboardView`) every other
-/// surface uses, supplied by the caller rather than duplicated here,
-/// since this view has no reason to know about the 6+ services that
-/// screen needs. Edit and Archive are now separate, explicit actions,
-/// never conflated with opening the athlete.
+/// (Superseded by round 8 below: a row no longer opens Athlete Home at
+/// all — see that note for the current, corrected destination.) Edit
+/// and Archive are now separate, explicit actions, never conflated
+/// with opening the athlete.
 ///
 /// Round 7 (Profile / Manage Athletes IA polish): Manage Athletes now
 /// owns ONLY athlete identity + navigation into Athlete Home. Every
@@ -50,6 +48,23 @@ import VoxtrAthleteDomain
 /// via `presentationMode`: `.navigation` (no Done — normal
 /// NavigationStack/back behavior) for the two pushed sites, `.modal`
 /// (explicit Done, calling `dismiss()`) for the one real sheet.
+///
+/// Round 8 (TestFlight IA correction): round 7's separate row + Settings
+/// link ("Oliver > Settings") competed for attention and made the
+/// hierarchy unclear. Approved correction — Profile owns People &
+/// Configuration entirely: tapping an athlete row here now opens that
+/// athlete's CONFIGURATION HUB (`AthleteSettingsView`) directly, never
+/// Athlete Home. Athlete Home stays reachable only through the Home
+/// experience (`FamilyHomeContentView.athleteOverview(for:)`), exactly
+/// as this app's own pre-round-7 architecture doc comment already
+/// intended (see `FamilyHomeView`'s own doc comment: "`AthleteFamilyManagementView`
+/// is deliberately administrative-only... it does not navigate into
+/// Athlete Overview, and that is the intended separation, not a
+/// regression to fix" — round 7 had drifted from this; this round
+/// restores it). `athleteHomeDestination` is therefore removed
+/// entirely — dead parameter, dead closures, and (in `FamilyHomeView`)
+/// a now-dead private helper that existed only to feed it — rather
+/// than left wired to an unused destination.
 public struct AthleteFamilyManagementView: View {
     /// How this view is being presented — set explicitly by the
     /// caller at each construction site, never inferred. `.modal`
@@ -66,21 +81,18 @@ public struct AthleteFamilyManagementView: View {
     @State private var editingAthlete: AthleteProfile?
     @Environment(\.dismiss) private var dismiss
     private let presentationMode: PresentationMode
-    private let athleteHomeDestination: (AthleteProfile) -> AnyView
-    /// VX-023 (Sleep V1): same caller-supplied-destination shape as
-    /// `athleteHomeDestination` above — this view has no reason to know
-    /// how to construct `SleepCoordinationService` itself.
+    /// This view has no reason to know how to construct
+    /// `SleepCoordinationService` itself — the caller supplies the
+    /// destination, reused unchanged by `AthleteSettingsView` below.
     private let sleepSettingsDestination: (AthleteProfile) -> AnyView
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
         presentationMode: PresentationMode,
-        athleteHomeDestination: @escaping (AthleteProfile) -> AnyView,
         sleepSettingsDestination: @escaping (AthleteProfile) -> AnyView
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
-        self.athleteHomeDestination = athleteHomeDestination
         self.sleepSettingsDestination = sleepSettingsDestination
     }
 
@@ -147,63 +159,55 @@ public struct AthleteFamilyManagementView: View {
             }
 
             ForEach(viewModel.athletes, id: \.id) { athlete in
-                HStack {
-                    if athlete.isArchived {
-                        VStack(alignment: .leading) {
-                            Text(athlete.givenName)
-                            Text("Archived")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        // A. Open athlete — pushes the SAME canonical
-                        // "<Athlete Name> Home" every other surface
-                        // uses. Archived athletes have no Home to open.
-                        NavigationLink {
-                            athleteHomeDestination(athlete)
-                        } label: {
-                            Text(athlete.givenName)
-                        }
-                        .accessibilityIdentifier("athleteManagement.openButton.\(athlete.id.uuidString)")
+                if athlete.isArchived {
+                    VStack(alignment: .leading) {
+                        Text(athlete.givenName)
+                        Text("Archived")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Spacer()
-                    if !athlete.isArchived {
-                        // Round 7: Settings is the ONE secondary action
-                        // on the row — Edit, Sleep, and Archive all
-                        // live inside it now, never directly on the row
-                        // itself, so the row/name tap stays the sole
-                        // path into Athlete Home.
-                        NavigationLink("Settings") {
-                            AthleteSettingsView(
-                                viewModel: viewModel,
-                                athlete: athlete,
-                                sleepSettingsDestination: sleepSettingsDestination
-                            )
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityIdentifier("athleteManagement.settingsButton.\(athlete.id.uuidString)")
+                    .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
+                } else {
+                    // Round 8 (TestFlight IA correction): the athlete
+                    // row is now the SINGLE destination — Manage
+                    // Athletes is a people/configuration index, not
+                    // another Athlete Home launcher, so tapping an
+                    // athlete opens their configuration hub directly.
+                    // No separate "Settings" action alongside it.
+                    NavigationLink {
+                        AthleteSettingsView(
+                            viewModel: viewModel,
+                            athlete: athlete,
+                            sleepSettingsDestination: sleepSettingsDestination
+                        )
+                    } label: {
+                        Text(athlete.givenName)
                     }
+                    .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
                 }
-                .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
             }
         }
         .accessibilityIdentifier("athleteManagement.athleteList")
     }
 }
 
-/// Round 7 (Profile / Manage Athletes IA polish): the ONE canonical
-/// per-athlete configuration screen. Manage Athletes' row now owns
-/// only identity + navigation into Athlete Home (see the doc comment
-/// above `AthleteFamilyManagementView`); this screen owns everything
-/// that used to sit as separate row actions — Edit profile, Sleep
-/// tracking, and destructive Archive — so configuration lives in
-/// exactly one place, never duplicated across both surfaces. Reuses
-/// the existing `AthleteFormView` sheet, the caller-supplied
-/// `sleepSettingsDestination` closure, and
+/// Round 7 (Profile / Manage Athletes IA polish), evolved in round 8
+/// into the canonical ATHLETE CONFIGURATION HUB — the ONE screen
+/// `AthleteFamilyManagementView`'s athlete row now opens directly (see
+/// that struct's own doc comment). Owns everything that used to sit as
+/// separate row actions — Profile, Sleep tracking, and destructive
+/// Archive — so configuration lives in exactly one place, never
+/// duplicated. Reuses the existing `AthleteFormView` sheet, the
+/// caller-supplied `sleepSettingsDestination` closure, and
 /// `AthleteFamilyManagementViewModel.archiveAthlete(_:)` verbatim — no
 /// new configuration surface, no new persistence path, and Archive's
-/// own behavior (immediate, no confirmation dialog) is unchanged; only
-/// its location moved here from the row.
+/// own behavior (immediate, no confirmation dialog) is unchanged.
+///
+/// Each concept gets its own `Form` `Section`, Archive last and
+/// visually separated — this is deliberate so a future concept (e.g.
+/// Notifications, explicitly NOT implemented this round) can be added
+/// as one more `Section` between Sleep and Archive without touching
+/// Manage Athletes or this hub's own structure again.
 struct AthleteSettingsView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let athlete: AthleteProfile
@@ -213,11 +217,14 @@ struct AthleteSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Button("Edit Profile") {
+                // "Profile", not "Edit Profile" — this row simply IS
+                // the athlete's profile; tapping it opens the existing
+                // Add/Edit form (reused verbatim, no duplicated fields).
+                Button("Profile") {
                     viewModel.prefill(from: athlete)
                     isPresentingForm = true
                 }
-                .accessibilityIdentifier("athleteSettings.editProfileButton.\(athlete.id.uuidString)")
+                .accessibilityIdentifier("athleteSettings.profileButton.\(athlete.id.uuidString)")
             }
 
             Section {
@@ -231,13 +238,13 @@ struct AthleteSettingsView: View {
             // Section — matches this screen's own "Archive preferably
             // at the bottom" requirement without any fixed geometry.
             Section {
-                Button("Archive Athlete", role: .destructive) {
+                Button("Archive athlete", role: .destructive) {
                     viewModel.archiveAthlete(athlete)
                 }
                 .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
             }
         }
-        .navigationTitle("\(athlete.givenName) Settings")
+        .navigationTitle(athlete.givenName)
         .sheet(isPresented: $isPresentingForm) {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
         }

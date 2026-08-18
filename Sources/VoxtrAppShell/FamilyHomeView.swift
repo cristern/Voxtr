@@ -110,7 +110,6 @@ public struct FamilyHomeView: View {
                 AthleteFamilyManagementView(
                     viewModel: makeAthleteManagementViewModel(),
                     presentationMode: .navigation,
-                    athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) },
                     sleepSettingsDestination: { athlete in
                         AnyView(AthleteSleepSettingsView(
                             viewModel: AthleteSleepSettingsViewModel(
@@ -123,47 +122,6 @@ public struct FamilyHomeView: View {
                 )
             }
         }
-    }
-
-    /// Reused verbatim from `FamilyHomeContentView`'s own
-    /// `athleteOverview(for:)` — the same canonical Athlete Home
-    /// (`HomeDashboardView`), never a second implementation. This
-    /// exists here only because the zero-active-athletes branch above
-    /// is a separate root-level presentation from
-    /// `FamilyHomeContentView`, not because Athlete Home itself
-    /// differs in any way.
-    private func athleteOverview(for athlete: AthleteProfile) -> some View {
-        HomeDashboardView(
-            viewModel: HomeDashboardViewModel(
-                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                coachingPresentationProvider: coachingApplicationService,
-                athleteId: athlete.athleteId,
-                athleteDisplayName: athlete.givenName,
-                weekStart: WeeklyPlanningViewModel.currentWeekStart(),
-                todayActivityComposer: TodayActivityComposer(
-                    planningService: planningService,
-                    trainingService: trainingService,
-                    trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                ),
-                activityChangeBroadcaster: activityChangeBroadcaster,
-                sleepStatusProvider: sleepCoordinationService,
-                sleepChangeBroadcaster: sleepChangeBroadcaster
-            ),
-            athleteDisplayName: athlete.givenName,
-            planningService: planningService,
-            trainingService: trainingService,
-            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-            weeklyReviewCoordinationService: weeklyReviewCoordinationService,
-            weeklyReflectionService: weeklyReflectionService,
-            coachingApplicationService: coachingApplicationService,
-            athleteId: athlete.athleteId,
-            committedByActorId: ActorId(rawValue: family.participant.id),
-            athleteManagementViewModel: makeAthleteManagementViewModel(),
-            activityChangeBroadcaster: activityChangeBroadcaster,
-            sleepCoordinationService: sleepCoordinationService,
-            sleepChangeBroadcaster: sleepChangeBroadcaster
-        )
     }
 
     private func makeAthleteManagementViewModel() -> AthleteFamilyManagementViewModel {
