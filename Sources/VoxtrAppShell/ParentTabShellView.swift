@@ -186,6 +186,7 @@ public struct ParentTabShellView: View {
                         athleteRepository: athleteRepository,
                         athleteFamilyManagementService: athleteFamilyManagementService
                     ),
+                    presentationMode: .navigation,
                     athleteHomeDestination: { athlete in
                         AnyView(
                             HomeDashboardView(

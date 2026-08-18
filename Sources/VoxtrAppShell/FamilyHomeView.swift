@@ -109,6 +109,7 @@ public struct FamilyHomeView: View {
             NavigationStack {
                 AthleteFamilyManagementView(
                     viewModel: makeAthleteManagementViewModel(),
+                    presentationMode: .navigation,
                     athleteHomeDestination: { athlete in AnyView(self.athleteOverview(for: athlete)) },
                     sleepSettingsDestination: { athlete in
                         AnyView(AthleteSleepSettingsView(

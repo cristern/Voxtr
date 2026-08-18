@@ -212,6 +212,7 @@ public struct HomeDashboardView: View {
             NavigationStack {
                 AthleteFamilyManagementView(
                     viewModel: athleteManagementViewModel,
+                    presentationMode: .modal,
                     athleteHomeDestination: { athlete in
                         AnyView(HomeDashboardView(
                             viewModel: HomeDashboardViewModel(

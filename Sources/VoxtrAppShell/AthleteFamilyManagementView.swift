@@ -35,18 +35,37 @@ import VoxtrAthleteDomain
 /// and into the new `AthleteSettingsView` below, reached through a
 /// single "Settings" secondary action — so the row/name tap can never
 /// accidentally route into Sleep Settings, and configuration is never
-/// duplicated across two surfaces. The removed "Done" toolbar button
-/// was confirmed dead everywhere this view is presented as pushed
-/// content (`ParentTabShellView`'s Profile tab, `FamilyHomeView`'s
-/// zero-athletes root); the one real `.sheet` presentation
-/// (`HomeDashboardView`'s "Manage Athletes" button) has no
-/// `.interactiveDismissDisabled()` anywhere in this module, so it
-/// still dismisses via SwiftUI's default swipe-to-dismiss gesture —
-/// Done was never its only escape route.
+/// duplicated across two surfaces.
+///
+/// Round 7 review correction: the "Done" button was first removed
+/// outright, on the reasoning that swipe-to-dismiss remains available
+/// wherever this view is shown as a `.sheet`. That's true, but it
+/// treats an intentionally modal presentation
+/// (`HomeDashboardView`'s "Manage Athletes" sheet) the same as normal
+/// pushed `NavigationStack` content (`ParentTabShellView`'s Profile
+/// tab, `FamilyHomeView`'s zero-athletes root) — an intentionally
+/// modal screen shouldn't rely on gesture-only dismissal. Rather than
+/// have this view infer its own presentation context from the
+/// environment, each of the three call sites now states it explicitly
+/// via `presentationMode`: `.navigation` (no Done — normal
+/// NavigationStack/back behavior) for the two pushed sites, `.modal`
+/// (explicit Done, calling `dismiss()`) for the one real sheet.
 public struct AthleteFamilyManagementView: View {
+    /// How this view is being presented — set explicitly by the
+    /// caller at each construction site, never inferred. `.modal`
+    /// is the only case that shows a Done control; `.navigation`
+    /// participates in ordinary NavigationStack/back navigation with
+    /// no artificial completion control of its own.
+    public enum PresentationMode: Equatable {
+        case navigation
+        case modal
+    }
+
     @State private var viewModel: AthleteFamilyManagementViewModel
     @State private var isPresentingForm: Bool = false
     @State private var editingAthlete: AthleteProfile?
+    @Environment(\.dismiss) private var dismiss
+    private let presentationMode: PresentationMode
     private let athleteHomeDestination: (AthleteProfile) -> AnyView
     /// VX-023 (Sleep V1): same caller-supplied-destination shape as
     /// `athleteHomeDestination` above — this view has no reason to know
@@ -55,10 +74,12 @@ public struct AthleteFamilyManagementView: View {
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
+        presentationMode: PresentationMode,
         athleteHomeDestination: @escaping (AthleteProfile) -> AnyView,
         sleepSettingsDestination: @escaping (AthleteProfile) -> AnyView
     ) {
         _viewModel = State(initialValue: viewModel)
+        self.presentationMode = presentationMode
         self.athleteHomeDestination = athleteHomeDestination
         self.sleepSettingsDestination = sleepSettingsDestination
     }
@@ -80,6 +101,12 @@ public struct AthleteFamilyManagementView: View {
                     isPresentingForm = true
                 }
                 .accessibilityIdentifier("athleteManagement.addAthleteButton")
+            }
+            if presentationMode == .modal {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                        .accessibilityIdentifier("athleteManagement.doneButton")
+                }
             }
         }
         .onAppear {
