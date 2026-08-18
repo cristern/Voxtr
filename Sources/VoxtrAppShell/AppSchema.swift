@@ -27,16 +27,20 @@ import VoxtrReflectionDomain
 /// `RecurringPlannedActivity`. VX-023 (Sleep V1) adds `DailyStatus` and
 /// `AthleteSettings` — both types existed in source already but were
 /// never registered here and never persisted by any repository; Sleep
-/// V1 is what activates them for real. This is a type *addition*, not a
-/// field-level change to an already-listed type: per
-/// `AppSchemaVersioning.swift`'s own "HOW TO ADD" step 3, only a type
-/// addition/removal touches this array at all. No `AppSchemaV2` bump
-/// was made for this addition — `AppCurrentSchema.models` is still a
-/// live (not yet frozen) passthrough to this array, so both newly-
-/// registered types simply become part of what V1 already resolves to,
-/// consistent with this file's own "no production data at stake, first
-/// version of the simplified scheme" philosophy. There are zero existing
-/// persisted rows of either type to migrate.
+/// V1 is what activates them for real. This IS a genuine schema version
+/// bump: `AppSchemaVersioning.swift` now declares `AppSchemaV2`
+/// ("2.0.0") as the current version (`AppCurrentSchema`, "1.0.0", is
+/// FROZEN to the prior 15-entity shape), with a `.lightweight`
+/// migration stage carrying an existing on-disk "1.0.0" store forward.
+/// An earlier round of this same feature treated a live-passthrough
+/// `AppCurrentSchema.models` (no version bump at all) as sufficient —
+/// review follow-up determined that was not actually safe for an
+/// existing TestFlight store (a fixed "1.0.0" identity would have
+/// silently meant a different entity shape across builds) and corrected
+/// it to the real version bump described above. See
+/// `AppSchemaVersioning.swift`'s own doc comment for the full
+/// reasoning, and `PersistenceRecoveryTests.existingV1StoreMigratesToV2Successfully`
+/// for the migration itself exercised end to end.
 ///
 /// CRITICAL PERSISTENCE RECOVERY: this project's schema *versioning*
 /// history (`AppSchemaV1` through `AppSchemaV6`, with "frozen legacy

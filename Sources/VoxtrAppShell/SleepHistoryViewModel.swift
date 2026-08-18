@@ -86,7 +86,18 @@ public final class SleepHistoryViewModel {
         let oldestDate = newestDate.adding(days: -(Self.pageSize - 1))
         do {
             let statuses = try sleepStatusProvider.fetchDailyStatuses(forAthlete: athleteId, from: oldestDate, to: newestDate)
-            let byDate = Dictionary(uniqueKeysWithValues: statuses.map { ($0.localDate, $0) })
+            // Review follow-up (one-DailyStatus-per-athlete/date audit):
+            // `uniqueKeysWithValues:` would trap if the repository ever
+            // returned two rows for the same date — the write path
+            // (`ReflectionRepository.upsertSleepQuality`, MainActor-
+            // isolated with no suspension point in its fetch-then-write
+            // sequence) shouldn't be able to produce that today, but
+            // this read path has no way to know that and must not crash
+            // the UI on a "shouldn't happen" anomaly (e.g. hand-edited/
+            // legacy data). `uniquingKeysWith:` degrades to picking one
+            // of the duplicates instead — never a fatal error, and never
+            // presented as two rows for the same date.
+            let byDate = Dictionary(statuses.map { ($0.localDate, $0) }, uniquingKeysWith: { first, _ in first })
             var newRows: [SleepHistoryRow] = []
             var cursor = newestDate
             while cursor >= oldestDate {

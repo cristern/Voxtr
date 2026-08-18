@@ -48,16 +48,22 @@ public final class CompositionRoot {
     /// CRITICAL PERSISTENCE RECOVERY: this default previously targeted
     /// `AppSchemaV6` (itself a fix for an earlier bug where it targeted
     /// `AppSchemaV1`, the oldest version in the plan — see git history).
-    /// The whole multi-version history it pointed into has since been
+    /// The whole multi-version history it pointed into was then
     /// collapsed to `AppCurrentSchema` — one live version, no
-    /// historical "legacy type" scaffolding — see
-    /// `AppSchemaVersioning.swift`'s own doc comment for the full
-    /// investigation and why. This parameter must be updated at every
-    /// future schema version bump; see that same file's own "HOW TO
-    /// ADD A NEW VERSION" instructions.
+    /// historical "legacy type" scaffolding. VX-023 (Sleep V1) review
+    /// follow-up: `AppCurrentSchema` is now FROZEN (15 entities, "1.0.0")
+    /// and this default targets `AppSchemaV2` ("2.0.0", 17 entities —
+    /// adds `DailyStatus`/`AthleteSettings`), the current genuine
+    /// version — see `AppSchemaVersioning.swift`'s own doc comment for
+    /// the full investigation and why a live-passthrough
+    /// `AppCurrentSchema` was not actually safe for a model-type
+    /// addition. This parameter must be updated at every future schema
+    /// version bump; see that same file's own "HOW TO ADD A NEW
+    /// VERSION" instructions — missing this exact step is the
+    /// documented root cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppCurrentSchema.self,
+            versionedSchema: AppSchemaV2.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

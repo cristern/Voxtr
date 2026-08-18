@@ -100,4 +100,44 @@ struct SleepHistoryViewModelTests {
         #expect(viewModel.rows.first { $0.localDate == threeDaysAgo }?.sleepQuality == 5)
         #expect(viewModel.rows.count == 14)
     }
+
+    /// Review follow-up (one-DailyStatus-per-athlete/date audit, part D):
+    /// the canonical write path (`ReflectionRepository.upsertSleepQuality`)
+    /// cannot produce two rows for the same athlete/date under normal
+    /// operation — verified separately by
+    /// `SleepCoordinationServiceTests.concurrentRecordSleepNeverDuplicates`.
+    /// This test covers the READ side's own defensiveness for a
+    /// "shouldn't happen" anomaly instead (hand-edited data, a future
+    /// bug, direct `ModelContext` access bypassing the repository): two
+    /// genuinely separate `DailyStatus` rows inserted directly for the
+    /// same athlete/date must never crash Sleep History —
+    /// `Dictionary(uniqueKeysWithValues:)` would `fatalError` on a
+    /// duplicate key; the fix uses `uniquingKeysWith:` instead (see
+    /// `SleepHistoryViewModel.loadMore()`'s own doc comment).
+    @Test("Review follow-up: two duplicate DailyStatus rows for the same athlete/date never crash Sleep History — one is used, never a fatal error")
+    @MainActor
+    func duplicateRowsForSameDateNeverCrashHistory() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let athleteId = AthleteId()
+        let date = LocalDate(year: 2026, month: 8, day: 17)
+
+        // Bypasses the canonical upsert path entirely — inserted
+        // directly, simulating an anomaly the write path itself cannot
+        // produce.
+        let first = DailyStatus(athleteId: athleteId, localDate: date, sleepQuality: 2, visibility: .sharedWithGuardians)
+        let second = DailyStatus(athleteId: athleteId, localDate: date, sleepQuality: 5, visibility: .sharedWithGuardians)
+        container.mainContext.insert(first)
+        container.mainContext.insert(second)
+        try container.mainContext.save()
+
+        let service = Self.makeService(container: container)
+        let viewModel = SleepHistoryViewModel(sleepStatusProvider: service, athleteId: athleteId, today: date)
+
+        viewModel.loadInitial()
+
+        let matchingRows = viewModel.rows.filter { $0.localDate == date }
+        #expect(matchingRows.count == 1)
+        let resolvedSleepQuality = matchingRows.first?.sleepQuality
+        #expect(resolvedSleepQuality == 2 || resolvedSleepQuality == 5)
+    }
 }

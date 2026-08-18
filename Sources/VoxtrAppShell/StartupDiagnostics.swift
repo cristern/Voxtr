@@ -23,13 +23,25 @@ public enum StartupDiagnostics {
     /// The current schema version and the full migration plan's
     /// version sequence — static facts about this build, not about any
     /// particular failure, but essential context for reading one.
+    ///
+    /// VX-023 review follow-up: previously hardcoded to
+    /// `AppCurrentSchema.versionIdentifier` — silently wrong the moment
+    /// `AppSchemaV2` became the real target (`CompositionRoot.build`'s
+    /// default), since `AppCurrentSchema` is now a frozen, superseded
+    /// version, not "the current schema version" its own name implies.
+    /// Derived from `AppSchemaMigrationPlan.schemas.last` instead — per
+    /// that plan's own contract ("old versions are never removed, only
+    /// appended to," `AppSchemaVersioning.swift`'s "HOW TO ADD A NEW
+    /// VERSION" step 5), the last entry is always whatever is actually
+    /// current, with no separate constant to keep in sync at the next
+    /// version bump.
     public static var schemaContext: String {
-        let latestVersion = AppCurrentSchema.versionIdentifier
         let planVersions = AppSchemaMigrationPlan.schemas.map { schema in
             "\(schema.versionIdentifier.major).\(schema.versionIdentifier.minor).\(schema.versionIdentifier.patch)"
         }
+        let latestVersion = planVersions.last ?? "unknown"
         return """
-        Target schema version: \(latestVersion.major).\(latestVersion.minor).\(latestVersion.patch)
+        Target schema version: \(latestVersion)
         Migration plan version sequence: \(planVersions.joined(separator: " → "))
         """
     }

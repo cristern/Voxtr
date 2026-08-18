@@ -6,6 +6,7 @@ import VoxtrCoreContracts
 @testable import VoxtrAppShell
 import VoxtrAthleteDomain
 import VoxtrParentDomain
+import VoxtrReflectionDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -41,7 +42,11 @@ struct PersistenceRecoveryTests {
         // exercises the real construction path.
         let storeURL = URL.temporaryDirectory.appendingPathComponent("fresh-install-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        // VX-023 review follow-up: a genuine fresh install now targets
+        // AppSchemaV2 (CompositionRoot.build's real default) — no
+        // migration stage runs at all for a brand-new store; it's simply
+        // created directly under the current version.
+        let schema = Schema(versionedSchema: AppSchemaV2.self)
 
         var athleteIds: [UUID] = []
         var workspaceId: WorkspaceId
@@ -111,17 +116,18 @@ struct PersistenceRecoveryTests {
     @Test("Restarting a store created under the current schema succeeds without a migration path being required")
     @MainActor
     func restartUnderCurrentSchemaSucceeds() throws {
-        // "Update from previous shipped schema" under the collapsed,
-        // single-version scheme: a store created under AppCurrentSchema
-        // (the only version) still needs to reopen correctly on the
-        // NEXT construction — this is the scheme's own trivial case of
-        // that requirement, since there is only one version right now.
-        // A genuine multi-version migration test becomes meaningful
-        // again the first time a real AppSchemaV2 is added (see
-        // AppSchemaVersioning.swift's own "HOW TO ADD A NEW VERSION").
+        // A store created under whatever the CURRENT version is still
+        // needs to reopen correctly on the NEXT construction, with no
+        // migration stage actually being exercised (source and target
+        // version are identical). VX-023 review follow-up: this now
+        // targets AppSchemaV2 — the real current version — rather than
+        // the now-frozen AppCurrentSchema (V1). The genuine V1→V2
+        // migration case this comment used to describe as "not yet
+        // meaningful" is now covered separately by
+        // existingV1StoreMigratesToV2Successfully below.
         let storeURL = URL.temporaryDirectory.appendingPathComponent("restart-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        let schema = Schema(versionedSchema: AppSchemaV2.self)
 
         do {
             let firstContainer = try ModelContainer(
@@ -163,12 +169,74 @@ struct PersistenceRecoveryTests {
         // at the wrong schema version) that caused this whole
         // investigation.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppCurrentSchema.self,
+            versionedSchema: AppSchemaV2.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
 
         #expect(container.schema.entities.count == AppSchema.modelTypes.count)
+    }
+
+    @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")
+    @MainActor
+    func existingV1StoreMigratesToV2Successfully() throws {
+        // Simulates exactly the scenario an existing TestFlight install
+        // hits after updating to a build containing VX-023: a store
+        // already on disk, saved under the OLD, now-frozen V1 schema —
+        // no DailyStatus/AthleteSettings tables exist in it at all.
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v1-to-v2-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v1Schema = Schema(versionedSchema: AppCurrentSchema.self)
+        var athleteRawId: UUID
+        do {
+            let v1Container = try ModelContainer(
+                for: v1Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v1Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v1Container.mainContext.insert(athlete)
+            try v1Container.mainContext.save()
+            athleteRawId = athlete.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V2) — the real production default
+        // (CompositionRoot.build's own `versionedSchema: AppSchemaV2.self`).
+        let v2Schema = Schema(versionedSchema: AppSchemaV2.self)
+        let v2Container = try ModelContainer(
+            for: v2Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v2Schema, url: storeURL)]
+        )
+
+        // Pre-existing data survived the migration completely untouched.
+        let athleteRepository = AthleteRepository(modelContext: v2Container.mainContext)
+        let athletes = try athleteRepository.fetchAllAthletes()
+        #expect(athletes.count == 1)
+        #expect(athletes.first?.id == athleteRawId)
+        #expect(athletes.first?.givenName == "Jonas")
+
+        // The new Sleep model type is genuinely usable against the
+        // migrated store — proves the lightweight stage actually
+        // created its table, not merely that the container opened
+        // without throwing.
+        let reflectionRepository = ReflectionRepository(modelContext: v2Container.mainContext)
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let recorded = try reflectionRepository.upsertSleepQuality(
+            athleteId: athleteId,
+            localDate: LocalDate(year: 2026, month: 8, day: 18),
+            sleepQuality: 4,
+            visibility: .sharedWithGuardians
+        )
+        #expect(recorded.sleepQuality == 4)
+        #expect(try v2Container.mainContext.fetch(FetchDescriptor<DailyStatus>()).count == 1)
     }
 
     @Test("A save failure during onboarding rolls back completely, leaving no partial family data")

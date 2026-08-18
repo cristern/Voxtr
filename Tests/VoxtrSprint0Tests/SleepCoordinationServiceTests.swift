@@ -174,6 +174,39 @@ struct SleepCoordinationServiceTests {
         #expect(try service.fetchDailyStatus(forAthlete: athleteId, localDate: date)?.sleepQuality == 3)
     }
 
+    /// Review follow-up (one-DailyStatus-per-athlete/date audit):
+    /// `ReflectionRepository`/`ReflectionService`/`SleepCoordinationService`
+    /// are all `@MainActor`-isolated, and `upsertSleepQuality`'s own
+    /// fetch → decide → insert-or-mutate → save sequence contains no
+    /// `await` at all — a fully synchronous run of MainActor-isolated
+    /// code cannot be interleaved by another MainActor-isolated call,
+    /// only preempted at a suspension point, and there isn't one here.
+    /// This test proves that guarantee under GENUINE concurrent
+    /// scheduling (`withTaskGroup`, not just sequential calls in one
+    /// test body, which `sameAthleteDateStaysOneCanonicalRow` above
+    /// already covers) — ten concurrently-dispatched `recordSleep`
+    /// calls for the identical athlete/date still resolve to exactly
+    /// one canonical row. No lock/queue/actor was added to make this
+    /// pass — the existing MainActor isolation already proves it.
+    @Test("8b: ten concurrent recordSleep calls for the same athlete/date never produce two DailyStatus rows")
+    @MainActor
+    func concurrentRecordSleepNeverDuplicates() async throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeService(container: container)
+        let athleteId = AthleteId()
+        let date = LocalDate(year: 2026, month: 8, day: 17)
+
+        await withTaskGroup(of: Void.self) { group in
+            for value in 1...10 {
+                group.addTask { @MainActor in
+                    _ = try? service.recordSleep(athleteId: athleteId, localDate: date, sleepQuality: (value % 5) + 1, today: date)
+                }
+            }
+        }
+
+        #expect(try container.mainContext.fetch(FetchDescriptor<DailyStatus>()).count == 1)
+    }
+
     // MARK: Tracking (9-11)
 
     @Test("9: default Sleep tracking is On for an athlete with no AthleteSettings row at all")
