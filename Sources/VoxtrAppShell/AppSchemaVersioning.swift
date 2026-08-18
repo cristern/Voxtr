@@ -1,5 +1,11 @@
 import Foundation
 import SwiftData
+import VoxtrCore
+import VoxtrAthleteDomain
+import VoxtrParentDomain
+import VoxtrPlanningDomain
+import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// CRITICAL PERSISTENCE RECOVERY (see this work's own root-cause
 /// writeup for the full investigation): this file previously declared
