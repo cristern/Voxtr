@@ -235,14 +235,12 @@ public struct HomeDashboardView: View {
                 AthleteFamilyManagementView(
                     viewModel: athleteManagementViewModel,
                     presentationMode: .modal,
-                    sleepSettingsDestination: { athlete in
-                        AnyView(AthleteSleepSettingsView(
-                            viewModel: AthleteSleepSettingsViewModel(
-                                sleepCoordinationService: sleepCoordinationService,
-                                athleteId: athlete.athleteId,
-                                athleteDisplayName: athlete.givenName
-                            )
-                        ))
+                    sleepSettingsViewModel: { athlete in
+                        AthleteSleepSettingsViewModel(
+                            sleepCoordinationService: sleepCoordinationService,
+                            athleteId: athlete.athleteId,
+                            athleteDisplayName: athlete.givenName
+                        )
                     }
                 )
             }

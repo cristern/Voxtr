@@ -83,17 +83,19 @@ public struct AthleteFamilyManagementView: View {
     private let presentationMode: PresentationMode
     /// This view has no reason to know how to construct
     /// `SleepCoordinationService` itself — the caller supplies the
-    /// destination, reused unchanged by `AthleteSettingsView` below.
-    private let sleepSettingsDestination: (AthleteProfile) -> AnyView
+    /// ViewModel, reused unchanged by `AthleteSettingsView` below for
+    /// its inline Sleep tracking Toggle (round 10 — see that type's
+    /// own doc comment: no dedicated Sleep Settings screen anymore).
+    private let sleepSettingsViewModel: (AthleteProfile) -> AthleteSleepSettingsViewModel
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
         presentationMode: PresentationMode,
-        sleepSettingsDestination: @escaping (AthleteProfile) -> AnyView
+        sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
-        self.sleepSettingsDestination = sleepSettingsDestination
+        self.sleepSettingsViewModel = sleepSettingsViewModel
     }
 
     public var body: some View {
@@ -178,7 +180,7 @@ public struct AthleteFamilyManagementView: View {
                         AthleteSettingsView(
                             viewModel: viewModel,
                             athlete: athlete,
-                            sleepSettingsDestination: sleepSettingsDestination
+                            sleepSettingsViewModel: sleepSettingsViewModel(athlete)
                         )
                     } label: {
                         Text(athlete.givenName)
@@ -198,7 +200,7 @@ public struct AthleteFamilyManagementView: View {
 /// separate row actions — Profile, Sleep tracking, and destructive
 /// Archive — so configuration lives in exactly one place, never
 /// duplicated. Reuses the existing `AthleteFormView` sheet, the
-/// caller-supplied `sleepSettingsDestination` closure, and
+/// caller-supplied `sleepSettingsViewModel` factory, and
 /// `AthleteFamilyManagementViewModel.archiveAthlete(_:)` verbatim — no
 /// new configuration surface, no new persistence path, and Archive's
 /// own behavior (immediate, no confirmation dialog) is unchanged.
@@ -217,18 +219,29 @@ public struct AthleteFamilyManagementView: View {
 /// it is configuration, not identity, and now sits in its own row at
 /// the same level as Sleep.
 ///
-/// Round 9 review correction: Development Stage first reused the full
-/// `AthleteFormView` sheet (same screen the Profile card opens),
-/// which wrongly exposed identity-editing fields from what's meant to
-/// be a pure configuration entry point — Profile identity data vs.
-/// athlete configuration is an intentional distinction, not one this
-/// row should blur. It now pushes `AthleteDevelopmentStageView`
-/// instead — the smallest focused edit surface for
-/// `AthleteProfile.developmentStage` alone, reusing the exact same
-/// `editAthlete(_:)` mutation/service path (see that view's own doc
-/// comment) rather than a new model or a changed mutation contract.
-/// `AthleteFormView` itself now shows only Name/Family name/Birth
-/// date, for both this hub's Profile card and Add Athlete.
+/// Round 10 (TestFlight IA correction): the navigation title duplicated
+/// the athlete's name — it was already the first line of the Profile
+/// card, so the screen showed "Oliver" twice. Fixed by titling this
+/// screen "Athlete settings" (never the athlete's name) while the
+/// Profile card keeps showing Name as before — the duplication is
+/// removed by changing the title, not by touching the card.
+///
+/// Round 10 also establishes this hub's Simple Settings Rule: a
+/// single-value setting (Development Stage, Sleep tracking) is shown
+/// and edited DIRECTLY on this screen; navigation is reserved for
+/// settings that genuinely need more (multiple fields, history,
+/// explanation, a richer workflow — none of which apply to either of
+/// these two). Development Stage was previously a separate pushed
+/// screen (`AthleteDevelopmentStageView`, now removed as dead code —
+/// its one Picker moved inline below, same `editAthlete(_:)` mutation
+/// path, same `prefill(from:)` priming, nothing new). Sleep tracking
+/// was previously a separate pushed screen too
+/// (`AthleteSleepSettingsView`, now removed as dead code — its one
+/// Toggle moved inline below, same `AthleteSleepSettingsViewModel`/
+/// `SleepCoordinationService.setSleepTrackingEnabled` mutation path).
+/// Neither removal touches Sleep History, Sleep Capture, DailyStatus,
+/// or the morning prompt — none of those were ever part of either
+/// screen.
 ///
 /// Each concept gets its own `Form` `Section`, Archive last and
 /// visually separated — this is deliberate so a future concept (e.g.
@@ -238,16 +251,36 @@ public struct AthleteFamilyManagementView: View {
 struct AthleteSettingsView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let athlete: AthleteProfile
-    let sleepSettingsDestination: (AthleteProfile) -> AnyView
     @State private var isPresentingForm: Bool = false
+    @State private var sleepSettingsViewModel: AthleteSleepSettingsViewModel
+
+    init(
+        viewModel: AthleteFamilyManagementViewModel,
+        athlete: AthleteProfile,
+        sleepSettingsViewModel: AthleteSleepSettingsViewModel
+    ) {
+        self.viewModel = viewModel
+        self.athlete = athlete
+        _sleepSettingsViewModel = State(initialValue: sleepSettingsViewModel)
+    }
 
     var body: some View {
         Form {
-            // PROFILE CARD — identity/profile facts only (Name, Family
+            if let errorMessage = viewModel.errorMessage {
+                Section {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("athleteSettings.errorMessage")
+                }
+            }
+
+            // PROFILE — identity/profile facts only (Name, Family
             // name, Birth date), reused directly off `athlete`, never a
             // second copy of this data. Tapping anywhere on the card
-            // opens the existing Edit Athlete form.
-            Section {
+            // opens the existing Edit Athlete form (Name/Family
+            // name/Birth date only — Development Stage is deliberately
+            // NOT part of this form; see the Settings section below).
+            Section("Profile") {
                 Button {
                     viewModel.prefill(from: athlete)
                     isPresentingForm = true
@@ -273,33 +306,47 @@ struct AthleteSettingsView: View {
                 .accessibilityIdentifier("athleteSettings.profileCard.\(athlete.id.uuidString)")
             }
 
-            // Configuration — deliberately separate from the identity
-            // facts above (see this hub's own doc comment). Development
-            // Stage pushes its own small, focused edit surface — never
-            // the Profile card's identity-editing form.
-            Section {
-                NavigationLink("Development stage") {
-                    AthleteDevelopmentStageView(viewModel: viewModel, athlete: athlete)
+            // SETTINGS — simple, single-value athlete configuration,
+            // shown and changed directly here rather than behind a
+            // second navigation push (see this screen's own doc
+            // comment for why).
+            Section("Settings") {
+                Picker("Development stage", selection: developmentStageBinding) {
+                    Text("Parent-led").tag(DevelopmentStage.parentLed)
+                    Text("Shared ownership").tag(DevelopmentStage.sharedOwnership)
+                    Text("Guided independence").tag(DevelopmentStage.guidedIndependence)
+                    Text("Athlete-led").tag(DevelopmentStage.athleteLed)
                 }
-                .accessibilityIdentifier("athleteSettings.developmentStageLink.\(athlete.id.uuidString)")
+                .accessibilityIdentifier("athleteSettings.developmentStagePicker.\(athlete.id.uuidString)")
 
-                NavigationLink("Sleep") {
-                    sleepSettingsDestination(athlete)
+                if let sleepErrorMessage = sleepSettingsViewModel.errorMessage {
+                    Text(sleepErrorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("athleteSettings.sleepErrorMessage.\(athlete.id.uuidString)")
                 }
-                .accessibilityIdentifier("athleteSettings.sleepLink.\(athlete.id.uuidString)")
+                Toggle("Sleep", isOn: Binding(
+                    get: { sleepSettingsViewModel.isTrackingEnabled },
+                    set: { sleepSettingsViewModel.setTrackingEnabled($0) }
+                ))
+                .accessibilityIdentifier("athleteSettings.sleepToggle.\(athlete.id.uuidString)")
+            } footer: {
+                Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept.")
             }
 
-            // Destructive, visually separated in its own trailing
-            // Section — matches this screen's own "Archive preferably
-            // at the bottom" requirement without any fixed geometry.
-            Section {
+            // ARCHIVE — destructive, visually separated in its own
+            // trailing Section, at the bottom.
+            Section("Archive") {
                 Button("Archive athlete", role: .destructive) {
                     viewModel.archiveAthlete(athlete)
                 }
                 .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
             }
         }
-        .navigationTitle(athlete.givenName)
+        .navigationTitle("Athlete settings")
+        .onAppear {
+            viewModel.prefill(from: athlete)
+            sleepSettingsViewModel.load()
+        }
         .sheet(isPresented: $isPresentingForm) {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
         }
@@ -313,6 +360,27 @@ struct AthleteSettingsView: View {
             Text(value)
                 .foregroundStyle(.primary)
         }
+    }
+
+    /// Setting this binding both updates the shared
+    /// `AthleteFamilyManagementViewModel` form state AND commits it via
+    /// `editAthlete(_:)` in the same action — `prefill(from:)` (called
+    /// `onAppear` above, a plain property assignment) never goes
+    /// through this binding's setter, so only a genuine user selection
+    /// triggers a save. `prefill` already captured the athlete's
+    /// current Name/Family name/Birth date/Preferred name, so this
+    /// resubmits every other field unchanged — only Development Stage
+    /// actually changes. Same `AthleteProfile.developmentStage`
+    /// canonical field, same mutation path `AthleteFormView` uses for
+    /// its own fields — no new model, no changed semantics.
+    private var developmentStageBinding: Binding<DevelopmentStage> {
+        Binding(
+            get: { viewModel.developmentStage },
+            set: { newValue in
+                viewModel.developmentStage = newValue
+                viewModel.editAthlete(athlete)
+            }
+        )
     }
 }
 
@@ -331,71 +399,6 @@ enum AthleteBirthDateFormatter {
         formatter.calendar = Calendar(identifier: .gregorian)
         let month = formatter.monthSymbols[localDate.month - 1]
         return "\(localDate.day) \(month) \(localDate.year)"
-    }
-}
-
-/// Round 9 review correction: the smallest focused edit surface for
-/// the existing canonical `AthleteProfile.developmentStage` — a single
-/// `Picker`, nothing else. No new model, no new service method, no
-/// change to `DevelopmentStage` semantics: this reuses the exact same
-/// `AthleteFamilyManagementViewModel.editAthlete(_:)` mutation/service
-/// path `AthleteFormView` already uses. `prefill(from:)` (called
-/// `onAppear`) captures the athlete's CURRENT Name/Family name/Birth
-/// date/Preferred name into that shared ViewModel form state, so
-/// selecting a new stage and submitting resubmits every other field
-/// unchanged — only Development Stage actually changes, matching
-/// `AthleteFormView`'s own established "prefill, then submit the whole
-/// record" mechanism, just exposed through a one-field screen.
-///
-/// No own `NavigationStack` — designed to be pushed, matching
-/// `sleepSettingsDestination`'s own destination shape, never sheeted
-/// (which would nest a second `NavigationStack` inside `AthleteFormView`'s
-/// own). Commits immediately on selection, no separate Save action —
-/// the same "settings row commits immediately" convention
-/// `AthleteSleepSettingsView`'s tracking Toggle already establishes,
-/// rather than inventing a second edit-flow shape.
-struct AthleteDevelopmentStageView: View {
-    @Bindable var viewModel: AthleteFamilyManagementViewModel
-    let athlete: AthleteProfile
-
-    var body: some View {
-        Form {
-            if let errorMessage = viewModel.errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(.red)
-                        .accessibilityIdentifier("athleteDevelopmentStage.errorMessage")
-                }
-            }
-            Section {
-                Picker("Development stage", selection: developmentStageBinding) {
-                    Text("Parent-led").tag(DevelopmentStage.parentLed)
-                    Text("Shared ownership").tag(DevelopmentStage.sharedOwnership)
-                    Text("Guided independence").tag(DevelopmentStage.guidedIndependence)
-                    Text("Athlete-led").tag(DevelopmentStage.athleteLed)
-                }
-                .accessibilityIdentifier("athleteDevelopmentStage.picker")
-            }
-        }
-        .navigationTitle("Development Stage")
-        .onAppear {
-            viewModel.prefill(from: athlete)
-        }
-    }
-
-    /// Setting this binding both updates the shared form state AND
-    /// commits it via `editAthlete(_:)` in the same action — `prefill`
-    /// (called `onAppear`, a plain property assignment) never goes
-    /// through this binding's setter, so only a genuine user selection
-    /// triggers a save.
-    private var developmentStageBinding: Binding<DevelopmentStage> {
-        Binding(
-            get: { viewModel.developmentStage },
-            set: { newValue in
-                viewModel.developmentStage = newValue
-                viewModel.editAthlete(athlete)
-            }
-        )
     }
 }
 
@@ -420,19 +423,19 @@ struct AthleteDevelopmentStageView: View {
 /// underlying `preferredName` column itself is retained as
 /// technical/domain cleanup debt — reported, not touched, this round.
 ///
-/// Round 9 review correction: Development Stage no longer reuses this
-/// form — it has its own focused edit surface,
-/// `AthleteDevelopmentStageView` (see that type's own doc comment),
-/// reached from the configuration hub's separate "Development stage"
-/// row. This form is now exclusively Name/Family name/Birth date —
-/// the athlete configuration hub's Profile card opens exactly this,
-/// nothing more — for both Add Athlete and Edit Athlete (a newly
-/// added athlete keeps whatever `developmentStage` the shared
-/// ViewModel form state currently holds, i.e. `resetForm()`'s
-/// `.parentLed` default, changeable afterward through the hub's own
-/// Development Stage row — this form was never the only place that
-/// could be set, and removing it here is what "Profile card opens
-/// only identity fields" requires).
+/// Round 9/10 review corrections: Development Stage no longer reuses
+/// this form at all — round 9 first gave it a dedicated pushed screen,
+/// round 10 replaced that with an inline `Picker` directly on
+/// `AthleteSettingsView` (see that type's own doc comment for the
+/// full history and current "Settings" section). This form is now
+/// exclusively Name/Family name/Birth date — the athlete configuration
+/// hub's Profile card opens exactly this, nothing more — for both Add
+/// Athlete and Edit Athlete (a newly added athlete keeps whatever
+/// `developmentStage` the shared ViewModel form state currently holds,
+/// i.e. `resetForm()`'s `.parentLed` default, changeable afterward
+/// through the hub's own inline Development Stage row — this form was
+/// never the only place that could be set, and removing it here is
+/// what "Profile card opens only identity fields" requires).
 struct AthleteFormView: View {
     @Bindable var viewModel: AthleteFamilyManagementViewModel
     let editingAthlete: AthleteProfile?
