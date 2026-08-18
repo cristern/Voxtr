@@ -1276,6 +1276,7 @@ struct HomeDashboardViewModelCacheTests {
 /// an extension for a smaller diff against an already large file — same
 /// type, same file, same `.serialized` suite.
 extension FamilyHomeViewModelTests {
+    @MainActor
     private static func makeSleepCoordinationService(container: ModelContainer) -> SleepCoordinationService {
         let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
         let reflectionService = ReflectionService(repository: reflectionRepository)
@@ -1291,6 +1292,7 @@ extension FamilyHomeViewModelTests {
         )
     }
 
+    @MainActor
     private func makeViewModel(
         container: ModelContainer,
         activeAthletes: [AthleteProfile],
