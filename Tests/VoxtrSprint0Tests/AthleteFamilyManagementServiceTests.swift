@@ -368,6 +368,127 @@ struct AthleteFamilyManagementServiceTests {
         #expect(refetched?.givenName == "Jonas Updated")
     }
 
+    /// TestFlight correctness fix (Athlete settings Development Stage):
+    /// proves the narrow `setDevelopmentStage` mutation updates only
+    /// the targeted athlete's `developmentStage`, leaving every other
+    /// profile field on that same athlete untouched — the exact
+    /// property the old `editAthlete`-based path could NOT guarantee,
+    /// since it resubmitted the whole shared form (including
+    /// `givenName`, which is what produced the reported
+    /// `"givenName must be 1-80 characters"` runtime error whenever
+    /// that shared form state was empty/stale).
+    @Test("setDevelopmentStage updates only developmentStage, leaving givenName/familyName/birthDate/preferredName unchanged")
+    @MainActor
+    func setDevelopmentStageChangesOnlyThatField() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", familyName: "Nygren", preferredName: "Jon",
+            birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let updated = try service.setDevelopmentStage(
+            added.athlete.athleteId, expectedRevision: added.athlete.revision,
+            developmentStage: .sharedOwnership
+        )
+
+        #expect(updated.developmentStage == .sharedOwnership)
+        let refetched = try athleteRepository.fetchAthlete(byId: added.athlete.athleteId)
+        #expect(refetched?.developmentStage == .sharedOwnership)
+        #expect(refetched?.givenName == "Jonas")
+        #expect(refetched?.familyName == "Nygren")
+        #expect(refetched?.preferredName == "Jon")
+        #expect(refetched?.birthDate == LocalDate(year: 2012, month: 4, day: 10))
+    }
+
+    /// Proves `setDevelopmentStage` needs no valid local Profile form
+    /// state at all — unlike `editAthlete`, which throws
+    /// `.invalidField` for an empty `givenName`, an empty/blank
+    /// `givenName` string is never even a parameter to this call, so
+    /// there is nothing for it to validate or reject.
+    @Test("setDevelopmentStage does not require or accept any givenName parameter, and cannot trigger givenName validation")
+    @MainActor
+    func setDevelopmentStageRequiresNoProfileFormState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        // No givenName is ever supplied here — the old bug required a
+        // valid shared-form givenName to reach this far at all. If this
+        // throws, the test itself fails (the function is `throws`) —
+        // matching this file's own established pattern of calling a
+        // success-expected mutation directly with `try`, with no
+        // `#expect(throws:)` wrapper.
+        let updated = try service.setDevelopmentStage(
+            added.athlete.athleteId, expectedRevision: added.athlete.revision,
+            developmentStage: .athleteLed
+        )
+        #expect(updated.developmentStage == .athleteLed)
+    }
+
+    @Test("setDevelopmentStage changes only the targeted athlete, leaving another athlete's developmentStage unchanged")
+    @MainActor
+    func setDevelopmentStageDoesNotAffectAnotherAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let first = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let second = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Emma", birthDate: LocalDate(year: 2014, month: 6, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        _ = try service.setDevelopmentStage(
+            first.athlete.athleteId, expectedRevision: first.athlete.revision,
+            developmentStage: .guidedIndependence
+        )
+
+        let refetchedFirst = try athleteRepository.fetchAthlete(byId: first.athlete.athleteId)
+        let refetchedSecond = try athleteRepository.fetchAthlete(byId: second.athlete.athleteId)
+        #expect(refetchedFirst?.developmentStage == .guidedIndependence)
+        #expect(refetchedSecond?.developmentStage == .parentLed)
+    }
+
     /// TestFlight IA correction: `AthleteBirthDateFormatter` is the one
     /// new pure formatting function this round adds, for the
     /// configuration hub's read-only Profile card — deterministic, no

@@ -131,6 +131,22 @@ public final class AthleteFamilyManagementViewModel {
         }
     }
 
+    /// Narrow Development Stage mutation — does not touch shared
+    /// add/edit form fields (`givenName` etc.) and does not call
+    /// `resetForm()`, since it was never backed by that shared form
+    /// state to begin with. Mirrors `archiveAthlete(_:)` above.
+    public func setDevelopmentStage(for athlete: AthleteProfile, to developmentStage: DevelopmentStage) {
+        errorMessage = nil
+        do {
+            try athleteFamilyManagementService.setDevelopmentStage(
+                athlete.athleteId, expectedRevision: athlete.revision, developmentStage: developmentStage
+            )
+            loadAthletes()
+        } catch {
+            errorMessage = Self.message(for: error)
+        }
+    }
+
     private static func nilIfBlank(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

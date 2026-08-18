@@ -178,6 +178,29 @@ public final class AthleteFamilyManagementService {
         return athlete
     }
 
+    /// Narrow, single-field Development Stage mutation — does not
+    /// validate or resubmit `givenName`/`familyName`/`preferredName`/
+    /// `birthDate`/`timeZoneId`, unlike `editAthlete`. Mirrors
+    /// `archiveAthlete`'s shape exactly: fetch, `applyMutation` on the
+    /// one changed field, save, return. Exists because the inline
+    /// Development Stage control on Athlete settings must never fail
+    /// due to unrelated Profile form state.
+    @discardableResult
+    public func setDevelopmentStage(
+        _ athleteId: AthleteId,
+        expectedRevision: Int,
+        developmentStage: DevelopmentStage
+    ) throws -> AthleteProfile {
+        guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
+            throw AthleteFamilyManagementError.athleteNotFound
+        }
+        try athlete.applyMutation(expectedRevision: expectedRevision, changedFields: ["developmentStage"]) { profile in
+            profile.developmentStage = developmentStage
+        }
+        try athleteRepository.save()
+        return athlete
+    }
+
     /// Mirrors `AthleteProfile.init`'s own precondition (`givenName`
     /// 1-80 characters) as a catchable error — the precondition still
     /// guards direct construction, but a service-level create/edit path

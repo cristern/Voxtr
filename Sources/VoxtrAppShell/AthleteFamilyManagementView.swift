@@ -233,15 +233,32 @@ public struct AthleteFamilyManagementView: View {
 /// explanation, a richer workflow — none of which apply to either of
 /// these two). Development Stage was previously a separate pushed
 /// screen (`AthleteDevelopmentStageView`, now removed as dead code —
-/// its one Picker moved inline below, same `editAthlete(_:)` mutation
-/// path, same `prefill(from:)` priming, nothing new). Sleep tracking
-/// was previously a separate pushed screen too
-/// (`AthleteSleepSettingsView`, now removed as dead code — its one
-/// Toggle moved inline below, same `AthleteSleepSettingsViewModel`/
+/// its one Picker moved inline below). Sleep tracking was previously a
+/// separate pushed screen too (`AthleteSleepSettingsView`, now removed
+/// as dead code — its one Toggle moved inline below, same
+/// `AthleteSleepSettingsViewModel`/
 /// `SleepCoordinationService.setSleepTrackingEnabled` mutation path).
 /// Neither removal touches Sleep History, Sleep Capture, DailyStatus,
 /// or the morning prompt — none of those were ever part of either
 /// screen.
+///
+/// TestFlight correctness fix (Development Stage mutation ownership):
+/// round 10's inline Development Stage Picker initially reused the
+/// broad `editAthlete(_:)` path — the same shared-form-state mutation
+/// `AthleteFormView` uses for Name/Family name/Birth date — which
+/// meant a Development Stage change validated and resubmitted
+/// `givenName` and could fail with `"givenName must be 1-80
+/// characters"` even though the user never touched Name. Development
+/// Stage now mutates through its own narrow
+/// `AthleteFamilyManagementService.setDevelopmentStage`/
+/// `AthleteFamilyManagementViewModel.setDevelopmentStage(for:to:)`
+/// path (mirrors `archiveAthlete`'s single-field shape), and its
+/// binding reads `athlete.developmentStage` directly rather than
+/// shared form state — see `developmentStageBinding`'s own doc comment
+/// below for the full trace. Sleep tracking already had its own
+/// separate, correctly-narrow mutation path
+/// (`AthleteSleepSettingsViewModel`/`SleepCoordinationService`, never
+/// `editAthlete(_:)`) and needed no change.
 ///
 /// Each concept gets its own `Form` `Section`, Archive last and
 /// visually separated — this is deliberate so a future concept (e.g.
@@ -288,11 +305,19 @@ struct AthleteSettingsView: View {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 12) {
                             profileField(label: "Name", value: athlete.givenName)
-                            // "Not set" matches this app's own existing
-                            // vocabulary for an absent optional value
-                            // (see `OptionalDurationPickerView`'s "Not
-                            // set" row) — calm, not a fabricated name.
-                            profileField(label: "Family name", value: athlete.familyName ?? "Not set")
+                            // TestFlight fix: "Not set" previously
+                            // rendered with the same `.primary` weight
+                            // as a real value, making a missing
+                            // optional field look like stored identity
+                            // data. `isPlaceholder` now renders this
+                            // case with normal SwiftUI secondary
+                            // styling (`.foregroundStyle(.secondary)`,
+                            // no hard-coded grey) instead.
+                            profileField(
+                                label: "Family name",
+                                value: athlete.familyName ?? "Not set (optional)",
+                                isPlaceholder: athlete.familyName == nil
+                            )
                             profileField(label: "Birth date", value: AthleteBirthDateFormatter.label(for: athlete.birthDate))
                         }
                         Spacer()
@@ -358,7 +383,19 @@ struct AthleteSettingsView: View {
         }
         .navigationTitle("Athlete settings")
         .onAppear {
-            viewModel.prefill(from: athlete)
+            // Correctness fix: this hub no longer reads
+            // `viewModel.developmentStage`/`givenName` etc. for display
+            // or mutation — the Profile card reads `athlete.*` directly,
+            // and Development Stage now mutates through its own narrow
+            // `setDevelopmentStage` path (see `developmentStageBinding`
+            // below). The Profile card's own `Button` action still
+            // calls `viewModel.prefill(from: athlete)` immediately
+            // before presenting its edit sheet — that JIT prefill is
+            // correctly scoped and untouched. Priming the shared form
+            // here, before any edit is even requested, is what let
+            // stale form state leak into the old Development Stage
+            // binding; removing it closes that gap rather than papering
+            // over it with prefill timing.
             sleepSettingsViewModel.load()
         }
         .sheet(isPresented: $isPresentingForm) {
@@ -366,33 +403,45 @@ struct AthleteSettingsView: View {
         }
     }
 
-    private func profileField(label: String, value: String) -> some View {
+    private func profileField(label: String, value: String, isPlaceholder: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(value)
-                .foregroundStyle(.primary)
+                .foregroundStyle(isPlaceholder ? .secondary : .primary)
         }
     }
 
-    /// Setting this binding both updates the shared
-    /// `AthleteFamilyManagementViewModel` form state AND commits it via
-    /// `editAthlete(_:)` in the same action — `prefill(from:)` (called
-    /// `onAppear` above, a plain property assignment) never goes
-    /// through this binding's setter, so only a genuine user selection
-    /// triggers a save. `prefill` already captured the athlete's
-    /// current Name/Family name/Birth date/Preferred name, so this
-    /// resubmits every other field unchanged — only Development Stage
-    /// actually changes. Same `AthleteProfile.developmentStage`
-    /// canonical field, same mutation path `AthleteFormView` uses for
-    /// its own fields — no new model, no changed semantics.
+    /// TestFlight correctness fix: this binding previously reused the
+    /// broad `editAthlete(_:)` path (shared `AthleteFamilyManagementViewModel`
+    /// form fields, validated and resubmitted as a whole), so a
+    /// Development Stage change could fail with
+    /// `"givenName must be 1-80 characters"` whenever that shared
+    /// `givenName` form field was empty/stale — e.g. left over from
+    /// this same shared ViewModel's Add/Edit Athlete flow elsewhere —
+    /// even though the user never touched Name. Root cause: Development
+    /// Stage was never actually a standalone mutation, just a field
+    /// riding along inside the profile-wide edit.
+    ///
+    /// Fixed by giving Development Stage its own narrow, single-field
+    /// mutation end to end: `AthleteFamilyManagementService.setDevelopmentStage`
+    /// (mirrors `archiveAthlete`'s shape — fetch, `applyMutation` on
+    /// exactly `["developmentStage"]`, save; no `givenName` validation,
+    /// no other field touched) via
+    /// `AthleteFamilyManagementViewModel.setDevelopmentStage(for:to:)`.
+    /// The getter now also reads `athlete.developmentStage` directly
+    /// off the canonical `@Model` reference — the same pattern the
+    /// Profile card above already uses for Name/Family name/Birth
+    /// date — instead of the shared, easily-stale form field. Same
+    /// canonical `AthleteProfile.developmentStage` field, same stable
+    /// `AthleteId`, no new model, no changed persisted semantics —
+    /// only the mutation's ownership boundary changed.
     private var developmentStageBinding: Binding<DevelopmentStage> {
         Binding(
-            get: { viewModel.developmentStage },
+            get: { athlete.developmentStage },
             set: { newValue in
-                viewModel.developmentStage = newValue
-                viewModel.editAthlete(athlete)
+                viewModel.setDevelopmentStage(for: athlete, to: newValue)
             }
         )
     }
