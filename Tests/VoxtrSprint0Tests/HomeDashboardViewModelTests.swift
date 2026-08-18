@@ -5,6 +5,7 @@ import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
 @testable import VoxtrCoachingDomain
+import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -1353,6 +1354,7 @@ struct HomeDashboardViewModelTests {
 /// declared above remain visible here since Swift's `private` allows use
 /// from any extension of the same type in the same file.
 extension HomeDashboardViewModelTests {
+    @MainActor
     private static func makeSleepCoordinationService(container: ModelContainer) -> SleepCoordinationService {
         let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
         let reflectionService = ReflectionService(repository: reflectionRepository)
@@ -1360,6 +1362,7 @@ extension HomeDashboardViewModelTests {
         return SleepCoordinationService(reflectionService: reflectionService, athleteRepository: athleteRepository)
     }
 
+    @MainActor
     private func makeHomeDashboardViewModel(
         athleteId: AthleteId,
         sleepStatusProvider: any SleepStatusProviding
