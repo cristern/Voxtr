@@ -42,13 +42,19 @@ public struct WeeklyPlanningView: View {
     public var body: some View {
         ScrollViewReader { proxy in
         Form {
-            // Post-mutation navigation and stale-state consistency
-            // audit (Issue B): an invisible top anchor for the
-            // scroll-to-top-after-add fix below — same mechanism
-            // DailyTrainingView already established for its own inline
-            // "Log an activity" form.
-            Color.clear.frame(height: 0).id("weeklyPlanning.top")
-
+            // TestFlight fix (empty white card above week identity):
+            // the scroll-to-top anchor used to be a standalone
+            // `Color.clear` row directly in the Form, not wrapped in
+            // any `Section` — SwiftUI's grouped Form style renders any
+            // top-level content outside a `Section` in its own
+            // implicit boxed row, so that zero-height anchor still
+            // produced a visible empty card above the week identity
+            // bar. Fixed by dropping the standalone row and attaching
+            // the same `"weeklyPlanning.top"` id directly to the week
+            // identity `Section` below instead — `proxy.scrollTo`
+            // still resolves the same id and lands at the same visual
+            // position (the top of the Form's real content), but there
+            // is no longer a separate, empty container to render.
             Section {
                 HStack {
                     Text(athleteDisplayName)
@@ -75,6 +81,7 @@ public struct WeeklyPlanningView: View {
                 }
                 .accessibilityIdentifier("planning.weekIdentityBar")
             }
+            .id("weeklyPlanning.top")
 
             if let errorMessage = viewModel.errorMessage {
                 Section {
