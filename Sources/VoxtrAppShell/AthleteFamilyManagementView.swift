@@ -28,11 +28,25 @@ import VoxtrAthleteDomain
 /// since this view has no reason to know about the 6+ services that
 /// screen needs. Edit and Archive are now separate, explicit actions,
 /// never conflated with opening the athlete.
+///
+/// Round 7 (Profile / Manage Athletes IA polish): Manage Athletes now
+/// owns ONLY athlete identity + navigation into Athlete Home. Every
+/// other per-athlete action (Edit, Sleep, Archive) moved off the row
+/// and into the new `AthleteSettingsView` below, reached through a
+/// single "Settings" secondary action — so the row/name tap can never
+/// accidentally route into Sleep Settings, and configuration is never
+/// duplicated across two surfaces. The removed "Done" toolbar button
+/// was confirmed dead everywhere this view is presented as pushed
+/// content (`ParentTabShellView`'s Profile tab, `FamilyHomeView`'s
+/// zero-athletes root); the one real `.sheet` presentation
+/// (`HomeDashboardView`'s "Manage Athletes" button) has no
+/// `.interactiveDismissDisabled()` anywhere in this module, so it
+/// still dismisses via SwiftUI's default swipe-to-dismiss gesture —
+/// Done was never its only escape route.
 public struct AthleteFamilyManagementView: View {
     @State private var viewModel: AthleteFamilyManagementViewModel
     @State private var isPresentingForm: Bool = false
     @State private var editingAthlete: AthleteProfile?
-    @Environment(\.dismiss) private var dismiss
     private let athleteHomeDestination: (AthleteProfile) -> AnyView
     /// VX-023 (Sleep V1): same caller-supplied-destination shape as
     /// `athleteHomeDestination` above — this view has no reason to know
@@ -66,10 +80,6 @@ public struct AthleteFamilyManagementView: View {
                     isPresentingForm = true
                 }
                 .accessibilityIdentifier("athleteManagement.addAthleteButton")
-            }
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Done") { dismiss() }
-                    .accessibilityIdentifier("athleteManagement.doneButton")
             }
         }
         .onAppear {
@@ -131,38 +141,79 @@ public struct AthleteFamilyManagementView: View {
                     }
                     Spacer()
                     if !athlete.isArchived {
-                        // VX-023 (Sleep V1): "Profile → Athlete → Sleep"
-                        // — a separate, explicit action alongside
-                        // Edit/Archive, never conflated with either.
-                        NavigationLink("Sleep") {
-                            sleepSettingsDestination(athlete)
+                        // Round 7: Settings is the ONE secondary action
+                        // on the row — Edit, Sleep, and Archive all
+                        // live inside it now, never directly on the row
+                        // itself, so the row/name tap stays the sole
+                        // path into Athlete Home.
+                        NavigationLink("Settings") {
+                            AthleteSettingsView(
+                                viewModel: viewModel,
+                                athlete: athlete,
+                                sleepSettingsDestination: sleepSettingsDestination
+                            )
                         }
                         .buttonStyle(.borderless)
-                        .accessibilityIdentifier("athleteManagement.sleepSettingsButton.\(athlete.id.uuidString)")
-
-                        // B. Edit athlete — a distinct, explicit action,
-                        // never conflated with opening the athlete.
-                        Button("Edit") {
-                            editingAthlete = athlete
-                            viewModel.prefill(from: athlete)
-                            isPresentingForm = true
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityIdentifier("athleteManagement.editButton.\(athlete.id.uuidString)")
-
-                        // C. Archive/remove athlete — unchanged
-                        // archive behavior and confirmation.
-                        Button("Archive") {
-                            viewModel.archiveAthlete(athlete)
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityIdentifier("athleteManagement.archiveButton.\(athlete.id.uuidString)")
+                        .accessibilityIdentifier("athleteManagement.settingsButton.\(athlete.id.uuidString)")
                     }
                 }
                 .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
             }
         }
         .accessibilityIdentifier("athleteManagement.athleteList")
+    }
+}
+
+/// Round 7 (Profile / Manage Athletes IA polish): the ONE canonical
+/// per-athlete configuration screen. Manage Athletes' row now owns
+/// only identity + navigation into Athlete Home (see the doc comment
+/// above `AthleteFamilyManagementView`); this screen owns everything
+/// that used to sit as separate row actions — Edit profile, Sleep
+/// tracking, and destructive Archive — so configuration lives in
+/// exactly one place, never duplicated across both surfaces. Reuses
+/// the existing `AthleteFormView` sheet, the caller-supplied
+/// `sleepSettingsDestination` closure, and
+/// `AthleteFamilyManagementViewModel.archiveAthlete(_:)` verbatim — no
+/// new configuration surface, no new persistence path, and Archive's
+/// own behavior (immediate, no confirmation dialog) is unchanged; only
+/// its location moved here from the row.
+struct AthleteSettingsView: View {
+    @Bindable var viewModel: AthleteFamilyManagementViewModel
+    let athlete: AthleteProfile
+    let sleepSettingsDestination: (AthleteProfile) -> AnyView
+    @State private var isPresentingForm: Bool = false
+
+    var body: some View {
+        Form {
+            Section {
+                Button("Edit Profile") {
+                    viewModel.prefill(from: athlete)
+                    isPresentingForm = true
+                }
+                .accessibilityIdentifier("athleteSettings.editProfileButton.\(athlete.id.uuidString)")
+            }
+
+            Section {
+                NavigationLink("Sleep") {
+                    sleepSettingsDestination(athlete)
+                }
+                .accessibilityIdentifier("athleteSettings.sleepLink.\(athlete.id.uuidString)")
+            }
+
+            // Destructive, visually separated in its own trailing
+            // Section — matches this screen's own "Archive preferably
+            // at the bottom" requirement without any fixed geometry.
+            Section {
+                Button("Archive Athlete", role: .destructive) {
+                    viewModel.archiveAthlete(athlete)
+                }
+                .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
+            }
+        }
+        .navigationTitle("\(athlete.givenName) Settings")
+        .sheet(isPresented: $isPresentingForm) {
+            AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
+        }
     }
 }
 

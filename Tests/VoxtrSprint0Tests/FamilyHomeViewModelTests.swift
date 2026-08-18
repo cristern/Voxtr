@@ -1321,7 +1321,15 @@ extension FamilyHomeViewModelTests {
         )
     }
 
-    @Test("19: Family Home Sleep section — an athlete missing today's Sleep produces a summary with sleepQuality nil (drives 'Not logged yet', with no Log Sleep or History action for that row)")
+    /// Round 7 (Family Home Sleep polish): `FamilyHomeContentView.sleepSection`
+    /// builds an unconditional "History" `NavigationLink` for every
+    /// entry in `sleepSummaries` — see that file's own doc comment.
+    /// This test proves the underlying, ViewModel-level composition
+    /// state that link depends on (a summary is still emitted for a
+    /// missing-Sleep athlete, with `sleepQuality == nil` driving "Not
+    /// logged yet"); it does not itself inspect rendered View content
+    /// or button placement.
+    @Test("19: Family Home Sleep section — an athlete missing today's Sleep still produces a summary (sleepQuality nil drives 'Not logged yet'; every summary here always has a History destination, never a Log Sleep action)")
     @MainActor
     func sleepSectionMissingSleep() throws {
         let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
@@ -1336,7 +1344,11 @@ extension FamilyHomeViewModelTests {
         #expect(viewModel.sleepSummaries.first?.athleteId == athlete.athleteId)
     }
 
-    @Test("20: Family Home Sleep section — an athlete with today's Sleep already recorded produces a summary with the real value (drives 'History' only)")
+    /// Round 7: same composition-state proof as test 19 above, for the
+    /// recorded-Sleep branch — a summary is still emitted with the real
+    /// `sleepQuality`, which is what `sleepSection` reads to show
+    /// "x/5" alongside the same always-present History link.
+    @Test("20: Family Home Sleep section — an athlete with today's Sleep already recorded produces a summary with the real value (drives 'x/5', with the same always-present History destination as the missing-Sleep case)")
     @MainActor
     func sleepSectionRecordedSleep() throws {
         let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
@@ -1348,6 +1360,7 @@ extension FamilyHomeViewModelTests {
 
         viewModel.loadSleepSummaries()
 
+        #expect(viewModel.sleepSummaries.count == 1)
         #expect(viewModel.sleepSummaries.first?.sleepQuality == 5)
     }
 

@@ -538,17 +538,19 @@ public struct FamilyHomeContentView: View {
         }
     }
 
-    /// VX-023 (Sleep V1) UX polish (TestFlight-verified, presentation
-    /// only): Family Home Sleep is primarily a MONITORING surface, not
-    /// a second place to record Sleep — recording stays on Athlete Home.
-    /// Recorded -> athlete name, "x/5", and "History" as a secondary
-    /// action pinned to the trailing edge via `Spacer()` (no fixed
-    /// widths, so this reflows normally under Dynamic Type). Missing ->
-    /// athlete name and a single-line "Not logged yet" status only — no
-    /// "Log Sleep" action here at all (that read as a second entry
-    /// point competing with Athlete Home) and no "History" link for a
-    /// day with nothing recorded yet. An athlete with tracking OFF
-    /// simply never appears in `viewModel.sleepSummaries` (see
+    /// VX-023 (Sleep V1) UX polish, round 2: Family Home Sleep is
+    /// primarily a MONITORING surface, not a second place to record
+    /// Sleep — recording stays on Athlete Home, so there is still no
+    /// "Log Sleep" action here. "History" is now ALWAYS shown for an
+    /// enabled athlete, whether or not today is recorded — round 1
+    /// incorrectly hid it whenever today's Sleep was missing, when the
+    /// actual product contract only ever asked to remove "Log Sleep"
+    /// from this surface. Both states share the same second-line
+    /// layout: a leading status (`"x/5"` or `"Not logged yet"`) with
+    /// `Spacer()` pinning "History" to the trailing edge — no fixed
+    /// widths, so this reflows normally under Dynamic Type. An athlete
+    /// with tracking OFF simply never appears in
+    /// `viewModel.sleepSummaries` (see
     /// `FamilyHomeViewModel.loadSleepSummaries()`'s own doc comment), so
     /// no per-athlete "disabled" branch is needed here — absence from
     /// the list already means absence from this section.
@@ -561,16 +563,16 @@ public struct FamilyHomeContentView: View {
                         Text(summary.athleteName)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        if let sleepQuality = summary.sleepQuality {
-                            HStack {
+                        HStack {
+                            if let sleepQuality = summary.sleepQuality {
                                 Text("\(sleepQuality)/5")
-                                Spacer()
-                                NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
-                                    .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
+                            } else {
+                                Text("Not logged yet")
+                                    .foregroundStyle(.secondary)
                             }
-                        } else {
-                            Text("Not logged yet")
-                                .foregroundStyle(.secondary)
+                            Spacer()
+                            NavigationLink("History", value: FamilyHomeDestination.sleepHistory(summary.athleteId))
+                                .accessibilityIdentifier("familyHome.sleep.historyLink.\(summary.athleteId.rawValue.uuidString)")
                         }
                     }
                     .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
