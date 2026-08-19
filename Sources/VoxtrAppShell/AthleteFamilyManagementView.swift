@@ -106,6 +106,8 @@ public struct AthleteFamilyManagementView: View {
                 athleteList
             }
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Manage Athletes")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -139,7 +141,8 @@ public struct AthleteFamilyManagementView: View {
     private var emptyState: some View {
         VStack(spacing: 12) {
             Text("No active athletes yet.")
-                .foregroundStyle(.secondary)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
             Button("Add athlete") {
                 editingAthlete = nil
                 viewModel.resetForm()
@@ -158,36 +161,57 @@ public struct AthleteFamilyManagementView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("athleteManagement.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
-            ForEach(viewModel.athletes, id: \.id) { athlete in
-                if athlete.isArchived {
-                    VStack(alignment: .leading) {
-                        Text(athlete.givenName)
-                        Text("Archived")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Section {
+                ForEach(viewModel.athletes, id: \.id) { athlete in
+                    if athlete.isArchived {
+                        HStack(spacing: 8) {
+                            // Design Foundation extension round: Manage
+                            // Athletes is a shared/multi-athlete people
+                            // list — the same small identity marker
+                            // Family Home's own Athletes/Sleep/Focus
+                            // this week rows already use, never the
+                            // fuller activity-row outline (this is a
+                            // roster row, not an activity card).
+                            VoxtrAthleteColorMarker(viewModel.resolvedColor(for: athlete).color)
+                            VStack(alignment: .leading) {
+                                Text(athlete.givenName)
+                                    .font(VoxtrTypography.cardTitle)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
+                                Text("Archived")
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
+                            }
+                        }
+                        .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
+                    } else {
+                        // Round 8 (TestFlight IA correction): the athlete
+                        // row is now the SINGLE destination — Manage
+                        // Athletes is a people/configuration index, not
+                        // another Athlete Home launcher, so tapping an
+                        // athlete opens their configuration hub directly.
+                        // No separate "Settings" action alongside it.
+                        NavigationLink {
+                            AthleteSettingsView(
+                                viewModel: viewModel,
+                                athlete: athlete,
+                                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
+                            )
+                        } label: {
+                            HStack(spacing: 8) {
+                                VoxtrAthleteColorMarker(viewModel.resolvedColor(for: athlete).color)
+                                Text(athlete.givenName)
+                                    .font(VoxtrTypography.cardTitle)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
+                            }
+                        }
+                        .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
                     }
-                    .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
-                } else {
-                    // Round 8 (TestFlight IA correction): the athlete
-                    // row is now the SINGLE destination — Manage
-                    // Athletes is a people/configuration index, not
-                    // another Athlete Home launcher, so tapping an
-                    // athlete opens their configuration hub directly.
-                    // No separate "Settings" action alongside it.
-                    NavigationLink {
-                        AthleteSettingsView(
-                            viewModel: viewModel,
-                            athlete: athlete,
-                            sleepSettingsViewModel: sleepSettingsViewModel(athlete)
-                        )
-                    } label: {
-                        Text(athlete.givenName)
-                    }
-                    .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
                 }
             }
+            .voxtrRowSurface()
         }
         .accessibilityIdentifier("athleteManagement.athleteList")
     }

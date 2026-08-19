@@ -692,24 +692,27 @@ public struct FamilyHomeContentView: View {
         }
     }
 
-    /// Design Foundation V0.1 correction round: the ONE small colour
-    /// marker every athlete-specific row on this shared, multi-athlete
-    /// screen now prepends before the athlete's own name — Sleep rows,
-    /// Focus this week rows, and the Athletes section itself (see the
-    /// doc comment above this function for why activity rows now use
-    /// the fuller inset-outline treatment instead). Applied only to
-    /// rows that are genuinely athlete-specific (never the "View
-    /// upcoming schedule" link, an error message, or a section
-    /// heading). Identity only, per `AthleteColor`'s own doc comment:
-    /// never a fill behind text, never implying performance/readiness/
-    /// warning/completion/ranking. Every call site keeps its own
-    /// existing athlete-name `Text` exactly as it already was — this
-    /// only adds the marker glyph beside it.
+    /// Design Foundation V0.1 correction round: the small colour marker
+    /// every athlete-specific row on this shared, multi-athlete screen
+    /// prepends before the athlete's own name — Sleep rows, Focus this
+    /// week rows, and the Athletes section itself (see the doc comment
+    /// above this function for why activity rows now use the fuller
+    /// inset-outline treatment instead). Applied only to rows that are
+    /// genuinely athlete-specific (never the "View upcoming schedule"
+    /// link, an error message, or a section heading). Every call site
+    /// keeps its own existing athlete-name `Text` exactly as it already
+    /// was — this only adds the marker glyph beside it.
+    ///
+    /// Design Foundation extension round: the marker itself is now
+    /// `VoxtrAthleteColorMarker` (`VoxtrDesignSystem.swift`) — this
+    /// function just resolves THIS screen's own colour (via
+    /// `viewModel.resolvedAthleteColor(for:)`, its cached, "explicit
+    /// preference wins, otherwise stable fallback" lookup) and hands it
+    /// to that one canonical component, shared with
+    /// `AthleteFamilyManagementView`'s Manage Athletes list rather than
+    /// each screen drawing its own dot.
     private func athleteColorMarker(_ athleteId: AthleteId) -> some View {
-        Circle()
-            .fill(viewModel.resolvedAthleteColor(for: athleteId).color)
-            .frame(width: 8, height: 8)
-            .accessibilityHidden(true)
+        VoxtrAthleteColorMarker(viewModel.resolvedAthleteColor(for: athleteId).color)
     }
 
     @ViewBuilder

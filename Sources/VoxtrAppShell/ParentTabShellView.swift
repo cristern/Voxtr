@@ -305,11 +305,12 @@ private struct ParentPlanTabView: View {
                     }
                     .accessibilityIdentifier("parentPlan.familyScheduleLink")
                 }
+                .voxtrRowSurface()
 
                 if !activeAthletes.isEmpty {
-                    Section("Weekly Plan") {
+                    Section {
                         ForEach(activeAthletes, id: \.athleteId) { athlete in
-                            NavigationLink(athlete.givenName) {
+                            NavigationLink {
                                 WeeklyPlanningView(
                                     viewModel: WeeklyPlanningViewModel(
                                         service: planningService,
@@ -321,12 +322,35 @@ private struct ParentPlanTabView: View {
                                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                     actorId: actorId
                                 )
+                            } label: {
+                                Text(athlete.givenName)
+                                    .font(VoxtrTypography.cardTitle)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
                             }
+                            // Design Foundation extension round: this is
+                            // a shared/multi-athlete SELECTOR row into a
+                            // single-athlete Weekly Plan screen — the
+                            // exact same shape (and same treatment) as
+                            // `ParentTrainingTabView`'s own Daily
+                            // Training/Weekly Review/Week by Week rows
+                            // below, reusing the SAME
+                            // `voxtrAthleteIdentityOutline` modifier and
+                            // the SAME canonical resolver, never a local
+                            // invention. `WeeklyPlanningView` itself
+                            // (the destination) stays untouched/neutral —
+                            // the colour identifies THIS row, not that
+                            // single-athlete screen.
+                            .voxtrAthleteIdentityOutline(resolvedColor(for: athlete.athleteId).color)
                             .accessibilityIdentifier("parentPlan.weeklyPlanLink.\(athlete.athleteId.rawValue.uuidString)")
                         }
+                    } header: {
+                        VoxtrSectionHeading("Weekly Plan")
                     }
+                    .voxtrRowSurface()
                 }
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle("Plan")
         }
         .onAppear {

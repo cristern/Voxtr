@@ -435,3 +435,33 @@ public struct VoxtrSectionHeading: View {
             .textCase(nil)
     }
 }
+
+/// Design Foundation extension round: the ONE small colour marker for
+/// a genuinely athlete-specific, NON-activity row on a shared/multi-
+/// athlete surface — originally established by `FamilyHomeContentView`'s
+/// own `athleteColorMarker(_:)` (Athletes/Sleep/Focus this week rows),
+/// promoted here once a second surface (`AthleteFamilyManagementView`'s
+/// Manage Athletes list) needed the exact same 8pt-circle, identity-
+/// only treatment — one canonical implementation instead of two files
+/// each drawing their own dot. Never a fill behind text, never implying
+/// performance/readiness/warning/completion/ranking — identity only,
+/// per `AthleteColor`'s own doc comment.
+///
+/// Deliberately the SMALLER of this design system's two athlete-colour
+/// treatments: `voxtrAthleteIdentityOutline(_:)` is for activity rows
+/// (a full card outline); this marker is for compact list rows (a
+/// person's name in a roster) — never both on the same row.
+public struct VoxtrAthleteColorMarker: View {
+    private let color: Color
+
+    public init(_ color: Color) {
+        self.color = color
+    }
+
+    public var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 8, height: 8)
+            .accessibilityHidden(true)
+    }
+}

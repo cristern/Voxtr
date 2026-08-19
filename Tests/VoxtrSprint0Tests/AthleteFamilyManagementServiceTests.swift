@@ -650,6 +650,17 @@ struct AthleteFamilyManagementServiceTests {
             givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
         )
+        // Design Foundation extension round: a second athlete, never
+        // given an explicit preference — proves `resolvedColor(for:)`
+        // resolves each athlete independently rather than caching or
+        // leaking one athlete's explicit choice onto another, now that
+        // Manage Athletes' own row marker calls this method directly
+        // for every athlete in the roster.
+        let secondAdded = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Emma", birthDate: LocalDate(year: 2014, month: 6, day: 2),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
         let viewModel = AthleteFamilyManagementViewModel(
             workspaceId: staged.workspace.workspaceId,
             participantId: staged.participant.id,
@@ -668,5 +679,10 @@ struct AthleteFamilyManagementServiceTests {
         let explicit: AthleteColor = AthleteColor.allCases.first { $0 != fallback } ?? .blue
         viewModel.setPreferredColor(for: added.athlete, to: explicit)
         #expect(viewModel.resolvedColor(for: added.athlete) == explicit)
+
+        // Athlete isolation: the second athlete's own resolution is
+        // untouched by the first athlete's explicit preference — still
+        // resolves to its own stable fallback.
+        #expect(viewModel.resolvedColor(for: secondAdded.athlete) == AthleteColor.forAthleteId(secondAdded.athlete.athleteId))
     }
 }

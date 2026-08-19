@@ -152,13 +152,21 @@ public final class AthleteFamilyManagementViewModel {
     /// preference wins, otherwise the stable `AthleteId`-derived
     /// fallback," the same rule `FamilyHomeViewModel.resolvedAthleteColor(for:)`
     /// applies on the shared-view side. Reads straight from
-    /// `AthleteSettings` on every call (no cache) — this hub is a
-    /// single-athlete settings screen, not a scrolling list, so a fresh
-    /// read per call is cheap and always current.
+    /// `AthleteSettings` on every call (no cache) — used both by the
+    /// single-athlete Athlete Settings hub (a fresh read per call is
+    /// cheap and always current there) and, since the Design Foundation
+    /// extension round, by Manage Athletes' own small colour marker per
+    /// row.
+    ///
+    /// Design Foundation extension round: delegates to the ONE
+    /// canonical `AthleteColor.resolved(forAthlete:using:)` helper
+    /// (`VoxtrDesignSystem.swift`) instead of re-deriving the same
+    /// "explicit preference wins, otherwise stable fallback" lookup
+    /// inline — this method used to duplicate that exact two-step logic
+    /// before the shared helper existed; same result, same per-call
+    /// freshness, no local mapping of its own anymore.
     public func resolvedColor(for athlete: AthleteProfile) -> AthleteColor {
-        let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athlete.athleteId)
-        let preferred = (settings ?? nil)?.preferredColor
-        return preferred ?? AthleteColor.forAthleteId(athlete.athleteId)
+        AthleteColor.resolved(forAthlete: athlete.athleteId, using: athleteRepository)
     }
 
     /// Narrow Athlete Color mutation — mirrors `setDevelopmentStage(for:to:)`'s
