@@ -15,7 +15,15 @@ enum FamilyHomeDestination: Hashable {
     case athlete(AthleteId)
     case activity(rowId: String)
     case recurringOccurrence(id: String)
-    case reflection(AthleteId)
+    // Family Home athlete navigation round: `.reflection(AthleteId)` is
+    // removed — its only trigger was `reflectionNavigationSection`'s
+    // per-athlete "Add Reflection" shortcut, replaced by `athletesSection`
+    // below (see that property's own doc comment for why). Athlete-level
+    // Reflection itself is untouched and remains fully reachable via
+    // `HomeDashboardView.reflectionSection`'s own "Add Reflection"/
+    // "Weekly Review" links, reached through THIS destination's own
+    // `.athlete(AthleteId)` case — nothing about Reflection became
+    // unreachable, only this one redundant Family-Home-level shortcut.
     case familySchedule
     /// VX-023 (Sleep V1) UX polish: Family Home Sleep is a monitoring
     /// surface — Athlete Home is the one place Sleep gets recorded, so
@@ -205,7 +213,7 @@ public struct FamilyHomeContentView: View {
 
                 focusThisWeekSection
                 sleepSection
-                reflectionNavigationSection
+                athletesSection
             }
             // Naming/navigation clarity: "Family Home" always, never
             // the generic "Home" — this is the family-wide screen, and
@@ -245,14 +253,6 @@ public struct FamilyHomeContentView: View {
                             onActivityLogged: { viewModel.refresh() }
                         )
                     }
-                case .reflection(let athleteId):
-                    ReflectionFormViewLoader(
-                        athleteId: athleteId,
-                        athleteDisplayName: viewModel.activeAthletes.first(where: { $0.athleteId == athleteId })?.givenName ?? "Athlete",
-                        weekStart: TrainingPlanningCoordinationService.weekStart(),
-                        authorId: ActorId(rawValue: family.participant.id),
-                        weeklyReflectionService: weeklyReflectionService
-                    )
                 case .familySchedule:
                     FamilyScheduleView(
                         viewModel: FamilyScheduleViewModel(
@@ -489,29 +489,47 @@ public struct FamilyHomeContentView: View {
         return parts.joined(separator: " · ")
     }
 
+    /// Family Home athlete navigation round: replaces the former
+    /// `reflectionNavigationSection` — a permanent, footer-only
+    /// per-athlete "Add Reflection" shortcut — in the exact same slot
+    /// at the bottom of the Form. Approved product gap this closes:
+    /// Athlete Home must remain reachable even on a day an athlete has
+    /// no activity (nothing in `nowNextSection`/"Today's Schedule"/
+    /// Tomorrow depends on activity existing), so a permanent,
+    /// activity-independent path to every active athlete's Home is
+    /// needed regardless of what else is on the page.
+    ///
+    /// Reused, not invented: `viewModel.activeAthletes` is the same
+    /// canonical, refreshed-on-appear list every other section in this
+    /// file already reads from (see this type's own top-level doc
+    /// comment — never `family.activeAthletes`, which goes stale).
+    /// `FamilyHomeDestination.athlete(AthleteId)` is the SAME existing
+    /// destination `nowNextSection`/`familyHomeRow`'s own small
+    /// athlete-name links already push, resolved by the SAME existing
+    /// `athleteOverview(for:)` below — no new destination, no new
+    /// Athlete Home construction path.
+    ///
+    /// This is experience navigation only, matching the approved
+    /// ownership distinction: Family Home → Athletes enters each
+    /// athlete's Home/experience; Profile → Manage Athletes remains the
+    /// separate people/configuration surface (`AthleteFamilyManagementView`,
+    /// untouched by this round) — this section never routes to Athlete
+    /// Settings and carries no edit/configuration action.
+    ///
+    /// Deliberately minimal for this first version: athlete name and
+    /// the standard `NavigationLink` chevron only — no activity
+    /// summary, readiness/status, Sleep value, color, ranking, or
+    /// badge. Those are explicitly evaluated later, not built here.
     @ViewBuilder
-    private var reflectionNavigationSection: some View {
-        // Reduced from a full, headline "Reflection" section (one row
-        // per athlete) to the minimum discoverable navigation: no
-        // section header, footer text only — visually secondary, not a
-        // permanent Reflection dashboard. Focus this week (below)
-        // remains the actual Home content; this is only a discreet
-        // route to it when useful. Per-athlete links are kept, not
-        // collapsed into one, since navigating to a specific athlete's
-        // reflection requires real, explicit athlete identity — no
-        // "first athlete" shortcut. Access itself isn't removed merely
-        // because Training also exposes it elsewhere.
+    private var athletesSection: some View {
         if !viewModel.activeAthletes.isEmpty {
-            Section {
+            Section("Athletes") {
                 ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
-                    NavigationLink(athlete.givenName, value: FamilyHomeDestination.reflection(athlete.athleteId))
-                        .font(.footnote)
-                        .accessibilityIdentifier("familyHome.reflectionLink.\(athlete.athleteId.rawValue.uuidString)")
+                    NavigationLink(athlete.givenName, value: FamilyHomeDestination.athlete(athlete.athleteId))
+                        .accessibilityIdentifier("familyHome.athletesSection.row.\(athlete.athleteId.rawValue.uuidString)")
                 }
-            } footer: {
-                Text("Reflect on this week")
             }
-            .accessibilityIdentifier("familyHome.reflectionNavigation")
+            .accessibilityIdentifier("familyHome.athletesSection")
         }
     }
 

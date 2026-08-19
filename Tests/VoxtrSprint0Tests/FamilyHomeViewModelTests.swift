@@ -323,6 +323,68 @@ struct FamilyHomeViewModelTests {
         #expect(viewModel.activeAthletes.first?.givenName == "Oliver")
     }
 
+    /// Family Home athlete navigation round: backs `athletesSection`'s
+    /// own requirement — every active athlete must remain reachable via
+    /// Family Home even on a day with no activity, so `activeAthletes`
+    /// (the composition that section reads directly) must never depend
+    /// on `rows`/`nowNextState`/any activity-derived state. An athlete
+    /// with genuinely zero planned, recurring, or logged activity today
+    /// (never scheduled anything, ever) still appears — proving the
+    /// list is sourced from the athlete roster itself
+    /// (`AthleteRepository`), not filtered by or derived from today's
+    /// schedule.
+    @Test("activeAthletes contains an athlete with no activity today, alongside one that has activity — athlete presence never depends on today's schedule")
+    @MainActor
+    func activeAthletesIncludesAthleteWithNoActivityToday() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let workspaceId = WorkspaceId()
+
+        let busyAthlete = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let quietAthlete = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: busyAthlete.athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: busyAthlete.athleteId, activityType: .teamTraining,
+            title: "Football", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        // quietAthlete: no week plan, no planned/recurring/logged
+        // activity created at all — a genuinely empty day.
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [],
+            workspaceId: workspaceId,
+            athleteRepository: athleteRepository,
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.refreshActiveAthletes()
+
+        #expect(viewModel.activeAthletes.contains { $0.athleteId == busyAthlete.athleteId })
+        #expect(viewModel.activeAthletes.contains { $0.athleteId == quietAthlete.athleteId })
+    }
+
     // MARK: - Parent Home UX / Content Contract: Focus this week
 
     @Test("Focus this week is derived from the PRIOR week's reflection, not the current week's")

@@ -15,6 +15,19 @@ public protocol SleepStatusProviding {
     func fetchDailyStatus(forAthlete athleteId: AthleteId, localDate: LocalDate) throws -> DailyStatus?
     /// VX-023: the range read `SleepHistoryViewModel` pages over.
     func fetchDailyStatuses(forAthlete athleteId: AthleteId, from: LocalDate, to: LocalDate) throws -> [DailyStatus]
+    /// Athlete Home Sleep inline round: the one write capability this
+    /// protocol now also exposes, mirroring
+    /// `SleepCoordinationService.recordSleep`'s exact signature — the
+    /// same canonical upsert path `SleepCaptureViewModel.save()` already
+    /// uses, injected here so `HomeDashboardViewModel`'s own inline 1-5
+    /// control can save through the SAME testable seam its reads
+    /// already use, rather than taking a second, concrete dependency.
+    /// No new persistence, no second Sleep write path.
+    @discardableResult
+    func recordSleep(
+        athleteId: AthleteId, localDate: LocalDate, sleepQuality: Int,
+        visibility: VisibilityPolicy, today: LocalDate
+    ) throws -> DailyStatus
 }
 
 /// VX-023: the Athlete Home Sleep card's own load state. No `.disabled`
@@ -110,6 +123,13 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
     /// VX-023: Athlete Home Sleep card state — see `SleepCardLoadState`'s
     /// own doc comment.
     public private(set) var sleepState: SleepCardLoadState = .loading
+    /// Athlete Home Sleep inline round: surfaces a genuine
+    /// `recordSleep(quality:)` save failure inline, next to the 1-5
+    /// control — distinct from `sleepState`, which stays exactly as it
+    /// was before the failed attempt (never forced to `.failed`, so the
+    /// control itself never disappears out from under a person mid-tap).
+    /// Cleared at the start of every `recordSleep(quality:)` call.
+    public private(set) var sleepErrorMessage: String?
 
     public let athleteId: AthleteId
     public let weekStart: LocalDate
@@ -275,6 +295,50 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
             sleepState = .loaded(sleepQuality: status?.sleepQuality)
         } catch {
             sleepState = .failed
+        }
+    }
+
+    /// Athlete Home Sleep inline round: the canonical inline save path —
+    /// each 1-5 tap on the Athlete Home Sleep control calls this
+    /// directly, no intermediate form/Save button. Goes through the
+    /// SAME `SleepStatusProviding.recordSleep` seam `loadSleepState()`
+    /// already reads through (backed by
+    /// `SleepCoordinationService.recordSleep` → the canonical
+    /// `upsertSleepQuality` in production) — recording a value for a
+    /// date that already has one UPDATES that same `DailyStatus`, never
+    /// creates a duplicate (unchanged semantics, same call). Always
+    /// records against TODAY specifically — this control has no notion
+    /// of any other date, matching the approved target ("Sleep quality
+    /// for TODAY... completed inline"); historical/backfill correction
+    /// remains Sleep History's own separate, richer flow.
+    ///
+    /// On success, reloads `sleepState` from canonical truth via the
+    /// existing `loadSleepState()` — no locally-assigned "optimistic"
+    /// value is ever set here, so the displayed selection can never
+    /// disagree with what was actually persisted. On failure,
+    /// `sleepState` is left exactly as it was (never forced to
+    /// `.failed`) and `sleepErrorMessage` reports why, mirroring
+    /// `SleepCaptureViewModel.save()`'s own error mapping exactly — the
+    /// same three cases, no new ones invented.
+    public func recordSleep(quality: Int, referenceDate: Date = .now, calendar: Calendar = .current) {
+        sleepErrorMessage = nil
+        guard let sleepStatusProvider else {
+            sleepErrorMessage = "Could not save Sleep. Please try again."
+            return
+        }
+        let today = SleepCoordinationService.today(referenceDate: referenceDate, calendar: calendar)
+        do {
+            try sleepStatusProvider.recordSleep(
+                athleteId: athleteId, localDate: today, sleepQuality: quality,
+                visibility: .sharedWithGuardians, today: today
+            )
+            loadSleepState(referenceDate: referenceDate, calendar: calendar)
+        } catch ReflectionServiceError.futureDateNotAllowed {
+            sleepErrorMessage = "Sleep can't be logged for a future date."
+        } catch ReflectionServiceError.invalidField(let message) {
+            sleepErrorMessage = message
+        } catch {
+            sleepErrorMessage = "Could not save Sleep. Please try again."
         }
     }
 

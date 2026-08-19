@@ -1562,4 +1562,59 @@ extension HomeDashboardViewModelTests {
         let nextMorning = Calendar.current.date(from: nextDayComponents) ?? Self.morningReferenceDate
         #expect(viewModel.isSleepPromptEligible(referenceDate: nextMorning, calendar: .current) == true)
     }
+
+    // MARK: - Athlete Home Sleep inline round
+
+    /// Backs the inline 1-5 control's "missing" case: tapping a value
+    /// calls `recordSleep(quality:)` directly, no separate capture
+    /// screen. Proves the canonical write actually happens (through the
+    /// real `SleepCoordinationService`, not a double) and that
+    /// `sleepState` reflects it afterward via the existing
+    /// `loadSleepState()` reload — the same invalidation path this
+    /// ViewModel already used for every other Sleep mutation.
+    @Test("recordSleep(quality:) for a missing current-day value writes the canonical DailyStatus and sleepState reflects the saved value")
+    @MainActor
+    func recordSleepForMissingValueWritesCanonicalValue() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+        #expect(viewModel.sleepState == .loaded(sleepQuality: nil))
+
+        viewModel.recordSleep(quality: 4, referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.sleepState == .loaded(sleepQuality: 4))
+        #expect(viewModel.sleepErrorMessage == nil)
+        let today = SleepCoordinationService.today(referenceDate: Self.morningReferenceDate, calendar: .current)
+        let persisted = try service.fetchDailyStatus(forAthlete: athleteId, localDate: today)
+        #expect(persisted?.sleepQuality == 4)
+    }
+
+    /// Backs the inline control's "already recorded" case: tapping a
+    /// DIFFERENT value later corrects today's value. Proves this
+    /// happens through the same canonical upsert `recordSleep(quality:)`
+    /// now uses — the same `DailyStatus` row is updated, never a
+    /// second one created — and that `sleepState` reflects the
+    /// corrected value, never the original one, afterward.
+    @Test("recordSleep(quality:) for an already-recorded current-day value updates the same canonical DailyStatus, never duplicates it, and sleepState reflects the corrected value")
+    @MainActor
+    func recordSleepCorrectsAlreadyRecordedValue() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let service = Self.makeSleepCoordinationService(container: container)
+        let athleteId = AthleteId()
+        let today = SleepCoordinationService.today(referenceDate: Self.morningReferenceDate, calendar: .current)
+        let first = try service.recordSleep(athleteId: athleteId, localDate: today, sleepQuality: 2, today: today)
+        let viewModel = makeHomeDashboardViewModel(athleteId: athleteId, sleepStatusProvider: service)
+        viewModel.loadSleepState(referenceDate: Self.morningReferenceDate, calendar: .current)
+        #expect(viewModel.sleepState == .loaded(sleepQuality: 2))
+
+        viewModel.recordSleep(quality: 5, referenceDate: Self.morningReferenceDate, calendar: .current)
+
+        #expect(viewModel.sleepState == .loaded(sleepQuality: 5))
+        let second = try service.fetchDailyStatus(forAthlete: athleteId, localDate: today)
+        #expect(second?.sleepQuality == 5)
+        #expect(second?.id == first.id)
+        #expect(try container.mainContext.fetch(FetchDescriptor<DailyStatus>()).count == 1)
+    }
 }

@@ -90,19 +90,22 @@ func homeDashboardDebugLog(_ message: @autoclosure () -> String) {}
 enum HomeDashboardDestination: Hashable {
     case activity(rowId: String)
     case recurringOccurrence(id: String)
-    /// VX-023 (Sleep V1): the canonical Sleep capture destination for
-    /// one `LocalDate` — used identically for both "log today's Sleep"
-    /// (from the Sleep card) and the morning prompt's own "log now"
-    /// action; `LocalDate` is `Hashable`, so no wrapper id is needed.
-    case sleepCapture(localDate: LocalDate)
     // Athlete Home "Now" restructure round (Part C, Sleep compaction):
     // `.sleepHistory` and its `sleepHistoryDestination` view were
     // removed together with the standalone "Sleep History" row that
-    // was their only trigger in this file — see `sleepSection`'s own
-    // doc comment. `SleepHistoryView` itself is untouched and remains
-    // reachable via Family Home's own separate "Sleep History" entry
-    // point (`FamilyHomeContentView`), so this is a same-file
-    // dead-code removal, not a destination removed from the app.
+    // was their only trigger in this file. `SleepHistoryView` itself is
+    // untouched and remains reachable via Family Home's own separate
+    // "Sleep History" entry point (`FamilyHomeContentView`).
+    //
+    // Athlete Home Sleep inline round: `.sleepCapture(localDate:)` is
+    // removed the same way — its only trigger was the Sleep row's
+    // `NavigationLink`, which is now the inline 1-5 control below (see
+    // `sleepSection`'s own doc comment). This screen's Sleep control no
+    // longer navigates anywhere for today; `SleepCaptureView`/
+    // `SleepCaptureViewModel` themselves are untouched and remain used
+    // by `SleepHistoryView`'s own per-date rows (historical
+    // correction/backfill), so nothing was removed from the app —
+    // only this file's now-unreachable trigger for it.
 }
 
 /// Resolves a `HomeDashboardDestination` against a `TodayActivityLoadState`
@@ -169,14 +172,19 @@ public struct HomeDashboardView: View {
     /// own `viewModel` above already subscribed with whatever broadcaster
     /// its own constructor received.
     private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
-    /// VX-023 (Sleep V1): threaded through to construct
-    /// `SleepCaptureViewModel` at this screen's Sleep capture
-    /// destination, and to the "Manage Athletes" sheet's own nested
-    /// `HomeDashboardViewModel`/`AthleteSleepSettingsViewModel`
-    /// construction below. Athlete Home "Now" restructure round: this
-    /// screen's separate Sleep History destination/link was removed
-    /// (see `sleepSection`'s own doc comment) — only one Sleep
-    /// navigation destination remains here now.
+    /// VX-023 (Sleep V1): threaded through to the "Manage Athletes"
+    /// sheet's own nested `HomeDashboardViewModel`/
+    /// `AthleteSleepSettingsViewModel` construction below — its only
+    /// remaining use in this file. Athlete Home Sleep inline round: no
+    /// longer used to construct `SleepCaptureViewModel` here — this
+    /// screen's Sleep control is now inline and saves through
+    /// `viewModel.recordSleep(quality:)` instead of navigating to a
+    /// capture screen (see `sleepSection`'s own doc comment); this
+    /// concrete service is not threaded into `HomeDashboardViewModel`
+    /// itself for that either, since `HomeDashboardViewModel` already
+    /// holds its own protocol-typed `SleepStatusProviding` seam
+    /// (extended with `recordSleep` this round) rather than taking a
+    /// second, concrete Sleep dependency.
     private let sleepCoordinationService: SleepCoordinationService
     /// VX-023: threaded through only to pass to the "Manage Athletes"
     /// sheet's own nested `HomeDashboardViewModel` construction below —
@@ -315,8 +323,6 @@ public struct HomeDashboardView: View {
                         }
                     )
                 }
-            case .sleepCapture(let localDate):
-                sleepCaptureDestination(localDate: localDate)
             }
         }
         .onAppear {
@@ -328,94 +334,85 @@ public struct HomeDashboardView: View {
         }
     }
 
-    /// VX-023 (Sleep V1): compact card — "enabled + today has Sleep ->
-    /// 'Sleep / 4/5'; enabled + missing -> 'Sleep / Sleep not logged
-    /// yet'; disabled -> no card at all." Tapping opens the SAME
-    /// canonical Sleep capture used everywhere else (today's
-    /// `LocalDate`). The morning in-app prompt (below) is a SEPARATE,
-    /// additional element — this card itself never changes shape based
-    /// on prompt eligibility.
+    /// Athlete Home Sleep inline round: applies this app's approved
+    /// interaction principle ("complete simple actions in context") —
+    /// Sleep quality for today is one value with five options, so it is
+    /// now completed directly here rather than behind a navigation push.
+    /// "enabled + missing -> question + five tappable values, none
+    /// selected; enabled + recorded -> five values, the canonical one
+    /// selected; disabled -> no card at all." Same native
+    /// button-row-with-selected-state visual convention
+    /// `WeekdayMultiSelectView` already establishes elsewhere in this
+    /// app (circular/rounded buttons, accent-filled when selected,
+    /// `.isSelected` accessibility trait) — not a new control shape.
     ///
-    /// Athlete Home "Now" restructure round (Part C): this used to be
-    /// followed by a second, separate "Sleep History" row/link. Removed
-    /// — "one compact Sleep row/card only" per that round's approved
-    /// direction. The remaining "Sleep" row's own destination is
-    /// UNCHANGED (still today's `.sleepCapture`, exactly as before);
-    /// only the extra row disappeared. `SleepHistoryView` itself,
-    /// `SleepHistoryViewModel`, and Sleep history semantics are
-    /// untouched — Family Home still links to Sleep History directly
-    /// (`FamilyHomeContentView`'s own separate entry point), so the
-    /// full history list remains reachable in the app; it is simply no
-    /// longer duplicated as a second row on this screen.
+    /// Tapping a value calls `viewModel.recordSleep(quality:)` directly
+    /// — no chevron, no separate current-day capture screen, no Save
+    /// button. Tapping a DIFFERENT value later corrects today's value
+    /// through the exact same call (canonical upsert — see that
+    /// method's own doc comment). `sleepState` itself is the single
+    /// source of truth for which value (if any) is selected; a
+    /// successful save reloads it from canonical truth via
+    /// `loadSleepState()` inside `recordSleep(quality:)` — no locally
+    /// held "just tapped" value is ever displayed ahead of what was
+    /// actually persisted.
+    ///
+    /// The previous separate, ambiguous "How did you sleep last night? /
+    /// Dismiss" morning prompt row is removed — the missing-Sleep
+    /// question and the input are now the same element, so a second,
+    /// dismissible prompt asking the identical question would be
+    /// duplicate prompting for the same missing value. This inline
+    /// control has no dismiss action; it doesn't need one, since it's
+    /// the answer, not a reminder to go answer elsewhere.
+    /// `HomeDashboardViewModel.isSleepPromptEligible()`/
+    /// `dismissSleepPrompt()` are deliberately left in place, unused by
+    /// this screen now — see this file's own audit notes in the
+    /// delivery report for why they were not deleted.
+    ///
+    /// Athlete Home "Now" restructure round (Part C, still true here):
+    /// no separate "Sleep History" row — Family Home's own entry point
+    /// remains the path to the full history/backfill list.
     @ViewBuilder
     private var sleepSection: some View {
         switch viewModel.sleepState {
         case .loading, .trackingDisabled, .failed:
             EmptyView()
         case .loaded(let sleepQuality):
-            let today = SleepCoordinationService.today()
-            Section {
-                NavigationLink(value: HomeDashboardDestination.sleepCapture(localDate: today)) {
-                    HStack {
-                        Text("Sleep")
-                        Spacer()
-                        if let sleepQuality {
-                            Text("\(sleepQuality)/5")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Sleep not logged yet")
-                                .foregroundStyle(.secondary)
+            Section("Sleep") {
+                if sleepQuality == nil {
+                    Text("How did you sleep last night?")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("homeDashboard.sleepPrompt")
+                }
+
+                HStack(spacing: 8) {
+                    ForEach(1...5, id: \.self) { value in
+                        let isSelected = value == sleepQuality
+                        Button {
+                            viewModel.recordSleep(quality: value)
+                        } label: {
+                            Text("\(value)")
+                                .frame(maxWidth: .infinity, minHeight: 36)
+                                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
+                                .foregroundStyle(isSelected ? Color.white : Color.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("homeDashboard.sleepValueButton.\(value)")
+                        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
                     }
                 }
-                .accessibilityIdentifier("homeDashboard.sleepCard")
+                .accessibilityIdentifier("homeDashboard.sleepValuePicker")
 
-                if viewModel.isSleepPromptEligible() {
-                    // Lightweight, non-blocking, dismissible morning
-                    // prompt — never a phone notification (that's
-                    // VX-026/VX-027, explicitly out of scope here).
-                    // Dismissing only records local, in-memory
-                    // presentation state (`dismissSleepPrompt()`) — it
-                    // never disables Sleep tracking itself.
-                    HStack {
-                        Text("How did you sleep last night?")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Dismiss") {
-                            viewModel.dismissSleepPrompt()
-                        }
-                        .font(.caption)
-                        .accessibilityIdentifier("homeDashboard.sleepPrompt.dismissButton")
-                    }
-                    .accessibilityIdentifier("homeDashboard.sleepPrompt")
+                if let sleepErrorMessage = viewModel.sleepErrorMessage {
+                    Text(sleepErrorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("homeDashboard.sleepErrorMessage")
                 }
             }
             .accessibilityIdentifier("homeDashboard.sleepSection")
         }
-    }
-
-    private func sleepCaptureDestination(localDate: LocalDate) -> some View {
-        let today = SleepCoordinationService.today()
-        let existing: Int? = {
-            if case .loaded(let sleepQuality) = viewModel.sleepState, localDate == today {
-                return sleepQuality
-            }
-            return try? sleepCoordinationService.fetchDailyStatus(forAthlete: athleteId, localDate: localDate)?.sleepQuality
-        }()
-        return SleepCaptureView(
-            viewModel: SleepCaptureViewModel(
-                sleepCoordinationService: sleepCoordinationService,
-                athleteId: athleteId,
-                athleteDisplayName: athleteDisplayName,
-                localDate: localDate,
-                existingSleepQuality: existing,
-                today: today
-            ),
-            onSaved: {
-                viewModel.loadSleepState()
-            }
-        )
     }
 
     /// Sprint 1.1, P2: the `dailyFocusCard` UI section that used to live
