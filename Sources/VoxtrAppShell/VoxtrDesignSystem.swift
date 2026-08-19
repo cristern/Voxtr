@@ -206,6 +206,23 @@ public extension AthleteColor {
     /// One athlete's fetch failure never blocks resolution for another
     /// — falls back to the stable mapping for this athlete only, same
     /// per-athlete isolation `loadAthleteColors()` already established.
+    ///
+    /// Codemagic compile fix: `AthleteRepository` is `@MainActor`
+    /// (class-level) — `fetchAthleteSettings(forAthlete:)` below is
+    /// therefore MainActor-isolated, and calling it synchronously from
+    /// a `nonisolated` static function is a Swift 6 actor-isolation
+    /// error, not merely a warning. `@MainActor` here matches the
+    /// callee's own isolation rather than working around it. Every
+    /// call site is already MainActor-isolated on its own: `FamilyHomeViewModel`
+    /// is itself `@MainActor`; `ParentPlanTabView`/`ParentTrainingTabView`
+    /// are `View`-conforming structs, implicitly `@MainActor` per
+    /// Swift 6's SwiftUI inference (no explicit annotation needed there,
+    /// unlike the free function `fetchActiveAthletes` in
+    /// `ParentTabShellView.swift`, whose own doc comment explains
+    /// exactly why it DOES need one); and this function's one test call
+    /// site is itself `@MainActor`-annotated. No call site needed to
+    /// change.
+    @MainActor
     static func resolved(forAthlete athleteId: AthleteId, using athleteRepository: AthleteRepository) -> AthleteColor {
         let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athleteId)
         let preferred = (settings ?? nil)?.preferredColor
