@@ -99,6 +99,7 @@ public struct RecurringOccurrencePreviewView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("recurringOccurrence.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             Section {
@@ -113,12 +114,13 @@ public struct RecurringOccurrencePreviewView: View {
                 }
                 LabeledContent("Status", value: "Recurring — not yet added to this week's plan")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("recurringOccurrence.summary")
 
             Section {
                 Text("This occurrence comes from a recurring activity and hasn't been added to a specific week's plan yet.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                 Button("Log Activity") {
                     materializeAndOpen()
                 }
@@ -143,7 +145,10 @@ public struct RecurringOccurrencePreviewView: View {
                 }
                 .accessibilityIdentifier("recurringOccurrence.cancelActivityButton")
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("\(athleteDisplayName) · Recurring Activity")
         .sheet(item: $editSheetItem) { item in
             RecurringActivityFormView(

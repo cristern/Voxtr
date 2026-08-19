@@ -99,6 +99,7 @@ public struct ActivityDetailView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("activityDetail.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             Section {
@@ -130,6 +131,7 @@ public struct ActivityDetailView: View {
                         .accessibilityIdentifier("activityDetail.formRow")
                 }
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("activityDetail.summary")
 
             Section {
@@ -193,8 +195,8 @@ public struct ActivityDetailView: View {
                     // comments.
                     if viewModel.canEditOrDelete {
                         Text("Editing the plan below does not change what was actually logged — use Edit Logged Activity to correct the result.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
 
@@ -211,8 +213,8 @@ public struct ActivityDetailView: View {
                     .accessibilityIdentifier("activityDetail.deleteButton")
                 } else {
                     Text("This week's plan is committed — editing and deleting are no longer available.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
 
                 // Planned/Logged Activity lifecycle consistency cleanup:
@@ -227,7 +229,10 @@ public struct ActivityDetailView: View {
                     .accessibilityIdentifier("activityDetail.cancelActivityButton")
                 }
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle(viewModel.activity.title)
         .sheet(isPresented: $isEditing) {
             ActivityEditFormView(viewModel: viewModel)
@@ -306,12 +311,24 @@ public struct ActivityDetailView: View {
         }
     }
 
+    // Status/outcome colour audit (Design Foundation extension round):
+    // `.green`/`.orange` are kept as the literal, already-established
+    // semantic "genuinely completed"/"missed" colours — the same
+    // meaning `DailyTrainingView`'s own completed-label colouring
+    // already uses. `VoxtrColor` has no status/outcome token, and this
+    // task explicitly forbids inventing one or silently remapping these
+    // onto an unrelated accent/athlete colour, so they stay literal
+    // system colours. Only the two NEUTRAL cases (`.secondary`/`.primary`)
+    // move to the direct `VoxtrColor` token equivalents already used
+    // everywhere else on this screen — see this round's own delivery
+    // report for a note on whether a future small semantic-status token
+    // pair would be worth adding.
     private var outcomeIndicatorColor: Color {
         switch viewModel.outcomeStatus {
         case .completed, .partiallyCompleted: return .green
         case .missed: return .orange
-        case .cancelled: return .secondary
-        case .none, .scheduled: return .primary
+        case .cancelled: return VoxtrColor.textSecondary
+        case .none, .scheduled: return VoxtrColor.textPrimary
         }
     }
 }
@@ -359,6 +376,8 @@ struct ActivityEditFormView: View {
                 TextField("Location", text: $viewModel.editLocation)
                     .accessibilityIdentifier("activityDetail.editLocationField")
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle("Edit Activity")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -411,6 +430,7 @@ struct LoggedActivityEditFormView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("activityDetail.editLoggedActivity.errorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
                 Section {
@@ -454,7 +474,10 @@ struct LoggedActivityEditFormView: View {
                     }
                     .accessibilityIdentifier("activityDetail.editLoggedActivity.sessionFormPicker")
                 }
+                .voxtrRowSurface()
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle("Edit Logged Activity")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {

@@ -47,12 +47,14 @@ public struct DailyTrainingView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("training.errorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
-                Section("Today's planned activities") {
+                Section {
                     if viewModel.plannedActivities.isEmpty {
                         Text(TrainingStrings.noPlannedActivitiesToday)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     } else {
                         ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
                             NavigationLink {
@@ -67,12 +69,14 @@ public struct DailyTrainingView: View {
                             )
                         } label: {
                             HStack {
-                                VStack(alignment: .leading) {
+                                VStack(alignment: .leading, spacing: 2) {
                                     Text(item.plannedActivity.title)
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
                                     if let location = item.plannedActivity.location, !location.isEmpty {
                                         Text(location)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(VoxtrTypography.metadata)
+                                            .foregroundStyle(VoxtrColor.textSecondary)
                                     }
                                 }
                                 Spacer()
@@ -83,169 +87,199 @@ public struct DailyTrainingView: View {
                                 // History's equivalent row label. A
                                 // Cancelled or Missed activity must
                                 // never show as "Completed" here.
+                                //
+                                // Status/outcome colour audit: `.green`
+                                // is kept as the literal semantic
+                                // "genuinely completed" colour (same
+                                // meaning `ActivityDetailView`'s own
+                                // `outcomeIndicatorColor` already
+                                // establishes) — no `VoxtrColor` token
+                                // represents this state, and none is
+                                // invented here; only the neutral case
+                                // moves to the `VoxtrColor` token.
                                 Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                                    .font(.caption)
-                                    .foregroundStyle(item.isGenuinelyCompleted ? .green : .secondary)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(item.isGenuinelyCompleted ? .green : VoxtrColor.textSecondary)
                             }
                         }
                         .accessibilityIdentifier("training.plannedActivityRow.\(item.plannedActivity.id.uuidString)")
                     }
+                    }
+                } header: {
+                    VoxtrSectionHeading("Today's planned activities")
                 }
-            }
-            .accessibilityIdentifier("training.plannedActivitiesList")
+                .voxtrRowSurface()
+                .accessibilityIdentifier("training.plannedActivitiesList")
 
-            if !viewModel.recurringOccurrences.isEmpty {
-                Section("Today's recurring activities") {
-                    ForEach(viewModel.recurringOccurrences, id: \.id) { suggestion in
-                        NavigationLink {
-                            RecurringOccurrencePreviewView(
-                                suggestion: suggestion,
-                                athleteDisplayName: athleteDisplayName,
-                                planningService: planningService,
-                                trainingService: trainingService,
-                                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                actorId: actorId,
-                                onActivityLogged: { viewModel.load() }
-                            )
-                        } label: {
-                            HStack {
-                                Text(suggestion.title)
-                                Spacer()
-                                Text("Recurring")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                if !viewModel.recurringOccurrences.isEmpty {
+                    Section {
+                        ForEach(viewModel.recurringOccurrences, id: \.id) { suggestion in
+                            NavigationLink {
+                                RecurringOccurrencePreviewView(
+                                    suggestion: suggestion,
+                                    athleteDisplayName: athleteDisplayName,
+                                    planningService: planningService,
+                                    trainingService: trainingService,
+                                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                    actorId: actorId,
+                                    onActivityLogged: { viewModel.load() }
+                                )
+                            } label: {
+                                HStack {
+                                    Text(suggestion.title)
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
+                                    Spacer()
+                                    Text("Recurring")
+                                        .font(VoxtrTypography.metadata)
+                                        .foregroundStyle(VoxtrColor.textSecondary)
+                                }
                             }
+                            .accessibilityIdentifier("training.recurringOccurrenceRow.\(suggestion.id)")
                         }
-                        .accessibilityIdentifier("training.recurringOccurrenceRow.\(suggestion.id)")
+                    } header: {
+                        VoxtrSectionHeading("Today's recurring activities")
                     }
+                    .voxtrRowSurface()
+                    .accessibilityIdentifier("training.recurringOccurrencesList")
                 }
-                .accessibilityIdentifier("training.recurringOccurrencesList")
-            }
 
-            Section("Today's logged activities") {
-                if viewModel.loggedActivities.isEmpty {
-                    Text(TrainingStrings.noLoggedActivitiesToday)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(viewModel.loggedActivities, id: \.id) { activity in
-                        VStack(alignment: .leading) {
-                            Text(activity.title)
-                            // Review follow-up (duration/logged-consumer
-                            // audit): a Cancelled/Missed entry must show
-                            // its outcome, never present its schema
-                            // placeholder duration as if it were real
-                            // training time.
-                            Text(Self.durationOrOutcomeSubtitle(for: activity))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .accessibilityIdentifier("training.loggedActivityRow.\(activity.id.uuidString)")
-                    }
-                }
-            }
-            .accessibilityIdentifier("training.loggedActivitiesList")
-
-            Section("Log an activity") {
-                TextField("Title", text: $viewModel.newLogTitle)
-                    .accessibilityIdentifier("training.newLogTitleField")
-
-                Picker("Activity type", selection: $viewModel.newLogActivityType) {
-                    Text("Team training").tag(ActivityType.teamTraining)
-                    Text("Match").tag(ActivityType.match)
-                    Text("Competition").tag(ActivityType.competition)
-                    Text("Individual training").tag(ActivityType.individualTraining)
-                    Text("Physical training").tag(ActivityType.physicalTraining)
-                    Text("Recovery").tag(ActivityType.recovery)
-                    Text("Test").tag(ActivityType.test)
-                    Text("Other").tag(ActivityType.other)
-                }
-                .accessibilityIdentifier("training.newLogActivityTypePicker")
-
-                DatePicker("Started at", selection: $viewModel.newLogStartedAt)
-                    .accessibilityIdentifier("training.newLogStartedAtPicker")
-
-                DurationPickerView(durationMinutes: $viewModel.newLogDurationMinutes)
-
-                Picker("RPE", selection: $viewModel.newLogPerceivedExertion) {
-                    Text("Not set").tag(Int?.none)
-                    ForEach(1...10, id: \.self) { value in
-                        Text("\(value)").tag(Int?.some(value))
-                    }
-                }
-                .accessibilityIdentifier("training.newLogExertionPicker")
-
-                // VX-022: "Form" — required for every log through this
-                // flow (always a completed session). Neutral 1-5 scale,
-                // no failure/success labeling, no scoring or readiness
-                // language, same Picker shape as RPE above. No "Not
-                // set" option — Form is required, not optional.
-                Picker("Form", selection: $viewModel.newLogSessionForm) {
-                    ForEach(1...5, id: \.self) { value in
-                        Text("\(value)").tag(Int?.some(value))
-                    }
-                }
-                .accessibilityIdentifier("training.newLogSessionFormPicker")
-
-                TextField("Notes", text: $viewModel.newLogNotes)
-                    .accessibilityIdentifier("training.newLogNotesField")
-
-                // Requirement: allow linking only to an UNCOMPLETED
-                // PlannedActivity — completed ones are shown (for
-                // context) but disabled, not hidden.
-                Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
-                    Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
-                    ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                        Text(item.plannedActivity.title)
-                            .tag(Optional(item.plannedActivity.plannedActivityId))
-                            .disabled(item.isCompleted)
-                    }
-                }
-                .accessibilityIdentifier("training.linkPlannedActivityPicker")
-
-                Button {
-                    viewModel.logActivity()
-                } label: {
-                    if viewModel.isSubmitting {
-                        ProgressView()
+                Section {
+                    if viewModel.loggedActivities.isEmpty {
+                        Text(TrainingStrings.noLoggedActivitiesToday)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     } else {
-                        Text("Log activity")
+                        ForEach(viewModel.loggedActivities, id: \.id) { activity in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(activity.title)
+                                    .font(VoxtrTypography.cardTitle)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
+                                // Review follow-up (duration/logged-consumer
+                                // audit): a Cancelled/Missed entry must show
+                                // its outcome, never present its schema
+                                // placeholder duration as if it were real
+                                // training time.
+                                Text(Self.durationOrOutcomeSubtitle(for: activity))
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
+                            }
+                            .accessibilityIdentifier("training.loggedActivityRow.\(activity.id.uuidString)")
+                        }
                     }
+                } header: {
+                    VoxtrSectionHeading("Today's logged activities")
                 }
-                .disabled(viewModel.isSubmitting)
-                .accessibilityIdentifier("training.logActivityButton")
-            }
+                .voxtrRowSurface()
+                .accessibilityIdentifier("training.loggedActivitiesList")
 
-            Section {
-                Button("Manage Recurring Activities") {
-                    let recurringViewModel = WeeklyPlanningViewModel(
-                        service: planningService,
-                        athleteId: viewModel.athleteId,
-                        committedByActorId: actorId
-                    )
-                    recurringViewModel.loadRecurringActivities()
-                    recurringManagementSheetItem = RecurringManagementSheetItem(viewModel: recurringViewModel)
+                Section {
+                    TextField("Title", text: $viewModel.newLogTitle)
+                        .accessibilityIdentifier("training.newLogTitleField")
+
+                    Picker("Activity type", selection: $viewModel.newLogActivityType) {
+                        Text("Team training").tag(ActivityType.teamTraining)
+                        Text("Match").tag(ActivityType.match)
+                        Text("Competition").tag(ActivityType.competition)
+                        Text("Individual training").tag(ActivityType.individualTraining)
+                        Text("Physical training").tag(ActivityType.physicalTraining)
+                        Text("Recovery").tag(ActivityType.recovery)
+                        Text("Test").tag(ActivityType.test)
+                        Text("Other").tag(ActivityType.other)
+                    }
+                    .accessibilityIdentifier("training.newLogActivityTypePicker")
+
+                    DatePicker("Started at", selection: $viewModel.newLogStartedAt)
+                        .accessibilityIdentifier("training.newLogStartedAtPicker")
+
+                    DurationPickerView(durationMinutes: $viewModel.newLogDurationMinutes)
+
+                    Picker("RPE", selection: $viewModel.newLogPerceivedExertion) {
+                        Text("Not set").tag(Int?.none)
+                        ForEach(1...10, id: \.self) { value in
+                            Text("\(value)").tag(Int?.some(value))
+                        }
+                    }
+                    .accessibilityIdentifier("training.newLogExertionPicker")
+
+                    // VX-022: "Form" — required for every log through this
+                    // flow (always a completed session). Neutral 1-5 scale,
+                    // no failure/success labeling, no scoring or readiness
+                    // language, same Picker shape as RPE above. No "Not
+                    // set" option — Form is required, not optional.
+                    Picker("Form", selection: $viewModel.newLogSessionForm) {
+                        ForEach(1...5, id: \.self) { value in
+                            Text("\(value)").tag(Int?.some(value))
+                        }
+                    }
+                    .accessibilityIdentifier("training.newLogSessionFormPicker")
+
+                    TextField("Notes", text: $viewModel.newLogNotes)
+                        .accessibilityIdentifier("training.newLogNotesField")
+
+                    // Requirement: allow linking only to an UNCOMPLETED
+                    // PlannedActivity — completed ones are shown (for
+                    // context) but disabled, not hidden.
+                    Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
+                        Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
+                        ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
+                            Text(item.plannedActivity.title)
+                                .tag(Optional(item.plannedActivity.plannedActivityId))
+                                .disabled(item.isCompleted)
+                        }
+                    }
+                    .accessibilityIdentifier("training.linkPlannedActivityPicker")
+
+                    Button {
+                        viewModel.logActivity()
+                    } label: {
+                        if viewModel.isSubmitting {
+                            ProgressView()
+                        } else {
+                            Text("Log activity")
+                        }
+                    }
+                    .disabled(viewModel.isSubmitting)
+                    .accessibilityIdentifier("training.logActivityButton")
+                } header: {
+                    VoxtrSectionHeading("Log an activity")
                 }
-                .accessibilityIdentifier("training.manageRecurringActivitiesButton")
+                .voxtrRowSurface()
+
+                Section {
+                    Button("Manage Recurring Activities") {
+                        let recurringViewModel = WeeklyPlanningViewModel(
+                            service: planningService,
+                            athleteId: viewModel.athleteId,
+                            committedByActorId: actorId
+                        )
+                        recurringViewModel.loadRecurringActivities()
+                        recurringManagementSheetItem = RecurringManagementSheetItem(viewModel: recurringViewModel)
+                    }
+                    .accessibilityIdentifier("training.manageRecurringActivitiesButton")
+                }
+                .voxtrRowSurface()
             }
-        }
-        .navigationTitle("\(athleteDisplayName) Daily Training")
-        .onAppear {
-            viewModel.load()
-        }
-        .sheet(item: $recurringManagementSheetItem) { item in
-            RecurringActivityManagementView(viewModel: item.viewModel, athleteDisplayName: athleteDisplayName)
-        }
-        .onChange(of: viewModel.successfulLogTrigger) { _, _ in
-            // Only fires when a log genuinely succeeded (see
-            // successfulLogTrigger's own doc comment) — never on
-            // validation failure, persistence failure, or opening the
-            // form. withAnimation is optional polish, not required for
-            // correctness; native ScrollViewReader.scrollTo is the
-            // actual mechanism, no timing hacks.
-            withAnimation {
-                proxy.scrollTo("dailyTraining.top", anchor: .top)
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
+            .navigationTitle("\(athleteDisplayName) Daily Training")
+            .onAppear {
+                viewModel.load()
             }
-        }
+            .sheet(item: $recurringManagementSheetItem) { item in
+                RecurringActivityManagementView(viewModel: item.viewModel, athleteDisplayName: athleteDisplayName)
+            }
+            .onChange(of: viewModel.successfulLogTrigger) { _, _ in
+                // Only fires when a log genuinely succeeded (see
+                // successfulLogTrigger's own doc comment) — never on
+                // validation failure, persistence failure, or opening the
+                // form. withAnimation is optional polish, not required for
+                // correctness; native ScrollViewReader.scrollTo is the
+                // actual mechanism, no timing hacks.
+                withAnimation {
+                    proxy.scrollTo("dailyTraining.top", anchor: .top)
+                }
+            }
         }
     }
 

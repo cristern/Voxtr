@@ -164,6 +164,21 @@ public struct DurationPickerView: View {
 /// itself read as canonical truth) purely so re-selecting after an
 /// accidental clear resumes where the user left off, rather than
 /// resetting to the generic starting seed every time.
+///
+/// Design Foundation extension round (Training workflow package): the
+/// "Not set" row's own two `Text` labels now use `VoxtrColor.textPrimary`/
+/// `VoxtrColor.textSecondary` instead of the raw system `.primary`/
+/// `.secondary` they used before — this is the one place this shared
+/// component drew its own row content rather than deferring to
+/// `DurationPickerView`'s native wheel picker (left untouched: a native
+/// wheel picker's own internal text is the correct native-control
+/// presentation, not something to override). Every existing host of
+/// this view (Log Activity, Edit Planned Activity, Edit Logged Activity,
+/// Weekly Plan's Add Activity, recurring activity forms, Daily
+/// Training's own log form) picks up this token automatically; already-
+/// styled hosts (e.g. `WeeklyPlanningView`'s Add Activity section) are
+/// made MORE consistent by this change, not regressed — they already
+/// use these exact `VoxtrColor` tokens for their own surrounding text.
 struct OptionalDurationPickerView: View {
     @Binding var durationMinutes: Int?
     @State private var lastKnownDurationMinutes: Int?
@@ -182,10 +197,10 @@ struct OptionalDurationPickerView: View {
             } label: {
                 HStack {
                     Text("Duration")
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(VoxtrColor.textPrimary)
                     Spacer()
                     Text("Not set")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
             }
             .accessibilityIdentifier("optionalDurationPicker.setDurationButton")

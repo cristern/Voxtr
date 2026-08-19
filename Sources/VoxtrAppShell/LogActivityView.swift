@@ -21,6 +21,7 @@ public struct LogActivityView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("logActivity.errorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
                 // Read-only context — already known from the plan, never
@@ -30,9 +31,10 @@ public struct LogActivityView: View {
                     LabeledContent("Activity", value: viewModel.plannedActivity.title)
                     LabeledContent("Date", value: viewModel.plannedActivity.localDate.isoString)
                 }
+                .voxtrRowSurface()
                 .accessibilityIdentifier("logActivity.plannedContext")
 
-                Section("How did it go?") {
+                Section {
                     // Activity outcome consistency closeout (item C):
                     // an explicit, clearly-labelled "Outcome" control —
                     // the previous "Completed" Toggle gave no visible
@@ -91,8 +93,13 @@ public struct LogActivityView: View {
 
                     TextField("Notes", text: $viewModel.notes, axis: .vertical)
                         .accessibilityIdentifier("logActivity.notesField")
+                } header: {
+                    VoxtrSectionHeading("How did it go?")
                 }
+                .voxtrRowSurface()
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle("Log Activity")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
