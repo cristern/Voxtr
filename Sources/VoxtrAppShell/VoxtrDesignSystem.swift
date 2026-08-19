@@ -1,0 +1,229 @@
+import SwiftUI
+import UIKit
+
+// MARK: - VoxtrColor
+
+/// Vǫxtr Parent App Design Foundation V0.1 — semantic colour tokens.
+///
+/// WORKING IMPLEMENTATION VALUES, not final brand values — see this
+/// round's own delivery report for the exact hex values chosen and the
+/// reasoning behind the dark variant (a deliberate, coherent dark
+/// palette, never a mechanical inversion of the light one).
+///
+/// No asset catalog is used: `VoxtrAppShell` is a Swift Package target,
+/// and adding a Colors.xcassets here would require a `Package.swift`
+/// resource-declaration change this round has no reason to make.
+/// Instead, each token is a `UIColor` dynamic provider (resolved from
+/// `UITraitCollection.userInterfaceStyle`) wrapped in `Color` — the
+/// standard code-only technique for a SwiftUI colour that follows
+/// system light/dark appearance automatically, with no in-app
+/// appearance selector and no `@Environment(\.colorScheme)` plumbing
+/// required at every call site.
+///
+/// One consistent palette across Parent App — Family Home and Athlete
+/// Home both use exactly these tokens; nothing here is athlete-themed
+/// (see `VoxtrAthleteColor` below for the separate, identity-only
+/// palette, restricted to shared/multi-athlete surfaces).
+public enum VoxtrColor {
+    /// Screen background. Light `#F4F7F6`, dark `#10191D` (deep
+    /// charcoal-navy, not a literal inversion of the light value).
+    public static let background = dynamic(light: 0xF4F7F6, dark: 0x10191D)
+    /// Primary card/group surface. Light `#FFFFFF`, dark `#17242A`
+    /// (slightly lighter than `background`, per the working dark
+    /// direction).
+    public static let surface = dynamic(light: 0xFFFFFF, dark: 0x17242A)
+    /// Lower-emphasis grouped/selected surface. Light `#EDF3F1`, dark
+    /// `#1E2E34`.
+    public static let surfaceSubtle = dynamic(light: 0xEDF3F1, dark: 0x1E2E34)
+    /// Primary text. Light `#18313D`, dark `#EDF3F1` (off-white, not
+    /// pure white).
+    public static let textPrimary = dynamic(light: 0x18313D, dark: 0xEDF3F1)
+    /// Secondary/metadata text. Light `#66757C`, dark `#8FA39D` (muted
+    /// cool grey-green, matching the light value's own cool cast).
+    public static let textSecondary = dynamic(light: 0x66757C, dark: 0x8FA39D)
+    /// Deep navy — a strong, non-accent emphasis tone (distinct from
+    /// `accent`). Light `#153243`, dark `#3E6478` (lightened so it
+    /// still reads against a dark background — the light value is
+    /// itself dark, so it cannot be reused unchanged in dark mode).
+    public static let navy = dynamic(light: 0x153243, dark: 0x3E6478)
+    /// Primary accent — selection states, tint, links. Light `#177D78`,
+    /// dark `#56C2B3` (brighter, for contrast against a dark
+    /// background).
+    public static let accent = dynamic(light: 0x177D78, dark: 0x56C2B3)
+    /// Brightest accent step — reserved for the strongest single
+    /// highlight (e.g. a selected value's fill). Light `#45B8AA`, dark
+    /// `#7DD9CB`.
+    public static let accentBright = dynamic(light: 0x45B8AA, dark: 0x7DD9CB)
+    /// Soft accent wash — subtle selected/emphasised backgrounds. Light
+    /// `#D8F0EA`, dark `#1C3B38` (a deep, low-luminance teal wash, not
+    /// a pale one — a pale wash would be nearly invisible against a
+    /// dark surface).
+    public static let accentSoft = dynamic(light: 0xD8F0EA, dark: 0x1C3B38)
+    /// Divider/border. Light `#DDE5E2`, dark `#2C3D40` (kept visible,
+    /// not just a low-opacity white/black).
+    public static let divider = dynamic(light: 0xDDE5E2, dark: 0x2C3D40)
+
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? UIColor(hex: dark) : UIColor(hex: light)
+        })
+    }
+}
+
+private extension UIColor {
+    convenience init(hex: UInt32) {
+        self.init(
+            red: CGFloat((hex >> 16) & 0xFF) / 255,
+            green: CGFloat((hex >> 8) & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+}
+
+// MARK: - VoxtrAthleteColor
+
+/// Athlete Color — IDENTITY ONLY, never performance/readiness/warning/
+/// completion/ranking. Restricted to shared/multi-athlete surfaces
+/// (Family Home); never used as Athlete Home's own theme — see
+/// `HomeDashboardView`, which does not reference this type at all.
+///
+/// The eight working values below are fixed and identical in light and
+/// dark mode — an identity accent, unlike the semantic `VoxtrColor`
+/// tokens, is not meant to shift with appearance the way a background
+/// or text tone does; each is already legible against both `surface`
+/// tones as a thin outline/marker — the only sanctioned treatment (see
+/// `FamilyHomeContentView.athletesSection`'s own small identity-circle
+/// usage), never as a fill behind text.
+public enum VoxtrAthleteColor: CaseIterable, Equatable {
+    case blue, indigo, purple, rose, orange, amber, green, cyan
+
+    public var color: Color {
+        switch self {
+        case .blue: Color(uiColor: UIColor(hex: 0x4F7CAC))
+        case .indigo: Color(uiColor: UIColor(hex: 0x6667AB))
+        case .purple: Color(uiColor: UIColor(hex: 0x8A63A8))
+        case .rose: Color(uiColor: UIColor(hex: 0xB56576))
+        case .orange: Color(uiColor: UIColor(hex: 0xC77D4A))
+        case .amber: Color(uiColor: UIColor(hex: 0xB88A32))
+        case .green: Color(uiColor: UIColor(hex: 0x4F8A68))
+        case .cyan: Color(uiColor: UIColor(hex: 0x3F8E9D))
+        }
+    }
+
+    /// Athlete Color data / persistence: no canonical, persisted
+    /// athlete-colour preference exists anywhere in `AthleteProfile`/
+    /// `AthleteSettings`/the athlete domain (confirmed by inspection
+    /// before writing this round's code) — this task does not invent
+    /// one. This is the smallest deterministic, PRESENTATION-ONLY
+    /// assignment: the athlete's position in the caller's own already
+    /// deterministically-ordered active-athlete list (createdAt, then
+    /// id — see `FamilyHomeViewModel.refreshActiveAthletes()`'s own
+    /// doc comment), taken modulo the eight-colour palette. Nothing is
+    /// stored; a re-fetch with the same roster in the same order
+    /// reproduces the same assignment, but this is NOT a durable,
+    /// user-configurable identity — re-ordering or archiving athletes
+    /// can shift it. Reported as a known limitation, not silently
+    /// treated as canonical.
+    public static func forIndex(_ index: Int) -> VoxtrAthleteColor {
+        allCases[((index % allCases.count) + allCases.count) % allCases.count]
+    }
+}
+
+// MARK: - VoxtrTypography
+
+/// Semantic type roles, built entirely on the system font and native
+/// SwiftUI text styles — no custom font, no one-off point sizes scattered
+/// across views. Deliberately small: only the roles this round's two
+/// target screens actually need.
+public enum VoxtrTypography {
+    /// A large heading inside body content (distinct from the
+    /// navigation bar's own large title, which SwiftUI already renders
+    /// natively via `.navigationTitle`).
+    public static let screenTitle: Font = .system(.title2, weight: .semibold)
+    /// A `Section` heading.
+    public static let sectionTitle: Font = .system(.subheadline, weight: .semibold)
+    /// A card/row's own primary title (an activity title, an athlete's
+    /// name).
+    public static let cardTitle: Font = .system(.headline)
+    /// Ordinary body copy.
+    public static let body: Font = .system(.body)
+    /// A data value read alongside a label (a Sleep score, a date).
+    public static let value: Font = .system(.body, weight: .medium)
+    /// A secondary metadata line (location, weekday, outcome).
+    public static let metadata: Font = .system(.caption)
+    /// The smallest supporting text (a small badge like "Recurring").
+    public static let caption: Font = .system(.caption2)
+}
+
+// MARK: - Reusable view primitives
+
+/// The small, shared foundation both target screens use — nothing here
+/// is a general-purpose component library; each modifier exists only
+/// because both Family Home and Athlete Home need it.
+public extension View {
+    /// Applied once to a screen's own `Form`: replaces the system's
+    /// default grouped-list background with `VoxtrColor.background`,
+    /// the semantic screen background token. `Form`/`Section`
+    /// structure, navigation, swipe actions, and every existing
+    /// destination are completely unchanged — only the background
+    /// colour underneath them changes; this is the standard, minimal
+    /// technique for reskinning a `Form` without replacing it with a
+    /// custom container (which would risk exactly the IA/behavior
+    /// regressions this round is explicitly asked to avoid).
+    func voxtrScreenBackground() -> some View {
+        self
+            .scrollContentBackground(.hidden)
+            .background(VoxtrColor.background)
+    }
+
+    /// Applied to a `Section`'s content (via `.listRowBackground`) to
+    /// use the semantic `surface` token instead of the system default —
+    /// the Section itself keeps its native grouped corner rounding;
+    /// only its fill colour changes. This is "grouping relies on
+    /// spacing before adding more boxes": every row in a Section still
+    /// reads as one coherent card, exactly as `Form`'s own grouped
+    /// style already renders it, just recoloured.
+    func voxtrRowSurface() -> some View {
+        listRowBackground(VoxtrColor.surface)
+    }
+
+    /// The one genuine "card" primitive this round introduces — a
+    /// small, explicitly bordered/rounded sub-grouping used only where
+    /// a Section's own implicit row-card isn't the right unit (the
+    /// inline Sleep value row, an Athlete Home identity marker). Card
+    /// radius 14pt (within the requested ~12-16pt range), a hairline
+    /// `divider`-coloured border, no shadow.
+    func voxtrCardSurface(cornerRadius: CGFloat = 14, fill: Color = VoxtrColor.surfaceSubtle) -> some View {
+        background(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(fill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(VoxtrColor.divider, lineWidth: 0.5)
+        )
+    }
+}
+
+/// A `Section` header rendered with `VoxtrTypography.sectionTitle` and
+/// `VoxtrColor.textSecondary` — the one standard section-heading
+/// treatment both target screens use wherever they need a styled
+/// (rather than the plain string-convenience) header. `.textCase(nil)`
+/// preserves the title's own capitalisation instead of the system
+/// default all-caps grouped-list header style, matching this round's
+/// calmer, less form-like visual goal.
+public struct VoxtrSectionHeading: View {
+    private let title: String
+
+    public init(_ title: String) {
+        self.title = title
+    }
+
+    public var body: some View {
+        Text(title)
+            .font(VoxtrTypography.sectionTitle)
+            .foregroundStyle(VoxtrColor.textSecondary)
+            .textCase(nil)
+    }
+}

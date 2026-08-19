@@ -188,20 +188,25 @@ public struct FamilyHomeContentView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("familyHome.errorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
                 nowNextSection
 
-                Section("Today's Schedule") {
+                Section {
                     if viewModel.rows.isEmpty {
                         Text("Nothing planned for today.")
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     } else {
                         ForEach(viewModel.rows) { row in
                             todayActivityRow(row)
                         }
                     }
+                } header: {
+                    VoxtrSectionHeading("Today's Schedule")
                 }
+                .voxtrRowSurface()
                 .accessibilityIdentifier("familyHome.scheduleList")
 
                 tomorrowSection
@@ -210,11 +215,18 @@ public struct FamilyHomeContentView: View {
                     NavigationLink("View upcoming schedule", value: FamilyHomeDestination.familySchedule)
                         .accessibilityIdentifier("familyHome.familyScheduleLink")
                 }
+                .voxtrRowSurface()
 
                 focusThisWeekSection
                 sleepSection
                 athletesSection
             }
+            // Design Foundation V0.1: the screen background token —
+            // structure/navigation/rows below are all unchanged, only
+            // the colour underneath changes. See `voxtrScreenBackground()`'s
+            // own doc comment.
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             // Naming/navigation clarity: "Family Home" always, never
             // the generic "Home" — this is the family-wide screen, and
             // must read as such at a glance, distinct from Athlete
@@ -311,11 +323,14 @@ public struct FamilyHomeContentView: View {
     @ViewBuilder
     private var tomorrowSection: some View {
         if !viewModel.tomorrowRows.isEmpty {
-            Section("Tomorrow") {
+            Section {
                 ForEach(viewModel.tomorrowRows) { row in
                     todayActivityRow(row)
                 }
+            } header: {
+                VoxtrSectionHeading("Tomorrow")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.tomorrowList")
         }
     }
@@ -333,14 +348,20 @@ public struct FamilyHomeContentView: View {
     private var nowNextSection: some View {
         switch viewModel.nowNextState {
         case .now(let items):
-            Section("Now") {
+            Section {
                 ForEach(items) { todayActivityRow($0) }
+            } header: {
+                VoxtrSectionHeading("Now")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.nowNext.now")
         case .next(let items):
-            Section("Next") {
+            Section {
                 ForEach(items) { todayActivityRow($0) }
+            } header: {
+                VoxtrSectionHeading("Next")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.nowNext.next")
         case .empty:
             // Calm by Default: no placeholder text, no "nothing
@@ -359,8 +380,8 @@ public struct FamilyHomeContentView: View {
             VStack(alignment: .leading, spacing: 4) {
                 NavigationLink(value: FamilyHomeDestination.athlete(athleteId)) {
                     Text(athleteName)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("familyHome.athleteLink.\(athleteId.rawValue.uuidString)")
@@ -369,14 +390,16 @@ public struct FamilyHomeContentView: View {
                     HStack {
                         VStack(alignment: .leading) {
                             Text(suggestion.title)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.recurringRowSubtitle(for: suggestion))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                         Spacer()
                         Text("Recurring")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.caption)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
                 .accessibilityIdentifier("familyHome.recurringRow.\(suggestion.id)")
@@ -384,15 +407,17 @@ public struct FamilyHomeContentView: View {
         case .unplannedLogged(let athleteId, let athleteName, let loggedActivity):
             VStack(alignment: .leading, spacing: 4) {
                 Text(athleteName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("familyHome.athleteLabel.\(athleteId.rawValue.uuidString)")
                 HStack {
                     VStack(alignment: .leading) {
                         Text(loggedActivity.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         Text("Unplanned · Logged")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                     Spacer()
                 }
@@ -416,8 +441,8 @@ public struct FamilyHomeContentView: View {
         VStack(alignment: .leading, spacing: 4) {
             NavigationLink(value: FamilyHomeDestination.athlete(row.athleteId)) {
                 Text(row.athleteName)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("familyHome.athleteLink.\(row.athleteId.rawValue.uuidString)")
@@ -426,9 +451,11 @@ public struct FamilyHomeContentView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(row.plannedActivity.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         Text(Self.rowSubtitle(for: row))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                     Spacer()
                     VStack(alignment: .trailing) {
@@ -442,13 +469,13 @@ public struct FamilyHomeContentView: View {
                         // conveys "Ready to log" there.
                         if let outcomeStatus = row.outcomeStatus {
                             Text(TrainingStrings.outcomeLabel(for: outcomeStatus))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                         if row.isFromRecurring {
                             Text("Recurring")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.caption)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                 }
@@ -516,19 +543,40 @@ public struct FamilyHomeContentView: View {
     /// untouched by this round) — this section never routes to Athlete
     /// Settings and carries no edit/configuration action.
     ///
-    /// Deliberately minimal for this first version: athlete name and
-    /// the standard `NavigationLink` chevron only — no activity
-    /// summary, readiness/status, Sleep value, color, ranking, or
-    /// badge. Those are explicitly evaluated later, not built here.
+    /// Deliberately minimal for this first version: athlete name,
+    /// standard `NavigationLink` chevron, and — new in the Design
+    /// Foundation V0.1 round — a small Athlete Color identity marker
+    /// (a filled circle, never a card fill). No activity summary,
+    /// readiness/status, Sleep value, ranking, or badge; still nothing
+    /// beyond identity. See `VoxtrAthleteColor.forIndex(_:)`'s own doc
+    /// comment for why this assignment is deterministic-but-presentation-only
+    /// (no canonical persisted athlete colour exists to read instead).
+    /// `Array.enumerated()` supplies the colour index only — `ForEach`'s
+    /// own identity is still `athlete.athleteId` (via `id:`), unrelated
+    /// to index/colour, so row identity is unaffected by roster
+    /// reordering.
     @ViewBuilder
     private var athletesSection: some View {
         if !viewModel.activeAthletes.isEmpty {
-            Section("Athletes") {
-                ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
-                    NavigationLink(athlete.givenName, value: FamilyHomeDestination.athlete(athlete.athleteId))
-                        .accessibilityIdentifier("familyHome.athletesSection.row.\(athlete.athleteId.rawValue.uuidString)")
+            Section {
+                ForEach(Array(viewModel.activeAthletes.enumerated()), id: \.element.athleteId) { index, athlete in
+                    NavigationLink(value: FamilyHomeDestination.athlete(athlete.athleteId)) {
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(VoxtrAthleteColor.forIndex(index).color)
+                                .frame(width: 10, height: 10)
+                                .accessibilityHidden(true)
+                            Text(athlete.givenName)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
+                        }
+                    }
+                    .accessibilityIdentifier("familyHome.athletesSection.row.\(athlete.athleteId.rawValue.uuidString)")
                 }
+            } header: {
+                VoxtrSectionHeading("Athletes")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.athletesSection")
         }
     }
@@ -541,17 +589,22 @@ public struct FamilyHomeContentView: View {
         // rule exactly. The prior reflection remains the sole source
         // of truth; this section never persists anything of its own.
         if !viewModel.focusThisWeek.isEmpty {
-            Section("Focus this week") {
+            Section {
                 ForEach(viewModel.focusThisWeek) { item in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.athleteName)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                         Text(item.focus)
+                            .font(VoxtrTypography.body)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                     }
                     .accessibilityIdentifier("familyHome.focusThisWeekRow.\(item.id)")
                 }
+            } header: {
+                VoxtrSectionHeading("Focus this week")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.focusThisWeek")
         }
     }
@@ -581,24 +634,30 @@ public struct FamilyHomeContentView: View {
     @ViewBuilder
     private var sleepSection: some View {
         if !viewModel.sleepSummaries.isEmpty {
-            Section("Sleep") {
+            Section {
                 ForEach(viewModel.sleepSummaries) { summary in
                     NavigationLink(value: FamilyHomeDestination.sleepHistory(summary.athleteId)) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(summary.athleteName)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                             if let sleepQuality = summary.sleepQuality {
                                 Text("\(sleepQuality)/5")
+                                    .font(VoxtrTypography.value)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
                             } else {
                                 Text("Not logged yet")
-                                    .foregroundStyle(.secondary)
+                                    .font(VoxtrTypography.value)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
                             }
                         }
                     }
                     .accessibilityIdentifier("familyHome.sleep.row.\(summary.athleteId.rawValue.uuidString)")
                 }
+            } header: {
+                VoxtrSectionHeading("Sleep")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("familyHome.sleepSection")
         }
     }

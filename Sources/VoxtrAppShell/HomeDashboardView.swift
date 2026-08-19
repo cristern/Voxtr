@@ -243,6 +243,12 @@ public struct HomeDashboardView: View {
             coachingSection
             reflectionSection
         }
+        // Design Foundation V0.1: same screen background token Family
+        // Home uses, applied identically — ONE consistent Parent App
+        // visual system, never a distinct Athlete Home theme. Structure/
+        // navigation/rows below are unchanged.
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("\(athleteDisplayName) Home")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -378,14 +384,26 @@ public struct HomeDashboardView: View {
         case .loading, .trackingDisabled, .failed:
             EmptyView()
         case .loaded(let sleepQuality):
-            Section("Sleep") {
+            Section {
                 if sleepQuality == nil {
                     Text("How did you sleep last night?")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.body)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                         .accessibilityIdentifier("homeDashboard.sleepPrompt")
                 }
 
+                // Design Foundation V0.1: the inline 1-5 control gets
+                // its own bordered `surfaceSubtle` card (via
+                // `voxtrCardSurface()`) — distinct from a plain Form
+                // row — so it reads as an intentional input surface,
+                // not a temporary/debug-looking row of plain buttons.
+                // Selected: filled `accent`, white numeral. Unselected:
+                // calm `surfaceSubtle`-on-`surfaceSubtle` (effectively
+                // just the divider-bordered card background showing
+                // through) with `textSecondary` numerals — never
+                // competing visually with the selected value. Save
+                // semantics (direct tap, canonical upsert) are
+                // completely unchanged — only the visual treatment.
                 HStack(spacing: 8) {
                     ForEach(1...5, id: \.self) { value in
                         let isSelected = value == sleepQuality
@@ -393,16 +411,19 @@ public struct HomeDashboardView: View {
                             viewModel.recordSleep(quality: value)
                         } label: {
                             Text("\(value)")
+                                .font(VoxtrTypography.value)
                                 .frame(maxWidth: .infinity, minHeight: 36)
-                                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
-                                .foregroundStyle(isSelected ? Color.white : Color.primary)
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                                .background(isSelected ? VoxtrColor.accent : Color.clear)
+                                .foregroundStyle(isSelected ? .white : VoxtrColor.textSecondary)
+                                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         }
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("homeDashboard.sleepValueButton.\(value)")
                         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
                     }
                 }
+                .padding(6)
+                .voxtrCardSurface(cornerRadius: 12)
                 .accessibilityIdentifier("homeDashboard.sleepValuePicker")
 
                 if let sleepErrorMessage = viewModel.sleepErrorMessage {
@@ -410,7 +431,10 @@ public struct HomeDashboardView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("homeDashboard.sleepErrorMessage")
                 }
+            } header: {
+                VoxtrSectionHeading("Sleep")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("homeDashboard.sleepSection")
         }
     }
@@ -455,14 +479,23 @@ public struct HomeDashboardView: View {
         case .loading:
             EmptyView()
         case .failed:
-            Section("Coaching") {
+            Section {
                 Text(CoachingPresentationStrings.unavailable)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("homeDashboard.coaching.unavailable")
+            } header: {
+                VoxtrSectionHeading("Coaching")
             }
+            .voxtrRowSurface()
         case .loaded(let presentation):
             if let topSection = presentation.sections.first {
-                Section("Coaching") {
+                // Visual goal: Coaching must not overpower Today — its
+                // own title stays at `metadata` weight (same
+                // sub-emphasis as before), and its content uses `body`
+                // rather than `cardTitle`, so it never reads as more
+                // prominent than Today's own activity rows above it.
+                Section {
                     NavigationLink {
                         WeeklyReviewView(
                             viewModel: WeeklyReviewViewModel(
@@ -478,15 +511,20 @@ public struct HomeDashboardView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(topSection.title)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                             ForEach(topSection.items, id: \.insight) { item in
                                 Text(item.text)
+                                    .font(VoxtrTypography.body)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
                             }
                         }
                     }
                     .accessibilityIdentifier("homeDashboard.coaching.summary")
+                } header: {
+                    VoxtrSectionHeading("Coaching")
                 }
+                .voxtrRowSurface()
             }
             // An empty presentation (no findings) renders nothing here
             // — no invented "everything looks good" message, matching
@@ -520,10 +558,12 @@ public struct HomeDashboardView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(familyHomeRow.plannedActivity.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = familyHomeRow.plannedActivity.location, !location.isEmpty {
                             Text(location)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                     Spacer()
@@ -535,12 +575,12 @@ public struct HomeDashboardView: View {
                         // equivalent row label.
                         let _ = homeDashboardDebugLog("render row=\(familyHomeRow.id) outcomeStatus=\(String(describing: familyHomeRow.outcomeStatus))")
                         Text(TrainingStrings.outcomeLabel(for: familyHomeRow.outcomeStatus))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                         if familyHomeRow.isFromRecurring {
                             Text("Recurring")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.caption)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                 }
@@ -551,16 +591,18 @@ public struct HomeDashboardView: View {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(suggestion.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = suggestion.location, !location.isEmpty {
                             Text(location)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                     Spacer()
                     Text("Recurring")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.caption)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
             }
             .accessibilityIdentifier("homeDashboard.todaysTraining.recurringRow.\(suggestion.id)")
@@ -568,9 +610,11 @@ public struct HomeDashboardView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(loggedActivity.title)
+                        .font(VoxtrTypography.cardTitle)
+                        .foregroundStyle(VoxtrColor.textPrimary)
                     Text("Unplanned · Logged")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
                 Spacer()
             }
@@ -604,10 +648,10 @@ public struct HomeDashboardView: View {
     ///    training today") is now shown explicitly rather than rendering
     ///    nothing.
     private var todaySection: some View {
-        Section("Today") {
+        Section {
             Text(Self.todayDateLabel(for: TrainingPlanningCoordinationService.today()))
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
                 .accessibilityIdentifier("homeDashboard.todayDateLabel")
 
             switch viewModel.todayActivityState {
@@ -615,12 +659,14 @@ public struct HomeDashboardView: View {
                 EmptyView()
             case .failed:
                 Text(CoachingPresentationStrings.unavailable)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("homeDashboard.todaysTraining.unavailable")
             case .loaded(let rows):
                 if rows.isEmpty {
                     Text("No training today")
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.body)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                         .accessibilityIdentifier("homeDashboard.today.noTrainingToday")
                 } else {
                     ForEach(rows) { row in
@@ -628,7 +674,10 @@ public struct HomeDashboardView: View {
                     }
                 }
             }
+        } header: {
+            VoxtrSectionHeading("Today")
         }
+        .voxtrRowSurface()
     }
 
     /// See `todaySection`'s own doc comment for the two existing
@@ -643,7 +692,7 @@ public struct HomeDashboardView: View {
     }
 
     private var reflectionSection: some View {
-        Section("Reflection") {
+        Section {
             NavigationLink("Add Reflection") {
                 ReflectionFormViewLoader(
                     athleteId: athleteId,
@@ -669,6 +718,9 @@ public struct HomeDashboardView: View {
                 )
             }
             .accessibilityIdentifier("homeDashboard.weeklyReviewLink")
+        } header: {
+            VoxtrSectionHeading("Reflection")
         }
+        .voxtrRowSurface()
     }
 }
