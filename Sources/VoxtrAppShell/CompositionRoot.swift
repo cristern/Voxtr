@@ -52,18 +52,22 @@ public final class CompositionRoot {
     /// collapsed to `AppCurrentSchema` — one live version, no
     /// historical "legacy type" scaffolding. VX-023 (Sleep V1) review
     /// follow-up: `AppCurrentSchema` is now FROZEN (15 entities, "1.0.0")
-    /// and this default targets `AppSchemaV2` ("2.0.0", 17 entities —
-    /// adds `DailyStatus`/`AthleteSettings`), the current genuine
-    /// version — see `AppSchemaVersioning.swift`'s own doc comment for
-    /// the full investigation and why a live-passthrough
-    /// `AppCurrentSchema` was not actually safe for a model-type
-    /// addition. This parameter must be updated at every future schema
-    /// version bump; see that same file's own "HOW TO ADD A NEW
+    /// and this default targeted `AppSchemaV2` ("2.0.0", 17 entities —
+    /// adds `DailyStatus`/`AthleteSettings`) — see
+    /// `AppSchemaVersioning.swift`'s own doc comment for the full
+    /// investigation and why a live-passthrough `AppCurrentSchema` was
+    /// not actually safe for a model-type addition. Design Foundation
+    /// V0.1 (Athlete Color canonical preference round): `AppSchemaV2` is
+    /// now itself FROZEN and this default targets `AppSchemaV3`
+    /// ("3.0.0", same 17 entities — adds
+    /// `AthleteSettings.preferredColor: AthleteColor?`), the current
+    /// genuine version. This parameter must be updated at every future
+    /// schema version bump; see that same file's own "HOW TO ADD A NEW
     /// VERSION" instructions — missing this exact step is the
     /// documented root cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV2.self,
+            versionedSchema: AppSchemaV3.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

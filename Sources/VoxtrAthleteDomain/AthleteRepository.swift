@@ -148,4 +148,26 @@ public final class AthleteRepository {
         try modelContext.save()
         return settings
     }
+
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): sets `preferredColor` on the athlete's ONE
+    /// `AthleteSettings` row — mirrors `setSleepTrackingEnabled` exactly
+    /// (mutate the existing row in place if one already exists,
+    /// preserving every other field untouched; otherwise create a
+    /// brand-new row with this type's own neutral defaults). Never
+    /// creates a second row for an athlete that already has one, and
+    /// never touches any other athlete's row.
+    @discardableResult
+    public func setPreferredColor(athleteId: AthleteId, color: AthleteColor) throws -> AthleteSettings {
+        if let existing = try fetchAthleteSettings(forAthlete: athleteId) {
+            existing.preferredColor = color
+            existing.updatedAt = .now
+            try modelContext.save()
+            return existing
+        }
+        let settings = AthleteSettings(athleteId: athleteId, preferredColor: color)
+        modelContext.insert(settings)
+        try modelContext.save()
+        return settings
+    }
 }

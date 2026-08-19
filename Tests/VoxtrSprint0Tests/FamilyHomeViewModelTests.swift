@@ -385,6 +385,65 @@ struct FamilyHomeViewModelTests {
         #expect(viewModel.activeAthletes.contains { $0.athleteId == quietAthlete.athleteId })
     }
 
+    // MARK: - Design Foundation V0.1: Athlete Color canonical preference
+
+    /// Requirements 3 and 4 (Family Home side): `resolvedAthleteColor(for:)`
+    /// prefers an athlete's explicit `AthleteSettings.preferredColor`
+    /// when one exists, and falls back to the stable
+    /// `AthleteColor.forAthleteId(_:)` mapping for an athlete who has
+    /// never set one — proven here through `loadAthleteColors()`, the
+    /// same method `refresh()` calls, over two athletes in the SAME
+    /// workspace so isolation between them is exercised too.
+    @Test("resolvedAthleteColor(for:) prefers an explicit AthleteSettings.preferredColor over the stable AthleteId fallback, per athlete, independently")
+    @MainActor
+    func resolvedAthleteColorPrefersExplicitPreferenceOverFallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+        let workspaceId = WorkspaceId()
+
+        let withPreference = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let withoutPreference = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        // Explicit preference deliberately chosen to differ from
+        // whatever this athlete's own stable fallback would be, so the
+        // assertion below cannot pass by coincidence.
+        let fallbackForWithPreference = AthleteColor.forAthleteId(withPreference.athleteId)
+        let explicitChoice: AthleteColor = AthleteColor.allCases.first { $0 != fallbackForWithPreference } ?? .blue
+        try athleteRepository.setPreferredColor(athleteId: withPreference.athleteId, color: explicitChoice)
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [],
+            workspaceId: workspaceId,
+            athleteRepository: athleteRepository,
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.refreshActiveAthletes()
+        viewModel.loadAthleteColors()
+
+        #expect(viewModel.resolvedAthleteColor(for: withPreference.athleteId) == explicitChoice)
+        #expect(viewModel.resolvedAthleteColor(for: withoutPreference.athleteId) == AthleteColor.forAthleteId(withoutPreference.athleteId))
+    }
+
     // MARK: - Parent Home UX / Content Contract: Focus this week
 
     @Test("Focus this week is derived from the PRIOR week's reflection, not the current week's")

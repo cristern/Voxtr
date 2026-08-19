@@ -194,6 +194,18 @@ public final class AthleteSettings {
     /// has no existing persisted rows for any default value to apply to
     /// retroactively.
     public var sleepTrackingEnabled: Bool
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): the athlete's explicit, user-chosen Athlete Color, or
+    /// `nil` when never explicitly set — the same "no row/no explicit
+    /// value = use the fallback, never a forced choice" shape
+    /// `sleepTrackingEnabled` already established above, applied to a
+    /// genuinely optional field this time (there is no single implied
+    /// default colour the way tracking defaults to "on"). Presentation
+    /// resolves a `nil` value via the existing stable, deterministic
+    /// `AthleteId`-derived mapping (`AthleteColor.forAthleteId(_:)` in
+    /// `VoxtrAppShell`) — never here; this type only ever stores what
+    /// was explicitly chosen.
+    public var preferredColor: AthleteColor?
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
@@ -209,6 +221,7 @@ public final class AthleteSettings {
         weeklyReviewDay: Int = Weekday.sunday.rawValue,
         weeklyReviewLocalTime: LocalTime? = nil,
         sleepTrackingEnabled: Bool = true,
+        preferredColor: AthleteColor? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
@@ -225,6 +238,7 @@ public final class AthleteSettings {
         self.weeklyReviewDay = weeklyReviewDay
         self.weeklyReviewLocalTime = weeklyReviewLocalTime
         self.sleepTrackingEnabled = sleepTrackingEnabled
+        self.preferredColor = preferredColor
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion

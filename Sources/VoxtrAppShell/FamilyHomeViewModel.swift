@@ -137,6 +137,17 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
     /// VX-023: Family Home's dedicated Sleep section — see
     /// `AthleteSleepSummary`'s own doc comment.
     public private(set) var sleepSummaries: [AthleteSleepSummary] = []
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): one RESOLVED colour per active athlete — explicit
+    /// `AthleteSettings.preferredColor` if the athlete has ever set one,
+    /// otherwise the stable `AthleteColor.forAthleteId(_:)` fallback.
+    /// Refreshed in `refresh()`, alongside everything else that depends
+    /// on the active-athlete roster. `resolvedAthleteColor(for:)` below
+    /// is the one function every Family Home row actually calls — it
+    /// still falls back safely even for an `AthleteId` this map hasn't
+    /// been populated for yet (e.g. between `refreshActiveAthletes()`
+    /// and this map's own load completing).
+    public private(set) var athleteColors: [AthleteId: AthleteColor] = [:]
     private let workspaceId: WorkspaceId
     private let athleteRepository: AthleteRepository
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
@@ -236,6 +247,37 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
         loadTomorrow()
         loadFocusThisWeek()
         loadSleepSummaries()
+        loadAthleteColors()
+    }
+
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): resolves and caches each active athlete's colour —
+    /// "explicit preference wins, otherwise the stable fallback," read
+    /// fresh from `AthleteSettings` on every refresh so a colour change
+    /// made in Athlete Settings shows up here the next time Family Home
+    /// appears (same "re-fetch on appear, no live push" freshness model
+    /// every other section on this screen already uses). One athlete's
+    /// fetch failure never blocks another's — falls back to the stable
+    /// mapping for that athlete only, same per-athlete isolation
+    /// `loadHome()`/`loadTomorrow()` already establish.
+    public func loadAthleteColors() {
+        var resolved: [AthleteId: AthleteColor] = [:]
+        for athlete in activeAthletes {
+            let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athlete.athleteId)
+            let preferred = (settings ?? nil)?.preferredColor
+            resolved[athlete.athleteId] = preferred ?? AthleteColor.forAthleteId(athlete.athleteId)
+        }
+        athleteColors = resolved
+    }
+
+    /// The one function every Family Home row calls for an athlete's
+    /// colour — never `AthleteColor.forAthleteId(_:)` directly, so a
+    /// row can never accidentally skip an athlete's explicit
+    /// preference. Falls back to the same stable mapping directly if
+    /// `athleteColors` hasn't been populated for this id yet, so a row
+    /// is never left with no colour at all.
+    public func resolvedAthleteColor(for athleteId: AthleteId) -> AthleteColor {
+        athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
     }
 
     /// VX-023: one `AthleteSleepSummary` per active athlete with Sleep

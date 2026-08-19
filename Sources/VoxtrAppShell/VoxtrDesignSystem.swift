@@ -23,8 +23,8 @@ import VoxtrCoreContracts
 ///
 /// One consistent palette across Parent App — Family Home and Athlete
 /// Home both use exactly these tokens; nothing here is athlete-themed
-/// (see `VoxtrAthleteColor` below for the separate, identity-only
-/// palette, restricted to shared/multi-athlete surfaces).
+/// (see `AthleteColor` below for the separate, identity-only palette,
+/// restricted to shared/multi-athlete surfaces).
 public enum VoxtrColor {
     /// Screen background. Light `#F4F7F6`, dark `#10191D` (deep
     /// charcoal-navy, not a literal inversion of the light value).
@@ -39,9 +39,25 @@ public enum VoxtrColor {
     /// Primary text. Light `#18313D`, dark `#EDF3F1` (off-white, not
     /// pure white).
     public static let textPrimary = dynamic(light: 0x18313D, dark: 0xEDF3F1)
-    /// Secondary/metadata text. Light `#66757C`, dark `#8FA39D` (muted
+    /// Secondary/metadata text. Light `#57666D`, dark `#8FA39D` (muted
     /// cool grey-green, matching the light value's own cool cast).
-    public static let textSecondary = dynamic(light: 0x66757C, dark: 0x8FA39D)
+    ///
+    /// TestFlight visual feedback round: the light value was `#66757C`
+    /// — measured ~4.4:1 contrast against `background` (`#F4F7F6`),
+    /// under the 4.5:1 AA threshold for normal-size text and genuinely
+    /// inadequate for the smaller caption/metadata sizes this token is
+    /// mostly used at, which need MORE contrast than body text, not
+    /// less. Matches the reported "too faint in normal daylight"
+    /// symptom. Darkened to `#57666D` (~5.5:1 against `background`,
+    /// ~5.8:1 against `surface`) — the SAME hue/cast, just deepened,
+    /// still clearly secondary and far short of `textPrimary`'s
+    /// `#18313D` (~13:1). The dark value is unchanged: `#8FA39D`
+    /// already measures ~6:1 against `surface`, comfortably passing,
+    /// and TestFlight feedback was specific to daylight/light-mode
+    /// legibility. Changed here, once, at the token layer — not as a
+    /// per-row local override, so every existing caller of this token
+    /// picks up the correction automatically.
+    public static let textSecondary = dynamic(light: 0x57666D, dark: 0x8FA39D)
     /// Deep navy — a strong, non-accent emphasis tone (distinct from
     /// `accent`). Light `#153243`, dark `#3E6478` (lightened so it
     /// still reads against a dark background — the light value is
@@ -82,24 +98,30 @@ private extension UIColor {
     }
 }
 
-// MARK: - VoxtrAthleteColor
+// MARK: - AthleteColor (presentation)
 
 /// Athlete Color — IDENTITY ONLY, never performance/readiness/warning/
 /// completion/ranking. Restricted to shared/multi-athlete surfaces
 /// (Family Home); never used as Athlete Home's own theme — see
 /// `HomeDashboardView`, which does not reference this type at all.
 ///
-/// The eight working values below are fixed and identical in light and
-/// dark mode — an identity accent, unlike the semantic `VoxtrColor`
+/// `AthleteColor` itself (the eight cases) is declared in
+/// `VoxtrCoreContracts/SharedEnums.swift` — it is the SAME type
+/// `AthleteSettings.preferredColor` persists (Design Foundation V0.1,
+/// Athlete Color canonical preference round), extended here with the
+/// `Color`-rendering and stable-fallback pieces that can only live
+/// where SwiftUI/UIKit are importable. One canonical type end to end:
+/// domain declares the cases, this extension renders them — never two
+/// separate colour enums.
+///
+/// The eight working hex values below are fixed and identical in light
+/// and dark mode — an identity accent, unlike the semantic `VoxtrColor`
 /// tokens, is not meant to shift with appearance the way a background
 /// or text tone does; each is already legible against both `surface`
-/// tones as a thin outline/marker — the only sanctioned treatment (see
-/// `FamilyHomeContentView.athletesSection`'s own small identity-circle
-/// usage), never as a fill behind text.
-public enum VoxtrAthleteColor: CaseIterable, Equatable {
-    case blue, indigo, purple, rose, orange, amber, green, cyan
-
-    public var color: Color {
+/// tones as a thin outline/marker, the only sanctioned treatment, never
+/// as a fill behind text.
+public extension AthleteColor {
+    var color: Color {
         switch self {
         case .blue: Color(uiColor: UIColor(hex: 0x4F7CAC))
         case .indigo: Color(uiColor: UIColor(hex: 0x6667AB))
@@ -112,23 +134,34 @@ public enum VoxtrAthleteColor: CaseIterable, Equatable {
         }
     }
 
-    /// Athlete Color data / persistence: no canonical, persisted
-    /// athlete-colour preference exists anywhere in `AthleteProfile`/
-    /// `AthleteSettings`/the athlete domain (confirmed by inspection
-    /// before writing this round's code) — this task does not invent
-    /// one. This is the smallest deterministic, PRESENTATION-ONLY
-    /// assignment, temporary until a canonical user-configurable
-    /// Athlete Color is implemented.
-    ///
-    /// Design Foundation V0.1 correction round: the FIRST working
-    /// version of this mapping used the athlete's position in
-    /// `activeAthletes` — rejected on review, correctly, because
-    /// Athlete Color is an identity aid: an athlete added/archived/
-    /// reordered elsewhere in the roster must never make a DIFFERENT
-    /// athlete's own colour appear to change. This version derives
-    /// entirely from the athlete's own stable `AthleteId` instead —
-    /// nothing about any other athlete's presence, order, or count
-    /// affects it.
+    /// Athlete Settings' inline Color picker's own display label — the
+    /// one UI-facing string form of this domain enum's raw case name.
+    /// Purely presentational (never persisted, never compared) — the
+    /// persisted value is always the enum case itself.
+    var displayName: String {
+        switch self {
+        case .blue: "Blue"
+        case .indigo: "Indigo"
+        case .purple: "Purple"
+        case .rose: "Rose"
+        case .orange: "Orange"
+        case .amber: "Amber"
+        case .green: "Green"
+        case .cyan: "Cyan"
+        }
+    }
+
+    /// The stable FALLBACK mapping — used only when an athlete has no
+    /// explicit `AthleteSettings.preferredColor` (never set, or the
+    /// settings row itself doesn't exist yet). Design Foundation V0.1
+    /// correction round: the FIRST working version of this mapping used
+    /// the athlete's position in `activeAthletes` — rejected on review,
+    /// correctly, because Athlete Color is an identity aid: an athlete
+    /// added/archived/reordered elsewhere in the roster must never make
+    /// a DIFFERENT athlete's own colour appear to change. This version
+    /// derives entirely from the athlete's own stable `AthleteId`
+    /// instead — nothing about any other athlete's presence, order, or
+    /// count affects it.
     ///
     /// `AthleteId` is `Identifier<AthleteTag>`, whose only stored value
     /// is a `UUID` (see `Identifier`'s own declaration in
@@ -144,7 +177,15 @@ public enum VoxtrAthleteColor: CaseIterable, Equatable {
     /// `AthleteId`'s own persisted identity: the same `AthleteId`
     /// always sums to the same total, on every launch, regardless of
     /// where it sits in any list.
-    public static func forAthleteId(_ athleteId: AthleteId) -> VoxtrAthleteColor {
+    ///
+    /// Canonical preference round: this fallback is now used ONLY when
+    /// `AthleteSettings.preferredColor` is `nil` — see
+    /// `FamilyHomeViewModel.resolvedAthleteColor(for:)` and
+    /// `AthleteFamilyManagementViewModel.resolvedColor(for:)`, the two
+    /// call sites that apply "explicit preference wins, otherwise this
+    /// fallback." Never bypassed by reading this directly wherever an
+    /// athlete's resolved colour is actually needed for display.
+    static func forAthleteId(_ athleteId: AthleteId) -> AthleteColor {
         let uuid = athleteId.rawValue.uuid
         let bytes: [UInt8] = [
             uuid.0, uuid.1, uuid.2, uuid.3, uuid.4, uuid.5, uuid.6, uuid.7,
@@ -227,6 +268,35 @@ public extension View {
         .overlay(
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(VoxtrColor.divider, lineWidth: 0.5)
+        )
+    }
+
+    /// TestFlight visual feedback round (Athlete Color inset outline):
+    /// the approved replacement for the earlier small identity-dot-only
+    /// treatment on athlete-specific ACTIVITY rows (Now/Next, Today's
+    /// Schedule, Tomorrow) — a subtle inner colour outline that follows
+    /// the row's own rounded card shape, inset slightly from the row's
+    /// outer edge, ~1.5pt stroke. Reuses this file's own 14pt card
+    /// radius token (the same value `voxtrCardSurface` already uses),
+    /// inset by 2pt so the drawn stroke sits inside the row's bounds
+    /// rather than overlapping any neighboring row/section chrome.
+    /// Colour only — no fill, so this never competes with
+    /// `voxtrRowSurface()`'s own `VoxtrColor.surface` row background,
+    /// and carries no status/performance/readiness meaning (see
+    /// `AthleteColor`'s own doc comment). Non-activity, non-athlete-
+    /// specific rows (a "View upcoming schedule" link, an error
+    /// message) never receive this modifier at all.
+    ///
+    /// Does not affect the tap target: `overlay` is purely decorative
+    /// and never participates in hit-testing, so the row's own
+    /// `NavigationLink`/tap-target shape (typically the same rounded
+    /// rectangle, via `.contentShape` where a caller already sets one)
+    /// is completely unaffected by this modifier's presence.
+    func voxtrAthleteIdentityOutline(_ color: Color, cornerRadius: CGFloat = 14) -> some View {
+        overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .inset(by: 2)
+                .strokeBorder(color, lineWidth: 1.5)
         )
     }
 }

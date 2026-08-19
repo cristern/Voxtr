@@ -377,45 +377,60 @@ public struct FamilyHomeContentView: View {
         case .planned(let familyHomeRowValue):
             familyHomeRow(familyHomeRowValue)
         case .recurringOccurrence(let athleteId, let athleteName, let suggestion):
-            VStack(alignment: .leading, spacing: 4) {
-                NavigationLink(value: FamilyHomeDestination.athlete(athleteId)) {
-                    HStack(spacing: 6) {
-                        athleteColorMarker(athleteId)
-                        Text(athleteName)
-                            .font(VoxtrTypography.metadata)
-                            .foregroundStyle(VoxtrColor.textSecondary)
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("familyHome.athleteLink.\(athleteId.rawValue.uuidString)")
-
-                NavigationLink(value: FamilyHomeDestination.recurringOccurrence(id: suggestion.id)) {
+            // TestFlight visual feedback round (One Chevron Per Row):
+            // this row previously wrapped the athlete-name label AND the
+            // suggestion content in two SEPARATE `NavigationLink`s,
+            // which is the exact root cause of the reported duplicate-
+            // chevron bug — Form/List renders its own disclosure
+            // indicator per `NavigationLink`, regardless of nesting
+            // depth inside one row's content. Fixed by merging into ONE
+            // `NavigationLink` (the SAME `.recurringOccurrence`
+            // destination as before — no destination change) whose
+            // label is the row's whole content; the athlete name stays
+            // as plain, non-navigating text (still explicit, per the
+            // approved visual direction), and the whole row remains the
+            // interaction target. The athlete's per-row navigation
+            // shortcut this removes is not a lost capability — Family
+            // Home's own Athletes section already exists as the
+            // canonical way to open an athlete's Home from this screen.
+            NavigationLink(value: FamilyHomeDestination.recurringOccurrence(id: suggestion.id)) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(athleteName)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                     HStack {
                         VStack(alignment: .leading) {
                             Text(suggestion.title)
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
+                            // Recurring metadata demotion round: "Recurring"
+                            // no longer renders as its own trailing
+                            // label competing with the chevron — folded
+                            // into this same metadata line by
+                            // `recurringRowSubtitle(for:)` below, same
+                            // size/colour as the rest of that line.
                             Text(Self.recurringRowSubtitle(for: suggestion))
                                 .font(VoxtrTypography.metadata)
                                 .foregroundStyle(VoxtrColor.textSecondary)
                         }
                         Spacer()
-                        Text("Recurring")
-                            .font(VoxtrTypography.caption)
-                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
-                .accessibilityIdentifier("familyHome.recurringRow.\(suggestion.id)")
+                .padding(.vertical, 4)
             }
+            .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
+            .accessibilityIdentifier("familyHome.recurringRow.\(suggestion.id)")
         case .unplannedLogged(let athleteId, let athleteName, let loggedActivity):
+            // No destination existed for this case before (see this
+            // row's own established doc comment above `todayActivityRow`)
+            // and none is added here — still non-navigable, so no
+            // chevron, by design; only the identity/visual treatment
+            // changes (dot marker -> inset outline, matching every
+            // other activity row on this screen).
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    athleteColorMarker(athleteId)
-                    Text(athleteName)
-                        .font(VoxtrTypography.metadata)
-                        .foregroundStyle(VoxtrColor.textSecondary)
-                }
-                .accessibilityIdentifier("familyHome.athleteLabel.\(athleteId.rawValue.uuidString)")
+                Text(athleteName)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
                         Text(loggedActivity.title)
@@ -428,10 +443,18 @@ public struct FamilyHomeContentView: View {
                     Spacer()
                 }
             }
+            .padding(.vertical, 4)
+            .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
             .accessibilityIdentifier("familyHome.unplannedLoggedRow.\(loggedActivity.id.uuidString)")
         }
     }
 
+    /// Recurring metadata demotion round: "Recurring" is now the last
+    /// part of this SAME joined metadata line (time · location ·
+    /// Recurring) rather than a separate trailing label — same
+    /// `VoxtrTypography.metadata`/`textSecondary` styling as the rest
+    /// of the line, no badge, no separate chevron. Recurrence semantics
+    /// themselves are untouched; only where this text renders changed.
     private static func recurringRowSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
         var parts: [String] = []
         if let startTime = suggestion.startLocalTime {
@@ -440,23 +463,22 @@ public struct FamilyHomeContentView: View {
         if let location = suggestion.location, !location.isEmpty {
             parts.append(location)
         }
+        parts.append("Recurring")
         return parts.joined(separator: " · ")
     }
 
+    /// TestFlight visual feedback round (One Chevron Per Row): merges
+    /// this row's former athlete-name `NavigationLink` and activity
+    /// `NavigationLink` into the ONE `NavigationLink` below — see
+    /// `todayActivityRow`'s `.recurringOccurrence` case for the full
+    /// root-cause explanation; the same fix applies here. Destination
+    /// (`FamilyHomeDestination.activity(rowId:)`) is unchanged.
     private func familyHomeRow(_ row: FamilyHomeRow) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            NavigationLink(value: FamilyHomeDestination.athlete(row.athleteId)) {
-                HStack(spacing: 6) {
-                    athleteColorMarker(row.athleteId)
-                    Text(row.athleteName)
-                        .font(VoxtrTypography.metadata)
-                        .foregroundStyle(VoxtrColor.textSecondary)
-                }
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("familyHome.athleteLink.\(row.athleteId.rawValue.uuidString)")
-
-            NavigationLink(value: FamilyHomeDestination.activity(rowId: row.id)) {
+        NavigationLink(value: FamilyHomeDestination.activity(rowId: row.id)) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.athleteName)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
                         Text(row.plannedActivity.title)
@@ -467,30 +489,29 @@ public struct FamilyHomeContentView: View {
                             .foregroundStyle(VoxtrColor.textSecondary)
                     }
                     Spacer()
-                    VStack(alignment: .trailing) {
-                        // Activity outcome consistency closeout (item B):
-                        // the real outcome, not a blanket "Completed" for
-                        // any resolved status — a Cancelled or Missed
-                        // activity must never show as Completed here.
-                        // Hidden entirely when unresolved (`outcomeStatus == nil`),
-                        // matching this row's prior behavior for that
-                        // case exactly — `rowSubtitle` below already
-                        // conveys "Ready to log" there.
-                        if let outcomeStatus = row.outcomeStatus {
-                            Text(TrainingStrings.outcomeLabel(for: outcomeStatus))
-                                .font(VoxtrTypography.metadata)
-                                .foregroundStyle(VoxtrColor.textSecondary)
-                        }
-                        if row.isFromRecurring {
-                            Text("Recurring")
-                                .font(VoxtrTypography.caption)
-                                .foregroundStyle(VoxtrColor.textSecondary)
-                        }
+                    // Activity outcome consistency closeout (item B):
+                    // the real outcome, not a blanket "Completed" for
+                    // any resolved status — a Cancelled or Missed
+                    // activity must never show as Completed here.
+                    // Hidden entirely when unresolved (`outcomeStatus == nil`),
+                    // matching this row's prior behavior for that
+                    // case exactly — `rowSubtitle` below already
+                    // conveys "Ready to log" there. Recurring metadata
+                    // demotion round: "Recurring" no longer renders as
+                    // its own trailing label here — folded into
+                    // `rowSubtitle(for:)`'s own metadata line instead,
+                    // same as the recurring-occurrence row above.
+                    if let outcomeStatus = row.outcomeStatus {
+                        Text(TrainingStrings.outcomeLabel(for: outcomeStatus))
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
             }
-            .accessibilityIdentifier("familyHome.activityRow.\(row.id)")
+            .padding(.vertical, 4)
         }
+        .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: row.athleteId).color)
+        .accessibilityIdentifier("familyHome.activityRow.\(row.id)")
     }
 
     /// Sprint 1 completion package, Item 5: location is now included
@@ -521,6 +542,15 @@ public struct FamilyHomeContentView: View {
         }
         if let location = row.plannedActivity.location, !location.isEmpty {
             parts.append(location)
+        }
+        // Recurring metadata demotion round: same treatment as
+        // `recurringRowSubtitle(for:)` above — "Recurring" joins this
+        // metadata line instead of rendering as a separate trailing
+        // label. Recurrence semantics (`row.isFromRecurring`'s own
+        // definition) are unchanged; only where this text renders
+        // changed.
+        if row.isFromRecurring {
+            parts.append("Recurring")
         }
         return parts.joined(separator: " · ")
     }
@@ -558,14 +588,32 @@ public struct FamilyHomeContentView: View {
     /// activity summary, readiness/status, Sleep value, ranking, or
     /// badge; still nothing beyond identity.
     ///
-    /// Design Foundation V0.1 correction round: the marker colour now
-    /// comes from `VoxtrAthleteColor.forAthleteId(_:)` — derived
-    /// entirely from the athlete's own stable `AthleteId`, never this
-    /// list's position — see that method's own doc comment for why
+    /// Design Foundation V0.1 correction round: the marker colour comes
+    /// from `viewModel.resolvedAthleteColor(for:)` — derived from the
+    /// athlete's own stable `AthleteId`, never this list's position
     /// (the previous, rejected version used list index, which could
     /// silently change an athlete's own colour whenever the roster
     /// changed elsewhere). `ForEach`'s identity (`id: \.athleteId`) was
     /// always independent of colour and remains unchanged.
+    ///
+    /// Athlete Color canonical preference round: `resolvedAthleteColor(for:)`
+    /// now honours an athlete's explicit `AthleteSettings.preferredColor`
+    /// when one has been set (Profile → Manage Athletes → athlete →
+    /// Athlete settings → Color), falling back to the same stable
+    /// `AthleteId`-derived mapping as before only when no explicit
+    /// choice exists yet — never a behaviour change for an athlete who
+    /// has never touched that setting.
+    ///
+    /// TestFlight visual feedback round: this dot marker remains the
+    /// treatment for NON-activity, athlete-specific rows only (Athletes,
+    /// Sleep, Focus this week) — genuinely athlete-specific ACTIVITY
+    /// rows (Now/Next, Today's Schedule, Tomorrow) now use the fuller
+    /// `voxtrAthleteIdentityOutline(_:)` card treatment instead (see
+    /// `familyHomeRow(_:)`/`todayActivityRow(_:)`), per the approved
+    /// direction that a full activity card benefits from the row-level
+    /// outline while a compact list row like Sleep/Athletes/Focus this
+    /// week still reads best with the smaller marker — one primary
+    /// identity treatment per row, never both at once.
     @ViewBuilder
     private var athletesSection: some View {
         if !viewModel.activeAthletes.isEmpty {
@@ -591,19 +639,20 @@ public struct FamilyHomeContentView: View {
 
     /// Design Foundation V0.1 correction round: the ONE small colour
     /// marker every athlete-specific row on this shared, multi-athlete
-    /// screen now prepends before the athlete's own name — Now/Next and
-    /// Today's Schedule/Tomorrow's activity rows, Sleep rows, Focus
-    /// this week rows, and the Athletes section itself. Applied only to
+    /// screen now prepends before the athlete's own name — Sleep rows,
+    /// Focus this week rows, and the Athletes section itself (see the
+    /// doc comment above this function for why activity rows now use
+    /// the fuller inset-outline treatment instead). Applied only to
     /// rows that are genuinely athlete-specific (never the "View
     /// upcoming schedule" link, an error message, or a section
-    /// heading). Identity only, per `VoxtrAthleteColor`'s own doc
-    /// comment: never a fill behind text, never implying performance/
-    /// readiness/warning/completion/ranking. Every call site keeps its
-    /// own existing athlete-name `Text` exactly as it already was —
-    /// this only adds the marker glyph beside it.
+    /// heading). Identity only, per `AthleteColor`'s own doc comment:
+    /// never a fill behind text, never implying performance/readiness/
+    /// warning/completion/ranking. Every call site keeps its own
+    /// existing athlete-name `Text` exactly as it already was — this
+    /// only adds the marker glyph beside it.
     private func athleteColorMarker(_ athleteId: AthleteId) -> some View {
         Circle()
-            .fill(VoxtrAthleteColor.forAthleteId(athleteId).color)
+            .fill(viewModel.resolvedAthleteColor(for: athleteId).color)
             .frame(width: 8, height: 8)
             .accessibilityHidden(true)
     }

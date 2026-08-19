@@ -147,6 +147,39 @@ public final class AthleteFamilyManagementViewModel {
         }
     }
 
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): the RESOLVED colour for one athlete — "explicit
+    /// preference wins, otherwise the stable `AthleteId`-derived
+    /// fallback," the same rule `FamilyHomeViewModel.resolvedAthleteColor(for:)`
+    /// applies on the shared-view side. Reads straight from
+    /// `AthleteSettings` on every call (no cache) — this hub is a
+    /// single-athlete settings screen, not a scrolling list, so a fresh
+    /// read per call is cheap and always current.
+    public func resolvedColor(for athlete: AthleteProfile) -> AthleteColor {
+        let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athlete.athleteId)
+        let preferred = (settings ?? nil)?.preferredColor
+        return preferred ?? AthleteColor.forAthleteId(athlete.athleteId)
+    }
+
+    /// Narrow Athlete Color mutation — mirrors `setDevelopmentStage(for:to:)`'s
+    /// shape (single field, no shared form state touched), but goes
+    /// straight through `AthleteRepository.setPreferredColor(athleteId:color:)`
+    /// rather than `AthleteFamilyManagementService`: Athlete Color lives
+    /// on `AthleteSettings`, not `AthleteProfile`, so there is no
+    /// `AthleteProfile.revision`/`applyMutation` optimistic-concurrency
+    /// check to make here — same reasoning `AthleteRepository.setSleepTrackingEnabled`
+    /// already establishes for the other `AthleteSettings` field this
+    /// codebase mutates narrowly. Does not call `loadAthletes()` — this
+    /// setting isn't part of the `athletes` list's own data.
+    public func setPreferredColor(for athlete: AthleteProfile, to color: AthleteColor) {
+        errorMessage = nil
+        do {
+            try athleteRepository.setPreferredColor(athleteId: athlete.athleteId, color: color)
+        } catch {
+            errorMessage = "Could not update Color."
+        }
+    }
+
     private static func nilIfBlank(_ value: String) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed

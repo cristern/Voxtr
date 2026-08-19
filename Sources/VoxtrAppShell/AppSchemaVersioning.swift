@@ -105,15 +105,59 @@ public enum AppCurrentSchema: VersionedSchema {
     }
 }
 
-/// VX-023 (Sleep V1) review follow-up: the current, live version — see
-/// `AppCurrentSchema`'s own doc comment for the full reasoning. `models`
-/// stays a live passthrough to `AppSchema.modelTypes` (this is now the
-/// LATEST version, so nothing downstream needs it frozen yet); it will
-/// need freezing itself, the same way `AppCurrentSchema` just was,
-/// the next time a genuine `AppSchemaV3` is added.
+/// VX-023 (Sleep V1) review follow-up: was the live-passthrough current
+/// version; now FROZEN following this file's own "HOW TO ADD A NEW
+/// VERSION" recipe below, since `AppSchemaV3` (Design Foundation V0.1
+/// Athlete Color round) is now the latest. `models` is the exact
+/// 17-entity shape every build shipped under "2.0.0" before that round
+/// — copied verbatim from `AppSchema.modelTypes` at the moment of
+/// freezing, per the same reasoning `AppCurrentSchema`'s own doc comment
+/// gives for why a fixed version identity must keep meaning a fixed
+/// shape.
 public enum AppSchemaV2: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(2, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+        ]
+    }
+}
+
+/// Design Foundation V0.1 (Athlete Color canonical preference round):
+/// the current, live version. `AthleteSettings` gains one new OPTIONAL
+/// property (`preferredColor: AthleteColor?`) — no model *type* is
+/// added or removed, so `AppSchema.modelTypes` itself is unchanged (see
+/// that file's own "HOW TO ADD" step 3); this is purely the field-level
+/// case step 4 describes, and `.lightweight` is exactly what Apple's own
+/// SwiftData migration guidance documents as covering "new optional
+/// properties with inferable defaults" — `nil` is the only value an
+/// existing row's new column can mean, with nothing to transform.
+/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
+/// now the LATEST version, so nothing downstream needs it frozen yet);
+/// it will need freezing itself the next time a genuine `AppSchemaV4` is
+/// added.
+public enum AppSchemaV3: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(3, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -126,19 +170,22 @@ public enum AppSchemaV2: VersionedSchema {
 /// from this point forward):
 ///
 /// 1. Freeze the CURRENT latest version's `models` (right now, that's
-///    `AppSchemaV2`) to a hardcoded literal array — copy its current
+///    `AppSchemaV3`) to a hardcoded literal array — copy its current
 ///    passthrough result before changing anything, the same way
-///    `AppCurrentSchema` was frozen when `AppSchemaV2` was introduced.
-/// 2. Add a new `AppSchemaV3: VersionedSchema` enum in this file, with
-///    `versionIdentifier: Schema.Version(3, 0, 0)` and `models`
-///    passthrough to `AppSchema.modelTypes` (V3 becomes the new latest,
+///    `AppSchemaV2` was frozen when `AppSchemaV3` was introduced (see
+///    that enum's own doc comment for a worked example).
+/// 2. Add a new `AppSchemaV4: VersionedSchema` enum in this file, with
+///    `versionIdentifier: Schema.Version(4, 0, 0)` and `models`
+///    passthrough to `AppSchema.modelTypes` (V4 becomes the new latest,
 ///    and `CompositionRoot.build`'s default `persistence:` parameter
 ///    must be updated to target it — see that type's own doc comment
 ///    for why this exact step was missed for years across V1-V6 before
 ///    this file's own simplification, and do not repeat that mistake).
 /// 3. Update `AppSchema.modelTypes` — only if a model *type* is
 ///    actually being added/removed. A field-level change to an
-///    already-listed type does not touch this array at all.
+///    already-listed type does not touch this array at all (the
+///    `AthleteSettings.preferredColor` addition that produced
+///    `AppSchemaV3` is exactly this case — see its own doc comment).
 /// 4. If the change is field-level on an already-listed type (not a
 ///    whole type addition/removal): before repeating the
 ///    "separately-declared legacy type" pattern this file's own
@@ -149,10 +196,9 @@ public enum AppSchemaV2: VersionedSchema {
 ///    that pattern may still be the only SwiftData-supported way to do
 ///    it — but verify it against an actual compiler and device before
 ///    trusting it again, not just reasoning from source code.
-/// 5. Add `AppSchemaV3.self` to `schemas` below, alongside
-///    `AppCurrentSchema.self`/`AppSchemaV2.self` (old versions are
-///    never removed, only appended to).
-/// 6. Add a real `MigrationStage` to `stages` describing the V2 → V3
+/// 5. Add `AppSchemaV4.self` to `schemas` below, alongside every prior
+///    version (old versions are never removed, only appended to).
+/// 6. Add a real `MigrationStage` to `stages` describing the V3 → V4
 ///    transition — `.lightweight` if the change is purely additive
 ///    (new type(s), new optional propert(y/ies)), `.custom` if it needs
 ///    real data transformation.
@@ -170,7 +216,7 @@ public enum AppSchemaV2: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self]
+        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -182,9 +228,23 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// inferable defaults). A custom stage with explicit
     /// `willMigrate`/`didMigrate` closures is unnecessary here since
     /// there is no data to transform — the new tables start empty.
+    ///
+    /// V2 ("2.0.0", 17 entities) → V3 ("3.0.0", same 17 entities — adds
+    /// `AthleteSettings.preferredColor: AthleteColor?`). `.lightweight`
+    /// again: no entity is added/removed and no existing property is
+    /// renamed/removed/retyped — a genuinely new, genuinely optional
+    /// column with no other value it could infer for an existing row
+    /// than `nil`, which is exactly what a `nil`-valued
+    /// `preferredColor` already means at the application layer ("no
+    /// explicit choice yet, use the stable AthleteId-derived fallback"
+    /// — see `AthleteSettings.preferredColor`'s own doc comment). Every
+    /// existing athlete's existing `AthleteSettings` row (if any) — and
+    /// every athlete with no row at all — is completely unaffected by
+    /// this migration; there is nothing to transform.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
+            .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self),
         ]
     }
 }

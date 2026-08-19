@@ -499,4 +499,174 @@ struct AthleteFamilyManagementServiceTests {
         #expect(AthleteBirthDateFormatter.label(for: LocalDate(year: 2020, month: 1, day: 1)) == "1 January 2020")
         #expect(AthleteBirthDateFormatter.label(for: LocalDate(year: 2019, month: 12, day: 31)) == "31 December 2019")
     }
+
+    // MARK: - Athlete Color canonical preference (Design Foundation V0.1)
+
+    /// Requirement 1: saving an explicit athlete colour persists for
+    /// the correct athlete. Goes straight through
+    /// `AthleteRepository.setPreferredColor(athleteId:color:)` — the
+    /// same narrow mutation `AthleteFamilyManagementViewModel.setPreferredColor(for:to:)`
+    /// calls — and reads back via `fetchAthleteSettings`, mirroring
+    /// this file's own established repository-level test shape for
+    /// `setDevelopmentStage` above.
+    @Test("setPreferredColor persists the explicit colour for the targeted athlete")
+    @MainActor
+    func setPreferredColorPersistsForTargetedAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        try athleteRepository.setPreferredColor(athleteId: added.athlete.athleteId, color: .rose)
+
+        let settings = try athleteRepository.fetchAthleteSettings(forAthlete: added.athlete.athleteId)
+        #expect(settings?.preferredColor == .rose)
+    }
+
+    /// Requirement 2: another athlete is unaffected.
+    @Test("setPreferredColor changes only the targeted athlete's AthleteSettings, leaving another athlete's colour unaffected")
+    @MainActor
+    func setPreferredColorDoesNotAffectAnotherAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let first = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let second = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Emma", birthDate: LocalDate(year: 2014, month: 6, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        try athleteRepository.setPreferredColor(athleteId: first.athlete.athleteId, color: .amber)
+
+        let firstSettings = try athleteRepository.fetchAthleteSettings(forAthlete: first.athlete.athleteId)
+        let secondSettings = try athleteRepository.fetchAthleteSettings(forAthlete: second.athlete.athleteId)
+        #expect(firstSettings?.preferredColor == .amber)
+        // Second athlete has never had any setting touched — no
+        // AthleteSettings row exists for them at all yet, same "no row
+        // = no explicit preference" shape `sleepTrackingEnabled`
+        // already establishes.
+        #expect(secondSettings == nil)
+    }
+
+    /// Requirement 8: a narrow colour-setting mutation changes only
+    /// that setting — proves `setPreferredColor` never touches
+    /// `sleepTrackingEnabled` on the SAME `AthleteSettings` row (set
+    /// first, via the already-established `setSleepTrackingEnabled`
+    /// narrow mutation), and that mutating colour again reuses that
+    /// SAME row rather than creating a second one for the athlete (at
+    /// most one `AthleteSettings` row per athlete, per this file's own
+    /// established invariant for Sleep).
+    @Test("setPreferredColor mutates the existing AthleteSettings row in place and never touches sleepTrackingEnabled")
+    @MainActor
+    func setPreferredColorMutatesExistingRowAndLeavesSleepTrackingUntouched() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        try athleteRepository.setSleepTrackingEnabled(athleteId: added.athlete.athleteId, enabled: false)
+        try athleteRepository.setPreferredColor(athleteId: added.athlete.athleteId, color: .green)
+
+        let settings = try athleteRepository.fetchAthleteSettings(forAthlete: added.athlete.athleteId)
+        #expect(settings?.preferredColor == .green)
+        // Sleep tracking, set to Off before colour was ever touched,
+        // survives the colour mutation completely unchanged.
+        #expect(settings?.sleepTrackingEnabled == false)
+        // Exactly one AthleteSettings row exists for this athlete —
+        // the colour mutation reused the same row Sleep already
+        // created, never inserted a second one.
+        #expect(try container.mainContext.fetch(FetchDescriptor<AthleteSettings>()).count == 1)
+
+        // And the reverse: mutating Sleep tracking again afterward
+        // never resets the colour just set.
+        try athleteRepository.setSleepTrackingEnabled(athleteId: added.athlete.athleteId, enabled: true)
+        let refetched = try athleteRepository.fetchAthleteSettings(forAthlete: added.athlete.athleteId)
+        #expect(refetched?.preferredColor == .green)
+        #expect(refetched?.sleepTrackingEnabled == true)
+    }
+
+    /// Requirements 3 and 4: `AthleteFamilyManagementViewModel.resolvedColor(for:)`
+    /// — explicit preference wins when set, and a `nil`/unset
+    /// preference resolves through the stable `AthleteId`-derived
+    /// fallback (`AthleteColor.forAthleteId(_:)`), never a hard-coded
+    /// default.
+    @Test("AthleteFamilyManagementViewModel.resolvedColor(for:) returns the explicit preference when set, otherwise the stable AthleteId fallback")
+    @MainActor
+    func viewModelResolvedColorPrefersExplicitOverFallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let viewModel = AthleteFamilyManagementViewModel(
+            workspaceId: staged.workspace.workspaceId,
+            participantId: staged.participant.id,
+            athleteRepository: athleteRepository,
+            athleteFamilyManagementService: service
+        )
+
+        // No explicit preference has ever been set for this athlete —
+        // resolves through the same deterministic fallback
+        // `AthleteColor.forAthleteId(_:)` computes directly.
+        #expect(viewModel.resolvedColor(for: added.athlete) == AthleteColor.forAthleteId(added.athlete.athleteId))
+
+        // Explicit preference now wins, even when it differs from the
+        // fallback this athlete's id would otherwise resolve to.
+        let fallback = AthleteColor.forAthleteId(added.athlete.athleteId)
+        let explicit: AthleteColor = AthleteColor.allCases.first { $0 != fallback } ?? .blue
+        viewModel.setPreferredColor(for: added.athlete, to: explicit)
+        #expect(viewModel.resolvedColor(for: added.athlete) == explicit)
+    }
 }

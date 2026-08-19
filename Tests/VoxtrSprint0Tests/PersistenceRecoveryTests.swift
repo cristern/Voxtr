@@ -42,11 +42,13 @@ struct PersistenceRecoveryTests {
         // exercises the real construction path.
         let storeURL = URL.temporaryDirectory.appendingPathComponent("fresh-install-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        // VX-023 review follow-up: a genuine fresh install now targets
-        // AppSchemaV2 (CompositionRoot.build's real default) — no
-        // migration stage runs at all for a brand-new store; it's simply
-        // created directly under the current version.
-        let schema = Schema(versionedSchema: AppSchemaV2.self)
+        // VX-023 review follow-up, updated for Design Foundation V0.1
+        // (Athlete Color canonical preference round): a genuine fresh
+        // install now targets AppSchemaV3 (CompositionRoot.build's real
+        // default) — no migration stage runs at all for a brand-new
+        // store; it's simply created directly under the current
+        // version.
+        let schema = Schema(versionedSchema: AppSchemaV3.self)
 
         var athleteIds: [UUID] = []
         var workspaceId: WorkspaceId
@@ -124,10 +126,14 @@ struct PersistenceRecoveryTests {
         // the now-frozen AppCurrentSchema (V1). The genuine V1→V2
         // migration case this comment used to describe as "not yet
         // meaningful" is now covered separately by
-        // existingV1StoreMigratesToV2Successfully below.
+        // existingV1StoreMigratesToV2Successfully below. Design
+        // Foundation V0.1 (Athlete Color canonical preference round):
+        // updated again to AppSchemaV3, the real current version after
+        // that round's bump — the V2→V3 migration case is covered
+        // separately by existingV2StoreMigratesToV3Successfully below.
         let storeURL = URL.temporaryDirectory.appendingPathComponent("restart-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppSchemaV2.self)
+        let schema = Schema(versionedSchema: AppSchemaV3.self)
 
         do {
             let firstContainer = try ModelContainer(
@@ -167,9 +173,12 @@ struct PersistenceRecoveryTests {
         // do. This is the single most direct regression guard against
         // the exact class of bug (a default argument silently pointing
         // at the wrong schema version) that caused this whole
-        // investigation.
+        // investigation. Design Foundation V0.1 (Athlete Color
+        // canonical preference round): updated to AppSchemaV3, matching
+        // CompositionRoot.build's own real default after that round's
+        // version bump.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV2.self,
+            versionedSchema: AppSchemaV3.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -206,9 +215,11 @@ struct PersistenceRecoveryTests {
         // Container above goes out of scope — genuinely closed, matching
         // a real app relaunch rather than a container kept alive.
 
-        // The NEXT launch, on the SAME store file, targets the CURRENT
-        // schema (V2) — the real production default
-        // (CompositionRoot.build's own `versionedSchema: AppSchemaV2.self`).
+        // The NEXT launch, on the SAME store file, targets V2 — current
+        // at the time this migration shipped (Design Foundation V0.1's
+        // Athlete Color round later moved the real production default
+        // to AppSchemaV3; see existingV2StoreMigratesToV3Successfully
+        // below for that later step of the SAME migration chain).
         let v2Schema = Schema(versionedSchema: AppSchemaV2.self)
         let v2Container = try ModelContainer(
             for: v2Schema,
@@ -237,6 +248,89 @@ struct PersistenceRecoveryTests {
         )
         #expect(recorded.sleepQuality == 4)
         #expect(try v2Container.mainContext.fetch(FetchDescriptor<DailyStatus>()).count == 1)
+    }
+
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round), requirement 7: migration preserves existing athlete data
+    /// and permits colour persistence. Simulates the scenario every
+    /// existing TestFlight install hits after updating to a build
+    /// containing this round: a store already on disk under the OLD,
+    /// now-frozen V2 schema, with an `AthleteSettings` row whose
+    /// `preferredColor` was never touched (this field did not exist as
+    /// a concept when that row was written).
+    @Test("A store created under AppSchemaV2 (17 entities, no explicit Athlete Color ever set) reopens successfully under AppSchemaV3 via the lightweight migration stage — existing AthleteProfile/AthleteSettings data survives untouched, preferredColor resolves to nil (never a forced default), and the field is genuinely writable/readable against the migrated store")
+    @MainActor
+    func existingV2StoreMigratesToV3Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v2-to-v3-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v2Schema = Schema(versionedSchema: AppSchemaV2.self)
+        var athleteRawId: UUID
+        do {
+            let v2Container = try ModelContainer(
+                for: v2Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v2Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v2Container.mainContext.insert(athlete)
+            try v2Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            // An AthleteSettings row exists (Sleep tracking already
+            // toggled, as a real pre-this-round install could easily
+            // have) but preferredColor was never set — the exact state
+            // this round's migration must leave untouched, not force
+            // to some default.
+            let v2AthleteRepository = AthleteRepository(modelContext: v2Container.mainContext)
+            try v2AthleteRepository.setSleepTrackingEnabled(athleteId: AthleteId(rawValue: athleteRawId), enabled: false)
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V3) — the real production default
+        // (CompositionRoot.build's own `versionedSchema: AppSchemaV3.self`).
+        let v3Schema = Schema(versionedSchema: AppSchemaV3.self)
+        let v3Container = try ModelContainer(
+            for: v3Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v3Schema, url: storeURL)]
+        )
+
+        // Pre-existing data survived the migration completely untouched.
+        let athleteRepository = AthleteRepository(modelContext: v3Container.mainContext)
+        let athletes = try athleteRepository.fetchAllAthletes()
+        #expect(athletes.count == 1)
+        #expect(athletes.first?.id == athleteRawId)
+        #expect(athletes.first?.givenName == "Jonas")
+
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let migratedSettings = try athleteRepository.fetchAthleteSettings(forAthlete: athleteId)
+        // Sleep tracking, set before the migration, survived it exactly
+        // as-is — this round's field addition never touches unrelated
+        // existing fields on the same row.
+        #expect(migratedSettings?.sleepTrackingEnabled == false)
+        // No forced/synthesized default for the new field — an
+        // athlete who never touched Athlete Color still resolves
+        // through the stable AthleteId fallback, never a hard-coded
+        // persisted value.
+        #expect(migratedSettings?.preferredColor == nil)
+
+        // The new field is genuinely writable/readable against the
+        // migrated store — proves the lightweight stage actually
+        // carries the new column, not merely that the container opened
+        // without throwing.
+        try athleteRepository.setPreferredColor(athleteId: athleteId, color: .purple)
+        let afterWrite = try athleteRepository.fetchAthleteSettings(forAthlete: athleteId)
+        #expect(afterWrite?.preferredColor == .purple)
+        // Still exactly one AthleteSettings row for this athlete — the
+        // new field's write reused the migrated row, never created a
+        // second one.
+        #expect(try v3Container.mainContext.fetch(FetchDescriptor<AthleteSettings>()).count == 1)
     }
 
     @Test("A save failure during onboarding rolls back completely, leaving no partial family data")

@@ -270,6 +270,20 @@ struct AthleteSettingsView: View {
     let athlete: AthleteProfile
     @State private var isPresentingForm: Bool = false
     @State private var sleepSettingsViewModel: AthleteSleepSettingsViewModel
+    /// Design Foundation V0.1 (Athlete Color canonical preference
+    /// round): local presentation state for the inline Color control
+    /// below — `AthleteSettings` isn't part of the `@Bindable` `viewModel`'s
+    /// own observed `athletes` list (see `resolvedColor(for:)`'s own doc
+    /// comment: a fresh, uncached read), so this screen needs its own
+    /// `@State` to hold "what's currently selected," loaded once on
+    /// appear and updated immediately on selection — same shape as
+    /// `AthleteSleepSettingsViewModel.isTrackingEnabled` one section
+    /// below, just without a dedicated ViewModel of its own (Athlete
+    /// Color is a single field on the SAME `AthleteRepository` this
+    /// hub's own `viewModel` already holds — no cross-domain
+    /// composition to justify a separate service/ViewModel pair the way
+    /// Sleep's own Reflection-domain dependency does).
+    @State private var selectedColor: AthleteColor
 
     init(
         viewModel: AthleteFamilyManagementViewModel,
@@ -279,6 +293,7 @@ struct AthleteSettingsView: View {
         self.viewModel = viewModel
         self.athlete = athlete
         _sleepSettingsViewModel = State(initialValue: sleepSettingsViewModel)
+        _selectedColor = State(initialValue: viewModel.resolvedColor(for: athlete))
     }
 
     var body: some View {
@@ -366,10 +381,44 @@ struct AthleteSettingsView: View {
                     set: { sleepSettingsViewModel.setTrackingEnabled($0) }
                 ))
                 .accessibilityIdentifier("athleteSettings.sleepToggle.\(athlete.id.uuidString)")
+
+                // Design Foundation V0.1 (Athlete Color canonical
+                // preference round): "Complete simple actions in
+                // context" — the SAME `Picker` shape as "Development
+                // stage" directly above (no explicit `pickerStyle`,
+                // matching that established, already-shipped inline
+                // Form-Picker convention exactly, rather than
+                // introducing a second picker presentation on the same
+                // screen) — shows the currently selected colour's own
+                // label as this row's trailing value, "current selected
+                // value is clearly visible" with no custom control.
+                // Selecting a new value saves immediately through
+                // `viewModel.setPreferredColor(for:to:)`, the narrow
+                // mutation path — no separate "Save" action, matching
+                // "no new settings page for colour."
+                Picker("Color", selection: Binding(
+                    get: { selectedColor },
+                    set: { newValue in
+                        selectedColor = newValue
+                        viewModel.setPreferredColor(for: athlete, to: newValue)
+                    }
+                )) {
+                    ForEach(AthleteColor.allCases, id: \.self) { athleteColor in
+                        Label {
+                            Text(athleteColor.displayName)
+                        } icon: {
+                            Circle()
+                                .fill(athleteColor.color)
+                                .frame(width: 14, height: 14)
+                        }
+                        .tag(athleteColor)
+                    }
+                }
+                .accessibilityIdentifier("athleteSettings.colorPicker.\(athlete.id.uuidString)")
             } header: {
                 Text("Settings")
             } footer: {
-                Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept.")
+                Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept. Color helps tell \(athlete.givenName) apart on Family Home.")
             }
 
             // ARCHIVE — destructive, visually separated in its own

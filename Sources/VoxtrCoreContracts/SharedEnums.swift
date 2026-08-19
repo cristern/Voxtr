@@ -65,3 +65,19 @@ public enum ReminderDeliveryState: String, Codable, Sendable, CaseIterable {
 public enum SyncState: String, Codable, Sendable, CaseIterable {
     case localOnly, pendingUpload, synced, conflict, tombstoned
 }
+
+/// Design Foundation V0.1 (Athlete Color canonical preference round) —
+/// NOT part of the original v1.3 Section 4 enum table this file's own
+/// header comment describes; added under this task's explicit approval
+/// to persist a single, canonical, user-configurable athlete-colour
+/// preference (`AthleteSettings.preferredColor`, `VoxtrAthleteDomain`).
+/// The eight cases are the approved Athlete Color palette — identity
+/// only, never performance/readiness/status. Deliberately has no
+/// `Color`/UIKit-facing members: this package cannot import SwiftUI (see
+/// `Package.swift`'s dependency rule), so the actual hex values and
+/// `Color` rendering live entirely in `VoxtrAppShell` as an extension on
+/// this same type (`VoxtrDesignSystem.swift`) — one canonical type, one
+/// persisted representation, no parallel/duplicate colour enum.
+public enum AthleteColor: String, Codable, Sendable, CaseIterable {
+    case blue, indigo, purple, rose, orange, amber, green, cyan
+}
