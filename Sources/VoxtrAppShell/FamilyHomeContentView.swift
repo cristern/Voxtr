@@ -199,8 +199,19 @@ public struct FamilyHomeContentView: View {
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
                     } else {
+                        // Outline geometry fix: each row already draws
+                        // its own athlete-colour outline as a distinct
+                        // card, with its own top/bottom margin from
+                        // `voxtrAthleteIdentityOutline`'s `.listRowInsets`
+                        // — the system's default grey row separator on
+                        // top of that read as redundant clutter (two
+                        // separation cues for the same boundary), so
+                        // it's hidden here specifically. The outline's
+                        // own per-row vertical margin is what now
+                        // provides the gap between rows.
                         ForEach(viewModel.rows) { row in
                             todayActivityRow(row)
+                                .listRowSeparator(.hidden)
                         }
                     }
                 } header: {
@@ -416,7 +427,11 @@ public struct FamilyHomeContentView: View {
                         Spacer()
                     }
                 }
-                .padding(.vertical, 4)
+                // Outline geometry fix: vertical/horizontal breathing
+                // room around this content is now owned entirely by
+                // `voxtrAthleteIdentityOutline` itself (`VoxtrSpacing.cardContentPadding`/
+                // `cardContentPaddingVertical`) — no local padding here,
+                // to avoid doubling up with that modifier's own.
             }
             .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
             .accessibilityIdentifier("familyHome.recurringRow.\(suggestion.id)")
@@ -443,7 +458,9 @@ public struct FamilyHomeContentView: View {
                     Spacer()
                 }
             }
-            .padding(.vertical, 4)
+            // Outline geometry fix: see the .recurringOccurrence case
+            // above — no local vertical padding here either, now owned
+            // by `voxtrAthleteIdentityOutline` itself.
             .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
             .accessibilityIdentifier("familyHome.unplannedLoggedRow.\(loggedActivity.id.uuidString)")
         }
@@ -508,7 +525,10 @@ public struct FamilyHomeContentView: View {
                     }
                 }
             }
-            .padding(.vertical, 4)
+            // Outline geometry fix: see todayActivityRow's
+            // .recurringOccurrence case — no local vertical padding
+            // here either, now owned by `voxtrAthleteIdentityOutline`
+            // itself.
         }
         .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: row.athleteId).color)
         .accessibilityIdentifier("familyHome.activityRow.\(row.id)")

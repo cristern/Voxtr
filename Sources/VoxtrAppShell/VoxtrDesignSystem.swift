@@ -222,6 +222,42 @@ public enum VoxtrTypography {
     public static let caption: Font = .system(.caption2)
 }
 
+// MARK: - VoxtrSpacing
+
+/// TestFlight visual feedback round (athlete identity outline geometry
+/// fix): the first spacing tokens this design layer introduces — the
+/// prior outline geometry hardcoded a single `2pt` inset directly in
+/// `voxtrAthleteIdentityOutline` with no separate concept of "distance
+/// from the true card edge" vs. "distance from the content," which is
+/// exactly why the outline could end up simultaneously too far from
+/// the white card's true edge AND too close to the text (both distances
+/// were the same one hardcoded number). These name the two distances
+/// this fix's four-layer hierarchy needs — card → outline → content —
+/// so any future row reusing the outline gets both automatically,
+/// instead of a new hardcoded value per screen.
+public enum VoxtrSpacing {
+    /// Horizontal gap between a row's true white-card edge and the
+    /// athlete-colour outline stroke (approved range ~8-10pt).
+    public static let cardOutlineInset: CGFloat = 9
+    /// Vertical counterpart of `cardOutlineInset`. Deliberately smaller
+    /// than the horizontal value — the approved range is specified for
+    /// the horizontal proximity problem this round fixes (text/chevron
+    /// crowding the outline); vertically, rows only need enough margin
+    /// that a multi-line row's text can't touch the stroke, not the
+    /// same magnitude of inset on every edge.
+    public static let cardOutlineInsetVertical: CGFloat = 6
+    /// Horizontal gap between the outline stroke and the row's own
+    /// content (text, chevron) — the minimum breathing room that
+    /// guarantees the outline can never intersect text (approved range
+    /// ~14-16pt).
+    public static let cardContentPadding: CGFloat = 15
+    /// Vertical counterpart of `cardContentPadding`, deliberately more
+    /// modest for the same reason `cardOutlineInsetVertical` is smaller
+    /// than `cardOutlineInset` — enough clearance above/below text
+    /// without making every activity row unnecessarily tall.
+    public static let cardContentPaddingVertical: CGFloat = 10
+}
+
 // MARK: - Reusable view primitives
 
 /// The small, shared foundation both target screens use — nothing here
@@ -275,17 +311,52 @@ public extension View {
     /// the approved replacement for the earlier small identity-dot-only
     /// treatment on athlete-specific ACTIVITY rows (Now/Next, Today's
     /// Schedule, Tomorrow) — a subtle inner colour outline that follows
-    /// the row's own rounded card shape, inset slightly from the row's
-    /// outer edge, ~1.5pt stroke. Reuses this file's own 14pt card
-    /// radius token (the same value `voxtrCardSurface` already uses),
-    /// inset by 2pt so the drawn stroke sits inside the row's bounds
-    /// rather than overlapping any neighboring row/section chrome.
-    /// Colour only — no fill, so this never competes with
-    /// `voxtrRowSurface()`'s own `VoxtrColor.surface` row background,
-    /// and carries no status/performance/readiness meaning (see
-    /// `AthleteColor`'s own doc comment). Non-activity, non-athlete-
-    /// specific rows (a "View upcoming schedule" link, an error
-    /// message) never receive this modifier at all.
+    /// the row's own rounded card shape. Colour only — no fill, so this
+    /// never competes with `voxtrRowSurface()`'s own `VoxtrColor.surface`
+    /// row background, and carries no status/performance/readiness
+    /// meaning (see `AthleteColor`'s own doc comment). Non-activity,
+    /// non-athlete-specific rows (a "View upcoming schedule" link, an
+    /// error message) never receive this modifier at all.
+    ///
+    /// Geometry fix, root cause: the original version applied a single
+    /// `2pt` inset directly to whatever content frame this modifier was
+    /// attached to (typically a `NavigationLink`'s own label VStack with
+    /// no horizontal padding of its own) — with no separate notion of
+    /// "distance from the row's TRUE white-card edge" vs. "distance
+    /// from the row's own text." In a `Form`/`List`, that content frame
+    /// starts well inside the row's true edges (List reserves its own
+    /// leading/trailing content inset, then a further system gutter for
+    /// the disclosure chevron), so the outline ended up simultaneously
+    /// too far inward from the true card edge AND right up against the
+    /// text with zero breathing room, and the system chevron — rendered
+    /// in that same reserved gutter, outside the content frame this
+    /// modifier ever saw — sat outside/crowding the stroke rather than
+    /// inside it.
+    ///
+    /// Fix: this is now a genuine three-layer container-level modifier,
+    /// applied to the row/card container itself (a `NavigationLink` or
+    /// row `VStack`), not to a content frame that starts at the text:
+    /// 1. `VoxtrSpacing.cardContentPadding`/`cardContentPaddingVertical`
+    ///    around the caller's own content — guarantees the outline can
+    ///    never intersect text.
+    /// 2. `.frame(maxWidth: .infinity, alignment: .leading)` — the
+    ///    padded content fills the FULL width this modifier is given,
+    ///    so the outline stroke drawn next spans the whole row, not
+    ///    just the text's own intrinsic width.
+    /// 3. The stroke itself, drawn via `.overlay` at that full-width,
+    ///    padded frame — genuinely colour-only, no fill, no shadow.
+    /// 4. `.listRowInsets(...)`, set to exactly
+    ///    `VoxtrSpacing.cardOutlineInset`/`cardOutlineInsetVertical` —
+    ///    this is what actually controls the ONE remaining distance,
+    ///    "outline to the row's true white-card edge," authoritatively
+    ///    (List's own undocumented default inset is neither reliable
+    ///    nor under this modifier's control otherwise) — this is also
+    ///    why every call site needs the chevron to land inside the
+    ///    outline: the approved 8-10pt range is deliberately smaller
+    ///    than the disclosure chevron's own system-reserved trailing
+    ///    gutter (a well-established, effectively-constant grouped-list
+    ///    margin, not something this modifier can query directly), so
+    ///    the chevron reliably renders further inward than the stroke.
     ///
     /// Does not affect the tap target: `overlay` is purely decorative
     /// and never participates in hit-testing, so the row's own
@@ -293,11 +364,19 @@ public extension View {
     /// rectangle, via `.contentShape` where a caller already sets one)
     /// is completely unaffected by this modifier's presence.
     func voxtrAthleteIdentityOutline(_ color: Color, cornerRadius: CGFloat = 14) -> some View {
-        overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .inset(by: 2)
-                .strokeBorder(color, lineWidth: 1.5)
-        )
+        padding(.horizontal, VoxtrSpacing.cardContentPadding)
+            .padding(.vertical, VoxtrSpacing.cardContentPaddingVertical)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(color, lineWidth: 1.5)
+            )
+            .listRowInsets(EdgeInsets(
+                top: VoxtrSpacing.cardOutlineInsetVertical,
+                leading: VoxtrSpacing.cardOutlineInset,
+                bottom: VoxtrSpacing.cardOutlineInsetVertical,
+                trailing: VoxtrSpacing.cardOutlineInset
+            ))
     }
 }
 
