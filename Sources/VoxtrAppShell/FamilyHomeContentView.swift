@@ -330,6 +330,40 @@ public struct FamilyHomeContentView: View {
                 }
             }
         }
+        // Athlete Color freshness fix (runtime/state audit): Family
+        // Home's own `.onAppear` above is attached to the `Form` —
+        // INSIDE this `NavigationStack` — so it only refires when that
+        // root content itself is the visible screen again. If the user
+        // is pushed into anything (an athlete's Home, Family Schedule,
+        // Activity Detail) when they switch to the Profile tab, change
+        // an athlete's Color in Athlete Settings, and switch back, they
+        // land directly back on the pushed screen — the Form never
+        // reappears, so `refresh()` (and the `loadAthleteColors()` step
+        // inside it) never reruns, and `viewModel.athleteColors` stays
+        // stale indefinitely.
+        //
+        // This second `.onAppear`, attached to the `NavigationStack`
+        // itself (mirroring the exact placement `ParentPlanTabView`/
+        // `ParentTrainingTabView` already use, and which is why THEIR
+        // Athlete Color caches don't have this gap), refires whenever
+        // the Home tab reappears regardless of how deep the user has
+        // navigated inside it. Deliberately calls ONLY
+        // `loadAthleteColors()` — not `refresh()` — so this fix stays
+        // scoped to Athlete Color freshness and does not also start
+        // refreshing rows/tomorrow/focus-this-week/sleep while the
+        // user is mid-navigation under a push; harmless to call twice
+        // back-to-back on first launch, alongside the inner `.onAppear`'s
+        // own `refresh()` call.
+        //
+        // `FamilyScheduleView` opened from here resolves colour through
+        // `viewModel.resolvedAthleteColor(for:)` — a bound method on
+        // this SAME live `FamilyHomeViewModel` instance, reading
+        // `athleteColors` fresh at call time, not a captured snapshot —
+        // so refreshing this cache here is what Family Schedule (opened
+        // from Family Home) needs too; no separate fix required there.
+        .onAppear {
+            viewModel.loadAthleteColors()
+        }
     }
 
     @ViewBuilder
