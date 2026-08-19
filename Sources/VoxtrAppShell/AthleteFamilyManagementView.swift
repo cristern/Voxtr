@@ -304,6 +304,7 @@ struct AthleteSettingsView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("athleteSettings.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             // PROFILE — identity/profile facts only (Name, Family
@@ -312,7 +313,7 @@ struct AthleteSettingsView: View {
             // opens the existing Edit Athlete form (Name/Family
             // name/Birth date only — Development Stage is deliberately
             // NOT part of this form; see the Settings section below).
-            Section("Profile") {
+            Section {
                 Button {
                     viewModel.prefill(from: athlete)
                     isPresentingForm = true
@@ -344,7 +345,10 @@ struct AthleteSettingsView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("athleteSettings.profileCard.\(athlete.id.uuidString)")
+            } header: {
+                VoxtrSectionHeading("Profile")
             }
+            .voxtrRowSurface()
 
             // SETTINGS — simple, single-value athlete configuration,
             // shown and changed directly here rather than behind a
@@ -416,20 +420,26 @@ struct AthleteSettingsView: View {
                 }
                 .accessibilityIdentifier("athleteSettings.colorPicker.\(athlete.id.uuidString)")
             } header: {
-                Text("Settings")
+                VoxtrSectionHeading("Settings")
             } footer: {
                 Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept. Color helps tell \(athlete.givenName) apart on Family Home.")
             }
+            .voxtrRowSurface()
 
             // ARCHIVE — destructive, visually separated in its own
             // trailing Section, at the bottom.
-            Section("Archive") {
+            Section {
                 Button("Archive athlete", role: .destructive) {
                     viewModel.archiveAthlete(athlete)
                 }
                 .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
+            } header: {
+                VoxtrSectionHeading("Archive")
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Athlete settings")
         .onAppear {
             // Correctness fix: this hub no longer reads
@@ -455,10 +465,10 @@ struct AthleteSettingsView: View {
     private func profileField(label: String, value: String, isPlaceholder: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
             Text(value)
-                .foregroundStyle(isPlaceholder ? .secondary : .primary)
+                .foregroundStyle(isPlaceholder ? VoxtrColor.textSecondary : VoxtrColor.textPrimary)
         }
     }
 

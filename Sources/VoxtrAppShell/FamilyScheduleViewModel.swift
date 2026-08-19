@@ -76,6 +76,25 @@ public final class FamilyScheduleViewModel {
     private let activeAthletes: [AthleteProfile]
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let planningService: PlanningService
+    /// Design Foundation extension round: Family Schedule is a
+    /// shared/multi-athlete surface, so its rows need the same resolved
+    /// Athlete Color Family Home already shows — but this ViewModel
+    /// deliberately does not hold its own `AthleteRepository` or repeat
+    /// `FamilyHomeViewModel.loadAthleteColors()`'s own cache/fetch
+    /// logic. Family Schedule has two production entry points —
+    /// `FamilyHomeContentView`'s "View upcoming schedule" destination
+    /// (which injects the already-refreshed `FamilyHomeViewModel`'s own
+    /// `resolvedAthleteColor(for:)`) and the Plan tab's
+    /// `ParentPlanTabView` (which has no `FamilyHomeViewModel` in scope,
+    /// so it injects its own small resolver backed by the SAME canonical
+    /// `AthleteColor.resolved(forAthlete:using:)` helper Family Home
+    /// itself now delegates to) — both resolve through that one shared
+    /// implementation, never a second, locally-invented mapping.
+    /// Defaulted to `AthleteColor.forAthleteId` (the stable,
+    /// repository-free fallback) so every pre-existing test construction
+    /// site — none of which supplies a resolver — keeps compiling and
+    /// keeps its existing deterministic behaviour unchanged.
+    private let resolveAthleteColor: (AthleteId) -> AthleteColor
 
     /// Fix: previously `tomorrow` through `+14 days` — omitted today
     /// entirely, and went twice as far ahead as the approved contract.
@@ -89,11 +108,21 @@ public final class FamilyScheduleViewModel {
     public init(
         activeAthletes: [AthleteProfile],
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
-        planningService: PlanningService
+        planningService: PlanningService,
+        resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId
     ) {
         self.activeAthletes = activeAthletes
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.planningService = planningService
+        self.resolveAthleteColor = resolveAthleteColor
+    }
+
+    /// The one function every Family Schedule row calls for an
+    /// athlete's colour — mirrors `FamilyHomeViewModel.resolvedAthleteColor(for:)`'s
+    /// own role on that screen, just backed by an injected resolver
+    /// here instead of a locally-owned cache.
+    public func resolvedAthleteColor(for athleteId: AthleteId) -> AthleteColor {
+        resolveAthleteColor(athleteId)
     }
 
     public func loadSchedule() {

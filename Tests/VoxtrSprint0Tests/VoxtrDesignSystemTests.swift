@@ -1,7 +1,10 @@
 import Foundation
 import Testing
+import SwiftData
+import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
+import VoxtrAthleteDomain
 
 /// Design Foundation V0.1: the one piece of reusable, non-visual logic
 /// this round introduces — `AthleteColor.forAthleteId(_:)`'s
@@ -97,5 +100,44 @@ struct VoxtrDesignSystemTests {
         let names = AthleteColor.allCases.map(\.displayName)
         #expect(names.allSatisfy { !$0.isEmpty })
         #expect(Set(names).count == AthleteColor.allCases.count)
+    }
+
+    /// Design Foundation extension round: `resolved(forAthlete:using:)`
+    /// is the ONE canonical "explicit preference wins, otherwise the
+    /// stable fallback" implementation now shared by
+    /// `FamilyHomeViewModel.loadAthleteColors()`, `ParentTrainingTabView`,
+    /// and (indirectly, via `FamilyHomeViewModel.resolvedAthleteColor(for:)`)
+    /// Family Schedule's injected resolver — this test proves that
+    /// shared implementation itself, independent of any one screen's
+    /// own ViewModel. Mirrors `FamilyHomeViewModelTests`'s own
+    /// `resolvedAthleteColorPrefersExplicitPreferenceOverFallback` test
+    /// for the underlying function these ViewModels now delegate to.
+    @Test("resolved(forAthlete:using:) prefers an explicit AthleteSettings.preferredColor over the stable fallback, per athlete, independently")
+    @MainActor
+    func resolvedPrefersExplicitPreferenceOverFallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let workspaceId = WorkspaceId()
+
+        let withPreference = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let withoutPreference = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        // Explicit preference deliberately chosen to differ from
+        // whatever this athlete's own stable fallback would be, so the
+        // assertion below cannot pass by coincidence.
+        let fallbackForWithPreference = AthleteColor.forAthleteId(withPreference.athleteId)
+        let explicitChoice: AthleteColor = AthleteColor.allCases.first { $0 != fallbackForWithPreference } ?? .blue
+        try athleteRepository.setPreferredColor(athleteId: withPreference.athleteId, color: explicitChoice)
+
+        #expect(AthleteColor.resolved(forAthlete: withPreference.athleteId, using: athleteRepository) == explicitChoice)
+        #expect(AthleteColor.resolved(forAthlete: withoutPreference.athleteId, using: athleteRepository) == AthleteColor.forAthleteId(withoutPreference.athleteId))
     }
 }

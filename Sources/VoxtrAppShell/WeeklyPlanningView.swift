@@ -58,7 +58,8 @@ public struct WeeklyPlanningView: View {
             Section {
                 HStack {
                     Text(athleteDisplayName)
-                        .font(.headline)
+                        .font(VoxtrTypography.cardTitle)
+                        .foregroundStyle(VoxtrColor.textPrimary)
                     Spacer()
                     Button {
                         viewModel.switchToWeek(viewModel.weekStart.adding(days: -7))
@@ -81,6 +82,7 @@ public struct WeeklyPlanningView: View {
                 }
                 .accessibilityIdentifier("planning.weekIdentityBar")
             }
+            .voxtrRowSurface()
             .id("weeklyPlanning.top")
 
             if let errorMessage = viewModel.errorMessage {
@@ -89,16 +91,19 @@ public struct WeeklyPlanningView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("planning.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             if !viewModel.isCommitted && !viewModel.recurringSuggestions.isEmpty {
-                Section("Recurring suggestions") {
+                Section {
                     ForEach(viewModel.recurringSuggestions) { suggestion in
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(suggestion.title)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.suggestionSubtitle(for: suggestion))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                             HStack {
                                 Button("Add to week") {
                                     viewModel.acceptSuggestion(suggestion)
@@ -112,11 +117,14 @@ public struct WeeklyPlanningView: View {
                         }
                         .accessibilityIdentifier("planning.suggestionRow.\(suggestion.id)")
                     }
+                } header: {
+                    VoxtrSectionHeading("Recurring suggestions")
                 }
+                .voxtrRowSurface()
                 .accessibilityIdentifier("planning.suggestionList")
             }
 
-            Section("Planned activities") {
+            Section {
                 ForEach(viewModel.activities, id: \.id) { activity in
                     NavigationLink {
                         ActivityDetailViewLoader(
@@ -129,11 +137,13 @@ public struct WeeklyPlanningView: View {
                             onActivityLogged: { viewModel.loadOrCreateWeekPlan() }
                         )
                     } label: {
-                        VStack(alignment: .leading) {
+                        VStack(alignment: .leading, spacing: 4) {
                             Text(activity.title)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.rowSubtitle(for: activity))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                     .accessibilityIdentifier("planning.activityRow.\(activity.id.uuidString)")
@@ -146,11 +156,14 @@ public struct WeeklyPlanningView: View {
                         }
                     }
                 }
+            } header: {
+                VoxtrSectionHeading("Planned activities")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("planning.activityList")
 
             if !viewModel.isCommitted {
-                Section("Add activity") {
+                Section {
                     TextField("Title", text: $viewModel.newActivityTitle)
                         .accessibilityIdentifier("planning.newActivityTitleField")
                     DatePicker("Date", selection: $viewModel.newActivityDate, displayedComponents: .date)
@@ -174,7 +187,10 @@ public struct WeeklyPlanningView: View {
                         viewModel.addActivity()
                     }
                     .accessibilityIdentifier("planning.addActivityButton")
+                } header: {
+                    VoxtrSectionHeading("Add activity")
                 }
+                .voxtrRowSurface()
             }
 
             // Weekday-scan / status-placement round: moved from just
@@ -187,7 +203,7 @@ public struct WeeklyPlanningView: View {
             Section {
                 HStack {
                     Text(viewModel.statusLabel)
-                        .font(.headline)
+                        .font(VoxtrTypography.cardTitle)
                         .foregroundStyle(viewModel.isCommitted ? .green : .orange)
                         .accessibilityIdentifier("planning.statusLabel")
                     Spacer()
@@ -211,6 +227,7 @@ public struct WeeklyPlanningView: View {
                     }
                 }
             }
+            .voxtrRowSurface()
             .confirmationDialog(
                 "Reopen this week's plan for editing?",
                 isPresented: $isPresentingReopenPlanningConfirmation,
@@ -222,6 +239,8 @@ public struct WeeklyPlanningView: View {
                 Button("Keep Committed", role: .cancel) {}
             }
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("\(athleteDisplayName) Weekly Plan")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {

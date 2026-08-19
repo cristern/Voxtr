@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import VoxtrAthleteDomain
 import VoxtrCoreContracts
 
 // MARK: - VoxtrColor
@@ -193,6 +194,22 @@ public extension AthleteColor {
         ]
         let sum = bytes.reduce(0) { $0 + Int($1) }
         return allCases[((sum % allCases.count) + allCases.count) % allCases.count]
+    }
+
+    /// Design Foundation extension round: the ONE canonical "explicit
+    /// preference wins, otherwise the stable fallback" resolution,
+    /// shared by every shared/multi-athlete surface —
+    /// `FamilyHomeViewModel.loadAthleteColors()`, `ParentTrainingTabView`
+    /// (`ParentTabShellView.swift`), and `FamilyScheduleViewModel`'s
+    /// injected resolver all call through this one implementation
+    /// rather than each re-deriving the same two-step lookup inline.
+    /// One athlete's fetch failure never blocks resolution for another
+    /// — falls back to the stable mapping for this athlete only, same
+    /// per-athlete isolation `loadAthleteColors()` already established.
+    static func resolved(forAthlete athleteId: AthleteId, using athleteRepository: AthleteRepository) -> AthleteColor {
+        let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athleteId)
+        let preferred = (settings ?? nil)?.preferredColor
+        return preferred ?? forAthleteId(athleteId)
     }
 }
 

@@ -48,24 +48,33 @@ public struct FamilyScheduleView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("familySchedule.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             if viewModel.dayGroups.isEmpty {
                 Section {
                     Text("No upcoming activities planned yet.")
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
+                .voxtrRowSurface()
             } else {
                 ForEach(viewModel.dayGroups) { group in
-                    Section(Self.dayHeading(for: group.date)) {
+                    Section {
                         ForEach(group.rows) { row in
                             scheduleRow(row)
+                                .listRowSeparator(.hidden)
                         }
+                    } header: {
+                        VoxtrSectionHeading(Self.dayHeading(for: group.date))
                     }
+                    .voxtrRowSurface()
                     .accessibilityIdentifier("familySchedule.dayGroup.\(group.id)")
                 }
             }
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Family Schedule")
         .onAppear {
             viewModel.loadSchedule()
@@ -97,8 +106,9 @@ public struct FamilyScheduleView: View {
                     )
                 )
             }
+            .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: familyRow.athleteId).color)
             .accessibilityIdentifier("familySchedule.activityRow.\(row.id)")
-        case .recurringSuggestion(_, _, let athleteName, let suggestion):
+        case .recurringSuggestion(_, let athleteId, let athleteName, let suggestion):
             NavigationLink {
                 RecurringOccurrencePreviewView(
                     suggestion: suggestion,
@@ -110,38 +120,46 @@ public struct FamilyScheduleView: View {
                     onActivityLogged: { viewModel.loadSchedule() }
                 )
             } label: {
-                HStack {
-                    rowContent(
-                        athleteName: athleteName,
-                        title: suggestion.title,
-                        subtitle: Self.rowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location, outcomeStatus: nil)
-                    )
-                    Spacer()
-                    Text("Recurring")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                rowContent(
+                    athleteName: athleteName,
+                    title: suggestion.title,
+                    // Same-pattern fix (Family Home's own "Recurring
+                    // metadata demotion" round): "Recurring" no longer
+                    // renders as its own trailing label competing with
+                    // this row's single chevron — folded into the same
+                    // metadata subtitle line instead, matching Family
+                    // Home's `.recurringOccurrence` row exactly.
+                    subtitle: Self.recurringRowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location)
+                )
             }
+            .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
             .accessibilityIdentifier("familySchedule.recurringRow.\(row.id)")
         }
     }
 
     private func rowContent(athleteName: String, title: String, subtitle: String) -> some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 4) {
             // Athlete name leads each row — the simplest, most direct
             // way to make multiple athletes visually distinguishable in
             // one shared list, without separate per-athlete schedules.
             Text(athleteName)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
-            VStack(alignment: .leading) {
-                Text(title)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+            HStack {
+                VStack(alignment: .leading) {
+                    Text(title)
+                        .font(VoxtrTypography.cardTitle)
+                        .foregroundStyle(VoxtrColor.textPrimary)
+                    Text(subtitle)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                }
+                Spacer()
             }
         }
+        // Outline geometry: no local horizontal/vertical padding here —
+        // owned entirely by `voxtrAthleteIdentityOutline` itself, same
+        // as every Family Home activity row.
     }
 
     /// Sprint 1.1 closeout, Item 3: weekday added, reusing the existing
@@ -175,5 +193,23 @@ public struct FamilyScheduleView: View {
             parts.append(TrainingStrings.outcomeLabel(for: outcomeStatus))
         }
         return parts.isEmpty ? "Ready to log" : parts.joined(separator: " · ")
+    }
+
+    /// Same-pattern fix (Family Home's own "Recurring metadata
+    /// demotion" round, `FamilyHomeContentView.recurringRowSubtitle(for:)`):
+    /// "Recurring" joins this row's metadata line instead of rendering
+    /// as its own separate trailing label — the exact local hard-coded
+    /// styling this round's same-pattern audit flags. Recurrence
+    /// semantics are unchanged; only where this text renders changed.
+    private static func recurringRowSubtitle(startLocalTime: LocalTime?, location: String?) -> String {
+        var parts: [String] = []
+        if let startLocalTime {
+            parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
+        }
+        if let location, !location.isEmpty {
+            parts.append(location)
+        }
+        parts.append("Recurring")
+        return parts.joined(separator: " · ")
     }
 }

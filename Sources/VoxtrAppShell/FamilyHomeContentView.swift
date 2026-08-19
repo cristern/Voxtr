@@ -281,7 +281,8 @@ public struct FamilyHomeContentView: View {
                         viewModel: FamilyScheduleViewModel(
                             activeAthletes: viewModel.activeAthletes,
                             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                            planningService: planningService
+                            planningService: planningService,
+                            resolveAthleteColor: viewModel.resolvedAthleteColor
                         ),
                         actorId: ActorId(rawValue: family.participant.id),
                         planningService: planningService,

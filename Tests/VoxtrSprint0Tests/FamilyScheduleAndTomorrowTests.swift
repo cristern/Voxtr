@@ -635,4 +635,77 @@ extension FamilyScheduleAndTomorrowTests {
         // Criterion 3: +8 days is excluded from the rolling window.
         #expect(!viewModel.dayGroups.contains { $0.date == eightDaysOut })
     }
+
+    /// Design Foundation extension round: proves the injected
+    /// `resolveAthleteColor` closure is what `resolvedAthleteColor(for:)`
+    /// actually calls — not a second, locally re-derived colour — and
+    /// that different athletes resolve independently through it (the
+    /// same per-athlete isolation `FamilyHomeViewModelTests`'s own
+    /// `resolvedAthleteColorPrefersExplicitPreferenceOverFallback` test
+    /// already proves for Family Home). The default parameter (no
+    /// resolver supplied) is exercised by every other test in this
+    /// file, all seven of which predate this round and construct
+    /// `FamilyScheduleViewModel` without a `resolveAthleteColor`
+    /// argument — this test is the one that exercises the injected
+    /// path instead.
+    @Test("resolvedAthleteColor(for:) calls the injected resolver, independently per athlete")
+    @MainActor
+    func resolvedAthleteColorCallsInjectedResolverPerAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteId()
+        let emma = AthleteId()
+        // A resolver whose output is trivially checkable against its
+        // input — proves the closure is actually invoked with the
+        // right athlete id, per athlete, rather than some fixed or
+        // memoized value.
+        var resolvedIds: [AthleteId] = []
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService,
+            resolveAthleteColor: { athleteId in
+                resolvedIds.append(athleteId)
+                return athleteId == oliver ? .rose : .cyan
+            }
+        )
+
+        #expect(viewModel.resolvedAthleteColor(for: oliver) == .rose)
+        #expect(viewModel.resolvedAthleteColor(for: emma) == .cyan)
+        #expect(resolvedIds == [oliver, emma])
+    }
+
+    /// The default `resolveAthleteColor` parameter — used by every
+    /// pre-existing construction site above, none of which supplies a
+    /// resolver — falls back to the same stable, repository-free
+    /// `AthleteColor.forAthleteId(_:)` mapping Family Home itself falls
+    /// back to when no explicit preference exists, so an athlete's
+    /// colour is never left unresolved on Family Schedule.
+    @Test("resolvedAthleteColor(for:) defaults to the stable AthleteColor.forAthleteId(_:) fallback when no resolver is injected")
+    @MainActor
+    func resolvedAthleteColorDefaultsToStableFallback() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+
+        let viewModel = FamilyScheduleViewModel(
+            activeAthletes: [],
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+
+        #expect(viewModel.resolvedAthleteColor(for: athleteId) == AthleteColor.forAthleteId(athleteId))
+    }
 }

@@ -255,6 +255,16 @@ private struct ParentPlanTabView: View {
     let actorId: ActorId
 
     @State private var activeAthletes: [AthleteProfile]
+    /// Design Foundation extension round: this Plan tab is the OTHER
+    /// production entry point into `FamilyScheduleView` — distinct from
+    /// the "View upcoming schedule" link on Family Home, which already
+    /// injects `FamilyHomeViewModel.resolvedAthleteColor(for:)` as its
+    /// resolver. This root has no `FamilyHomeViewModel` in scope to
+    /// reuse, so it resolves the same way `ParentTrainingTabView` does:
+    /// through the ONE canonical `AthleteColor.resolved(forAthlete:using:)`
+    /// helper, backed by this view's own already-stored
+    /// `athleteRepository` — never a second, locally-invented mapping.
+    @State private var athleteColors: [AthleteId: AthleteColor] = [:]
 
     init(
         family: RestoredFamily,
@@ -284,7 +294,8 @@ private struct ParentPlanTabView: View {
                             viewModel: FamilyScheduleViewModel(
                                 activeAthletes: activeAthletes,
                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                                planningService: planningService
+                                planningService: planningService,
+                                resolveAthleteColor: resolvedColor
                             ),
                             actorId: actorId,
                             planningService: planningService,
@@ -320,7 +331,26 @@ private struct ParentPlanTabView: View {
         }
         .onAppear {
             activeAthletes = fetchActiveAthletes(workspaceId: WorkspaceId(rawValue: family.workspace.id), athleteRepository: athleteRepository)
+            loadAthleteColors()
         }
+    }
+
+    /// Mirrors `FamilyHomeViewModel.loadAthleteColors()`'s own "re-fetch
+    /// on appear, no live push" freshness model.
+    private func loadAthleteColors() {
+        var resolved: [AthleteId: AthleteColor] = [:]
+        for athlete in activeAthletes {
+            resolved[athlete.athleteId] = AthleteColor.resolved(forAthlete: athlete.athleteId, using: athleteRepository)
+        }
+        athleteColors = resolved
+    }
+
+    /// Passed as `FamilyScheduleViewModel`'s `resolveAthleteColor`
+    /// closure above — falls back to the stable mapping directly if
+    /// `athleteColors` hasn't been populated for this id yet, so a row
+    /// is never left with no colour at all.
+    private func resolvedColor(for athleteId: AthleteId) -> AthleteColor {
+        athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
     }
 }
 
@@ -342,6 +372,19 @@ private struct ParentTrainingTabView: View {
     let actorId: ActorId
 
     @State private var activeAthletes: [AthleteProfile]
+    /// Design Foundation extension round: Training is a shared/multi-
+    /// athlete surface here — this tab root lists every active athlete
+    /// in the same "Daily Training"/"Weekly Review"/"Week by Week"
+    /// rows — so each row gets the same resolved Athlete Color Family
+    /// Home/Family Schedule already show. Resolved via the ONE
+    /// canonical `AthleteColor.resolved(forAthlete:using:)` helper
+    /// (`VoxtrDesignSystem.swift`), reusing this view's own already-
+    /// stored `athleteRepository` — never a second, locally-invented
+    /// colour-mapping scheme. The screens these rows navigate to
+    /// (`DailyTrainingView`, `WeeklyReviewView`, `WeeklyHistoryListView`)
+    /// are single-athlete detail screens once opened, and deliberately
+    /// receive no Athlete Color theming of their own.
+    @State private var athleteColors: [AthleteId: AthleteColor] = [:]
 
     init(
         family: RestoredFamily,
@@ -379,9 +422,9 @@ private struct ParentTrainingTabView: View {
                     )
                 } else {
                     List {
-                        Section("Daily Training") {
+                        Section {
                             ForEach(activeAthletes, id: \.athleteId) { athlete in
-                                NavigationLink(athlete.givenName) {
+                                NavigationLink {
                                     DailyTrainingView(
                                         viewModel: DailyTrainingViewModel(
                                             trainingService: trainingService,
@@ -402,13 +445,21 @@ private struct ParentTrainingTabView: View {
                                         actorId: actorId,
                                         athleteDisplayName: athlete.givenName
                                     )
+                                } label: {
+                                    Text(athlete.givenName)
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
                                 }
+                                .voxtrAthleteIdentityOutline(resolvedColor(for: athlete.athleteId).color)
                                 .accessibilityIdentifier("parentTraining.dailyTrainingLink.\(athlete.athleteId.rawValue.uuidString)")
                             }
+                        } header: {
+                            VoxtrSectionHeading("Daily Training")
                         }
-                        Section("Weekly Review") {
+                        .voxtrRowSurface()
+                        Section {
                             ForEach(activeAthletes, id: \.athleteId) { athlete in
-                                NavigationLink(athlete.givenName) {
+                                NavigationLink {
                                     WeeklyReviewView(
                                         viewModel: WeeklyReviewViewModel(
                                             coordinationService: weeklyReviewCoordinationService,
@@ -420,13 +471,21 @@ private struct ParentTrainingTabView: View {
                                         reflectionService: weeklyReflectionService,
                                         authorId: actorId
                                     )
+                                } label: {
+                                    Text(athlete.givenName)
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
                                 }
+                                .voxtrAthleteIdentityOutline(resolvedColor(for: athlete.athleteId).color)
                                 .accessibilityIdentifier("parentTraining.weeklyReviewLink.\(athlete.athleteId.rawValue.uuidString)")
                             }
+                        } header: {
+                            VoxtrSectionHeading("Weekly Review")
                         }
-                        Section("Week by Week") {
+                        .voxtrRowSurface()
+                        Section {
                             ForEach(activeAthletes, id: \.athleteId) { athlete in
-                                NavigationLink(athlete.givenName) {
+                                NavigationLink {
                                     WeeklyHistoryListView(
                                         viewModel: WeeklyHistoryListViewModel(
                                             coordinationService: weeklyReviewCoordinationService,
@@ -448,18 +507,51 @@ private struct ParentTrainingTabView: View {
                                             )
                                         }
                                     )
+                                } label: {
+                                    Text(athlete.givenName)
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
                                 }
+                                .voxtrAthleteIdentityOutline(resolvedColor(for: athlete.athleteId).color)
                                 .accessibilityIdentifier("parentTraining.weeklyHistoryLink.\(athlete.athleteId.rawValue.uuidString)")
                             }
+                        } header: {
+                            VoxtrSectionHeading("Week by Week")
                         }
+                        .voxtrRowSurface()
                     }
+                    .voxtrScreenBackground()
                 }
             }
             .navigationTitle("Training")
         }
         .onAppear {
             activeAthletes = fetchActiveAthletes(workspaceId: WorkspaceId(rawValue: family.workspace.id), athleteRepository: athleteRepository)
+            loadAthleteColors()
         }
+    }
+
+    /// Mirrors `FamilyHomeViewModel.loadAthleteColors()`'s own "re-fetch
+    /// on appear, no live push" freshness model — one resolved colour
+    /// per active athlete, read fresh every time this tab appears so a
+    /// colour change made in Athlete Settings shows up here the next
+    /// time the Training tab is opened.
+    private func loadAthleteColors() {
+        var resolved: [AthleteId: AthleteColor] = [:]
+        for athlete in activeAthletes {
+            resolved[athlete.athleteId] = AthleteColor.resolved(forAthlete: athlete.athleteId, using: athleteRepository)
+        }
+        athleteColors = resolved
+    }
+
+    /// The one function every row in this tab calls for an athlete's
+    /// colour — falls back to the stable mapping directly if
+    /// `athleteColors` hasn't been populated for this id yet, so a row
+    /// is never left with no colour at all (same guarantee
+    /// `FamilyHomeViewModel.resolvedAthleteColor(for:)` already gives
+    /// its own rows).
+    private func resolvedColor(for athleteId: AthleteId) -> AthleteColor {
+        athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
     }
 }
 

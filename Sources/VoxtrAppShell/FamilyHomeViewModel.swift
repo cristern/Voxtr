@@ -263,9 +263,7 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
     public func loadAthleteColors() {
         var resolved: [AthleteId: AthleteColor] = [:]
         for athlete in activeAthletes {
-            let settings = try? athleteRepository.fetchAthleteSettings(forAthlete: athlete.athleteId)
-            let preferred = (settings ?? nil)?.preferredColor
-            resolved[athlete.athleteId] = preferred ?? AthleteColor.forAthleteId(athlete.athleteId)
+            resolved[athlete.athleteId] = AthleteColor.resolved(forAthlete: athlete.athleteId, using: athleteRepository)
         }
         athleteColors = resolved
     }

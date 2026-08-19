@@ -55,6 +55,8 @@ public struct WeeklyReviewView: View {
 
             coachingSection
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("\(athleteDisplayName) Weekly Review")
         .onAppear {
             viewModel.load()
@@ -88,6 +90,8 @@ public struct WeeklyReviewView: View {
     private var header: some View {
         Section {
             Text(athleteDisplayName)
+                .font(VoxtrTypography.cardTitle)
+                .foregroundStyle(VoxtrColor.textPrimary)
                 .accessibilityIdentifier("weeklyReview.athleteName")
             HStack {
                 Button {
@@ -112,26 +116,34 @@ public struct WeeklyReviewView: View {
             }
             .accessibilityIdentifier("weeklyReview.weekStart")
         }
+        .voxtrRowSurface()
     }
 
     private func weekPlanSection(_ result: WeeklyReviewResult) -> some View {
-        Section("Weekly plan") {
+        Section {
             if let weekPlan = result.weekPlan {
                 Text(weekPlan.status == .committed ? "Committed" : "Draft")
+                    .font(VoxtrTypography.body)
+                    .foregroundStyle(VoxtrColor.textPrimary)
                     .accessibilityIdentifier("weeklyReview.weekPlanStatus")
             } else {
                 Text(WeeklyReviewStrings.noWeekPlan)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weeklyReview.noWeekPlan")
             }
+        } header: {
+            VoxtrSectionHeading("Weekly plan")
         }
+        .voxtrRowSurface()
     }
 
     private func plannedActivitiesSection(_ result: WeeklyReviewResult) -> some View {
-        Section("Planned activities") {
+        Section {
             if result.plannedActivities.isEmpty {
                 Text(WeeklyReviewStrings.noPlannedActivities)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weeklyReview.noPlannedActivities")
             } else {
                 ForEach(result.plannedActivities, id: \.plannedActivity.id) { item in
@@ -147,10 +159,12 @@ public struct WeeklyReviewView: View {
                         // section was already reading nothing else
                         // from.
                         Text(WeeklyPlanningView.weekdayLabel(for: item.plannedActivity.localDate.weekday))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                         HStack {
                             Text(item.plannedActivity.title)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
                             // Review follow-up (duration/completion
                             // placeholder audit): `isGenuinelyCompleted`,
@@ -159,8 +173,8 @@ public struct WeeklyReviewView: View {
                             // here, the same fix already applied to
                             // Weekly History's equivalent row label.
                             Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
-                                .font(.caption)
-                                .foregroundStyle(item.isGenuinelyCompleted ? .green : .secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(item.isGenuinelyCompleted ? .green : VoxtrColor.textSecondary)
                                 .accessibilityLabel(
                                     Text(item.isGenuinelyCompleted ? TrainingStrings.completedLabel : TrainingStrings.notCompletedLabel)
                                 )
@@ -176,14 +190,17 @@ public struct WeeklyReviewView: View {
                         // model happens to have.
                         if let loggedActivity = item.loggedActivity {
                             Text(Self.actualSubtitle(for: loggedActivity))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                     .accessibilityIdentifier("weeklyReview.plannedActivityRow.\(item.plannedActivity.id.uuidString)")
                 }
             }
+        } header: {
+            VoxtrSectionHeading("Planned activities")
         }
+        .voxtrRowSurface()
     }
 
     /// Review follow-up (duration/logged-consumer audit): duration and
@@ -214,14 +231,15 @@ public struct WeeklyReviewView: View {
     }
 
     private func loggedActivitiesSection(_ result: WeeklyReviewResult) -> some View {
-        Section("Logged activities") {
+        Section {
             if result.loggedActivities.isEmpty {
                 Text(WeeklyReviewStrings.noLoggedActivities)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weeklyReview.noLoggedActivities")
             } else {
                 ForEach(result.loggedActivities, id: \.id) { activity in
-                    VStack(alignment: .leading) {
+                    VStack(alignment: .leading, spacing: 2) {
                         // Weekday-scan round: same principle as
                         // `plannedActivitiesSection` above — a leading
                         // weekday caption so both sections read the
@@ -234,9 +252,11 @@ public struct WeeklyReviewView: View {
                         // `Date` -> `LocalDate` conversion — see that
                         // helper's own doc comment.
                         Text(WeeklyPlanningView.weekdayLabel(for: Self.localDate(for: activity.startedAt).weekday))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                         Text(activity.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         // Review follow-up (duration/logged-consumer
                         // audit): reuses the SAME `actualSubtitle`
                         // outcome-aware text `plannedActivitiesSection`
@@ -244,13 +264,16 @@ public struct WeeklyReviewView: View {
                         // here must show its outcome, never its
                         // placeholder duration presented as if real.
                         Text(Self.actualSubtitle(for: activity))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                     .accessibilityIdentifier("weeklyReview.loggedActivityRow.\(activity.id.uuidString)")
                 }
             }
+        } header: {
+            VoxtrSectionHeading("Logged activities")
         }
+        .voxtrRowSurface()
     }
 
     /// Weekday-scan round: `LoggedActivity.startedAt` is a `Date`
@@ -273,18 +296,22 @@ public struct WeeklyReviewView: View {
     }
 
     private func reflectionSection(_ result: WeeklyReviewResult) -> some View {
-        Section("Weekly reflection") {
+        Section {
             if let reflection = result.weeklyReflection {
                 if let satisfaction = reflection.overallSatisfaction {
                     Text("Overall satisfaction: \(satisfaction)/5")
+                        .font(VoxtrTypography.body)
+                        .foregroundStyle(VoxtrColor.textPrimary)
                 }
                 if let learning = reflection.learning {
                     Text(learning)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                 }
             } else {
                 Text(WeeklyReviewStrings.noReflection)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weeklyReview.noReflection")
             }
 
@@ -295,7 +322,10 @@ public struct WeeklyReviewView: View {
             .accessibilityLabel(
                 Text(result.weeklyReflection == nil ? WeeklyReviewStrings.startReflectionAction : WeeklyReviewStrings.editReflectionAction)
             )
+        } header: {
+            VoxtrSectionHeading("Weekly reflection")
         }
+        .voxtrRowSurface()
     }
 
     /// Sprint 9: the coaching integration. Never switches on
@@ -322,24 +352,30 @@ public struct WeeklyReviewView: View {
         case .failed:
             Section {
                 Text(CoachingPresentationStrings.unavailable)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weeklyReview.coaching.unavailable")
             }
+            .voxtrRowSurface()
         case .loaded(let presentation):
             if presentation.sections.isEmpty {
                 EmptyView()
             } else {
                 ForEach(presentation.sections, id: \.title) { section in
-                    Section(section.title) {
+                    Section {
                         ForEach(section.items, id: \.insight) { item in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(item.text)
+                                    .font(VoxtrTypography.body)
                                     .foregroundStyle(Self.color(for: item.emphasis))
                                 actionButton(for: item)
                             }
                             .accessibilityIdentifier("weeklyReview.coaching.item.\(item.insight.rawValue)")
                         }
+                    } header: {
+                        VoxtrSectionHeading(section.title)
                     }
+                    .voxtrRowSurface()
                 }
             }
         }
@@ -365,11 +401,11 @@ public struct WeeklyReviewView: View {
             Button(WeeklyReviewStrings.startReflectionAction) {
                 isShowingReflectionForm = true
             }
-            .font(.caption)
+            .font(VoxtrTypography.metadata)
             .accessibilityIdentifier("weeklyReview.coaching.action.startWeeklyReflection")
         case .addParentObservation:
             Button(CoachingPresentationStrings.addParentObservationAction) {}
-                .font(.caption)
+                .font(VoxtrTypography.metadata)
                 .disabled(true)
                 .accessibilityIdentifier("weeklyReview.coaching.action.addParentObservation")
         }
@@ -382,8 +418,8 @@ public struct WeeklyReviewView: View {
     ///
     /// `.attention` is deliberately NOT `.red` — this project already
     /// avoids alarm-coded color for "incomplete" states (see
-    /// `plannedActivitiesSection` above: not-completed uses plain
-    /// `.secondary`, not red). `.attention` here uses `.orange` instead
+    /// `plannedActivitiesSection` above: not-completed uses the plain
+    /// `VoxtrColor.textSecondary` token, not red). `.attention` here uses `.orange` instead
     /// — visually distinct from `.positive`/`.neutral` (so the emphasis
     /// actually carries meaning) while staying well short of the
     /// failure/danger/punishment/guilt read `.red` would risk. This is
