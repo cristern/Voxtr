@@ -9,11 +9,17 @@ import VoxtrMotivationDomain
 /// exactly that reason). There is no "single owner" conflict to avoid
 /// here — Daily Quote is a genuinely independent pipeline.
 ///
-/// Native SwiftUI only: semantic fonts (`.largeTitle`/`.body`/
-/// `.subheadline`) for Dynamic Type support, semantic colors
-/// (`.secondary`, default foreground) for Dark Mode — no fixed point
-/// sizes, no hardcoded RGB, no custom design system. No animation
-/// anywhere in this file.
+/// Design Foundation V0.1 correction round: this view previously used
+/// raw system semantic fonts/colors (`.largeTitle`/`.body`/
+/// `.subheadline`, `.secondary`) directly, making it the one visible
+/// default-SwiftUI island inside an otherwise restyled Athlete Home.
+/// It now uses the same shared `VoxtrTypography`/`VoxtrColor` tokens
+/// and `VoxtrSectionHeading`/`voxtrRowSurface()` every other Athlete
+/// Home section already uses — no new, Quote-specific visual language,
+/// no change to quote content, loading behaviour, or navigation. Both
+/// call sites (`quoteSection` and the `.failed` state below) get the
+/// same treatment, since both render as a `Section` on the same
+/// screen.
 public struct DailyQuoteView: View {
     @State private var viewModel: DailyQuoteViewModel
 
@@ -37,11 +43,15 @@ public struct DailyQuoteView: View {
                 // this is "loaded successfully, nothing to show," not
                 // a failure.
             case .failed:
-                Section(DailyQuoteStrings.sectionTitle) {
+                Section {
                     Text(DailyQuoteStrings.unavailable)
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.body)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                         .accessibilityIdentifier("dailyQuote.unavailable")
+                } header: {
+                    VoxtrSectionHeading(DailyQuoteStrings.sectionTitle)
                 }
+                .voxtrRowSurface()
             }
         }
         .onAppear {
@@ -50,21 +60,25 @@ public struct DailyQuoteView: View {
     }
 
     private func quoteSection(_ quote: Quote) -> some View {
-        Section(DailyQuoteStrings.sectionTitle) {
+        Section {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\u{201C}")
                     .font(.largeTitle)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityHidden(true)
                 Text(quote.text)
-                    .font(.body)
+                    .font(VoxtrTypography.body)
+                    .foregroundStyle(VoxtrColor.textPrimary)
                     .accessibilityIdentifier("dailyQuote.text")
                 Text("— \(quote.author)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("dailyQuote.author")
             }
             .accessibilityElement(children: .combine)
+        } header: {
+            VoxtrSectionHeading(DailyQuoteStrings.sectionTitle)
         }
+        .voxtrRowSurface()
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import VoxtrCoreContracts
 
 // MARK: - VoxtrColor
 
@@ -116,17 +117,41 @@ public enum VoxtrAthleteColor: CaseIterable, Equatable {
     /// `AthleteSettings`/the athlete domain (confirmed by inspection
     /// before writing this round's code) — this task does not invent
     /// one. This is the smallest deterministic, PRESENTATION-ONLY
-    /// assignment: the athlete's position in the caller's own already
-    /// deterministically-ordered active-athlete list (createdAt, then
-    /// id — see `FamilyHomeViewModel.refreshActiveAthletes()`'s own
-    /// doc comment), taken modulo the eight-colour palette. Nothing is
-    /// stored; a re-fetch with the same roster in the same order
-    /// reproduces the same assignment, but this is NOT a durable,
-    /// user-configurable identity — re-ordering or archiving athletes
-    /// can shift it. Reported as a known limitation, not silently
-    /// treated as canonical.
-    public static func forIndex(_ index: Int) -> VoxtrAthleteColor {
-        allCases[((index % allCases.count) + allCases.count) % allCases.count]
+    /// assignment, temporary until a canonical user-configurable
+    /// Athlete Color is implemented.
+    ///
+    /// Design Foundation V0.1 correction round: the FIRST working
+    /// version of this mapping used the athlete's position in
+    /// `activeAthletes` — rejected on review, correctly, because
+    /// Athlete Color is an identity aid: an athlete added/archived/
+    /// reordered elsewhere in the roster must never make a DIFFERENT
+    /// athlete's own colour appear to change. This version derives
+    /// entirely from the athlete's own stable `AthleteId` instead —
+    /// nothing about any other athlete's presence, order, or count
+    /// affects it.
+    ///
+    /// `AthleteId` is `Identifier<AthleteTag>`, whose only stored value
+    /// is a `UUID` (see `Identifier`'s own declaration in
+    /// `VoxtrCoreContracts/Identifier.swift`). `UUID.uuid` exposes that
+    /// UUID's own 16 raw bytes directly — a fixed property of the value
+    /// itself, unrelated to Swift's `hashValue` (which this
+    /// deliberately does NOT use: `hashValue` is randomly seeded per
+    /// process specifically for hash-flooding resistance, so the exact
+    /// same `AthleteId` can hash differently on two different app
+    /// launches — exactly the instability this mapping must avoid).
+    /// Summing those 16 bytes and taking the result modulo the
+    /// eight-colour palette is a plain, deterministic function of the
+    /// `AthleteId`'s own persisted identity: the same `AthleteId`
+    /// always sums to the same total, on every launch, regardless of
+    /// where it sits in any list.
+    public static func forAthleteId(_ athleteId: AthleteId) -> VoxtrAthleteColor {
+        let uuid = athleteId.rawValue.uuid
+        let bytes: [UInt8] = [
+            uuid.0, uuid.1, uuid.2, uuid.3, uuid.4, uuid.5, uuid.6, uuid.7,
+            uuid.8, uuid.9, uuid.10, uuid.11, uuid.12, uuid.13, uuid.14, uuid.15,
+        ]
+        let sum = bytes.reduce(0) { $0 + Int($1) }
+        return allCases[((sum % allCases.count) + allCases.count) % allCases.count]
     }
 }
 

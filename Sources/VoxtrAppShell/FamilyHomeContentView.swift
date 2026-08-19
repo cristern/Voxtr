@@ -379,9 +379,12 @@ public struct FamilyHomeContentView: View {
         case .recurringOccurrence(let athleteId, let athleteName, let suggestion):
             VStack(alignment: .leading, spacing: 4) {
                 NavigationLink(value: FamilyHomeDestination.athlete(athleteId)) {
-                    Text(athleteName)
-                        .font(VoxtrTypography.metadata)
-                        .foregroundStyle(VoxtrColor.textSecondary)
+                    HStack(spacing: 6) {
+                        athleteColorMarker(athleteId)
+                        Text(athleteName)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("familyHome.athleteLink.\(athleteId.rawValue.uuidString)")
@@ -406,10 +409,13 @@ public struct FamilyHomeContentView: View {
             }
         case .unplannedLogged(let athleteId, let athleteName, let loggedActivity):
             VStack(alignment: .leading, spacing: 4) {
-                Text(athleteName)
-                    .font(VoxtrTypography.metadata)
-                    .foregroundStyle(VoxtrColor.textSecondary)
-                    .accessibilityIdentifier("familyHome.athleteLabel.\(athleteId.rawValue.uuidString)")
+                HStack(spacing: 6) {
+                    athleteColorMarker(athleteId)
+                    Text(athleteName)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                }
+                .accessibilityIdentifier("familyHome.athleteLabel.\(athleteId.rawValue.uuidString)")
                 HStack {
                     VStack(alignment: .leading) {
                         Text(loggedActivity.title)
@@ -440,9 +446,12 @@ public struct FamilyHomeContentView: View {
     private func familyHomeRow(_ row: FamilyHomeRow) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             NavigationLink(value: FamilyHomeDestination.athlete(row.athleteId)) {
-                Text(row.athleteName)
-                    .font(VoxtrTypography.metadata)
-                    .foregroundStyle(VoxtrColor.textSecondary)
+                HStack(spacing: 6) {
+                    athleteColorMarker(row.athleteId)
+                    Text(row.athleteName)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                }
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("familyHome.athleteLink.\(row.athleteId.rawValue.uuidString)")
@@ -544,28 +553,27 @@ public struct FamilyHomeContentView: View {
     /// Settings and carries no edit/configuration action.
     ///
     /// Deliberately minimal for this first version: athlete name,
-    /// standard `NavigationLink` chevron, and — new in the Design
-    /// Foundation V0.1 round — a small Athlete Color identity marker
-    /// (a filled circle, never a card fill). No activity summary,
-    /// readiness/status, Sleep value, ranking, or badge; still nothing
-    /// beyond identity. See `VoxtrAthleteColor.forIndex(_:)`'s own doc
-    /// comment for why this assignment is deterministic-but-presentation-only
-    /// (no canonical persisted athlete colour exists to read instead).
-    /// `Array.enumerated()` supplies the colour index only — `ForEach`'s
-    /// own identity is still `athlete.athleteId` (via `id:`), unrelated
-    /// to index/colour, so row identity is unaffected by roster
-    /// reordering.
+    /// standard `NavigationLink` chevron, and a small Athlete Color
+    /// identity marker (a filled circle, never a card fill). No
+    /// activity summary, readiness/status, Sleep value, ranking, or
+    /// badge; still nothing beyond identity.
+    ///
+    /// Design Foundation V0.1 correction round: the marker colour now
+    /// comes from `VoxtrAthleteColor.forAthleteId(_:)` — derived
+    /// entirely from the athlete's own stable `AthleteId`, never this
+    /// list's position — see that method's own doc comment for why
+    /// (the previous, rejected version used list index, which could
+    /// silently change an athlete's own colour whenever the roster
+    /// changed elsewhere). `ForEach`'s identity (`id: \.athleteId`) was
+    /// always independent of colour and remains unchanged.
     @ViewBuilder
     private var athletesSection: some View {
         if !viewModel.activeAthletes.isEmpty {
             Section {
-                ForEach(Array(viewModel.activeAthletes.enumerated()), id: \.element.athleteId) { index, athlete in
+                ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
                     NavigationLink(value: FamilyHomeDestination.athlete(athlete.athleteId)) {
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(VoxtrAthleteColor.forIndex(index).color)
-                                .frame(width: 10, height: 10)
-                                .accessibilityHidden(true)
+                        HStack(spacing: 8) {
+                            athleteColorMarker(athlete.athleteId)
                             Text(athlete.givenName)
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
@@ -581,6 +589,25 @@ public struct FamilyHomeContentView: View {
         }
     }
 
+    /// Design Foundation V0.1 correction round: the ONE small colour
+    /// marker every athlete-specific row on this shared, multi-athlete
+    /// screen now prepends before the athlete's own name — Now/Next and
+    /// Today's Schedule/Tomorrow's activity rows, Sleep rows, Focus
+    /// this week rows, and the Athletes section itself. Applied only to
+    /// rows that are genuinely athlete-specific (never the "View
+    /// upcoming schedule" link, an error message, or a section
+    /// heading). Identity only, per `VoxtrAthleteColor`'s own doc
+    /// comment: never a fill behind text, never implying performance/
+    /// readiness/warning/completion/ranking. Every call site keeps its
+    /// own existing athlete-name `Text` exactly as it already was —
+    /// this only adds the marker glyph beside it.
+    private func athleteColorMarker(_ athleteId: AthleteId) -> some View {
+        Circle()
+            .fill(VoxtrAthleteColor.forAthleteId(athleteId).color)
+            .frame(width: 8, height: 8)
+            .accessibilityHidden(true)
+    }
+
     @ViewBuilder
     private var focusThisWeekSection: some View {
         // Parent Home UX / Content Contract: shows nothing at all when
@@ -592,9 +619,12 @@ public struct FamilyHomeContentView: View {
             Section {
                 ForEach(viewModel.focusThisWeek) { item in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.athleteName)
-                            .font(VoxtrTypography.metadata)
-                            .foregroundStyle(VoxtrColor.textSecondary)
+                        HStack(spacing: 6) {
+                            athleteColorMarker(item.athleteId)
+                            Text(item.athleteName)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
+                        }
                         Text(item.focus)
                             .font(VoxtrTypography.body)
                             .foregroundStyle(VoxtrColor.textPrimary)
@@ -638,9 +668,12 @@ public struct FamilyHomeContentView: View {
                 ForEach(viewModel.sleepSummaries) { summary in
                     NavigationLink(value: FamilyHomeDestination.sleepHistory(summary.athleteId)) {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(summary.athleteName)
-                                .font(VoxtrTypography.metadata)
-                                .foregroundStyle(VoxtrColor.textSecondary)
+                            HStack(spacing: 6) {
+                                athleteColorMarker(summary.athleteId)
+                                Text(summary.athleteName)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
+                            }
                             if let sleepQuality = summary.sleepQuality {
                                 Text("\(sleepQuality)/5")
                                     .font(VoxtrTypography.value)
