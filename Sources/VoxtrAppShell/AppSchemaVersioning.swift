@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import VoxtrCore
+import VoxtrCoreContracts
 import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrPlanningDomain
@@ -109,11 +110,45 @@ public enum AppCurrentSchema: VersionedSchema {
 /// version; now FROZEN following this file's own "HOW TO ADD A NEW
 /// VERSION" recipe below, since `AppSchemaV3` (Design Foundation V0.1
 /// Athlete Color round) is now the latest. `models` is the exact
-/// 17-entity shape every build shipped under "2.0.0" before that round
-/// — copied verbatim from `AppSchema.modelTypes` at the moment of
-/// freezing, per the same reasoning `AppCurrentSchema`'s own doc comment
-/// gives for why a fixed version identity must keep meaning a fixed
-/// shape.
+/// 17-entity shape every build shipped under "2.0.0" before that round.
+///
+/// CODEMAGIC FIX (Athlete Color round follow-up) — root cause of
+/// "Duplicate version checksums detected.": freezing `models` to a
+/// hardcoded literal ARRAY (as done here and for `AppCurrentSchema`)
+/// only freezes WHICH TYPES are listed — it does NOT freeze the
+/// per-type field SHAPE of a type that is still referenced by its
+/// live, current declaration. `AthleteSettings.self` below used to
+/// mean the same thing here as in `AppSchemaV3.self`, but the Athlete
+/// Color round added `AthleteSettings.preferredColor` to the ONE, live
+/// `VoxtrAthleteDomain.AthleteSettings` class — so V2's `models` and
+/// V3's `models` ended up pointing at the literal SAME compiled type,
+/// including the field V2 must NOT have. SwiftData computes each
+/// `VersionedSchema`'s checksum from its entities' actual persisted
+/// shape, not from the array literal or the `versionIdentifier`
+/// string — so V2 and V3 hashed identically, and `ModelContainer`
+/// throws validating the shared `AppSchemaMigrationPlan` (surfacing
+/// inside whichever test/call site constructs a container against it
+/// first — `existingV1StoreMigratesToV2Successfully` in Codemagic,
+/// even though the actual mismatch is V2-vs-V3, not V1-vs-V2).
+///
+/// Fix: `AthleteSettings` below is this enum's OWN nested, frozen copy
+/// — the genuine V2-era shape, WITHOUT `preferredColor` — following
+/// SwiftData's own documented `VersionedSchema` convention (Apple's
+/// migration guidance nests a frozen model type per version inside
+/// that version's own `VersionedSchema` enum; SwiftData matches it to
+/// later versions' same-named entity for migration purposes by its
+/// unqualified type name, not by Swift-level identity). This is
+/// deliberately narrow, unlike this file's own deleted
+/// `LegacySchemaTypes.swift` history (five fully-duplicated legacy
+/// entities across six versions, top-level and not namespaced under
+/// their own version): exactly ONE entity is frozen here, because
+/// `AthleteSettings` is the ONLY entity whose actual field shape
+/// diverges between V2 and V3, it is nested inside this enum (not a
+/// separate top-level file/type), and it is referenced ONLY from this
+/// `models` array — never by `AppSchema.modelTypes` (the live app's
+/// own current schema), any repository, service, or UI. Every other
+/// entity below is still the same live top-level type V1/V3 also use,
+/// unchanged, since none of them diverge in shape.
 public enum AppSchemaV2: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(2, 0, 0)
@@ -139,6 +174,64 @@ public enum AppSchemaV2: VersionedSchema {
             DailyStatus.self,
             AthleteSettings.self,
         ]
+    }
+
+    /// FROZEN — the genuine V2-era shape of `AthleteSettings`, the
+    /// exact field list Sleep V1 shipped with, before the Athlete
+    /// Color round added `preferredColor` to the live type in
+    /// `VoxtrAthleteDomain`. Do not add `preferredColor` (or any other
+    /// field the live type gains later) here — doing so would
+    /// silently recreate this exact checksum collision. This type
+    /// exists ONLY to give `AppSchemaV2.models` above an accurate
+    /// historical shape for migration purposes; nothing in this
+    /// codebase's live repositories/services/UI may construct or read
+    /// it — see `AthleteRepository`/`SleepCoordinationService` for the
+    /// real, live, current `AthleteSettings`.
+    @Model
+    public final class AthleteSettings {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var weekStartsOn: Int
+        public var defaultReflectionVisibility: VisibilityPolicy
+        public var preferredUnits: String
+        public var morningBriefEnabled: Bool
+        public var eveningCheckOutEnabled: Bool
+        public var weeklyReviewDay: Int
+        public var weeklyReviewLocalTime: LocalTime?
+        public var sleepTrackingEnabled: Bool
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            weekStartsOn: Int = Weekday.monday.rawValue,
+            defaultReflectionVisibility: VisibilityPolicy = .sharedWithGuardians,
+            preferredUnits: String = "metric",
+            morningBriefEnabled: Bool = false,
+            eveningCheckOutEnabled: Bool = false,
+            weeklyReviewDay: Int = Weekday.sunday.rawValue,
+            weeklyReviewLocalTime: LocalTime? = nil,
+            sleepTrackingEnabled: Bool = true,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.weekStartsOn = weekStartsOn
+            self.defaultReflectionVisibility = defaultReflectionVisibility
+            self.preferredUnits = preferredUnits
+            self.morningBriefEnabled = morningBriefEnabled
+            self.eveningCheckOutEnabled = eveningCheckOutEnabled
+            self.weeklyReviewDay = weeklyReviewDay
+            self.weeklyReviewLocalTime = weeklyReviewLocalTime
+            self.sleepTrackingEnabled = sleepTrackingEnabled
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
     }
 }
 
