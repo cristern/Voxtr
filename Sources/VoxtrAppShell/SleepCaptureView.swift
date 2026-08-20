@@ -30,12 +30,14 @@ public struct SleepCaptureView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("sleepCapture.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
             Section {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                 LabeledContent("Date", value: viewModel.localDate.isoString)
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("sleepCapture.context")
 
             // Product contract: "How did you sleep?" / "Sleep score:
@@ -43,7 +45,7 @@ public struct SleepCaptureView: View {
             // readiness language, no color-coding. Same neutral 1-5
             // Picker shape LogActivityView already establishes for
             // Session Form.
-            Section("How did you sleep?") {
+            Section {
                 Picker("Sleep score", selection: $viewModel.sleepQuality) {
                     ForEach(1...5, id: \.self) { value in
                         Text("\(value)").tag(value)
@@ -51,8 +53,13 @@ public struct SleepCaptureView: View {
                 }
                 .pickerStyle(.segmented)
                 .accessibilityIdentifier("sleepCapture.sleepQualityPicker")
+            } header: {
+                VoxtrSectionHeading("How did you sleep?")
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Sleep")
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {

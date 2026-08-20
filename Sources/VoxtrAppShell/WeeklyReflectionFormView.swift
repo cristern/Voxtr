@@ -44,6 +44,7 @@ public struct WeeklyReflectionFormView: View {
                     referenceWeekStart: WeeklyPlanningViewModel.currentWeekStart()
                 )
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("weeklyReflectionForm.weekIdentity")
 
             if let errorMessage = viewModel.errorMessage {
@@ -52,9 +53,10 @@ public struct WeeklyReflectionFormView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("weeklyReflectionForm.errorMessage")
                 }
+                .voxtrRowSurface()
             }
 
-            Section("How did the week feel?") {
+            Section {
                 Picker("Overall satisfaction", selection: $viewModel.overallSatisfaction) {
                     Text("Not set").tag(Int?.none)
                     ForEach(1...5, id: \.self) { value in
@@ -70,25 +72,45 @@ public struct WeeklyReflectionFormView: View {
                     }
                 }
                 .accessibilityIdentifier("weeklyReflectionForm.loadFeltPicker")
+            } header: {
+                VoxtrSectionHeading("How did the week feel?")
             }
+            .voxtrRowSurface()
 
-            Section("What worked") {
+            Section {
                 TextField("What worked well this week", text: $viewModel.whatWorked, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.whatWorkedField")
+            } header: {
+                VoxtrSectionHeading("What worked")
             }
-            Section("What was difficult") {
+            .voxtrRowSurface()
+
+            Section {
                 TextField("What was difficult this week", text: $viewModel.whatWasDifficult, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.whatWasDifficultField")
+            } header: {
+                VoxtrSectionHeading("What was difficult")
             }
-            Section("Learning") {
+            .voxtrRowSurface()
+
+            Section {
                 TextField("What did you learn", text: $viewModel.learning, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.learningField")
+            } header: {
+                VoxtrSectionHeading("Learning")
             }
-            Section("Focus next week") {
+            .voxtrRowSurface()
+
+            Section {
                 TextField("What would you like to carry forward into next week?", text: $viewModel.nextWeekConsideration, axis: .vertical)
                     .accessibilityIdentifier("weeklyReflectionForm.nextWeekField")
+            } header: {
+                VoxtrSectionHeading("Focus next week")
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle(viewModel.isEditing ? "\(viewModel.athleteDisplayName) · Edit Reflection" : "\(viewModel.athleteDisplayName) · New Reflection")
         .onAppear {
             viewModel.onSaved = { dismiss() }

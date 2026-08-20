@@ -108,12 +108,12 @@ public struct WeekIdentityView: View {
         VStack(alignment: .center, spacing: 2) {
             Text(WeekIdentityFormatter.stableIdentityLabel(forWeekStart: weekStart))
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(VoxtrColor.textSecondary)
                 .accessibilityIdentifier("weekIdentity.label")
             if let context = WeekIdentityFormatter.contextualLabel(for: weekStart, referenceWeekStart: referenceWeekStart) {
                 Text(context)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                    .font(VoxtrTypography.caption)
+                    .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("weekIdentity.contextBadge")
             }
         }

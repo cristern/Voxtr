@@ -35,6 +35,7 @@ public struct SleepHistoryView: View {
                 Section {
                     Text(errorMessage).foregroundStyle(.red)
                 }
+                .voxtrRowSurface()
             }
             ForEach(viewModel.rows) { row in
                 NavigationLink {
@@ -49,25 +50,33 @@ public struct SleepHistoryView: View {
                 } label: {
                     HStack {
                         Text(SleepHistoryDateFormatter.label(for: row.localDate, today: today))
+                            .font(VoxtrTypography.body)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         Spacer()
                         if let sleepQuality = row.sleepQuality {
                             Text("\(sleepQuality)/5")
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         } else {
                             Text("Not logged")
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                     }
                 }
                 .accessibilityIdentifier("sleepHistory.row.\(row.id)")
+                .voxtrRowSurface()
             }
             if viewModel.canLoadMore {
                 Button("Load more") {
                     viewModel.loadMore()
                 }
                 .accessibilityIdentifier("sleepHistory.loadMoreButton")
+                .voxtrRowSurface()
             }
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Sleep History")
         .onAppear {
             if viewModel.rows.isEmpty {
