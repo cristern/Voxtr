@@ -6,6 +6,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -58,16 +59,19 @@ public final class CompositionRoot {
     /// investigation and why a live-passthrough `AppCurrentSchema` was
     /// not actually safe for a model-type addition. Design Foundation
     /// V0.1 (Athlete Color canonical preference round): `AppSchemaV2` is
-    /// now itself FROZEN and this default targets `AppSchemaV3`
+    /// now itself FROZEN and this default targeted `AppSchemaV3`
     /// ("3.0.0", same 17 entities — adds
-    /// `AthleteSettings.preferredColor: AthleteColor?`), the current
-    /// genuine version. This parameter must be updated at every future
-    /// schema version bump; see that same file's own "HOW TO ADD A NEW
-    /// VERSION" instructions — missing this exact step is the
-    /// documented root cause of the V1-V6 history above.
+    /// `AthleteSettings.preferredColor: AthleteColor?`). Sport / Activity
+    /// Identity domain foundation round: `AppSchemaV3` is now itself
+    /// FROZEN and this default targets `AppSchemaV4` ("4.0.0", 18
+    /// entities — activates `Sport.self`), the current genuine version.
+    /// This parameter must be updated at every future schema version
+    /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
+    /// instructions — missing this exact step is the documented root
+    /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV3.self,
+            versionedSchema: AppSchemaV4.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
@@ -80,6 +84,19 @@ public final class CompositionRoot {
         container.register(FeatureFlagProviding.self) { featureFlags }
 
         let modelContainer = try persistence.makeModelContainer()
+
+        // Sport / Activity Identity domain foundation, Part 1/2:
+        // `VoxtrCoreReferenceData` owns Sport truth and is not part of
+        // the `VoxtrModule`/`ModuleRegistry` system (that system is
+        // scoped to `*Domain` targets only — see `ModuleRegistry.swift`),
+        // so `SportRepository` is constructed and registered directly
+        // here, same as any other cross-cutting Core dependency. Seeding
+        // is idempotent (matched by `canonicalKey`) and safe to call on
+        // every launch, so it always runs unconditionally rather than
+        // being gated behind a first-run check.
+        let sportRepository = SportRepository(modelContext: modelContainer.mainContext)
+        try sportRepository.seedCanonicalSportsIfNeeded()
+        container.register(SportRepository.self) { sportRepository }
 
         for module in ModuleRegistry.allModules() {
             await module.configure(container: container, eventBus: eventBus, modelContainer: modelContainer)

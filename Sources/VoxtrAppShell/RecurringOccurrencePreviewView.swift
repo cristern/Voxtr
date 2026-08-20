@@ -104,7 +104,7 @@ public struct RecurringOccurrencePreviewView: View {
 
             Section {
                 LabeledContent("Athlete", value: athleteDisplayName)
-                LabeledContent("Activity", value: suggestion.title)
+                LabeledContent("Activity", value: suggestion.title ?? "")
                 LabeledContent("Date", value: suggestion.occurrenceDate.isoString)
                 if let startTime = suggestion.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))

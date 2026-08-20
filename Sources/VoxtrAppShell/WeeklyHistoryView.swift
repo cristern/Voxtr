@@ -82,7 +82,7 @@ public struct WeeklyHistoryView: View {
                 Section {
                     ForEach(plannedActivities, id: \.plannedActivity.id) { completion in
                         HStack {
-                            Text(completion.plannedActivity.title)
+                            Text(completion.plannedActivity.title ?? "")
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
@@ -111,7 +111,7 @@ public struct WeeklyHistoryView: View {
             if !viewModel.additionalLoggedActivities.isEmpty {
                 Section {
                     ForEach(viewModel.additionalLoggedActivities, id: \.id) { logged in
-                        Text(logged.title)
+                        Text(logged.title ?? "")
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                     }

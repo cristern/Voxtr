@@ -98,7 +98,7 @@ public struct WeeklyPlanningView: View {
                 Section {
                     ForEach(viewModel.recurringSuggestions) { suggestion in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(suggestion.title)
+                            Text(suggestion.title ?? "")
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.suggestionSubtitle(for: suggestion))
@@ -138,7 +138,7 @@ public struct WeeklyPlanningView: View {
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(activity.title)
+                            Text(activity.title ?? "")
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.rowSubtitle(for: activity))
@@ -277,7 +277,8 @@ public struct WeeklyPlanningView: View {
             Text("Match").tag(ActivityType.match)
             Text("Competition").tag(ActivityType.competition)
             Text("Individual training").tag(ActivityType.individualTraining)
-            Text("Physical training").tag(ActivityType.physicalTraining)
+            Text("Strength").tag(ActivityType.strength)
+            Text("Conditioning").tag(ActivityType.conditioning)
             Text("Recovery").tag(ActivityType.recovery)
             Text("Test").tag(ActivityType.test)
             Text("Other").tag(ActivityType.other)
@@ -416,7 +417,7 @@ struct RecurringActivityManagementView: View {
                     VStack(alignment: .leading) {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(recurringActivity.title)
+                                Text(recurringActivity.title ?? "")
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
@@ -524,7 +525,8 @@ struct RecurringActivityFormView: View {
                         Text("Match").tag(ActivityType.match)
                         Text("Competition").tag(ActivityType.competition)
                         Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Physical training").tag(ActivityType.physicalTraining)
+                        Text("Strength").tag(ActivityType.strength)
+                        Text("Conditioning").tag(ActivityType.conditioning)
                         Text("Recovery").tag(ActivityType.recovery)
                         Text("Test").tag(ActivityType.test)
                         Text("Other").tag(ActivityType.other)

@@ -7,6 +7,8 @@ import VoxtrCoreContracts
 import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrReflectionDomain
+import VoxtrPlanningDomain
+import VoxtrCoreReferenceData
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -43,12 +45,13 @@ struct PersistenceRecoveryTests {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("fresh-install-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
         // VX-023 review follow-up, updated for Design Foundation V0.1
-        // (Athlete Color canonical preference round): a genuine fresh
-        // install now targets AppSchemaV3 (CompositionRoot.build's real
+        // (Athlete Color canonical preference round), updated again for
+        // Sport / Activity Identity domain foundation: a genuine fresh
+        // install now targets AppSchemaV4 (CompositionRoot.build's real
         // default) — no migration stage runs at all for a brand-new
         // store; it's simply created directly under the current
         // version.
-        let schema = Schema(versionedSchema: AppSchemaV3.self)
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
 
         var athleteIds: [UUID] = []
         var workspaceId: WorkspaceId
@@ -131,9 +134,13 @@ struct PersistenceRecoveryTests {
         // updated again to AppSchemaV3, the real current version after
         // that round's bump — the V2→V3 migration case is covered
         // separately by existingV2StoreMigratesToV3Successfully below.
+        // Sport / Activity Identity domain foundation: updated again to
+        // AppSchemaV4, the real current version after that round's own
+        // bump — the V3→V4 migration case is covered separately by
+        // existingV3StoreMigratesToV4Successfully below.
         let storeURL = URL.temporaryDirectory.appendingPathComponent("restart-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppSchemaV3.self)
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
 
         do {
             let firstContainer = try ModelContainer(
@@ -176,9 +183,10 @@ struct PersistenceRecoveryTests {
         // investigation. Design Foundation V0.1 (Athlete Color
         // canonical preference round): updated to AppSchemaV3, matching
         // CompositionRoot.build's own real default after that round's
-        // version bump.
+        // version bump. Sport / Activity Identity domain foundation:
+        // updated again to AppSchemaV4, matching that round's own bump.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV3.self,
+            versionedSchema: AppSchemaV4.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -344,6 +352,90 @@ struct PersistenceRecoveryTests {
         // new field's write reused the migrated row, never created a
         // second one.
         #expect(try v3Container.mainContext.fetch(FetchDescriptor<AthleteSettings>()).count == 1)
+    }
+
+    /// Sport / Activity Identity domain foundation, Part 8 (historical
+    /// data): simulates the scenario every existing TestFlight install
+    /// hits after updating to a build containing this round — a store
+    /// already on disk under the OLD, now-frozen V3 schema, holding a
+    /// `PlannedActivity` written under the PRE-this-round contract
+    /// (title was mandatory 1-120 characters, `Sport` was never
+    /// persisted at all). Confirms: the existing name-only record reads
+    /// back completely unchanged (never backfilled with a Sport, never
+    /// touched), and the new `Sport` table genuinely exists and is
+    /// usable against the migrated store (proves the `.lightweight`
+    /// stage actually created it, not merely that the container
+    /// opened).
+    @Test("A store created under AppSchemaV3 (17 entities, no Sport table) reopens successfully under AppSchemaV4 via the lightweight migration stage — the existing name-only PlannedActivity survives untouched with no Sport ever inferred from its title, and the new Sport table is genuinely usable against the migrated store")
+    @MainActor
+    func existingV3StoreMigratesToV4Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v3-to-v4-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v3Schema = Schema(versionedSchema: AppSchemaV3.self)
+        var athleteRawId: UUID
+        var plannedActivityRawId: UUID
+        do {
+            let v3Container = try ModelContainer(
+                for: v3Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v3Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v3Container.mainContext.insert(athlete)
+            try v3Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            // A genuine pre-this-round record: mandatory title, no
+            // Sport — exactly what every Internal Alpha record already
+            // looks like (see this round's audit findings).
+            let planningRepository = PlanningRepository(modelContext: v3Container.mainContext)
+            let weekPlan = try planningRepository.insertWeekPlan(
+                athleteId: AthleteId(rawValue: athleteRawId),
+                weekStart: LocalDate(year: 2026, month: 8, day: 17)
+            )
+            let plannedActivity = try planningRepository.insertPlannedActivity(
+                weekPlanId: weekPlan.weekPlanId,
+                athleteId: AthleteId(rawValue: athleteRawId),
+                activityType: .teamTraining,
+                title: "Football practice",
+                localDate: LocalDate(year: 2026, month: 8, day: 18),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            plannedActivityRawId = plannedActivity.id
+            // No Sport table exists at all under V3 — nothing to seed.
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V4) — the real production default
+        // (CompositionRoot.build's own `versionedSchema: AppSchemaV4.self`).
+        let v4Schema = Schema(versionedSchema: AppSchemaV4.self)
+        let v4Container = try ModelContainer(
+            for: v4Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v4Schema, url: storeURL)]
+        )
+
+        // The pre-existing name-only PlannedActivity survived completely
+        // untouched: same id, same title, no Sport ever backfilled from
+        // it.
+        let migratedActivity = try v4Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Football practice")
+        #expect(migratedActivity?.sportId == nil)
+
+        // The new Sport table is genuinely usable against the migrated
+        // store — proves the lightweight stage actually created it, not
+        // merely that the container opened without throwing.
+        let sportRepository = SportRepository(modelContext: v4Container.mainContext)
+        let seeded = try sportRepository.seedCanonicalSportsIfNeeded()
+        #expect(seeded.count == 3)
+        #expect(try sportRepository.fetchAllSports().count == 3)
     }
 
     /// Codemagic checksum fix, requirement 2: an existing install still

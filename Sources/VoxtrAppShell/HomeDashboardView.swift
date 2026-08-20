@@ -557,7 +557,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.activity(rowId: familyHomeRow.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(familyHomeRow.plannedActivity.title)
+                        Text(familyHomeRow.plannedActivity.title ?? "")
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = familyHomeRow.plannedActivity.location, !location.isEmpty {
@@ -590,7 +590,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.recurringOccurrence(id: suggestion.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(suggestion.title)
+                        Text(suggestion.title ?? "")
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = suggestion.location, !location.isEmpty {
@@ -609,7 +609,7 @@ public struct HomeDashboardView: View {
         case .unplannedLogged(_, _, let loggedActivity):
             HStack {
                 VStack(alignment: .leading) {
-                    Text(loggedActivity.title)
+                    Text(loggedActivity.title ?? "")
                         .font(VoxtrTypography.cardTitle)
                         .foregroundStyle(VoxtrColor.textPrimary)
                     Text("Unplanned · Logged")

@@ -12,9 +12,32 @@ public enum DevelopmentStage: String, Codable, Sendable, CaseIterable {
     case parentLed, sharedOwnership, guidedIndependence, athleteLed
 }
 
+/// Sport / Activity Identity domain foundation round: `physicalTraining`
+/// was replaced with `strength`/`conditioning` — Statistics needs these
+/// independently queryable, and the single broad case could not express
+/// that. This is a genuine, intentional raw-value change (not additive):
+/// any already-persisted row whose stored `activityType` raw string is
+/// still `"physicalTraining"` will fail to decode after this change.
+/// Repository evidence (existing test fixtures/usage before this round)
+/// showed no consistent, recoverable signal for which of the two new
+/// cases any given historical `physicalTraining` activity actually
+/// meant — one fixture used it for "Strength," another for "Wednesday
+/// gym" (which could equally mean conditioning) — so no deterministic
+/// or "neutral default" auto-migration was written; inventing one would
+/// silently misclassify some activities as a category their user never
+/// chose. Per this codebase's own established Internal Alpha policy for
+/// genuine field/enum reshapes with no production data at stake (see
+/// `RecurringPlannedActivity.weekdays`'s own doc comment for the
+/// identical precedent), this is documented as an explicit, accepted
+/// Internal Alpha limitation rather than a fuzzy-mapped migration: any
+/// existing local/TestFlight store containing a `physicalTraining`-typed
+/// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity` row
+/// needs a fresh install/store reset to pick this up cleanly. This must
+/// be revisited with a real, explicit user-facing correction flow before
+/// genuine production data exists.
 public enum ActivityType: String, Codable, Sendable, CaseIterable {
     case teamTraining, match, competition, individualTraining
-    case physicalTraining, recovery, test, other
+    case strength, conditioning, recovery, test, other
 }
 
 public enum ActivityStatus: String, Codable, Sendable, CaseIterable {

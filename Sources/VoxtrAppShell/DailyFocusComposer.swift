@@ -45,7 +45,7 @@ public struct DailyFocusComposer: Sendable {
     ) -> DailyFocusPresentation? {
         if let incomplete = todaysActivities?.first(where: { !$0.isCompleted }) {
             return DailyFocusPresentation(
-                title: incomplete.plannedActivity.title,
+                title: incomplete.plannedActivity.title ?? "",
                 subtitle: TrainingStrings.notCompletedLabel,
                 action: .none,
                 source: .todaysTraining

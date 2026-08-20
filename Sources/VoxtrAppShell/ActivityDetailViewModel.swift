@@ -209,7 +209,7 @@ public final class ActivityDetailViewModel {
     }
 
     public func prefillEditForm() {
-        editTitle = activity.title
+        editTitle = activity.title ?? ""
         editDate = Self.date(from: activity.localDate)
         editActivityType = activity.activityType
         if let startTime = activity.startLocalTime {

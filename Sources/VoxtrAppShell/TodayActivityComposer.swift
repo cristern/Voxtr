@@ -50,11 +50,18 @@ public enum TodayActivityRow: Identifiable {
         }
     }
 
+    /// Sport / Activity Identity domain foundation: Activity Name is now
+    /// optional on the underlying entities — this row's own `title`
+    /// stays non-optional `String` (a compile-safe presentation
+    /// fallback only, never a fabricated name) so every existing
+    /// consumer of this shared row type is unaffected. The canonical
+    /// Sport/Activity Name display resolver is explicitly out of scope
+    /// this round (see `ActivityIdentity.swift`).
     public var title: String {
         switch self {
-        case .planned(let row): return row.plannedActivity.title
-        case .recurringOccurrence(_, _, let suggestion): return suggestion.title
-        case .unplannedLogged(_, _, let loggedActivity): return loggedActivity.title
+        case .planned(let row): return row.plannedActivity.title ?? ""
+        case .recurringOccurrence(_, _, let suggestion): return suggestion.title ?? ""
+        case .unplannedLogged(_, _, let loggedActivity): return loggedActivity.title ?? ""
         }
     }
 

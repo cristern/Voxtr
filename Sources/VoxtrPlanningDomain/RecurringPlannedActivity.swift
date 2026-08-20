@@ -20,7 +20,11 @@ import VoxtrCoreContracts
 public final class RecurringPlannedActivity {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
-    public var title: String
+    /// Sport / Activity Identity domain foundation: optional, same
+    /// representation and same canonical invariant as
+    /// `PlannedActivity.title` — see that property's own doc comment
+    /// and `ActivityIdentity.swift`.
+    public var title: String?
     public var activityType: ActivityType
     public var sportId: UUID?
     public var categoryIds: [UUID]
@@ -69,7 +73,7 @@ public final class RecurringPlannedActivity {
     public init(
         id: RecurringPlannedActivityId = RecurringPlannedActivityId(),
         athleteId: AthleteId,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -85,7 +89,14 @@ public final class RecurringPlannedActivity {
         updatedAt: Date = .now,
         schemaVersion: Int = 1
     ) {
-        precondition((1...120).contains(title.count), "title must be 1-120 characters, matching PlannedActivity's own bound")
+        let normalizedTitle = ActivityIdentity.normalizedName(title)
+        if let normalizedTitle {
+            precondition(normalizedTitle.count <= 120, "title must be at most 120 characters, matching PlannedActivity's own bound")
+        }
+        precondition(
+            ActivityIdentity.isValid(normalizedName: normalizedTitle, sportId: sportId),
+            "RecurringPlannedActivity requires a non-blank title or a sportId (Sport / Activity Identity round)"
+        )
         if let duration = plannedDurationMinutes {
             precondition((1...1440).contains(duration), "plannedDurationMinutes must be 1-1440, matching PlannedActivity's own bound")
         }
@@ -96,7 +107,7 @@ public final class RecurringPlannedActivity {
         }
         self.id = id.rawValue
         self.athleteId = athleteId.rawValue
-        self.title = title
+        self.title = normalizedTitle
         self.activityType = activityType
         self.sportId = sportId?.rawValue
         self.categoryIds = categoryIds.map(\.rawValue)
@@ -178,7 +189,9 @@ public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
     public let recurringPlannedActivityId: RecurringPlannedActivityId
     public let athleteId: AthleteId
     public let occurrenceDate: LocalDate
-    public let title: String
+    /// Optional, same representation as `RecurringPlannedActivity.title`
+    /// it's projected from — see that property's own doc comment.
+    public let title: String?
     public let activityType: ActivityType
     public let sportId: SportId?
     public let categoryIds: [ActivityCategoryId]
@@ -194,7 +207,7 @@ public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
         recurringPlannedActivityId: RecurringPlannedActivityId,
         athleteId: AthleteId,
         occurrenceDate: LocalDate,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId?,
         categoryIds: [ActivityCategoryId],

@@ -1,5 +1,7 @@
 import Testing
 import Foundation
+import SwiftData
+import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
@@ -52,6 +54,44 @@ struct PlanningDomainModelTests {
         #expect(activity.plannedDurationMinutes == nil)
     }
 
+    /// Sport / Activity Identity domain foundation, Part 3/4: Sport-only
+    /// (no Activity Name) is a valid identity — `title` is optional, and
+    /// `sportId` alone satisfies `ActivityIdentity`'s canonical rule.
+    @Test("PlannedActivity may be Sport-only, with no title at all")
+    func plannedActivitySportOnlyIsValid() {
+        let sportId = SportId()
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(),
+            athleteId: AthleteId(),
+            sportId: sportId,
+            activityType: .teamTraining,
+            title: nil,
+            localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        #expect(activity.title == nil)
+        #expect(activity.sportId == sportId.rawValue)
+    }
+
+    /// Whitespace-only input is treated as absent (the same rule
+    /// `ActivityIdentity.normalizedName` enforces) — a whitespace-only
+    /// title with a Sport present is still valid (Sport alone satisfies
+    /// identity), and the stored title is normalized to `nil`, never
+    /// persisted as a blank string.
+    @Test("A whitespace-only title normalizes to nil when a Sport is present")
+    func plannedActivityWhitespaceOnlyTitleNormalizesToNil() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(),
+            athleteId: AthleteId(),
+            sportId: SportId(),
+            activityType: .teamTraining,
+            title: "   ",
+            localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        #expect(activity.title == nil)
+    }
+
     @Test("PlanningDecision requires resultingRevision exactly when accepted")
     func planningDecisionAcceptedInvariant() {
         let decision = PlanningDecision(
@@ -84,6 +124,191 @@ struct TrainingDomainModelTests {
             source: "planned"
         )
         #expect(logged.plannedActivityId == plannedId.rawValue)
+    }
+
+    /// Sport / Activity Identity domain foundation, Part 7: the domain
+    /// model must support a Sport-only `LoggedActivity` (no Activity
+    /// Name at all) — future unplanned logging/External Sources must be
+    /// able to supply `SportId` directly without a title heuristic.
+    @Test("LoggedActivity may be Sport-only, with no title at all")
+    func loggedActivitySportOnlyIsValid() {
+        let sportId = SportId()
+        let logged = LoggedActivity(
+            athleteId: AthleteId(),
+            sportId: sportId,
+            activityType: .individualTraining,
+            title: nil,
+            startedAt: .now,
+            durationMinutes: 45,
+            status: .completed,
+            source: "manual"
+        )
+        #expect(logged.title == nil)
+        #expect(logged.sportId == sportId.rawValue)
+    }
+
+    /// ActivityType migration: `strength`/`conditioning` are real,
+    /// independently persistable cases replacing `physicalTraining` —
+    /// round-trips through `LoggedActivity` exactly like every other
+    /// case.
+    @Test("LoggedActivity persists the new strength and conditioning ActivityType cases")
+    func loggedActivityStrengthAndConditioningCases() {
+        let strength = LoggedActivity(
+            athleteId: AthleteId(), activityType: .strength, title: "Gym",
+            startedAt: .now, durationMinutes: 60, status: .completed, source: "manual"
+        )
+        let conditioning = LoggedActivity(
+            athleteId: AthleteId(), activityType: .conditioning, title: "Track",
+            startedAt: .now, durationMinutes: 30, status: .completed, source: "manual"
+        )
+        #expect(strength.activityType == .strength)
+        #expect(conditioning.activityType == .conditioning)
+    }
+
+    /// ActivityType migration: `physicalTraining` was removed, not kept
+    /// as a deprecated alias — proves the raw-value change is genuine at
+    /// the type level. Any already-persisted row whose stored raw
+    /// string is still `"physicalTraining"` fails to decode, exactly as
+    /// documented on `ActivityType`'s own doc comment (an accepted,
+    /// explicit Internal Alpha limitation — no fuzzy auto-migration to
+    /// `strength` or `conditioning` was written, since neither can be
+    /// proven correct for an arbitrary historical row).
+    @Test("ActivityType no longer has a physicalTraining case — the old raw value fails to decode")
+    func physicalTrainingRawValueNoLongerDecodes() {
+        #expect(ActivityType(rawValue: "physicalTraining") == nil)
+        #expect(ActivityType(rawValue: "strength") == .strength)
+        #expect(ActivityType(rawValue: "conditioning") == .conditioning)
+    }
+}
+
+/// Sport / Activity Identity domain foundation: the ONE canonical
+/// validation rule every activity-shaped mutation boundary shares. Pure
+/// function tests — no persistence needed.
+@Suite("ActivityIdentity canonical validation")
+struct ActivityIdentityTests {
+    @Test("A non-blank name alone is valid")
+    func nameAloneIsValid() {
+        #expect(ActivityIdentity.isValid(normalizedName: "Football practice", sportId: nil))
+    }
+
+    @Test("A Sport alone, with no name, is valid")
+    func sportAloneIsValid() {
+        #expect(ActivityIdentity.isValid(normalizedName: nil, sportId: SportId()))
+    }
+
+    @Test("Both a name and a Sport together are valid")
+    func bothIsValid() {
+        #expect(ActivityIdentity.isValid(normalizedName: "Football practice", sportId: SportId()))
+    }
+
+    @Test("Neither a name nor a Sport is invalid")
+    func neitherIsInvalid() {
+        #expect(!ActivityIdentity.isValid(normalizedName: nil, sportId: nil))
+    }
+
+    @Test("Whitespace-only name normalizes to nil, and with no Sport is invalid")
+    func whitespaceOnlyNameWithNoSportIsInvalid() {
+        #expect(ActivityIdentity.normalizedName("   ") == nil)
+        #expect(!ActivityIdentity.isValid(normalizedName: ActivityIdentity.normalizedName("   "), sportId: nil))
+    }
+
+    @Test("normalizedName trims surrounding whitespace from a real name")
+    func normalizedNameTrimsWhitespace() {
+        #expect(ActivityIdentity.normalizedName("  Football practice  ") == "Football practice")
+    }
+
+    @Test("validate(name:sportId:) throws missingIdentity when neither is present")
+    func validateThrowsWhenBothAbsent() {
+        #expect(throws: ActivityIdentityError.missingIdentity) {
+            try ActivityIdentity.validate(name: nil, sportId: nil)
+        }
+        #expect(throws: ActivityIdentityError.missingIdentity) {
+            try ActivityIdentity.validate(name: "   ", sportId: nil)
+        }
+    }
+
+    @Test("validate(name:sportId:) succeeds when a name or a Sport (or both) is present")
+    func validateSucceedsWhenEitherIsPresent() throws {
+        try ActivityIdentity.validate(name: "Football practice", sportId: nil)
+        try ActivityIdentity.validate(name: nil, sportId: SportId())
+        try ActivityIdentity.validate(name: "Football practice", sportId: SportId())
+    }
+}
+
+/// Sport / Activity Identity domain foundation, Part 1/2: the
+/// previously-dormant canonical `Sport` model, now activated —
+/// persistence-backed via `SportRepository`.
+@Suite("Sport canonical reference data", .serialized)
+struct SportRepositoryTests {
+    @Test("Seeding populates exactly the bounded canonical set (Football, Hockey, Bandy)")
+    @MainActor
+    func seedsCanonicalSet() throws {
+        let controller = InMemoryPersistenceController(modelTypes: [Sport.self])
+        let container = try controller.makeModelContainer()
+        let repository = SportRepository(modelContext: container.mainContext)
+
+        let seeded = try repository.seedCanonicalSportsIfNeeded()
+
+        #expect(seeded.count == 3)
+        #expect(Set(seeded.map(\.canonicalKey)) == ["football", "hockey", "bandy"])
+    }
+
+    @Test("Seeding twice never duplicates — idempotent by canonicalKey")
+    @MainActor
+    func seedingIsIdempotent() throws {
+        let controller = InMemoryPersistenceController(modelTypes: [Sport.self])
+        let container = try controller.makeModelContainer()
+        let repository = SportRepository(modelContext: container.mainContext)
+
+        try repository.seedCanonicalSportsIfNeeded()
+        let secondSeed = try repository.seedCanonicalSportsIfNeeded()
+
+        #expect(secondSeed.isEmpty)
+        #expect(try repository.fetchAllSports().count == 3)
+    }
+
+    @Test("fetchSport(byId:) resolves stable identity, never by displayNameKey")
+    @MainActor
+    func fetchByStableId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: [Sport.self])
+        let container = try controller.makeModelContainer()
+        let repository = SportRepository(modelContext: container.mainContext)
+        try repository.seedCanonicalSportsIfNeeded()
+
+        let all = try repository.fetchAllSports()
+        let football = try #require(all.first { $0.canonicalKey == "football" })
+
+        let resolved = try repository.fetchSport(byId: football.sportId)
+        #expect(resolved?.id == football.id)
+        #expect(resolved?.canonicalKey == "football")
+    }
+
+    @Test("Seeded Sport identity is deterministic across separate seed calls/containers, never randomly generated")
+    @MainActor
+    func seededIdentityIsDeterministic() throws {
+        let firstContainer = try InMemoryPersistenceController(modelTypes: [Sport.self]).makeModelContainer()
+        let firstRepository = SportRepository(modelContext: firstContainer.mainContext)
+        try firstRepository.seedCanonicalSportsIfNeeded()
+        let firstFootballId = try #require(try firstRepository.fetchAllSports().first { $0.canonicalKey == "football" }?.sportId)
+
+        let secondContainer = try InMemoryPersistenceController(modelTypes: [Sport.self]).makeModelContainer()
+        let secondRepository = SportRepository(modelContext: secondContainer.mainContext)
+        try secondRepository.seedCanonicalSportsIfNeeded()
+        let secondFootballId = try #require(try secondRepository.fetchAllSports().first { $0.canonicalKey == "football" }?.sportId)
+
+        #expect(firstFootballId == secondFootballId)
+    }
+
+    @Test("fetchAllSports is ordered deterministically by sortOrder")
+    @MainActor
+    func fetchAllSportsIsOrdered() throws {
+        let controller = InMemoryPersistenceController(modelTypes: [Sport.self])
+        let container = try controller.makeModelContainer()
+        let repository = SportRepository(modelContext: container.mainContext)
+        try repository.seedCanonicalSportsIfNeeded()
+
+        let all = try repository.fetchAllSports()
+        #expect(all.map(\.canonicalKey) == ["football", "hockey", "bandy"])
     }
 }
 

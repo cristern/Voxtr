@@ -104,7 +104,7 @@ public struct ActivityDetailView: View {
 
             Section {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
-                LabeledContent("Activity", value: viewModel.activity.title)
+                LabeledContent("Activity", value: viewModel.activity.title ?? "")
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
                 if let startTime = viewModel.activity.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
@@ -233,7 +233,7 @@ public struct ActivityDetailView: View {
         }
         .voxtrScreenBackground()
         .tint(VoxtrColor.accent)
-        .navigationTitle(viewModel.activity.title)
+        .navigationTitle(viewModel.activity.title ?? "")
         .sheet(isPresented: $isEditing) {
             ActivityEditFormView(viewModel: viewModel)
         }
@@ -352,7 +352,8 @@ struct ActivityEditFormView: View {
                     Text("Match").tag(ActivityType.match)
                     Text("Competition").tag(ActivityType.competition)
                     Text("Individual training").tag(ActivityType.individualTraining)
-                    Text("Physical training").tag(ActivityType.physicalTraining)
+                    Text("Strength").tag(ActivityType.strength)
+                    Text("Conditioning").tag(ActivityType.conditioning)
                     Text("Recovery").tag(ActivityType.recovery)
                     Text("Test").tag(ActivityType.test)
                     Text("Other").tag(ActivityType.other)

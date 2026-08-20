@@ -111,7 +111,7 @@ public final class PlanningService {
         toWeekPlan weekPlanId: WeekPlanId,
         athleteId: AthleteId,
         activityType: ActivityType,
-        title: String,
+        title: String?,
         localDate: LocalDate,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
@@ -127,6 +127,7 @@ public final class PlanningService {
         }
         try Self.validate(
             title: title,
+            sportId: sportId,
             plannedDurationMinutes: plannedDurationMinutes,
             plannedIntensity: plannedIntensity,
             notes: notes
@@ -159,7 +160,7 @@ public final class PlanningService {
         _ plannedActivityId: PlannedActivityId,
         expectedWeekPlanId weekPlanId: WeekPlanId,
         activityType: ActivityType,
-        title: String,
+        title: String?,
         localDate: LocalDate,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
@@ -184,13 +185,14 @@ public final class PlanningService {
         }
         try Self.validate(
             title: title,
+            sportId: sportId,
             plannedDurationMinutes: plannedDurationMinutes,
             plannedIntensity: plannedIntensity,
             notes: notes
         )
 
         activity.activityType = activityType
-        activity.title = title
+        activity.title = ActivityIdentity.normalizedName(title)
         activity.localDate = localDate
         activity.timeZoneId = timeZoneId
         activity.sportId = sportId?.rawValue
@@ -214,13 +216,24 @@ public final class PlanningService {
     /// initializer's preconditions don't run again) can reject the same
     /// invalid input with a catchable error instead of a crash.
     private static func validate(
-        title: String,
+        title: String?,
+        sportId: SportId?,
         plannedDurationMinutes: Int?,
         plannedIntensity: Int?,
         notes: String?
     ) throws {
-        guard (1...120).contains(title.count) else {
-            throw PlanningServiceError.invalidField("title must be 1-120 characters")
+        // Sport / Activity Identity domain foundation: the ONE canonical
+        // rule (`ActivityIdentity`), not a title-length check — Activity
+        // Name is optional as long as a Sport is present.
+        do {
+            try ActivityIdentity.validate(name: title, sportId: sportId)
+        } catch is ActivityIdentityError {
+            throw PlanningServiceError.invalidField("title or sportId is required")
+        }
+        if let normalizedTitle = ActivityIdentity.normalizedName(title) {
+            guard normalizedTitle.count <= 120 else {
+                throw PlanningServiceError.invalidField("title must be at most 120 characters")
+            }
         }
         if let duration = plannedDurationMinutes {
             guard (1...1440).contains(duration) else {
@@ -383,7 +396,7 @@ public final class PlanningService {
     /// invalid input is a catchable error here, not a crash.
     public func createRecurringPlannedActivity(
         athleteId: AthleteId,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -397,6 +410,7 @@ public final class PlanningService {
     ) throws -> RecurringPlannedActivity {
         try Self.validateRecurringActivity(
             title: title,
+            sportId: sportId,
             plannedDurationMinutes: plannedDurationMinutes,
             effectiveStartDate: effectiveStartDate,
             effectiveEndDate: effectiveEndDate,
@@ -427,7 +441,7 @@ public final class PlanningService {
     @discardableResult
     public func editRecurringPlannedActivity(
         _ recurringPlannedActivityId: RecurringPlannedActivityId,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -444,12 +458,13 @@ public final class PlanningService {
         }
         try Self.validateRecurringActivity(
             title: title,
+            sportId: sportId,
             plannedDurationMinutes: plannedDurationMinutes,
             effectiveStartDate: effectiveStartDate,
             effectiveEndDate: effectiveEndDate,
             weekdays: weekdays
         )
-        recurringActivity.title = title
+        recurringActivity.title = ActivityIdentity.normalizedName(title)
         recurringActivity.activityType = activityType
         recurringActivity.sportId = sportId?.rawValue
         recurringActivity.categoryIds = categoryIds.map(\.rawValue)
@@ -816,14 +831,22 @@ public final class PlanningService {
     /// that path reject the same invalid input with a catchable error
     /// instead of a crash.
     private static func validateRecurringActivity(
-        title: String,
+        title: String?,
+        sportId: SportId?,
         plannedDurationMinutes: Int?,
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate,
         weekdays: [Weekday]
     ) throws {
-        guard (1...120).contains(title.count) else {
-            throw PlanningServiceError.invalidField("title must be 1-120 characters")
+        do {
+            try ActivityIdentity.validate(name: title, sportId: sportId)
+        } catch is ActivityIdentityError {
+            throw PlanningServiceError.invalidField("title or sportId is required")
+        }
+        if let normalizedTitle = ActivityIdentity.normalizedName(title) {
+            guard normalizedTitle.count <= 120 else {
+                throw PlanningServiceError.invalidField("title must be at most 120 characters")
+            }
         }
         if let duration = plannedDurationMinutes {
             guard (1...1440).contains(duration) else {

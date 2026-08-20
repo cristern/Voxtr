@@ -70,7 +70,7 @@ public struct DailyTrainingView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.plannedActivity.title)
+                                    Text(item.plannedActivity.title ?? "")
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     if let location = item.plannedActivity.location, !location.isEmpty {
@@ -126,7 +126,7 @@ public struct DailyTrainingView: View {
                                 )
                             } label: {
                                 HStack {
-                                    Text(suggestion.title)
+                                    Text(suggestion.title ?? "")
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     Spacer()
@@ -152,7 +152,7 @@ public struct DailyTrainingView: View {
                     } else {
                         ForEach(viewModel.loggedActivities, id: \.id) { activity in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(activity.title)
+                                Text(activity.title ?? "")
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 // Review follow-up (duration/logged-consumer
@@ -182,7 +182,8 @@ public struct DailyTrainingView: View {
                         Text("Match").tag(ActivityType.match)
                         Text("Competition").tag(ActivityType.competition)
                         Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Physical training").tag(ActivityType.physicalTraining)
+                        Text("Strength").tag(ActivityType.strength)
+                        Text("Conditioning").tag(ActivityType.conditioning)
                         Text("Recovery").tag(ActivityType.recovery)
                         Text("Test").tag(ActivityType.test)
                         Text("Other").tag(ActivityType.other)
@@ -223,7 +224,7 @@ public struct DailyTrainingView: View {
                     Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
                         Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
                         ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                            Text(item.plannedActivity.title)
+                            Text(item.plannedActivity.title ?? "")
                                 .tag(Optional(item.plannedActivity.plannedActivityId))
                                 .disabled(item.isCompleted)
                         }

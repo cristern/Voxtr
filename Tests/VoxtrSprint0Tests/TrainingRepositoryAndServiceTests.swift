@@ -52,7 +52,7 @@ struct TrainingRepositoryAndServiceTests {
 
         let logged = try service.logActivity(
             athleteId: AthleteId(),
-            activityType: .physicalTraining,
+            activityType: .strength,
             title: "Gym session",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 60,
@@ -61,6 +61,75 @@ struct TrainingRepositoryAndServiceTests {
         )
 
         #expect(logged.plannedActivityId == nil)
+    }
+
+    // MARK: - Sport / Activity Identity domain foundation (Part 7)
+
+    @Test("Logging a Sport-only activity, with no title at all, is supported")
+    @MainActor
+    func logActivitySportOnlyIsSupported() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let sportId = SportId()
+
+        let logged = try service.logActivity(
+            athleteId: AthleteId(),
+            sportId: sportId,
+            activityType: .individualTraining,
+            title: nil,
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 45,
+            status: .completed,
+            source: "manual"
+        )
+
+        #expect(logged.title == nil)
+        #expect(logged.sportId == sportId.rawValue)
+    }
+
+    @Test("Logging an activity with neither a title nor a Sport is rejected without persisting")
+    @MainActor
+    func logActivityRejectsMissingIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+
+        #expect(throws: TrainingServiceError.self) {
+            try service.logActivity(
+                athleteId: AthleteId(),
+                activityType: .individualTraining,
+                title: nil,
+                startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+                durationMinutes: 45,
+                status: .completed,
+                source: "manual"
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
+    }
+
+    @Test("Logging an activity with a whitespace-only title and no Sport is rejected")
+    @MainActor
+    func logActivityRejectsWhitespaceOnlyTitleWithNoSport() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+
+        #expect(throws: TrainingServiceError.self) {
+            try service.logActivity(
+                athleteId: AthleteId(),
+                activityType: .individualTraining,
+                title: "   ",
+                startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+                durationMinutes: 45,
+                status: .completed,
+                source: "manual"
+            )
+        }
     }
 
     @Test("Fetching by athlete returns only that athlete's activities, ordered deterministically by startedAt")
