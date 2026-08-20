@@ -7,6 +7,7 @@ import VoxtrParentDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// CRITICAL PERSISTENCE RECOVERY (see this work's own root-cause
 /// writeup for the full investigation): this file previously declared
@@ -244,13 +245,96 @@ public enum AppSchemaV2: VersionedSchema {
 /// SwiftData migration guidance documents as covering "new optional
 /// properties with inferable defaults" — `nil` is the only value an
 /// existing row's new column can mean, with nothing to transform.
-/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
-/// now the LATEST version, so nothing downstream needs it frozen yet);
-/// it will need freezing itself the next time a genuine `AppSchemaV4` is
-/// added.
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V3
+/// was the latest version; now FROZEN (Sport / Activity Identity domain
+/// foundation round) to the exact 17-entity shape it shipped with, since
+/// `AppSchemaV4` below is now latest — same freezing rationale as
+/// `AppCurrentSchema`/`AppSchemaV2` above. No entity here diverges in
+/// field shape from its live top-level declaration (the title-optional
+/// and `ActivityType` raw-value changes landed directly on the live
+/// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity` types
+/// with no version-specific nested copy — see `AppSchemaV4`'s own doc
+/// comment for why), so freezing the type LIST here is sufficient; no
+/// nested legacy copy is needed for this version.
 public enum AppSchemaV3: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(3, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+        ]
+    }
+}
+
+/// Sport / Activity Identity domain foundation: the current, live
+/// version. Adds ONE model type, `Sport.self` (`VoxtrCoreReferenceData`)
+/// — the type already existed (used by every `SportId?` field already on
+/// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity`/
+/// `DevelopmentGoal`) but was never itself registered/persisted before
+/// this round; registering it is a genuine model-type addition per this
+/// file's own "HOW TO ADD" step 3.
+///
+/// This same version also bundles two field-level changes to
+/// already-listed live types:
+///   - `PlannedActivity.title` / `LoggedActivity.title` /
+///     `RecurringPlannedActivity.title`: `String` → `String?`
+///     (Activity Name becomes optional; see `ActivityIdentity.swift`).
+///   - `ActivityType`: `physicalTraining` retained as legacy case for backward
+///     compatibility; `strength` + `conditioning` added.
+///
+/// Per step 4's own instruction to "seriously consider whether the
+/// disproportionate complexity... [of frozen legacy copies]... [is]
+/// worth it for whatever data is actually at stake": there is still no
+/// production data at stake (this app has never left TestFlight/Internal
+/// Alpha), and this exact codebase already has a directly-precedented,
+/// already-accepted answer for that situation —
+/// `RecurringPlannedActivity.weekdays`'s own shape change (`Weekday` →
+/// `[Weekday]`) shipped with NO frozen legacy copy, only a documented
+/// "existing installs may need a reinstall/store reset" Internal Alpha
+/// note. The title-optionality and `ActivityType` changes follow that
+/// same precedent here, for the same reason: building three fully
+/// duplicated nested legacy entity copies (`PlannedActivity`,
+/// `LoggedActivity`, `RecurringPlannedActivity`) to preserve field shapes
+/// nobody's real data depends on would reintroduce exactly the
+/// "disproportionate complexity" this file's own history (the deleted
+/// six-version `LegacySchemaTypes.swift` saga) already burned real launch
+/// failures to learn from — see `ActivityType`'s own doc comment in
+/// `SharedEnums.swift` for the equivalent, explicit "Internal Alpha
+/// limitation, reinstall required" note for that change specifically.
+/// `.lightweight` is still the correct stage kind: SwiftData's own
+/// migration guidance covers "new optional properties" (the title
+/// changes) the same way regardless of whether the OLD shape is
+/// separately frozen — a `.lightweight` stage does not require a source
+/// type to exist for a property that is simply becoming optional on the
+/// SAME live type; there is no separate V3-shaped `PlannedActivity` for
+/// it to migrate FROM in the first place; the `ActivityType` raw-value
+/// change carries the same accepted Internal Alpha risk described above
+/// regardless of migration-stage kind.
+///
+/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
+/// now the LATEST version); it will need freezing itself the next time a
+/// genuine `AppSchemaV5` is added.
+public enum AppSchemaV4: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(4, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -263,13 +347,13 @@ public enum AppSchemaV3: VersionedSchema {
 /// from this point forward):
 ///
 /// 1. Freeze the CURRENT latest version's `models` (right now, that's
-///    `AppSchemaV3`) to a hardcoded literal array — copy its current
+///    `AppSchemaV4`) to a hardcoded literal array — copy its current
 ///    passthrough result before changing anything, the same way
-///    `AppSchemaV2` was frozen when `AppSchemaV3` was introduced (see
+///    `AppSchemaV3` was frozen when `AppSchemaV4` was introduced (see
 ///    that enum's own doc comment for a worked example).
-/// 2. Add a new `AppSchemaV4: VersionedSchema` enum in this file, with
-///    `versionIdentifier: Schema.Version(4, 0, 0)` and `models`
-///    passthrough to `AppSchema.modelTypes` (V4 becomes the new latest,
+/// 2. Add a new `AppSchemaV5: VersionedSchema` enum in this file, with
+///    `versionIdentifier: Schema.Version(5, 0, 0)` and `models`
+///    passthrough to `AppSchema.modelTypes` (V5 becomes the new latest,
 ///    and `CompositionRoot.build`'s default `persistence:` parameter
 ///    must be updated to target it — see that type's own doc comment
 ///    for why this exact step was missed for years across V1-V6 before
@@ -289,9 +373,9 @@ public enum AppSchemaV3: VersionedSchema {
 ///    that pattern may still be the only SwiftData-supported way to do
 ///    it — but verify it against an actual compiler and device before
 ///    trusting it again, not just reasoning from source code.
-/// 5. Add `AppSchemaV4.self` to `schemas` below, alongside every prior
+/// 5. Add `AppSchemaV5.self` to `schemas` below, alongside every prior
 ///    version (old versions are never removed, only appended to).
-/// 6. Add a real `MigrationStage` to `stages` describing the V3 → V4
+/// 6. Add a real `MigrationStage` to `stages` describing the V4 → V5
 ///    transition — `.lightweight` if the change is purely additive
 ///    (new type(s), new optional propert(y/ies)), `.custom` if it needs
 ///    real data transformation.
@@ -309,7 +393,7 @@ public enum AppSchemaV3: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self]
+        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -334,10 +418,22 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// existing athlete's existing `AthleteSettings` row (if any) — and
     /// every athlete with no row at all — is completely unaffected by
     /// this migration; there is nothing to transform.
+    /// V3 ("3.0.0", 17 entities) → V4 ("4.0.0", 18 entities — adds
+    /// `Sport.self`; also carries the title-optionality and
+    /// `ActivityType` raw-value changes described on `AppSchemaV4`'s own
+    /// doc comment). `.lightweight`: the only structural change SwiftData
+    /// itself needs to reason about here is the new `Sport` entity/table,
+    /// which is purely additive — same class of change as V1→V2's
+    /// `DailyStatus`/`AthleteSettings` addition above. A fresh install
+    /// starts directly under V4 (`Sport` seeded empty, then populated by
+    /// `SportRepository.seedCanonicalSportsIfNeeded()` at first launch);
+    /// an existing V3 store gains the new empty `Sport` table with its
+    /// existing 17 entities' data completely untouched.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
             .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self),
+            .lightweight(fromVersion: AppSchemaV3.self, toVersion: AppSchemaV4.self),
         ]
     }
 }

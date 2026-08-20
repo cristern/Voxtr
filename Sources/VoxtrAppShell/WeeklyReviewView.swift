@@ -162,7 +162,7 @@ public struct WeeklyReviewView: View {
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
                         HStack {
-                            Text(item.plannedActivity.title)
+                            Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
@@ -254,7 +254,7 @@ public struct WeeklyReviewView: View {
                         Text(WeeklyPlanningView.weekdayLabel(for: Self.localDate(for: activity.startedAt).weekday))
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
-                        Text(activity.title)
+                        Text(ActivityLabelResolver().primaryLabel(for: activity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         // Review follow-up (duration/logged-consumer

@@ -98,7 +98,7 @@ public struct WeeklyPlanningView: View {
                 Section {
                     ForEach(viewModel.recurringSuggestions) { suggestion in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(suggestion.title)
+                            Text(ActivityLabelResolver().primaryLabel(for: suggestion))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.suggestionSubtitle(for: suggestion))
@@ -138,7 +138,7 @@ public struct WeeklyPlanningView: View {
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(activity.title)
+                            Text(ActivityLabelResolver().primaryLabel(for: activity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.rowSubtitle(for: activity))
@@ -273,14 +273,9 @@ public struct WeeklyPlanningView: View {
     /// cases either way, so this avoids two copies drifting apart.
     private func activityTypePicker(selection: Binding<ActivityType>) -> some View {
         Picker("Activity type", selection: selection) {
-            Text("Team training").tag(ActivityType.teamTraining)
-            Text("Match").tag(ActivityType.match)
-            Text("Competition").tag(ActivityType.competition)
-            Text("Individual training").tag(ActivityType.individualTraining)
-            Text("Physical training").tag(ActivityType.physicalTraining)
-            Text("Recovery").tag(ActivityType.recovery)
-            Text("Test").tag(ActivityType.test)
-            Text("Other").tag(ActivityType.other)
+            ForEach(ActivityType.selectableCases, id: \.self) { type in
+                Text(type.displayName).tag(type)
+            }
         }
     }
 
@@ -416,7 +411,7 @@ struct RecurringActivityManagementView: View {
                     VStack(alignment: .leading) {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(recurringActivity.title)
+                                Text(ActivityLabelResolver().primaryLabel(for: recurringActivity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
@@ -503,6 +498,14 @@ struct RecurringActivityFormView: View {
     let athleteDisplayName: String
     @Environment(\.dismiss) private var dismiss
 
+    private var availableActivityTypes: [ActivityType] {
+        if editingRecurringActivity?.activityType == .physicalTraining {
+            return [.physicalTraining] + ActivityType.selectableCases
+        } else {
+            return ActivityType.selectableCases
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -520,14 +523,9 @@ struct RecurringActivityFormView: View {
                         .accessibilityIdentifier("planning.recurringFormTitleField")
 
                     Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
-                        Text("Team training").tag(ActivityType.teamTraining)
-                        Text("Match").tag(ActivityType.match)
-                        Text("Competition").tag(ActivityType.competition)
-                        Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Physical training").tag(ActivityType.physicalTraining)
-                        Text("Recovery").tag(ActivityType.recovery)
-                        Text("Test").tag(ActivityType.test)
-                        Text("Other").tag(ActivityType.other)
+                        ForEach(availableActivityTypes, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
                     }
                     .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
                 } header: {

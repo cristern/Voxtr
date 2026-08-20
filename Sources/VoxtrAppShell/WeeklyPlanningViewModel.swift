@@ -436,7 +436,7 @@ public final class WeeklyPlanningViewModel {
     /// Populates the management form fields from an existing recurring
     /// activity, so the edit sheet opens pre-filled.
     public func beginEditingRecurringActivity(_ recurringActivity: RecurringPlannedActivity) {
-        recurringFormTitle = recurringActivity.title
+        recurringFormTitle = recurringActivity.title ?? ""
         recurringFormActivityType = recurringActivity.activityType
         recurringFormWeekdays = Set(recurringActivity.weekdays)
         if let startLocalTime = recurringActivity.startLocalTime {

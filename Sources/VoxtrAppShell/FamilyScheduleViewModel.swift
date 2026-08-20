@@ -31,11 +31,19 @@ public enum FamilyScheduleRow: Identifiable {
         }
     }
 
-    public var title: String {
+    /// Sport / Activity Identity domain foundation: resolves primary activity
+    /// label following the canonical `Name ?? Sport` rule via `ActivityLabelResolver`.
+    @MainActor
+    public func primaryActivityLabel(resolver: ActivityLabelResolver = ActivityLabelResolver()) -> String {
         switch self {
-        case .planned(let row): return row.plannedActivity.title
-        case .recurringSuggestion(_, _, _, let suggestion): return suggestion.title
+        case .planned(let row): return resolver.primaryLabel(for: row.plannedActivity)
+        case .recurringSuggestion(_, _, _, let suggestion): return resolver.primaryLabel(for: suggestion)
         }
+    }
+
+    @MainActor
+    public var title: String {
+        primaryActivityLabel()
     }
 
     public var startLocalTime: LocalTime? {

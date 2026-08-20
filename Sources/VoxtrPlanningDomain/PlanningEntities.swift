@@ -191,7 +191,14 @@ public final class PlannedActivity {
     public var sportId: UUID?
     public var categoryIds: [UUID]
     public var activityType: ActivityType
-    public var title: String
+    /// Sport / Activity Identity domain foundation: Activity Name is
+    /// optional, human-authored, never a classification system —
+    /// `nil` (not `""`) represents genuine absence. The canonical
+    /// invariant this entity itself defends (`title != nil ||
+    /// sportId != nil`, via `ActivityIdentity`) is enforced both here
+    /// (defense-in-depth) and, catchably, at `PlanningService`'s
+    /// create/edit boundaries — see `ActivityIdentity.swift`.
+    public var title: String?
     // Same fix as WeekPlan.weekStart above, applied proactively here:
     // fetching/sorting multiple PlannedActivity rows with differing
     // `localDate` values hits the identical documented SwiftData bug.
@@ -220,7 +227,7 @@ public final class PlannedActivity {
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
         activityType: ActivityType,
-        title: String,
+        title: String?,
         localDate: LocalDate,
         startLocalTime: LocalTime? = nil,
         timeZoneId: TimeZoneId,
@@ -234,7 +241,14 @@ public final class PlannedActivity {
         updatedAt: Date = .now,
         schemaVersion: Int = 1
     ) {
-        precondition((1...120).contains(title.count), "title must be 1-120 characters (v1.3 Section 8.2)")
+        let normalizedTitle = ActivityIdentity.normalizedName(title)
+        if let normalizedTitle {
+            precondition(normalizedTitle.count <= 120, "title must be at most 120 characters (v1.3 Section 8.2, Sport / Activity Identity round)")
+        }
+        precondition(
+            ActivityIdentity.isValid(normalizedName: normalizedTitle, sportId: sportId),
+            "PlannedActivity requires a non-blank title or a sportId (Sport / Activity Identity round)"
+        )
         if let duration = plannedDurationMinutes {
             precondition((1...1440).contains(duration), "plannedDurationMinutes must be 1-1440 (v1.3 Section 8.2)")
         }
@@ -253,7 +267,7 @@ public final class PlannedActivity {
         self.sportId = sportId?.rawValue
         self.categoryIds = categoryIds.map(\.rawValue)
         self.activityType = activityType
-        self.title = title
+        self.title = normalizedTitle
         self.localDateRaw = localDate.isoString
         self.startLocalTime = startLocalTime
         self.timeZoneId = timeZoneId

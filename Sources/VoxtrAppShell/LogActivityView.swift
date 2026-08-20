@@ -28,7 +28,7 @@ public struct LogActivityView: View {
                 // re-asked.
                 Section {
                     LabeledContent("Athlete", value: viewModel.athleteDisplayName)
-                    LabeledContent("Activity", value: viewModel.plannedActivity.title)
+                    LabeledContent("Activity", value: ActivityLabelResolver().primaryLabel(for: viewModel.plannedActivity))
                     LabeledContent("Date", value: viewModel.plannedActivity.localDate.isoString)
                 }
                 .voxtrRowSurface()

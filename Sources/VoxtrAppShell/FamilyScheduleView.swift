@@ -98,7 +98,7 @@ public struct FamilyScheduleView: View {
             } label: {
                 rowContent(
                     athleteName: familyRow.athleteName,
-                    title: familyRow.plannedActivity.title,
+                    title: ActivityLabelResolver().primaryLabel(for: familyRow.plannedActivity),
                     subtitle: Self.rowSubtitle(
                         startLocalTime: familyRow.plannedActivity.startLocalTime,
                         location: familyRow.plannedActivity.location,
@@ -122,7 +122,7 @@ public struct FamilyScheduleView: View {
             } label: {
                 rowContent(
                     athleteName: athleteName,
-                    title: suggestion.title,
+                    title: ActivityLabelResolver().primaryLabel(for: suggestion),
                     // Same-pattern fix (Family Home's own "Recurring
                     // metadata demotion" round): "Recurring" no longer
                     // renders as its own trailing label competing with

@@ -110,4 +110,118 @@ struct SchemaVersioningTests {
         #expect(fetched.count == 1)
         #expect(fetched.first?.givenName == "Kari")
     }
+
+    @Test("Persisted V3 store with physicalTraining activities migrates cleanly to V4 with legacy activityType preserved")
+    @MainActor
+    func v3StoreWithPhysicalTrainingMigratesToV4() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v3-v4-physical-training-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+
+        let v3Schema = Schema(versionedSchema: AppSchemaV3.self)
+        let v3Configuration = ModelConfiguration(schema: v3Schema, url: storeURL)
+        let v3Container = try ModelContainer(
+            for: v3Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [v3Configuration]
+        )
+
+        let athleteId = AthleteId()
+        let weekPlanId = WeekPlanId()
+        let plannedId = PlannedActivityId()
+        let loggedId = LoggedActivityId()
+        let recurringId = RecurringPlannedActivityId()
+
+        let originalDate = LocalDate(year: 2026, month: 3, day: 4)
+        let originalTitle = "Wednesday Gym Session"
+
+        // 1. PlannedActivity with physicalTraining
+        let planned = PlannedActivity(
+            plannedActivityId: plannedId,
+            weekPlanId: weekPlanId,
+            athleteId: athleteId,
+            activityType: .physicalTraining,
+            title: originalTitle,
+            localDate: originalDate,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            plannedDurationMinutes: 60
+        )
+        v3Container.mainContext.insert(planned)
+
+        // 2. LoggedActivity with physicalTraining
+        let startedAt = Date()
+        let logged = LoggedActivity(
+            loggedActivityId: loggedId,
+            athleteId: athleteId,
+            plannedActivityId: plannedId,
+            activityType: .physicalTraining,
+            title: originalTitle,
+            startedAt: startedAt,
+            durationMinutes: 60,
+            status: .completed,
+            source: "manual"
+        )
+        v3Container.mainContext.insert(logged)
+
+        // 3. RecurringPlannedActivity with physicalTraining
+        let recurring = RecurringPlannedActivity(
+            recurringPlannedActivityId: recurringId,
+            athleteId: athleteId,
+            title: originalTitle,
+            activityType: .physicalTraining,
+            weekdays: [.wednesday],
+            plannedDurationMinutes: 60,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: originalDate,
+            effectiveEndDate: originalDate.adding(days: 30)
+        )
+        v3Container.mainContext.insert(recurring)
+
+        try v3Container.mainContext.save()
+
+        // Discard v3Container and migrate to V4 using the same on-disk file
+        let v4Schema = Schema(versionedSchema: AppSchemaV4.self)
+        let v4Configuration = ModelConfiguration(schema: v4Schema, url: storeURL)
+        let v4Container = try ModelContainer(
+            for: v4Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [v4Configuration]
+        )
+
+        // Verify PlannedActivity
+        let fetchedPlanned = try v4Container.mainContext.fetch(FetchDescriptor<PlannedActivity>())
+        #expect(fetchedPlanned.count == 1)
+        let migratedPlanned = try #require(fetchedPlanned.first)
+        #expect(migratedPlanned.plannedActivityId == plannedId)
+        #expect(migratedPlanned.athleteId == athleteId.rawValue)
+        #expect(migratedPlanned.title == originalTitle)
+        #expect(migratedPlanned.sportId == nil)
+        #expect(migratedPlanned.plannedDurationMinutes == 60)
+        #expect(migratedPlanned.localDate == originalDate)
+        #expect(migratedPlanned.activityType == .physicalTraining)
+
+        // Verify LoggedActivity
+        let fetchedLogged = try v4Container.mainContext.fetch(FetchDescriptor<LoggedActivity>())
+        #expect(fetchedLogged.count == 1)
+        let migratedLogged = try #require(fetchedLogged.first)
+        #expect(migratedLogged.loggedActivityId == loggedId)
+        #expect(migratedLogged.athleteId == athleteId.rawValue)
+        #expect(migratedLogged.title == originalTitle)
+        #expect(migratedLogged.sportId == nil)
+        #expect(migratedLogged.durationMinutes == 60)
+        #expect(migratedLogged.startedAt == startedAt)
+        #expect(migratedLogged.source == "manual")
+        #expect(migratedLogged.activityType == .physicalTraining)
+
+        // Verify RecurringPlannedActivity
+        let fetchedRecurring = try v4Container.mainContext.fetch(FetchDescriptor<RecurringPlannedActivity>())
+        #expect(fetchedRecurring.count == 1)
+        let migratedRecurring = try #require(fetchedRecurring.first)
+        #expect(migratedRecurring.recurringPlannedActivityId == recurringId)
+        #expect(migratedRecurring.athleteId == athleteId.rawValue)
+        #expect(migratedRecurring.title == originalTitle)
+        #expect(migratedRecurring.sportId == nil)
+        #expect(migratedRecurring.plannedDurationMinutes == 60)
+        #expect(migratedRecurring.weekdays == [.wednesday])
+        #expect(migratedRecurring.activityType == .physicalTraining)
+    }
 }

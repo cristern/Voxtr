@@ -70,7 +70,7 @@ public struct DailyTrainingView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.plannedActivity.title)
+                                    Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     if let location = item.plannedActivity.location, !location.isEmpty {
@@ -126,7 +126,7 @@ public struct DailyTrainingView: View {
                                 )
                             } label: {
                                 HStack {
-                                    Text(suggestion.title)
+                                    Text(ActivityLabelResolver().primaryLabel(for: suggestion))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     Spacer()
@@ -152,7 +152,7 @@ public struct DailyTrainingView: View {
                     } else {
                         ForEach(viewModel.loggedActivities, id: \.id) { activity in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(activity.title)
+                                Text(ActivityLabelResolver().primaryLabel(for: activity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 // Review follow-up (duration/logged-consumer
@@ -178,14 +178,9 @@ public struct DailyTrainingView: View {
                         .accessibilityIdentifier("training.newLogTitleField")
 
                     Picker("Activity type", selection: $viewModel.newLogActivityType) {
-                        Text("Team training").tag(ActivityType.teamTraining)
-                        Text("Match").tag(ActivityType.match)
-                        Text("Competition").tag(ActivityType.competition)
-                        Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Physical training").tag(ActivityType.physicalTraining)
-                        Text("Recovery").tag(ActivityType.recovery)
-                        Text("Test").tag(ActivityType.test)
-                        Text("Other").tag(ActivityType.other)
+                        ForEach(ActivityType.selectableCases, id: \.self) { type in
+                            Text(type.displayName).tag(type)
+                        }
                     }
                     .accessibilityIdentifier("training.newLogActivityTypePicker")
 
@@ -223,7 +218,7 @@ public struct DailyTrainingView: View {
                     Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
                         Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
                         ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                            Text(item.plannedActivity.title)
+                            Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
                                 .tag(Optional(item.plannedActivity.plannedActivityId))
                                 .disabled(item.isCompleted)
                         }

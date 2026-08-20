@@ -450,7 +450,7 @@ public struct FamilyHomeContentView: View {
                         .foregroundStyle(VoxtrColor.textSecondary)
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(suggestion.title)
+                            Text(ActivityLabelResolver().primaryLabel(for: suggestion))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             // Recurring metadata demotion round: "Recurring"
@@ -487,7 +487,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(loggedActivity.title)
+                        Text(ActivityLabelResolver().primaryLabel(for: loggedActivity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text("Unplanned · Logged")
@@ -537,7 +537,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(row.plannedActivity.title)
+                        Text(ActivityLabelResolver().primaryLabel(for: row.plannedActivity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text(Self.rowSubtitle(for: row))

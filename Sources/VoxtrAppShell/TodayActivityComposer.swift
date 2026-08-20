@@ -50,12 +50,20 @@ public enum TodayActivityRow: Identifiable {
         }
     }
 
-    public var title: String {
+    /// Sport / Activity Identity domain foundation: resolves primary activity
+    /// label following the canonical `Name ?? Sport` rule via `ActivityLabelResolver`.
+    @MainActor
+    public func primaryActivityLabel(resolver: ActivityLabelResolver = ActivityLabelResolver()) -> String {
         switch self {
-        case .planned(let row): return row.plannedActivity.title
-        case .recurringOccurrence(_, _, let suggestion): return suggestion.title
-        case .unplannedLogged(_, _, let loggedActivity): return loggedActivity.title
+        case .planned(let row): return resolver.primaryLabel(for: row.plannedActivity)
+        case .recurringOccurrence(_, _, let suggestion): return resolver.primaryLabel(for: suggestion)
+        case .unplannedLogged(_, _, let loggedActivity): return resolver.primaryLabel(for: loggedActivity)
         }
+    }
+
+    @MainActor
+    public var title: String {
+        primaryActivityLabel()
     }
 
     /// Deterministic chronological sort key — no-start-time rows sort

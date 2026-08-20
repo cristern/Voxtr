@@ -37,4 +37,14 @@ public final class Sport {
     }
 
     public var sportId: SportId { SportId(rawValue: id) }
+
+    /// Human-readable display name for this Sport, resolving `displayNameKey`
+    /// via localization or falling back to the capitalized `canonicalKey`.
+    public var displayName: String {
+        let localized = NSLocalizedString(displayNameKey, comment: "")
+        if localized != displayNameKey {
+            return localized
+        }
+        return canonicalKey.capitalized
+    }
 }

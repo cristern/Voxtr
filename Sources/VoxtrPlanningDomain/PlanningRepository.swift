@@ -52,7 +52,7 @@ public final class PlanningRepository {
         weekPlanId: WeekPlanId,
         athleteId: AthleteId,
         activityType: ActivityType,
-        title: String,
+        title: String?,
         localDate: LocalDate,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
@@ -97,7 +97,7 @@ public final class PlanningRepository {
         weekPlanId: WeekPlanId,
         athleteId: AthleteId,
         activityType: ActivityType,
-        title: String,
+        title: String?,
         localDate: LocalDate,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
@@ -224,7 +224,7 @@ public final class PlanningRepository {
     /// Inserts a new `RecurringPlannedActivity` definition.
     public func insertRecurringPlannedActivity(
         athleteId: AthleteId,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -261,7 +261,7 @@ public final class PlanningRepository {
     /// public overload above, which always passes `nil`.
     func insertRecurringPlannedActivity(
         athleteId: AthleteId,
-        title: String,
+        title: String?,
         activityType: ActivityType,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -330,7 +330,16 @@ public final class PlanningRepository {
                     case (let l?, let r?): return l < r
                     }
                 }
-                return lhs.title < rhs.title
+                // Sport / Activity Identity domain foundation: title is
+                // now optional — nil (Sport-only) sorts after any named
+                // activity, same tiebreaker-only role this ordering
+                // already had (not a business rule).
+                switch (lhs.title, rhs.title) {
+                case (nil, nil): return false
+                case (nil, _): return false
+                case (_, nil): return true
+                case (let l?, let r?): return l < r
+                }
             }
     }
 
