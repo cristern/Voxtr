@@ -100,7 +100,17 @@ public struct AthleteFamilyManagementView: View {
 
     public var body: some View {
         Group {
-            if viewModel.athletes.filter({ !$0.isArchived }).isEmpty {
+            // Archive/Reactivate lifecycle fix: this used to gate on
+            // "zero ACTIVE athletes," which meant a family whose only
+            // athlete had been archived could never reach that athlete
+            // again through this screen at all — `emptyState` doesn't
+            // list archived athletes, so "still access the archived
+            // athlete later" was unreachable in exactly that case. This
+            // now gates on "zero athletes at all" (active or archived);
+            // `athleteList` itself renders an Active-only, Archived-only,
+            // or both-empty-so-neither-section layout correctly either
+            // way (see its own doc comment below).
+            if viewModel.athletes.isEmpty {
                 emptyState
             } else {
                 athleteList
@@ -133,11 +143,12 @@ public struct AthleteFamilyManagementView: View {
         }
     }
 
-    /// Shown whenever `activeAthletes` (see `RestoredFamily`'s own
-    /// property of the same name) is empty — no active athletes,
-    /// whether because none was ever added or every one has been
-    /// archived. The "Add" button in the toolbar above is always
-    /// available regardless, so this is never a dead end.
+    /// Shown only when `viewModel.athletes` is genuinely empty — no
+    /// athlete has ever been added, active or archived. An archived
+    /// athlete is never a reason to show this: `athleteList` below
+    /// remains reachable and lists them under "Archived" so they stay
+    /// findable and reactivatable. The "Add" button in the toolbar above
+    /// is always available regardless, so this is never a dead end.
     private var emptyState: some View {
         VStack(spacing: 12) {
             Text("No active athletes yet.")
@@ -153,8 +164,23 @@ public struct AthleteFamilyManagementView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
+    /// Archive/Reactivate lifecycle fix: archived athletes previously
+    /// rendered as a bare `HStack` here — no `NavigationLink`, so tapping
+    /// one did nothing at all, a genuine dead row (Athlete Settings, the
+    /// only place "Reactivate athlete" lives, was unreachable for an
+    /// already-archived athlete through this screen). Both branches now
+    /// share the exact same `NavigationLink → AthleteSettingsView` row
+    /// (`athleteRow(_:)` below) — archived and active athletes are
+    /// equally interactive, differing only in the small "Archived"
+    /// secondary label, never in tappability. Grouped into two Sections
+    /// (shown only when non-empty, so an all-active or all-archived
+    /// family never shows an empty section) rather than one mixed list —
+    /// "Manage Athletes is the configuration hub for both active and
+    /// archived athletes," not an undifferentiated roster.
     private var athleteList: some View {
-        List {
+        let activeAthletes = viewModel.athletes.filter { !$0.isArchived }
+        let archivedAthletes = viewModel.athletes.filter { $0.isArchived }
+        return List {
             if let errorMessage = viewModel.errorMessage {
                 Section {
                     Text(errorMessage)
@@ -164,56 +190,62 @@ public struct AthleteFamilyManagementView: View {
                 .voxtrRowSurface()
             }
 
-            Section {
-                ForEach(viewModel.athletes, id: \.id) { athlete in
+            if !activeAthletes.isEmpty {
+                Section {
+                    ForEach(activeAthletes, id: \.id) { athlete in
+                        athleteRow(athlete)
+                    }
+                } header: {
+                    VoxtrSectionHeading("Active")
+                }
+                .voxtrRowSurface()
+            }
+
+            if !archivedAthletes.isEmpty {
+                Section {
+                    ForEach(archivedAthletes, id: \.id) { athlete in
+                        athleteRow(athlete)
+                    }
+                } header: {
+                    VoxtrSectionHeading("Archived")
+                }
+                .voxtrRowSurface()
+            }
+        }
+        .accessibilityIdentifier("athleteManagement.athleteList")
+    }
+
+    /// Round 8 (TestFlight IA correction): the athlete row is the SINGLE
+    /// destination — Manage Athletes is a people/configuration index,
+    /// not another Athlete Home launcher, so tapping an athlete opens
+    /// their configuration hub directly, active or archived alike. No
+    /// separate "Settings" action alongside it. Athlete Color's own
+    /// small identity marker is shown for both — it means identity only,
+    /// never archive status; the "Archived" text label is the sole
+    /// archived-state indicator.
+    private func athleteRow(_ athlete: AthleteProfile) -> some View {
+        NavigationLink {
+            AthleteSettingsView(
+                viewModel: viewModel,
+                athlete: athlete,
+                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
+            )
+        } label: {
+            HStack(spacing: 8) {
+                VoxtrAthleteColorMarker(viewModel.resolvedColor(for: athlete).color)
+                VStack(alignment: .leading) {
+                    Text(athlete.givenName)
+                        .font(VoxtrTypography.cardTitle)
+                        .foregroundStyle(VoxtrColor.textPrimary)
                     if athlete.isArchived {
-                        HStack(spacing: 8) {
-                            // Design Foundation extension round: Manage
-                            // Athletes is a shared/multi-athlete people
-                            // list — the same small identity marker
-                            // Family Home's own Athletes/Sleep/Focus
-                            // this week rows already use, never the
-                            // fuller activity-row outline (this is a
-                            // roster row, not an activity card).
-                            VoxtrAthleteColorMarker(viewModel.resolvedColor(for: athlete).color)
-                            VStack(alignment: .leading) {
-                                Text(athlete.givenName)
-                                    .font(VoxtrTypography.cardTitle)
-                                    .foregroundStyle(VoxtrColor.textPrimary)
-                                Text("Archived")
-                                    .font(VoxtrTypography.metadata)
-                                    .foregroundStyle(VoxtrColor.textSecondary)
-                            }
-                        }
-                        .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
-                    } else {
-                        // Round 8 (TestFlight IA correction): the athlete
-                        // row is now the SINGLE destination — Manage
-                        // Athletes is a people/configuration index, not
-                        // another Athlete Home launcher, so tapping an
-                        // athlete opens their configuration hub directly.
-                        // No separate "Settings" action alongside it.
-                        NavigationLink {
-                            AthleteSettingsView(
-                                viewModel: viewModel,
-                                athlete: athlete,
-                                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
-                            )
-                        } label: {
-                            HStack(spacing: 8) {
-                                VoxtrAthleteColorMarker(viewModel.resolvedColor(for: athlete).color)
-                                Text(athlete.givenName)
-                                    .font(VoxtrTypography.cardTitle)
-                                    .foregroundStyle(VoxtrColor.textPrimary)
-                            }
-                        }
-                        .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
+                        Text("Archived")
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
             }
-            .voxtrRowSurface()
         }
-        .accessibilityIdentifier("athleteManagement.athleteList")
+        .accessibilityIdentifier("athleteManagement.athleteRow.\(athlete.id.uuidString)")
     }
 }
 
@@ -223,11 +255,19 @@ public struct AthleteFamilyManagementView: View {
 /// that struct's own doc comment). Owns everything that used to sit as
 /// separate row actions — Profile, Sleep tracking, and destructive
 /// Archive — so configuration lives in exactly one place, never
-/// duplicated. Reuses the existing `AthleteFormView` sheet, the
-/// caller-supplied `sleepSettingsViewModel` factory, and
-/// `AthleteFamilyManagementViewModel.archiveAthlete(_:)` verbatim — no
-/// new configuration surface, no new persistence path, and Archive's
-/// own behavior (immediate, no confirmation dialog) is unchanged.
+/// duplicated. Reuses the existing `AthleteFormView` sheet and
+/// caller-supplied `sleepSettingsViewModel` factory verbatim — no new
+/// configuration surface, no new persistence path.
+///
+/// Archive/Reactivate lifecycle round: Archive now requires explicit
+/// confirmation via `.confirmationDialog` before
+/// `AthleteFamilyManagementViewModel.archiveAthlete(_:)` runs (the
+/// approved product contract — tapping "Archive athlete" no longer
+/// mutates immediately). This Section also now branches on
+/// `athlete.isArchived`: an already-archived athlete sees "Reactivate
+/// athlete" instead (`AthleteFamilyManagementViewModel.reactivateAthlete(_:)`,
+/// no confirmation — a safe reversing action), never both actions at
+/// once.
 ///
 /// Round 9 (TestFlight IA correction): a plain "Profile >" navigation
 /// row read as an unnecessary extra hierarchy level. Approved
@@ -308,6 +348,12 @@ struct AthleteSettingsView: View {
     /// composition to justify a separate service/ViewModel pair the way
     /// Sleep's own Reflection-domain dependency does).
     @State private var selectedColor: AthleteColor
+    /// Approved product contract: Archive must not mutate until the
+    /// user explicitly confirms via the `.confirmationDialog` below —
+    /// tapping "Archive athlete" only sets this to `true`; the actual
+    /// `viewModel.archiveAthlete(athlete)` call lives solely in the
+    /// dialog's own destructive action.
+    @State private var isPresentingArchiveConfirmation = false
 
     init(
         viewModel: AthleteFamilyManagementViewModel,
@@ -450,21 +496,56 @@ struct AthleteSettingsView: View {
             }
             .voxtrRowSurface()
 
-            // ARCHIVE — destructive, visually separated in its own
-            // trailing Section, at the bottom.
+            // ARCHIVE / REACTIVATE — the athlete's one lifecycle action,
+            // visually separated in its own trailing Section, at the
+            // bottom. `athlete` is the same SwiftData-managed reference
+            // this hub was handed throughout, so a successful mutation
+            // (either direction) flips `athlete.isArchived` in place and
+            // this Section re-renders on its own — no manual reload,
+            // same reasoning this file's own Profile-card doc comment
+            // already establishes for Name/Family name/Birth date edits.
             Section {
-                Button("Archive athlete", role: .destructive) {
-                    viewModel.archiveAthlete(athlete)
+                if athlete.isArchived {
+                    // Reactivation is a safe reversing action — no
+                    // confirmation, standard/accent treatment (no
+                    // `.destructive` role), matching the approved
+                    // contract exactly.
+                    Button("Reactivate athlete") {
+                        viewModel.reactivateAthlete(athlete)
+                    }
+                    .accessibilityIdentifier("athleteSettings.reactivateButton.\(athlete.id.uuidString)")
+                } else {
+                    Button("Archive athlete", role: .destructive) {
+                        isPresentingArchiveConfirmation = true
+                    }
+                    .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
                 }
-                .accessibilityIdentifier("athleteSettings.archiveButton.\(athlete.id.uuidString)")
             } header: {
-                VoxtrSectionHeading("Archive")
+                VoxtrSectionHeading(athlete.isArchived ? "Reactivate" : "Archive")
             }
             .voxtrRowSurface()
         }
         .voxtrScreenBackground()
         .tint(VoxtrColor.accent)
         .navigationTitle("Athlete settings")
+        // Approved product contract: tapping "Archive athlete" must not
+        // mutate until the user explicitly confirms. Same native
+        // `.confirmationDialog` pattern already used elsewhere in this
+        // app (see `ActivityDetailView`'s Delete/Cancel-activity dialogs)
+        // — only new here because this is the first confirmation whose
+        // approved copy needs a `message:` in addition to the title.
+        .confirmationDialog(
+            "Archive athlete?",
+            isPresented: $isPresentingArchiveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Archive", role: .destructive) {
+                viewModel.archiveAthlete(athlete)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This athlete will be removed from active family views. Their training and history will be preserved, and you can reactivate them later.")
+        }
         .onAppear {
             // Correctness fix: this hub no longer reads
             // `viewModel.developmentStage`/`givenName` etc. for display

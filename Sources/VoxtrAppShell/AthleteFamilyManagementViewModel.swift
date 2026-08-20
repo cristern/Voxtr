@@ -131,6 +131,20 @@ public final class AthleteFamilyManagementViewModel {
         }
     }
 
+    /// "Reactivate/undo archive" — the reverse of `archiveAthlete(_:)`
+    /// above, same shape (same service call pattern, same
+    /// `loadAthletes()` refresh afterward, same error handling). Never
+    /// touches any other athlete in `athletes`.
+    public func reactivateAthlete(_ athlete: AthleteProfile) {
+        errorMessage = nil
+        do {
+            try athleteFamilyManagementService.reactivateAthlete(athlete.athleteId, expectedRevision: athlete.revision)
+            loadAthletes()
+        } catch {
+            errorMessage = Self.message(for: error)
+        }
+    }
+
     /// Narrow Development Stage mutation — does not touch shared
     /// add/edit form fields (`givenName` etc.) and does not call
     /// `resetForm()`, since it was never backed by that shared form

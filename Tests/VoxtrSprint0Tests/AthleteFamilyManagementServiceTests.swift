@@ -251,6 +251,271 @@ struct AthleteFamilyManagementServiceTests {
         }
     }
 
+    // MARK: - Archive / Reactivate lifecycle
+
+    /// Guarantees 1, 2, 3, 4: an active athlete can be archived; the
+    /// archived row remains fetchable by its stable `AthleteId`; it is
+    /// excluded from the canonical active-athlete roster (the same
+    /// `!isArchived` filter `FamilyHomeViewModel.refreshActiveAthletes()`/
+    /// `ParentTabShellView`'s tab roots/`AthleteFamilyManagementViewModel.loadAthletes()`
+    /// all apply over `fetchAthletes(forWorkspace:)`); and it remains
+    /// present in the full/manage-athletes query (`fetchAthletes(forWorkspace:)`
+    /// itself, unfiltered).
+    @Test("An active athlete can be archived; the archived row is fetchable by id, excluded from the active-roster filter, and still present in the full roster")
+    @MainActor
+    func archivedAthleteIsFetchableExcludedFromActiveIncludedInFullRoster() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        #expect(added.athlete.isArchived == false)
+
+        _ = try service.archiveAthlete(added.athlete.athleteId, expectedRevision: added.athlete.revision)
+
+        let fetchedById = try athleteRepository.fetchAthlete(byId: added.athlete.athleteId)
+        #expect(fetchedById?.isArchived == true)
+
+        let fullRoster = try athleteRepository.fetchAthletes(forWorkspace: staged.workspace.workspaceId)
+        #expect(fullRoster.contains { $0.athleteId == added.athlete.athleteId })
+
+        let activeRoster = fullRoster.filter { !$0.isArchived }
+        #expect(!activeRoster.contains { $0.athleteId == added.athlete.athleteId })
+    }
+
+    /// Guarantees 5, 6, 7, 10: an archived athlete can be reactivated;
+    /// the SAME stable `AthleteId` is preserved across the archive/
+    /// reactivate cycle; the reactivated athlete returns to the
+    /// canonical active-athlete roster filter; and no duplicate
+    /// `AthleteProfile` row is ever created (the roster count is
+    /// unchanged throughout).
+    @Test("An archived athlete can be reactivated, preserving the same AthleteId, returning to the active-roster filter, with no duplicate row created")
+    @MainActor
+    func reactivateAthleteRestoresActiveRosterMembershipWithoutDuplication() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let originalAthleteId = added.athlete.athleteId
+        let archived = try service.archiveAthlete(originalAthleteId, expectedRevision: added.athlete.revision)
+        #expect(try athleteRepository.fetchAllAthletes().count == 1)
+
+        let reactivated = try service.reactivateAthlete(originalAthleteId, expectedRevision: archived.revision)
+
+        #expect(reactivated.athleteId == originalAthleteId)
+        #expect(reactivated.isArchived == false)
+        #expect(try athleteRepository.fetchAllAthletes().count == 1)
+        let activeRoster = try athleteRepository.fetchAthletes(forWorkspace: staged.workspace.workspaceId)
+            .filter { !$0.isArchived }
+        #expect(activeRoster.map(\.athleteId) == [originalAthleteId])
+    }
+
+    /// Guarantee 9 (extended to the full archive/reactivate cycle):
+    /// archiving and reactivating one athlete never touches a sibling
+    /// athlete's `isArchived` state.
+    @Test("Archiving and reactivating one athlete does not affect a sibling athlete")
+    @MainActor
+    func archiveAndReactivateDoesNotAffectSibling() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let first = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let second = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Emma", birthDate: LocalDate(year: 2014, month: 6, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let archivedFirst = try service.archiveAthlete(first.athlete.athleteId, expectedRevision: first.athlete.revision)
+        _ = try service.reactivateAthlete(first.athlete.athleteId, expectedRevision: archivedFirst.revision)
+
+        let refetchedSecond = try athleteRepository.fetchAthlete(byId: second.athlete.athleteId)
+        #expect(refetchedSecond?.isArchived == false)
+        #expect(refetchedSecond?.revision == 1)
+    }
+
+    /// Guarantee 11: the archive/reactivate mutation changes only
+    /// `isArchived` (plus the required `revision`/`updatedAt` lifecycle
+    /// metadata `applyMutation` always advances) — every other profile
+    /// field, and the athlete's own `AthleteSettings` row (Sleep
+    /// tracking, preferred Color), survive completely untouched. This is
+    /// the data-safety guarantee for historical/linked configuration:
+    /// archive/reactivate never reads or writes any table other than
+    /// this one `AthleteProfile` row.
+    @Test("archiveAthlete/reactivateAthlete change only isArchived and lifecycle metadata, leaving every other profile field and the athlete's AthleteSettings untouched")
+    @MainActor
+    func archiveAndReactivateChangeOnlyLifecycleFieldsAndPreserveSettings() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", familyName: "Nygren", preferredName: "Jon",
+            birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .sharedOwnership
+        )
+        try athleteRepository.setSleepTrackingEnabled(athleteId: added.athlete.athleteId, enabled: false)
+        try athleteRepository.setPreferredColor(athleteId: added.athlete.athleteId, color: .rose)
+        let originalRevision = added.athlete.revision
+
+        let archived = try service.archiveAthlete(added.athlete.athleteId, expectedRevision: originalRevision)
+        #expect(archived.revision == originalRevision + 1)
+        _ = try service.reactivateAthlete(added.athlete.athleteId, expectedRevision: archived.revision)
+
+        let refetched = try athleteRepository.fetchAthlete(byId: added.athlete.athleteId)
+        #expect(refetched?.isArchived == false)
+        #expect(refetched?.revision == originalRevision + 2)
+        #expect(refetched?.givenName == "Jonas")
+        #expect(refetched?.familyName == "Nygren")
+        #expect(refetched?.preferredName == "Jon")
+        #expect(refetched?.birthDate == LocalDate(year: 2012, month: 4, day: 10))
+        #expect(refetched?.developmentStage == .sharedOwnership)
+
+        let settings = try athleteRepository.fetchAthleteSettings(forAthlete: added.athlete.athleteId)
+        #expect(settings?.sleepTrackingEnabled == false)
+        #expect(settings?.preferredColor == .rose)
+    }
+
+    @Test("reactivateAthlete rejects a nonexistent athlete")
+    @MainActor
+    func reactivateAthleteRejectsMissingAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+
+        #expect(throws: AthleteFamilyManagementError.athleteNotFound) {
+            try service.reactivateAthlete(AthleteId(), expectedRevision: 1)
+        }
+    }
+
+    @Test("reactivateAthlete rejects a stale revision without mutating the athlete")
+    @MainActor
+    func reactivateAthleteRejectsStaleRevision() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let archived = try service.archiveAthlete(added.athlete.athleteId, expectedRevision: added.athlete.revision)
+
+        #expect(throws: AthleteProfileConflictError.staleRevision(expected: 99, actual: archived.revision)) {
+            try service.reactivateAthlete(added.athlete.athleteId, expectedRevision: 99)
+        }
+        let refetched = try athleteRepository.fetchAthlete(byId: added.athlete.athleteId)
+        #expect(refetched?.isArchived == true)
+    }
+
+    /// `AthleteFamilyManagementViewModel.reactivateAthlete(_:)` mirrors
+    /// `archiveAthlete(_:)`'s own established shape exactly (see that
+    /// method's test above via `viewModelResolvedColorPrefersExplicitOverFallback`'s
+    /// ViewModel-construction pattern) — this proves the ViewModel-level
+    /// call reaches the same canonical service mutation and refreshes
+    /// `athletes` from persistence afterward, the same "re-fetch on
+    /// mutation" freshness this screen's own `loadAthletes()` already
+    /// establishes for every other mutation.
+    @Test("AthleteFamilyManagementViewModel.reactivateAthlete(_:) reactivates through the canonical service path and refreshes athletes")
+    @MainActor
+    func viewModelReactivateAthleteReachesCanonicalServiceAndRefreshesList() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let staged = parentWorkspaceRepository.stageParentAndWorkspace(givenName: "Kari")
+        try container.mainContext.save()
+        let service = AthleteFamilyManagementService(
+            modelContext: container.mainContext,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let added = try service.addAthlete(
+            workspaceId: staged.workspace.workspaceId, participantId: staged.participant.id,
+            givenName: "Jonas", birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let viewModel = AthleteFamilyManagementViewModel(
+            workspaceId: staged.workspace.workspaceId,
+            participantId: staged.participant.id,
+            athleteRepository: athleteRepository,
+            athleteFamilyManagementService: service
+        )
+        viewModel.archiveAthlete(added.athlete)
+        #expect(viewModel.errorMessage == nil)
+        let archivedAthlete = try #require(viewModel.athletes.first { $0.athleteId == added.athlete.athleteId })
+        #expect(archivedAthlete.isArchived == true)
+
+        viewModel.reactivateAthlete(archivedAthlete)
+
+        #expect(viewModel.errorMessage == nil)
+        let reactivatedAthlete = try #require(viewModel.athletes.first { $0.athleteId == added.athlete.athleteId })
+        #expect(reactivatedAthlete.isArchived == false)
+    }
+
     @Test("addAthlete rejects an invalid givenName and creates nothing")
     @MainActor
     func addAthleteRejectsInvalidGivenName() throws {

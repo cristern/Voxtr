@@ -178,6 +178,30 @@ public final class AthleteFamilyManagementService {
         return athlete
     }
 
+    /// "Reactivate athlete" — the exact reverse of `archiveAthlete`
+    /// above, same shape (fetch by stable `AthleteId`, `applyMutation`
+    /// on the single `isArchived` field, save, return the SAME
+    /// `AthleteProfile` row). Never creates a new athlete, never touches
+    /// `AthleteAccessGrant` or any historical/linked data, and never
+    /// touches any other athlete. Restoring active-surface visibility
+    /// needs no additional invalidation here: every consumer of the
+    /// active-athlete roster (`FamilyHomeViewModel.refreshActiveAthletes()`,
+    /// `ParentTabShellView`'s Plan/Training tab roots,
+    /// `AthleteFamilyManagementViewModel.loadAthletes()`) already
+    /// re-fetches from this same repository on appear — this method only
+    /// has to make the persisted row correct, not push a notification.
+    @discardableResult
+    public func reactivateAthlete(_ athleteId: AthleteId, expectedRevision: Int) throws -> AthleteProfile {
+        guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
+            throw AthleteFamilyManagementError.athleteNotFound
+        }
+        try athlete.applyMutation(expectedRevision: expectedRevision, changedFields: ["isArchived"]) { profile in
+            profile.isArchived = false
+        }
+        try athleteRepository.save()
+        return athlete
+    }
+
     /// Narrow, single-field Development Stage mutation — does not
     /// validate or resubmit `givenName`/`familyName`/`preferredName`/
     /// `birthDate`/`timeZoneId`, unlike `editAthlete`. Mirrors
