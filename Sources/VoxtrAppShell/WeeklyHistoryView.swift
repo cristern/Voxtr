@@ -31,7 +31,8 @@ public struct WeeklyHistoryView: View {
         Form {
             Section {
                 Text(athleteDisplayName)
-                    .font(.headline)
+                    .font(VoxtrTypography.cardTitle)
+                    .foregroundStyle(VoxtrColor.textPrimary)
                     .accessibilityIdentifier("weeklyHistory.athleteName")
                 HStack {
                     Button {
@@ -55,28 +56,35 @@ public struct WeeklyHistoryView: View {
                     .accessibilityIdentifier("weeklyHistory.nextWeekButton")
                 }
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("weeklyHistory.weekIdentityBar")
 
             if let errorMessage = viewModel.errorMessage {
                 Section {
                     Text(errorMessage).foregroundStyle(.red)
                 }
+                .voxtrRowSurface()
             }
 
-            Section("What happened") {
+            Section {
                 LabeledContent("Planned", value: "\(viewModel.plannedCount)")
                     .accessibilityIdentifier("weeklyHistory.plannedCount")
                 LabeledContent("Completed from plan", value: "\(viewModel.completedFromPlanCount)")
                     .accessibilityIdentifier("weeklyHistory.completedCount")
                 LabeledContent("Additional", value: "\(viewModel.additionalCount)")
                     .accessibilityIdentifier("weeklyHistory.additionalCount")
+            } header: {
+                VoxtrSectionHeading("What happened")
             }
+            .voxtrRowSurface()
 
             if let plannedActivities = viewModel.result?.plannedActivities, !plannedActivities.isEmpty {
-                Section("Planned activities") {
+                Section {
                     ForEach(plannedActivities, id: \.plannedActivity.id) { completion in
                         HStack {
                             Text(completion.plannedActivity.title)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
                             // Review follow-up (cancellation sanity
                             // check): the outcome, not a blanket
@@ -88,25 +96,33 @@ public struct WeeklyHistoryView: View {
                             // never logged).
                             if let status = completion.loggedActivity?.status {
                                 Text(Self.outcomeLabel(for: status))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
                             }
                         }
                     }
+                } header: {
+                    VoxtrSectionHeading("Planned activities")
                 }
+                .voxtrRowSurface()
                 .accessibilityIdentifier("weeklyHistory.plannedActivitiesSection")
             }
 
             if !viewModel.additionalLoggedActivities.isEmpty {
-                Section("Additional (unplanned)") {
+                Section {
                     ForEach(viewModel.additionalLoggedActivities, id: \.id) { logged in
                         Text(logged.title)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                     }
+                } header: {
+                    VoxtrSectionHeading("Additional (unplanned)")
                 }
+                .voxtrRowSurface()
                 .accessibilityIdentifier("weeklyHistory.additionalActivitiesSection")
             }
 
-            Section("Reflection") {
+            Section {
                 switch viewModel.reflectionAccessState {
                 case .visible(let reflection):
                     if let whatWorked = reflection.whatWorked, !whatWorked.isEmpty {
@@ -124,7 +140,8 @@ public struct WeeklyHistoryView: View {
                     .accessibilityIdentifier("weeklyHistory.reflectionAction")
                 case .none:
                     Text("No reflection yet")
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                         .accessibilityIdentifier("weeklyHistory.noReflection")
                     Button("Add Reflection") {
                         isShowingReflectionForm = true
@@ -140,12 +157,18 @@ public struct WeeklyHistoryView: View {
                     // competing/duplicate Reflection for this
                     // athlete/week, which already has one).
                     Text("No reflection yet")
-                        .foregroundStyle(.secondary)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
                         .accessibilityIdentifier("weeklyHistory.noReflection")
                 }
+            } header: {
+                VoxtrSectionHeading("Reflection")
             }
+            .voxtrRowSurface()
             .accessibilityIdentifier("weeklyHistory.reflectionSection")
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Week by Week")
         .onAppear {
             viewModel.load()

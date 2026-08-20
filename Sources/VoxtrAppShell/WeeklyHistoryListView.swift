@@ -30,6 +30,7 @@ public struct WeeklyHistoryListView: View {
                 Section {
                     Text(errorMessage).foregroundStyle(.red)
                 }
+                .voxtrRowSurface()
             }
             ForEach(viewModel.summaries) { summary in
                 NavigationLink {
@@ -37,26 +38,31 @@ public struct WeeklyHistoryListView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(WeekIdentityFormatter.stableIdentityLabel(forWeekStart: summary.weekStart))
-                            .font(.headline)
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
                         if let context = WeekIdentityFormatter.contextualLabel(for: summary.weekStart, referenceWeekStart: currentWeekStart) {
                             Text(context)
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                                .font(VoxtrTypography.caption)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                         }
                         Text("Planned \(summary.plannedCount) · Completed from plan \(summary.completedFromPlanCount) · Additional \(summary.additionalCount)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
                     }
                 }
                 .accessibilityIdentifier("weeklyHistoryList.weekRow.\(summary.weekStart.isoString)")
+                .voxtrRowSurface()
             }
             if viewModel.canLoadMore {
                 Button("Load more") {
                     viewModel.loadMore()
                 }
                 .accessibilityIdentifier("weeklyHistoryList.loadMoreButton")
+                .voxtrRowSurface()
             }
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Week by Week")
         .onAppear {
             if viewModel.summaries.isEmpty {

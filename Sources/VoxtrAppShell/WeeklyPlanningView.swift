@@ -385,8 +385,8 @@ struct WeekdayMultiSelectView: View {
                 } label: {
                     Text(String(WeeklyPlanningView.weekdayLabel(for: weekday).prefix(1)))
                         .frame(width: 32, height: 32)
-                        .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.15))
-                        .foregroundStyle(isSelected ? Color.white : Color.primary)
+                        .background(isSelected ? VoxtrColor.accent : VoxtrColor.surfaceSubtle)
+                        .foregroundStyle(isSelected ? Color.white : VoxtrColor.textPrimary)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -417,13 +417,15 @@ struct RecurringActivityManagementView: View {
                         HStack {
                             VStack(alignment: .leading) {
                                 Text(recurringActivity.title)
+                                    .font(VoxtrTypography.cardTitle)
+                                    .foregroundStyle(VoxtrColor.textPrimary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
                                 if let location = recurringActivity.location, !location.isEmpty {
                                     Text(location)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .font(VoxtrTypography.metadata)
+                                        .foregroundStyle(VoxtrColor.textSecondary)
                                 }
                             }
                             Spacer()
@@ -444,8 +446,11 @@ struct RecurringActivityManagementView: View {
                         viewModel.beginEditingRecurringActivity(recurringActivity)
                         formSheetItem = RecurringFormSheetItem(editingRecurringActivity: recurringActivity)
                     }
+                    .voxtrRowSurface()
                 }
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .accessibilityIdentifier("planning.recurringActivityList")
             .navigationTitle("\(athleteDisplayName) · Recurring Activities")
             .toolbar {
@@ -507,60 +512,78 @@ struct RecurringActivityFormView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("planning.recurringFormErrorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
-                TextField("Title", text: $viewModel.recurringFormTitle)
-                    .accessibilityIdentifier("planning.recurringFormTitleField")
+                Section {
+                    TextField("Title", text: $viewModel.recurringFormTitle)
+                        .accessibilityIdentifier("planning.recurringFormTitleField")
 
-                Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
-                    Text("Team training").tag(ActivityType.teamTraining)
-                    Text("Match").tag(ActivityType.match)
-                    Text("Competition").tag(ActivityType.competition)
-                    Text("Individual training").tag(ActivityType.individualTraining)
-                    Text("Physical training").tag(ActivityType.physicalTraining)
-                    Text("Recovery").tag(ActivityType.recovery)
-                    Text("Test").tag(ActivityType.test)
-                    Text("Other").tag(ActivityType.other)
+                    Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
+                        Text("Team training").tag(ActivityType.teamTraining)
+                        Text("Match").tag(ActivityType.match)
+                        Text("Competition").tag(ActivityType.competition)
+                        Text("Individual training").tag(ActivityType.individualTraining)
+                        Text("Physical training").tag(ActivityType.physicalTraining)
+                        Text("Recovery").tag(ActivityType.recovery)
+                        Text("Test").tag(ActivityType.test)
+                        Text("Other").tag(ActivityType.other)
+                    }
+                    .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
+                } header: {
+                    VoxtrSectionHeading("Activity")
                 }
-                .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
+                .voxtrRowSurface()
 
-                WeekdayMultiSelectView(selectedWeekdays: $viewModel.recurringFormWeekdays)
-                    .accessibilityIdentifier("planning.recurringFormWeekdayPicker")
+                Section {
+                    WeekdayMultiSelectView(selectedWeekdays: $viewModel.recurringFormWeekdays)
+                        .accessibilityIdentifier("planning.recurringFormWeekdayPicker")
 
-                DatePicker(
-                    "Start date",
-                    selection: $viewModel.recurringFormStartDate,
-                    displayedComponents: .date
-                )
-                .accessibilityIdentifier("planning.recurringFormStartDatePicker")
-
-                DatePicker(
-                    "End date",
-                    selection: $viewModel.recurringFormEndDate,
-                    displayedComponents: .date
-                )
-                .accessibilityIdentifier("planning.recurringFormEndDatePicker")
-
-                Toggle("Has start time", isOn: $viewModel.recurringFormHasStartTime)
-                    .accessibilityIdentifier("planning.recurringFormHasStartTimeToggle")
-                if viewModel.recurringFormHasStartTime {
                     DatePicker(
-                        "Start time",
-                        selection: $viewModel.recurringFormStartTime,
-                        displayedComponents: .hourAndMinute
+                        "Start date",
+                        selection: $viewModel.recurringFormStartDate,
+                        displayedComponents: .date
                     )
-                    .accessibilityIdentifier("planning.recurringFormStartTimePicker")
-                }
+                    .accessibilityIdentifier("planning.recurringFormStartDatePicker")
 
-                Toggle("Has duration", isOn: $viewModel.recurringFormHasDuration)
-                    .accessibilityIdentifier("planning.recurringFormHasDurationToggle")
-                if viewModel.recurringFormHasDuration {
-                    DurationPickerView(durationMinutes: $viewModel.recurringFormDurationMinutes)
-                }
+                    DatePicker(
+                        "End date",
+                        selection: $viewModel.recurringFormEndDate,
+                        displayedComponents: .date
+                    )
+                    .accessibilityIdentifier("planning.recurringFormEndDatePicker")
 
-                TextField("Location (optional)", text: $viewModel.recurringFormLocation)
-                    .accessibilityIdentifier("planning.recurringFormLocationField")
+                    Toggle("Has start time", isOn: $viewModel.recurringFormHasStartTime)
+                        .accessibilityIdentifier("planning.recurringFormHasStartTimeToggle")
+                    if viewModel.recurringFormHasStartTime {
+                        DatePicker(
+                            "Start time",
+                            selection: $viewModel.recurringFormStartTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .accessibilityIdentifier("planning.recurringFormStartTimePicker")
+                    }
+
+                    Toggle("Has duration", isOn: $viewModel.recurringFormHasDuration)
+                        .accessibilityIdentifier("planning.recurringFormHasDurationToggle")
+                    if viewModel.recurringFormHasDuration {
+                        DurationPickerView(durationMinutes: $viewModel.recurringFormDurationMinutes)
+                    }
+                } header: {
+                    VoxtrSectionHeading("Schedule")
+                }
+                .voxtrRowSurface()
+
+                Section {
+                    TextField("Location (optional)", text: $viewModel.recurringFormLocation)
+                        .accessibilityIdentifier("planning.recurringFormLocationField")
+                } header: {
+                    VoxtrSectionHeading("Location")
+                }
+                .voxtrRowSurface()
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle(editingRecurringActivity == nil ? "\(athleteDisplayName) · Add Recurring Activity" : "\(athleteDisplayName) · Edit Recurring Activity")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
