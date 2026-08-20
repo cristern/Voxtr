@@ -179,7 +179,7 @@ struct Sprint12ATests {
         )
 
         let scheduleViewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )

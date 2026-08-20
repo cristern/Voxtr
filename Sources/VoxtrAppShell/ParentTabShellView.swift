@@ -292,7 +292,7 @@ private struct ParentPlanTabView: View {
                     NavigationLink("Family Schedule") {
                         FamilyScheduleView(
                             viewModel: FamilyScheduleViewModel(
-                                activeAthletes: activeAthletes,
+                                provideActiveAthletes: { activeAthletes },
                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                                 planningService: planningService,
                                 resolveAthleteColor: resolvedColor

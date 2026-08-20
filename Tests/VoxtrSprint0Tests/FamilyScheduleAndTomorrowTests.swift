@@ -223,7 +223,7 @@ struct FamilyScheduleAndTomorrowTests {
         )
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver, emma],
+            provideActiveAthletes: { [oliver, emma] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -238,6 +238,177 @@ struct FamilyScheduleAndTomorrowTests {
         // Re-running produces the identical grouping/order — deterministic.
         viewModel.loadSchedule()
         #expect(viewModel.dayGroups.map(\.date) == [date3, date7])
+    }
+
+    // MARK: - Active-roster freshness (Archive/Reactivate)
+
+    /// Active-roster freshness fix (runtime/state audit): proves
+    /// `loadSchedule()` asks `provideActiveAthletes()` again on every
+    /// call, rather than permanently using whatever roster was true at
+    /// construction — the exact defect this fix closes (Family Schedule
+    /// previously froze its roster forever once pushed, so an athlete
+    /// archived or reactivated while the screen remained on-screen never
+    /// appeared/disappeared without a full pop-and-repush).
+    @Test("FamilySchedule asks its roster provider again on a later load, not only at construction")
+    @MainActor
+    func familyScheduleReasksRosterProviderOnLaterLoad() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        var providerCallCount = 0
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: {
+                providerCallCount += 1
+                return [oliver]
+            },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        #expect(providerCallCount == 0)
+
+        viewModel.loadSchedule()
+        #expect(providerCallCount == 1)
+
+        viewModel.loadSchedule()
+        #expect(providerCallCount == 2)
+    }
+
+    /// Guarantee 2: a reactivated athlete (simulated here by the
+    /// provider's result growing between two loads of the SAME
+    /// `FamilyScheduleViewModel` instance — exactly the "still pushed,
+    /// no reconstruction" scenario the freshness fix targets) is
+    /// included in the NEXT schedule load, without constructing a new
+    /// ViewModel.
+    @Test("Changing the roster provider's result from one athlete to two causes a later schedule load to include the newly-added athlete")
+    @MainActor
+    func familyScheduleLoadIncludesAthleteAddedToProvider() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus3 = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus3)
+        let date3 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let oliverWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: oliverWeekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Football", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let emmaWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: emma.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: emmaWeekPlan.weekPlanId, athleteId: emma.athleteId, activityType: .teamTraining,
+            title: "Handball", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var currentRoster: [AthleteProfile] = [oliver]
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { currentRoster },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+
+        viewModel.loadSchedule()
+        #expect(Set(viewModel.dayGroups.flatMap(\.rows).map(\.athleteName)) == ["Oliver"])
+
+        // Simulates Emma being reactivated between two loads of this same,
+        // still-pushed screen instance — no new FamilyScheduleViewModel
+        // constructed.
+        currentRoster = [oliver, emma]
+        viewModel.loadSchedule()
+        #expect(Set(viewModel.dayGroups.flatMap(\.rows).map(\.athleteName)) == ["Oliver", "Emma"])
+    }
+
+    /// Guarantee 3: the inverse — an archived athlete (simulated by the
+    /// provider's result shrinking between two loads of the SAME
+    /// instance) is excluded from the NEXT schedule load.
+    @Test("Changing the roster provider's result from two athletes to one causes a later schedule load to exclude the removed athlete")
+    @MainActor
+    func familyScheduleLoadExcludesAthleteRemovedFromProvider() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus3 = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus3)
+        let date3 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let oliverWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: oliverWeekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Football", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let emmaWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: emma.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: emmaWeekPlan.weekPlanId, athleteId: emma.athleteId, activityType: .teamTraining,
+            title: "Handball", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var currentRoster: [AthleteProfile] = [oliver, emma]
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { currentRoster },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+
+        viewModel.loadSchedule()
+        #expect(Set(viewModel.dayGroups.flatMap(\.rows).map(\.athleteName)) == ["Oliver", "Emma"])
+
+        // Simulates Emma being archived between two loads of this same,
+        // still-pushed screen instance — no new FamilyScheduleViewModel
+        // constructed.
+        currentRoster = [oliver]
+        viewModel.loadSchedule()
+        #expect(Set(viewModel.dayGroups.flatMap(\.rows).map(\.athleteName)) == ["Oliver"])
     }
 
     @Test("Navigation from Family Schedule preserves the correct athlete/activity identity")
@@ -274,7 +445,7 @@ struct FamilyScheduleAndTomorrowTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
         )
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [athlete],
+            provideActiveAthletes: { [athlete] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -350,7 +521,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -405,7 +576,7 @@ extension FamilyScheduleAndTomorrowTests {
         _ = try planningService.acceptSuggestion(matchingSuggestion, forWeekPlan: weekPlan.weekPlanId)
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -472,7 +643,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -515,7 +686,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -603,7 +774,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -667,7 +838,7 @@ extension FamilyScheduleAndTomorrowTests {
         // memoized value.
         var resolvedIds: [AthleteId] = []
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [],
+            provideActiveAthletes: { [] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService,
             resolveAthleteColor: { athleteId in
@@ -701,7 +872,7 @@ extension FamilyScheduleAndTomorrowTests {
         let athleteId = AthleteId()
 
         let viewModel = FamilyScheduleViewModel(
-            activeAthletes: [],
+            provideActiveAthletes: { [] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )

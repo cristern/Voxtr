@@ -72,7 +72,7 @@ struct Sprint1CloseoutTests {
         )
 
         let scheduleViewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )
@@ -123,7 +123,7 @@ struct Sprint1CloseoutTests {
         )
 
         let scheduleViewModel = FamilyScheduleViewModel(
-            activeAthletes: [oliver],
+            provideActiveAthletes: { [oliver] },
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             planningService: planningService
         )

@@ -73,7 +73,22 @@ public final class FamilyScheduleViewModel {
     public private(set) var dayGroups: [FamilyScheduleDayGroup] = []
     public private(set) var errorMessage: String?
 
-    private let activeAthletes: [AthleteProfile]
+    /// Active-roster freshness fix (runtime/state audit): previously a
+    /// frozen `let activeAthletes: [AthleteProfile]`, captured once at
+    /// construction — correct only for the moment Family Schedule was
+    /// pushed, and permanently stale for the rest of that screen
+    /// instance's life if an athlete was archived or reactivated while
+    /// it remained the visible/pushed content (e.g. a tab switch away
+    /// and back with no pop). Replaced with an injected LIVE provider,
+    /// the same dependency-injection shape `resolveAthleteColor` below
+    /// already establishes for an analogous cross-cutting concern this
+    /// ViewModel deliberately does not own the source of truth for.
+    /// `loadSchedule(referenceDate:calendar:)` calls this fresh at the
+    /// START of every load — never stored as a second, competing roster
+    /// state — so each load always reflects the CURRENT canonical
+    /// `AthleteProfile.isArchived` state, not a construction-time
+    /// snapshot.
+    private let provideActiveAthletes: () -> [AthleteProfile]
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let planningService: PlanningService
     /// Design Foundation extension round: Family Schedule is a
@@ -106,12 +121,12 @@ public final class FamilyScheduleViewModel {
     private static let upcomingDayCount = 7
 
     public init(
-        activeAthletes: [AthleteProfile],
+        provideActiveAthletes: @escaping () -> [AthleteProfile],
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         planningService: PlanningService,
         resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId
     ) {
-        self.activeAthletes = activeAthletes
+        self.provideActiveAthletes = provideActiveAthletes
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.planningService = planningService
         self.resolveAthleteColor = resolveAthleteColor
@@ -139,6 +154,12 @@ public final class FamilyScheduleViewModel {
     /// it always used, so no existing behavior changes.
     func loadSchedule(referenceDate: Date, calendar: Calendar) {
         errorMessage = nil
+        // Active-roster freshness fix: obtained fresh at the START of
+        // this load, from the live provider — never the construction-time
+        // value this ViewModel no longer stores. Used consistently as a
+        // local snapshot for the rest of THIS load only; never held as a
+        // second, competing source of truth between loads.
+        let activeAthletes = provideActiveAthletes()
         guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: referenceDate) else {
             dayGroups = []
             return

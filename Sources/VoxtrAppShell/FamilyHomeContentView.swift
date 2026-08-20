@@ -279,7 +279,7 @@ public struct FamilyHomeContentView: View {
                 case .familySchedule:
                     FamilyScheduleView(
                         viewModel: FamilyScheduleViewModel(
-                            activeAthletes: viewModel.activeAthletes,
+                            provideActiveAthletes: { viewModel.activeAthletes },
                             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                             planningService: planningService,
                             resolveAthleteColor: viewModel.resolvedAthleteColor
@@ -330,39 +330,43 @@ public struct FamilyHomeContentView: View {
                 }
             }
         }
-        // Athlete Color freshness fix (runtime/state audit): Family
-        // Home's own `.onAppear` above is attached to the `Form` —
-        // INSIDE this `NavigationStack` — so it only refires when that
-        // root content itself is the visible screen again. If the user
-        // is pushed into anything (an athlete's Home, Family Schedule,
-        // Activity Detail) when they switch to the Profile tab, change
-        // an athlete's Color in Athlete Settings, and switch back, they
-        // land directly back on the pushed screen — the Form never
-        // reappears, so `refresh()` (and the `loadAthleteColors()` step
-        // inside it) never reruns, and `viewModel.athleteColors` stays
-        // stale indefinitely.
+        // Active-roster freshness fix (runtime/state audit, extending the
+        // earlier Athlete Color fix below): Family Home's own inner
+        // `.onAppear` above is attached to the `Form` — INSIDE this
+        // `NavigationStack` — so it only refires when that root content
+        // itself is the visible screen again. If the user is pushed into
+        // anything (an athlete's Home, Family Schedule, Activity Detail)
+        // when they switch to the Profile tab, Archive or Reactivate an
+        // athlete, and switch back, they land directly back on the
+        // pushed screen — the Form never reappears, so `refresh()` never
+        // reruns, and `viewModel.activeAthletes` (plus everything
+        // derived from it: today's rows, tomorrow, focus this week,
+        // sleep summaries, Athlete Colors) stays stale indefinitely.
         //
         // This second `.onAppear`, attached to the `NavigationStack`
         // itself (mirroring the exact placement `ParentPlanTabView`/
         // `ParentTrainingTabView` already use, and which is why THEIR
-        // Athlete Color caches don't have this gap), refires whenever
+        // active-athlete rosters don't have this gap), refires whenever
         // the Home tab reappears regardless of how deep the user has
-        // navigated inside it. Deliberately calls ONLY
-        // `loadAthleteColors()` — not `refresh()` — so this fix stays
-        // scoped to Athlete Color freshness and does not also start
-        // refreshing rows/tomorrow/focus-this-week/sleep while the
-        // user is mid-navigation under a push; harmless to call twice
-        // back-to-back on first launch, alongside the inner `.onAppear`'s
-        // own `refresh()` call.
+        // navigated inside it. Originally scoped narrowly to
+        // `loadAthleteColors()` only (an Athlete Color-only fix); now
+        // calls the full `refresh()` instead — a strict superset, since
+        // `refresh()` already ends by calling `loadAthleteColors()` — so
+        // the active roster gets the exact same reappearance-freshness
+        // guarantee Color already had. Harmless to run twice back-to-back
+        // on first launch, alongside the inner `.onAppear`'s own
+        // `refresh()` call — `refresh()` is a set of read-only re-fetches,
+        // not a mutation.
         //
-        // `FamilyScheduleView` opened from here resolves colour through
-        // `viewModel.resolvedAthleteColor(for:)` — a bound method on
-        // this SAME live `FamilyHomeViewModel` instance, reading
-        // `athleteColors` fresh at call time, not a captured snapshot —
-        // so refreshing this cache here is what Family Schedule (opened
-        // from Family Home) needs too; no separate fix required there.
+        // `FamilyScheduleView` opened from here reads its roster through
+        // an injected `provideActiveAthletes` closure (`{ viewModel.activeAthletes }`,
+        // see `FamilyScheduleViewModel`'s own doc comment) — reading this
+        // SAME live `FamilyHomeViewModel.activeAthletes` fresh on every
+        // Family Schedule appearance, not a captured snapshot — so
+        // keeping THIS property current here is exactly what that
+        // downstream fix depends on.
         .onAppear {
-            viewModel.loadAthleteColors()
+            viewModel.refresh()
         }
     }
 
