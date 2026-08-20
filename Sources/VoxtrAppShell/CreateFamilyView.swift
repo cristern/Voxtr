@@ -17,27 +17,28 @@ public struct CreateFamilyView: View {
 
     public var body: some View {
         Form {
-            Section("Your name") {
+            Section {
                 TextField("Your name", text: $viewModel.parentGivenName)
                     .textContentType(.givenName)
                     .accessibilityIdentifier("onboarding.parentNameField")
                     .accessibilityLabel(Text("Your name"))
                 if let error = viewModel.parentGivenNameError {
                     Text(error)
-                        .font(.footnote)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("onboarding.parentNameField.error")
                 }
+            } header: {
+                VoxtrSectionHeading("Your name")
             }
+            .voxtrRowSurface()
 
-            Section("Athlete") {
+            Section {
                 TextField("Athlete's name", text: $viewModel.athleteGivenName)
                     .textContentType(.givenName)
                     .accessibilityIdentifier("onboarding.athleteNameField")
                     .accessibilityLabel(Text("Athlete's name"))
                 if let error = viewModel.athleteGivenNameError {
                     Text(error)
-                        .font(.footnote)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("onboarding.athleteNameField.error")
                 }
@@ -51,7 +52,6 @@ public struct CreateFamilyView: View {
                 .accessibilityLabel(Text("Athlete's birth date"))
                 if let error = viewModel.athleteBirthDateError {
                     Text(error)
-                        .font(.footnote)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("onboarding.athleteBirthDatePicker.error")
                 }
@@ -64,7 +64,10 @@ public struct CreateFamilyView: View {
                 }
                 .accessibilityIdentifier("onboarding.developmentStagePicker")
                 .accessibilityLabel(Text("Development stage"))
+            } header: {
+                VoxtrSectionHeading("Athlete")
             }
+            .voxtrRowSurface()
 
             if let submissionError = viewModel.submissionError {
                 Section {
@@ -72,6 +75,7 @@ public struct CreateFamilyView: View {
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("onboarding.submissionError")
                 }
+                .voxtrRowSurface()
             }
 
             Section {
@@ -89,7 +93,10 @@ public struct CreateFamilyView: View {
                 .accessibilityIdentifier("onboarding.submitButton")
                 .accessibilityLabel(Text("Create family"))
             }
+            .voxtrRowSurface()
         }
+        .voxtrScreenBackground()
+        .tint(VoxtrColor.accent)
         .navigationTitle("Welcome to Vǫxtr")
     }
 }

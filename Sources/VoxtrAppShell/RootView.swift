@@ -83,15 +83,18 @@ private struct InconsistentFamilyView: View {
                 .font(.largeTitle)
                 .foregroundStyle(.orange)
             Text(OnboardingStrings.inconsistentGraphTitle)
-                .font(.headline)
+                .font(VoxtrTypography.cardTitle)
+                .foregroundStyle(VoxtrColor.textPrimary)
                 .accessibilityIdentifier("onboarding.inconsistentGraph.title")
             Text(reason)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
                 .accessibilityIdentifier("onboarding.inconsistentGraph.reason")
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .voxtrScreenBackground()
     }
 }

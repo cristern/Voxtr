@@ -596,17 +596,23 @@ struct AthleteFormView: View {
                             .foregroundStyle(.red)
                             .accessibilityIdentifier("athleteManagement.formErrorMessage")
                     }
+                    .voxtrRowSurface()
                 }
 
-                Section("Athlete") {
+                Section {
                     TextField("Given name", text: $viewModel.givenName)
                         .accessibilityIdentifier("athleteManagement.givenNameField")
                     TextField("Family name (optional)", text: $viewModel.familyName)
                         .accessibilityIdentifier("athleteManagement.familyNameField")
                     DatePicker("Birth date", selection: $viewModel.birthDate, displayedComponents: .date)
                         .accessibilityIdentifier("athleteManagement.birthDatePicker")
+                } header: {
+                    VoxtrSectionHeading("Athlete")
                 }
+                .voxtrRowSurface()
             }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
             .navigationTitle(editingAthlete == nil ? "Add Athlete" : "Edit Athlete")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
