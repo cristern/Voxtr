@@ -22,8 +22,10 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// `TrainingReflectionCoordinationService` calls `activityChanged(for:)`
 /// after each of its three mutating methods succeeds
 /// (`logActivity`/`correctLoggedActivity`/`reopenCancelledActivity`);
-/// never on a thrown failure, since each call site sits after the
-/// underlying write already succeeded.
+/// `WeeklyPlanningViewModel` also calls it after successful canonical
+/// PlannedActivity create/edit/delete/materialization paths. Never on a
+/// thrown mutation failure, since every call site sits after the
+/// underlying canonical write already succeeded.
 ///
 /// Deliberately a separate type from `TrainingReflectionCoordinationService`:
 /// that type orchestrates Training+Reflection writes; this type owns

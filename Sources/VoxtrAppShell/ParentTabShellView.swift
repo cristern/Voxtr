@@ -129,6 +129,7 @@ public struct ParentTabShellView: View {
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 athleteRepository: athleteRepository,
+                activityChangeBroadcaster: activityChangeBroadcaster,
                 actorId: ActorId(rawValue: family.participant.id)
             )
             .tabItem { Label("Plan", systemImage: "calendar") }
@@ -252,6 +253,7 @@ private struct ParentPlanTabView: View {
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let athleteRepository: AthleteRepository
+    let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
     let actorId: ActorId
 
     @State private var activeAthletes: [AthleteProfile]
@@ -273,6 +275,7 @@ private struct ParentPlanTabView: View {
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         athleteRepository: AthleteRepository,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         actorId: ActorId
     ) {
         self.family = family
@@ -281,6 +284,7 @@ private struct ParentPlanTabView: View {
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.athleteRepository = athleteRepository
+        self.activityChangeBroadcaster = activityChangeBroadcaster
         self.actorId = actorId
         _activeAthletes = State(initialValue: family.activeAthletes)
     }
@@ -315,7 +319,8 @@ private struct ParentPlanTabView: View {
                                     viewModel: WeeklyPlanningViewModel(
                                         service: planningService,
                                         athleteId: athlete.athleteId,
-                                        committedByActorId: actorId
+                                        committedByActorId: actorId,
+                                        activityChangeBroadcaster: activityChangeBroadcaster
                                     ),
                                     athleteDisplayName: athlete.givenName,
                                     planningService: planningService,
