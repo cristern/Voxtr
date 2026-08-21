@@ -402,6 +402,7 @@ struct WeekdayMultiSelectView: View {
 struct RecurringActivityManagementView: View {
     @Bindable var viewModel: WeeklyPlanningViewModel
     let athleteDisplayName: String
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @State private var formSheetItem: RecurringFormSheetItem?
 
