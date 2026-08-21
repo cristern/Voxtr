@@ -15,7 +15,7 @@ import VoxtrReflectionDomain
 /// Recurring reopen stale-Athlete-Home fix (architecture round): the
 /// invariant this whole redesign rests on — a successful canonical
 /// activity-lifecycle mutation (`TrainingReflectionCoordinationService.logActivity`/
-/// `correctLoggedActivity`/`reopenCancelledActivity`) notifies every
+/// `correctLoggedActivity`/`reopenNoTrainingOutcome`) notifies every
 /// still-live `AthleteActivityChangeSubscriber` registered for the
 /// mutated athlete exactly once, a failed mutation notifies none, and
 /// isolation/subscription lifecycle hold regardless of which screen
@@ -76,7 +76,7 @@ struct AthleteActivityChangeBroadcasterTests {
 
     // MARK: - 2. Failure emits none
 
-    @Test("A failed reopenCancelledActivity call (not actually cancelled) notifies no subscriber")
+    @Test("A failed reopenNoTrainingOutcome call (completed outcome) notifies no subscriber")
     @MainActor
     func failedMutationEmitsNone() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -88,18 +88,56 @@ struct AthleteActivityChangeBroadcasterTests {
         broadcaster.subscribe(athleteId: athleteId, subscriber)
 
         // A genuinely COMPLETED (never cancelled) activity — reopen must
-        // throw .activityNotCancelled and never reach the broadcast.
+        // throw .activityNotReopenable and never reach the broadcast.
         let logged = try coordinator.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
             startedAt: .now, durationMinutes: 30, authorId: ActorId(), sessionForm: nil
         )
         #expect(subscriber.callCount == 1) // from the successful log above
 
-        #expect(throws: TrainingServiceError.activityNotCancelled) {
-            try coordinator.reopenCancelledActivity(logged.loggedActivity.loggedActivityId, athleteId: athleteId)
+        #expect(throws: TrainingServiceError.activityNotReopenable) {
+            try coordinator.reopenNoTrainingOutcome(logged.loggedActivity.loggedActivityId, athleteId: athleteId)
         }
         // Unchanged by the failed reopen attempt.
         #expect(subscriber.callCount == 1)
+    }
+
+    @Test("A successful missed-outcome reopen notifies only after the canonical deletion succeeds")
+    @MainActor
+    func successfulMissedReopenEmitsAfterMutation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (planning, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let weekPlan = try planning.getOrCreateWeekPlan(
+            athleteId: athleteId,
+            weekStart: TrainingPlanningCoordinationService.weekStart()
+        )
+        let planned = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Missed session",
+            localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: Self.oslo
+        )
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: planned.plannedActivityId,
+            activityType: planned.activityType,
+            title: planned.title,
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+
+        try coordinator.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
+
+        #expect(subscriber.callCount == 1)
+        #expect(try training.fetchLoggedActivities(forPlannedActivity: planned.plannedActivityId).isEmpty)
     }
 
     // MARK: - 3. Athlete isolation

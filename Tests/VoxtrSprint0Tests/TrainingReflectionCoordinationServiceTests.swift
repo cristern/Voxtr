@@ -522,4 +522,98 @@ struct TrainingReflectionCoordinationServiceTests {
         #expect(cancelledDetail.loggedActivity.status == .cancelled)
         #expect(missedDetail.loggedActivity.status == .missed)
     }
+
+    @Test("Logged detail resolves planned-linked and standalone logs by exact LoggedActivityId")
+    @MainActor
+    func loggedDetailUsesExactStableIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let sameInstant = Date(timeIntervalSince1970: 1_767_000_000)
+        let plannedActivityId = PlannedActivityId()
+        let linked = try trainingService.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Same label",
+            startedAt: sameInstant,
+            durationMinutes: 30,
+            status: .completed
+        )
+        let standalone = try trainingService.logActivity(
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Same label",
+            startedAt: sameInstant,
+            durationMinutes: 45,
+            status: .completed
+        )
+
+        let linkedDetail = try coordinator.loggedActivityDetail(
+            loggedActivityId: linked.loggedActivityId,
+            athleteId: athleteId
+        )
+        let standaloneDetail = try coordinator.loggedActivityDetail(
+            loggedActivityId: standalone.loggedActivityId,
+            athleteId: athleteId
+        )
+
+        #expect(linkedDetail.loggedActivity.loggedActivityId == linked.loggedActivityId)
+        #expect(linkedDetail.loggedActivity.plannedActivityId == plannedActivityId.rawValue)
+        #expect(linkedDetail.loggedActivity.durationMinutes == 30)
+        #expect(standaloneDetail.loggedActivity.loggedActivityId == standalone.loggedActivityId)
+        #expect(standaloneDetail.loggedActivity.plannedActivityId == nil)
+        #expect(standaloneDetail.loggedActivity.durationMinutes == 45)
+    }
+
+    @Test("Reopening Missed or Cancelled removes its linked ActivityReflection before removing the log")
+    @MainActor
+    func reopenNoTrainingOutcomeCleansReflectionIntegrity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        for status: ActivityStatus in [.missed, .cancelled] {
+            let plannedActivityId = PlannedActivityId()
+            let result = try coordinator.logActivity(
+                athleteId: athleteId,
+                plannedActivityId: plannedActivityId,
+                activityType: .individualTraining,
+                title: "No-training outcome",
+                startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+                durationMinutes: 1,
+                status: status,
+                authorId: ActorId(),
+                sessionForm: 3
+            )
+            let loggedActivityId = result.loggedActivity.loggedActivityId
+            #expect(
+                try reflectionService.fetchActivityReflection(
+                    forLoggedActivity: loggedActivityId
+                ) != nil
+            )
+
+            try coordinator.reopenNoTrainingOutcome(
+                loggedActivityId,
+                athleteId: athleteId
+            )
+
+            #expect(try trainingService.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
+            #expect(
+                try reflectionService.fetchActivityReflection(
+                    forLoggedActivity: loggedActivityId
+                ) == nil
+            )
+        }
+    }
 }

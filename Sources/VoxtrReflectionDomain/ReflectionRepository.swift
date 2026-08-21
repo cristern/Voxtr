@@ -125,6 +125,14 @@ public final class ReflectionRepository {
         try modelContext.save()
     }
 
+    /// Removes the exact reflection through Reflection's canonical
+    /// repository. Used when its owning LoggedActivity is intentionally
+    /// removed by the cross-domain reopen lifecycle command.
+    public func deleteActivityReflection(_ reflection: ActivityReflection) throws {
+        modelContext.delete(reflection)
+        try modelContext.save()
+    }
+
     /// Ordered deterministically by `localDate`, then `id` — same
     /// pattern `PlanningRepository`/`TrainingRepository` already use.
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {

@@ -46,6 +46,7 @@ struct DailyTrainingViewModelTests {
         #expect(viewModel.plannedActivities.isEmpty)
         #expect(viewModel.loggedActivities.isEmpty)
         #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.logErrorMessage == nil)
     }
 
     @Test("Logging an activity persists it, clears the form, and refreshes the logged list")
@@ -72,9 +73,13 @@ struct DailyTrainingViewModelTests {
         )
         viewModel.load()
         viewModel.newLogTitle = "Easy jog"
-        viewModel.newLogDurationMinutes = 30
+        viewModel.newLogDurationMinutes = 0
         viewModel.newLogSessionForm = 3 // VX-022: required for every log through this flow.
 
+        viewModel.logActivity()
+        #expect(viewModel.logErrorMessage != nil)
+
+        viewModel.newLogDurationMinutes = 30
         viewModel.logActivity()
 
         #expect(viewModel.loggedActivities.count == 1)
@@ -86,7 +91,7 @@ struct DailyTrainingViewModelTests {
         // value, so a parent logging several activities in a row with
         // the same duration doesn't have to re-enter it each time.
         #expect(viewModel.newLogDurationMinutes == 30)
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.logErrorMessage == nil)
     }
 
     @Test("Daily Training saves a Sport-only identity and clears Sport back to nil")
@@ -123,7 +128,7 @@ struct DailyTrainingViewModelTests {
         #expect(viewModel.loggedActivities.first?.sportId == sportId.rawValue)
         #expect(viewModel.loggedActivities.first?.activityType == .match)
         #expect(viewModel.newLogSportId == nil)
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.logErrorMessage == nil)
     }
 
     @Test("Logging with an out-of-range duration surfaces an error and does not persist")
@@ -153,7 +158,8 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.logErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
     }
 
@@ -184,7 +190,8 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.logErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
     }
 
@@ -215,8 +222,9 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage == TrainingStrings.activityIdentityRequired)
-        #expect(viewModel.errorMessage != "title or sportId is required")
+        #expect(viewModel.logErrorMessage == TrainingStrings.activityIdentityRequired)
+        #expect(viewModel.logErrorMessage != "title or sportId is required")
+        #expect(viewModel.errorMessage == nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).isEmpty)
     }
 
@@ -260,7 +268,7 @@ struct DailyTrainingViewModelTests {
         viewModel.selectedPlannedActivityId = plannedActivity.plannedActivityId
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.logErrorMessage == nil)
         #expect(viewModel.plannedActivities.first?.isCompleted == true)
     }
 
@@ -306,7 +314,8 @@ struct DailyTrainingViewModelTests {
         viewModel.selectedPlannedActivityId = plannedActivity.plannedActivityId
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.logErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
     }
 
@@ -342,7 +351,7 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.logErrorMessage == nil)
         #expect(viewModel.sessionFormPendingRetry == false)
         // The value is never left populated once genuinely saved —
         // preserved-for-retry only applies to the failure path.
@@ -394,7 +403,8 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.logErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
         // Blocked at the orchestration boundary, before anything is
         // created — not a partial log, not a reflection-write failure.
         #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).isEmpty)
@@ -483,7 +493,8 @@ struct DailyTrainingViewModelTests {
         // Never crashes — and, per the VX-022 correction, never even
         // reaches TrainingService.logActivity: nothing is created at
         // all, not even a LoggedActivity without its reflection.
-        #expect(viewModel.errorMessage != nil)
+        #expect(viewModel.logErrorMessage != nil)
+        #expect(viewModel.errorMessage == nil)
         #expect(viewModel.sessionFormPendingRetry == false)
         #expect(try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId).isEmpty)
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)

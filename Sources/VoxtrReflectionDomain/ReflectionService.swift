@@ -154,6 +154,17 @@ public final class ReflectionService {
         return reflection
     }
 
+    public func deleteActivityReflection(
+        _ reflectionId: ReflectionId,
+        athleteId: AthleteId
+    ) throws {
+        guard let reflection = try repository.fetchActivityReflection(byId: reflectionId),
+              reflection.athleteId == athleteId.rawValue else {
+            throw ReflectionServiceError.activityReflectionNotFound
+        }
+        try repository.deleteActivityReflection(reflection)
+    }
+
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {
         try repository.fetchParentObservations(forAthlete: athleteId)
     }

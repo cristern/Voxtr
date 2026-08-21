@@ -1121,6 +1121,119 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.canReopen == true)
     }
 
+    @Test("canReopen allows Missed and rejects Completed and Partially Completed")
+    @MainActor
+    func canReopenUsesNoTrainingOutcomeGate() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: athleteId,
+            weekStart: TrainingPlanningCoordinationService.weekStart()
+        )
+
+        for status: ActivityStatus in [.missed, .completed, .partiallyCompleted] {
+            let activity = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .individualTraining,
+                title: "\(status)",
+                localDate: TrainingPlanningCoordinationService.today(),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            let logged = try trainingService.logActivity(
+                athleteId: athleteId,
+                plannedActivityId: activity.plannedActivityId,
+                activityType: .individualTraining,
+                title: activity.title,
+                startedAt: .now,
+                durationMinutes: status == .missed ? 1 : 30,
+                status: status
+            )
+            let viewModel = ActivityDetailViewModel(
+                activity: activity,
+                isCompleted: true,
+                loggedActivity: logged,
+                weekPlanId: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                athleteDisplayName: "Oliver",
+                isWeekPlanDraft: true,
+                deletedByActorId: ActorId(),
+                planningService: planningService,
+                trainingReflectionCoordinationService: coordinator
+            )
+
+            #expect(viewModel.canReopen == (status == .missed))
+        }
+    }
+
+    @Test("Reopening Missed preserves PlannedActivityId and reloads the host after success")
+    @MainActor
+    func reopenMissedPreservesPlanAndSignalsSuccess() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            activityChangeBroadcaster: broadcaster
+        )
+        let athleteId = AthleteId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: athleteId,
+            weekStart: TrainingPlanningCoordinationService.weekStart()
+        )
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Missed session",
+            localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: activity.plannedActivityId,
+            activityType: activity.activityType,
+            title: activity.title,
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        var hostReloads = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity,
+            isCompleted: true,
+            loggedActivity: logged,
+            weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            athleteDisplayName: "Oliver",
+            isWeekPlanDraft: true,
+            deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { hostReloads += 1 }
+        )
+
+        #expect(viewModel.reopenActivity())
+        #expect(hostReloads == 1)
+        #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
+        #expect(try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId).isEmpty)
+        #expect(
+            try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+                .contains { $0.plannedActivityId == activity.plannedActivityId }
+        )
+    }
+
     @Test("reopenActivity removes the cancelled LoggedActivity link, restores the unresolved state, and never deletes or duplicates the PlannedActivity")
     @MainActor
     func reopenActivityRestoresUnresolvedStateWithoutTouchingThePlan() throws {

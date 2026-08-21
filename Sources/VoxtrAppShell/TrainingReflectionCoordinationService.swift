@@ -236,6 +236,20 @@ public final class TrainingReflectionCoordinationService {
         return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
     }
 
+    /// Resolves one exact logged result for review, including standalone
+    /// manual logs that have no PlannedActivity relationship.
+    public func loggedActivityDetail(
+        loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId
+    ) throws -> LoggedActivityDetail {
+        let loggedActivity = try trainingService.fetchLoggedActivity(
+            byId: loggedActivityId,
+            athleteId: athleteId
+        )
+        let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivityId)
+        return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
+    }
+
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
     /// Logged Activity -> RPE + Form), extended by review follow-up to
     /// also correct actual duration: the correction counterpart to
@@ -323,16 +337,23 @@ public final class TrainingReflectionCoordinationService {
     }
 
     /// Reversibility principle (Reopen Activity): a pure passthrough to
-    /// `TrainingService.reopenCancelledActivity`, same as
+    /// `TrainingService.reopenNoTrainingOutcome`, same as
     /// `correctLoggedActivity` above is for `TrainingService.correctLoggedActivity` —
     /// this coordinator stays the one place `ActivityDetailViewModel`
     /// mutates a `LoggedActivity` through, even for a mutation with no
-    /// reflection involvement at all (cancellation never records a
-    /// Session Form, so there is nothing here to clean up).
-    public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
-        try trainingService.reopenCancelledActivity(loggedActivityId, athleteId: athleteId)
+    /// reflection ownership. Any linked ActivityReflection is removed
+    /// through Reflection before Training removes the no-training outcome.
+    public func reopenNoTrainingOutcome(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+        let detail = try loggedActivityDetail(loggedActivityId: loggedActivityId, athleteId: athleteId)
+        guard detail.loggedActivity.status == .cancelled || detail.loggedActivity.status == .missed else {
+            throw TrainingServiceError.activityNotReopenable
+        }
+        if let reflection = detail.reflection {
+            try reflectionService.deleteActivityReflection(reflection.reflectionId, athleteId: athleteId)
+        }
+        try trainingService.reopenNoTrainingOutcome(loggedActivityId, athleteId: athleteId)
         // Only reached once the delete above has already succeeded — a
-        // thrown .loggedActivityNotFound/.activityNotCancelled never
+        // thrown .loggedActivityNotFound/.activityNotReopenable never
         // reaches this line, so a failed reopen broadcasts nothing.
         activityChangeBroadcaster?.activityChanged(for: athleteId)
     }

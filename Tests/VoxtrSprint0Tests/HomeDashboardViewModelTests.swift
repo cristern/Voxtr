@@ -1084,7 +1084,7 @@ struct HomeDashboardViewModelTests {
         // navigation would use) — never through
         // homeDashboardViewModel.loadTodaysTraining()/loadTodayActivityRows()
         // directly, and never through athleteHomeCoordinator at all.
-        try otherScreenCoordinator.reopenCancelledActivity(
+        try otherScreenCoordinator.reopenNoTrainingOutcome(
             cancelResult.loggedActivity.loggedActivityId, athleteId: athleteId
         )
         // athleteHomeCoordinator exists only to prove it was never the
@@ -1093,7 +1093,7 @@ struct HomeDashboardViewModelTests {
 
         // No explicit reload call on homeDashboardViewModel anywhere
         // above or below this line — the broadcaster already invalidated
-        // it synchronously, inside the call to reopenCancelledActivity.
+        // it synchronously, inside the call to reopenNoTrainingOutcome.
         guard case .loaded(let freshRows) = homeDashboardViewModel.todayActivityState,
               case .planned(let freshRow) = freshRows.first(where: { $0.id == materialized.plannedActivityId.rawValue.uuidString }) else {
             Issue.record("Expected the fresh .planned row after the broadcaster's automatic reload")

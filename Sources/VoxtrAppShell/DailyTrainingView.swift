@@ -152,21 +152,32 @@ public struct DailyTrainingView: View {
                             .foregroundStyle(VoxtrColor.textSecondary)
                     } else {
                         ForEach(viewModel.loggedActivities, id: \.id) { activity in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
-                                    .font(VoxtrTypography.cardTitle)
-                                    .foregroundStyle(VoxtrColor.textPrimary)
-                                Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
-                                    .font(VoxtrTypography.metadata)
-                                    .foregroundStyle(VoxtrColor.textSecondary)
-                                // Review follow-up (duration/logged-consumer
-                                // audit): a Cancelled/Missed entry must show
-                                // its outcome, never present its schema
-                                // placeholder duration as if it were real
-                                // training time.
-                                Text(Self.durationOrOutcomeSubtitle(for: activity))
-                                    .font(VoxtrTypography.metadata)
-                                    .foregroundStyle(VoxtrColor.textSecondary)
+                            NavigationLink {
+                                LoggedActivityReviewViewLoader(
+                                    loggedActivityId: activity.loggedActivityId,
+                                    athleteId: viewModel.athleteId,
+                                    athleteDisplayName: athleteDisplayName,
+                                    actorId: actorId,
+                                    coordinationService: trainingReflectionCoordinationService,
+                                    onActivityChanged: { viewModel.load() }
+                                )
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
+                                        .font(VoxtrTypography.cardTitle)
+                                        .foregroundStyle(VoxtrColor.textPrimary)
+                                    Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
+                                        .font(VoxtrTypography.metadata)
+                                        .foregroundStyle(VoxtrColor.textSecondary)
+                                    // Review follow-up (duration/logged-consumer
+                                    // audit): a Cancelled/Missed entry must show
+                                    // its outcome, never present its schema
+                                    // placeholder duration as if it were real
+                                    // training time.
+                                    Text(Self.durationOrOutcomeSubtitle(for: activity))
+                                        .font(VoxtrTypography.metadata)
+                                        .foregroundStyle(VoxtrColor.textSecondary)
+                                }
                             }
                             .accessibilityIdentifier("training.loggedActivityRow.\(activity.id.uuidString)")
                         }
@@ -225,6 +236,12 @@ public struct DailyTrainingView: View {
                         }
                     }
                     .accessibilityIdentifier("training.linkPlannedActivityPicker")
+
+                    if let logErrorMessage = viewModel.logErrorMessage {
+                        Text(logErrorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("training.logErrorMessage")
+                    }
 
                     Button {
                         viewModel.logActivity()

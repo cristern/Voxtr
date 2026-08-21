@@ -141,7 +141,7 @@ public final class TrainingRepository {
 
     /// Reversibility principle (Reopen Activity): a plain, low-level
     /// removal primitive — not itself exposed as a general UI
-    /// capability. `TrainingService.reopenCancelledActivity` is the one
+    /// capability. `TrainingService.reopenNoTrainingOutcome` is the one
     /// caller, and only after verifying athlete ownership and that the
     /// `LoggedActivity` being removed is genuinely `.cancelled`. The
     /// linked `PlannedActivity` (if any) is completely untouched — this
