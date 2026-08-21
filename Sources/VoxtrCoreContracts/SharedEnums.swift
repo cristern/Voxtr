@@ -12,9 +12,42 @@ public enum DevelopmentStage: String, Codable, Sendable, CaseIterable {
     case parentLed, sharedOwnership, guidedIndependence, athleteLed
 }
 
+/// Sport / Activity Identity domain foundation round: `physicalTraining` remains
+/// readable as a legacy persisted enum case for backward compatibility with historical
+/// records. It is excluded from `ActivityType.selectableCases` so it cannot be selected for
+/// new activity input. `strength` and `conditioning` are the current selectable replacements.
+/// Historical activities persisted as `physicalTraining` remain readable and queryable, and
+/// no reinstall or store reset is required.
 public enum ActivityType: String, Codable, Sendable, CaseIterable {
     case teamTraining, match, competition, individualTraining
-    case physicalTraining, recovery, test, other
+    case strength, conditioning, recovery, test, other
+
+    /// Legacy classification present in historical persisted data (V3 and earlier).
+    /// Kept for backward compatibility when decoding historical records.
+    /// Excluded from `selectableCases` so it cannot be chosen for new activity input.
+    case physicalTraining
+
+    /// The canonical list of `ActivityType` cases selectable for new or edited activities.
+    /// Excludes legacy/deprecated cases such as `.physicalTraining`.
+    public static var selectableCases: [ActivityType] {
+        [.teamTraining, .match, .competition, .individualTraining, .strength, .conditioning, .recovery, .test, .other]
+    }
+
+    /// User-visible display label for each activity type case.
+    public var displayName: String {
+        switch self {
+        case .teamTraining: return "Team training"
+        case .match: return "Match"
+        case .competition: return "Competition"
+        case .individualTraining: return "Individual training"
+        case .strength: return "Strength"
+        case .conditioning: return "Conditioning"
+        case .recovery: return "Recovery"
+        case .test: return "Test"
+        case .other: return "Other"
+        case .physicalTraining: return "Physical training"
+        }
+    }
 }
 
 public enum ActivityStatus: String, Codable, Sendable, CaseIterable {

@@ -6,6 +6,7 @@ import VoxtrParentDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// The set of `@Model` types the running app persists locally.
 ///
@@ -58,6 +59,17 @@ import VoxtrReflectionDomain
 /// belongs on `WorkspaceParticipant.state`, not a separate persisted
 /// entity. Do not re-add it.
 ///
+/// Sport / Activity Identity domain foundation adds `Sport.self`
+/// (`VoxtrCoreReferenceData`) — the type already existed and was already
+/// used by `SportId`-typed fields on `PlannedActivity`/`LoggedActivity`/
+/// `RecurringPlannedActivity`/`DevelopmentGoal`, but was never itself
+/// registered/persisted until this round. This is a genuine model-type
+/// addition (`AppSchemaV4`, see `AppSchemaVersioning.swift`), bundled in
+/// the same version bump as this round's `ActivityType` raw-value change
+/// and the optional-title field changes on the three activity entities —
+/// see that file's own doc comment for why no frozen legacy copies were
+/// needed for the field-level changes.
+///
 /// IMPORTANT: any change to this list is a schema version change — see
 /// `AppSchemaVersioning.swift`'s "HOW TO ADD" instructions before
 /// editing this array. Changing this array alone, without also adding a
@@ -84,6 +96,7 @@ public enum AppSchema {
             RecurringPlannedActivity.self,
             DailyStatus.self,
             AthleteSettings.self,
+            Sport.self,
         ]
     }
 }

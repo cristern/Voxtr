@@ -195,13 +195,13 @@ struct FamilyHomeViewModelTests {
             startLocalTime: LocalTime(hour: 7, minute: 0)
         )
         let completed = try planningService.addPlannedActivity(
-            toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .physicalTraining,
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .strength,
             title: "Strength", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
             startLocalTime: LocalTime(hour: 6, minute: 0)
         )
         _ = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: completed.plannedActivityId,
-            activityType: .physicalTraining, title: "Strength", startedAt: .now
+            activityType: .strength, title: "Strength", startedAt: .now
         )
 
         let viewModel = FamilyHomeViewModel(

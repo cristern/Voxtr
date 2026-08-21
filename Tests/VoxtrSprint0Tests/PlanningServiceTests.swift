@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAppShell
+import VoxtrCoreReferenceData
 @testable import VoxtrPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
@@ -233,6 +234,228 @@ struct PlanningServiceTests {
         // Unchanged — the rejected edit must not have applied.
         let stillOriginal = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
         #expect(stillOriginal?.title == "Endurance run")
+    }
+
+    // MARK: - Sport / Activity Identity domain foundation (Parts 3/4)
+
+    @Test("A PlannedActivity may be created Sport-only, with no title at all")
+    @MainActor
+    func addPlannedActivitySportOnlyIsCreatable() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let sportId = SportId()
+
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .teamTraining,
+            title: nil,
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: sportId
+        )
+
+        #expect(activity.title == nil)
+        #expect(activity.sportId == sportId.rawValue)
+    }
+
+    @Test("Adding a PlannedActivity with neither a title nor a Sport is rejected")
+    @MainActor
+    func addPlannedActivityRejectsMissingIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .teamTraining,
+                title: nil,
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    @Test("Adding a PlannedActivity with a whitespace-only title and no Sport is rejected")
+    @MainActor
+    func addPlannedActivityRejectsWhitespaceOnlyTitleWithNoSport() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .teamTraining,
+                title: "   ",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+    }
+
+    @Test("Editing a PlannedActivity cannot remove its final identity (neither title nor Sport)")
+    @MainActor
+    func editPlannedActivityCannotRemoveFinalIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                activityType: .individualTraining,
+                title: nil,
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        // Unchanged — the rejected edit must not have applied.
+        let stillOriginal = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(stillOriginal?.title == "Endurance run")
+    }
+
+    @Test("Editing can remove the title as long as a Sport remains")
+    @MainActor
+    func editPlannedActivityCanRemoveTitleWhenSportRemains() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let sportId = SportId()
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: sportId
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .individualTraining,
+            title: nil,
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: sportId
+        )
+
+        #expect(edited.title == nil)
+        #expect(edited.sportId == sportId.rawValue)
+    }
+
+    @Test("Editing can remove the Sport as long as a title remains")
+    @MainActor
+    func editPlannedActivityCanRemoveSportWhenTitleRemains() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: SportId()
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: nil
+        )
+
+        #expect(edited.title == "Endurance run")
+        #expect(edited.sportId == nil)
+    }
+
+    /// Sport / Activity Identity domain foundation, Part 10 (isolation):
+    /// editing one PlannedActivity's identity (title/Sport) never
+    /// mutates a sibling activity in the same WeekPlan, nor the
+    /// canonical `Sport` row itself — no shared mutable state between
+    /// activities, and Sport truth is read-only from every feature
+    /// domain's perspective.
+    @Test("Editing one PlannedActivity's identity does not mutate a sibling activity or the canonical Sport row")
+    @MainActor
+    func editingOneActivityDoesNotMutateSiblingOrSport() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let sportRepository = SportRepository(modelContext: container.mainContext)
+        try sportRepository.seedCanonicalSportsIfNeeded()
+        let football = try #require(try sportRepository.fetchAllSports().first { $0.canonicalKey == "football" })
+
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let sibling = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Football practice", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: football.sportId
+        )
+        let target = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .strength,
+            title: "Gym", localDate: LocalDate(year: 2026, month: 1, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        _ = try service.editPlannedActivity(
+            target.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .conditioning,
+            title: nil, localDate: LocalDate(year: 2026, month: 1, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: football.sportId
+        )
+
+        // The sibling activity is completely untouched.
+        let stillSibling = try repository.fetchPlannedActivity(byId: sibling.plannedActivityId)
+        #expect(stillSibling?.title == "Football practice")
+        #expect(stillSibling?.activityType == .teamTraining)
+        #expect(stillSibling?.sportId == football.sportId.rawValue)
+
+        // The canonical Sport row itself is completely untouched — a
+        // feature domain never mutates Sport truth, only ever reads it.
+        let stillFootball = try #require(try sportRepository.fetchSport(byId: football.sportId))
+        #expect(stillFootball.canonicalKey == "football")
+        #expect(stillFootball.displayNameKey == football.displayNameKey)
+        #expect(try sportRepository.fetchAllSports().count == 3)
     }
 
     @Test("Adding a PlannedActivity with an invalid title is rejected without persisting")
@@ -656,6 +879,51 @@ struct PlanningServiceRecurringActivityTests {
         }
     }
 
+    @Test("createRecurringPlannedActivity may be Sport-only, with no title at all")
+    @MainActor
+    func createRecurringPlannedActivitySportOnlyIsValid() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let sportId = SportId()
+
+        let created = try service.createRecurringPlannedActivity(
+            athleteId: AthleteId(),
+            title: nil,
+            activityType: .teamTraining,
+            sportId: sportId,
+            weekdays: [.monday],
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            effectiveStartDate: Self.rangeStart,
+            effectiveEndDate: Self.rangeEnd
+        )
+
+        #expect(created.title == nil)
+        #expect(created.sportId == sportId.rawValue)
+    }
+
+    @Test("createRecurringPlannedActivity rejects neither a title nor a Sport")
+    @MainActor
+    func createRecurringPlannedActivityRejectsMissingIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.createRecurringPlannedActivity(
+                athleteId: AthleteId(),
+                title: nil,
+                activityType: .teamTraining,
+                weekdays: [.monday],
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                effectiveStartDate: Self.rangeStart,
+                effectiveEndDate: Self.rangeEnd
+            )
+        }
+    }
+
     @Test("editRecurringPlannedActivity updates fields on the existing definition")
     @MainActor
     func editRecurringPlannedActivityUpdatesFields() throws {
@@ -942,7 +1210,7 @@ struct PlanningServiceRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         _ = try service.createRecurringPlannedActivity(
-            athleteId: athleteId, title: "Wednesday gym", activityType: .physicalTraining, weekdays: [.wednesday],
+            athleteId: athleteId, title: "Wednesday gym", activityType: .strength, weekdays: [.wednesday],
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
 
@@ -1063,6 +1331,58 @@ struct PlanningServiceRecurringActivityTests {
         #expect(created.activityType == .teamTraining)
         #expect(created.startLocalTime == LocalTime(hour: 17, minute: 30))
         #expect(created.plannedDurationMinutes == 150)
+    }
+
+    /// Sport / Activity Identity domain foundation, Parts 3/6: a
+    /// recurring definition may be Sport-only (no title) — and the
+    /// stable SportId survives the FULL lifecycle: definition ->
+    /// suggestion -> accepted PlannedActivity.
+    @Test("A Sport-only recurring definition's SportId survives suggestion derivation and acceptance")
+    @MainActor
+    func sportOnlyRecurringDefinitionSurvivesLifecycle() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let sportId = SportId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: nil, activityType: .teamTraining, sportId: sportId, weekdays: [.monday],
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        #expect(suggestion.title == nil)
+        #expect(suggestion.sportId == sportId)
+
+        let created = try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        #expect(created.title == nil)
+        #expect(created.sportId == sportId.rawValue)
+    }
+
+    /// ActivityType migration: `strength`/`conditioning` survive the
+    /// same definition -> suggestion -> PlannedActivity lifecycle
+    /// unchanged, exactly like every other case.
+    @Test("A recurring definition's strength/conditioning ActivityType survives suggestion derivation and acceptance")
+    @MainActor
+    func strengthAndConditioningActivityTypeSurviveLifecycle() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.mondayWeekStart)
+        _ = try service.createRecurringPlannedActivity(
+            athleteId: athleteId, title: "Gym", activityType: .strength, weekdays: [.monday],
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
+        )
+
+        let suggestion = try #require(try service.deriveSuggestions(forWeekPlan: weekPlan.weekPlanId).first)
+        #expect(suggestion.activityType == .strength)
+
+        let created = try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+        #expect(created.activityType == .strength)
     }
 
     @Test("The created activity belongs to the current WeekPlan and athlete")

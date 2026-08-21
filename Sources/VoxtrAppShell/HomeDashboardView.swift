@@ -144,6 +144,7 @@ enum HomeDashboardRowResolver {
 }
 
 public struct HomeDashboardView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: HomeDashboardViewModel
     private let athleteDisplayName: String
     private let planningService: PlanningService
@@ -557,7 +558,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.activity(rowId: familyHomeRow.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(familyHomeRow.plannedActivity.title)
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: familyHomeRow.plannedActivity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = familyHomeRow.plannedActivity.location, !location.isEmpty {
@@ -590,7 +591,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.recurringOccurrence(id: suggestion.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(suggestion.title)
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = suggestion.location, !location.isEmpty {
@@ -609,7 +610,7 @@ public struct HomeDashboardView: View {
         case .unplannedLogged(_, _, let loggedActivity):
             HStack {
                 VStack(alignment: .leading) {
-                    Text(loggedActivity.title)
+                    Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: loggedActivity))
                         .font(VoxtrTypography.cardTitle)
                         .foregroundStyle(VoxtrColor.textPrimary)
                     Text("Unplanned · Logged")

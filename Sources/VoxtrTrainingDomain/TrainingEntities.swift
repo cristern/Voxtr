@@ -13,7 +13,11 @@ public final class LoggedActivity {
     public var sportId: UUID?
     public var categoryIds: [UUID]
     public var activityType: ActivityType
-    public var title: String
+    /// Sport / Activity Identity domain foundation: optional, same
+    /// representation and same canonical invariant as
+    /// `PlannedActivity.title` — see that property's own doc comment
+    /// and `ActivityIdentity.swift`.
+    public var title: String?
     public var startedAt: Date
     public var endedAt: Date?
     public var durationMinutes: Int
@@ -32,7 +36,7 @@ public final class LoggedActivity {
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
         activityType: ActivityType,
-        title: String,
+        title: String?,
         startedAt: Date,
         endedAt: Date? = nil,
         durationMinutes: Int,
@@ -44,6 +48,11 @@ public final class LoggedActivity {
         updatedAt: Date = .now,
         schemaVersion: Int = 1
     ) {
+        let normalizedTitle = ActivityIdentity.normalizedName(title)
+        precondition(
+            ActivityIdentity.isValid(normalizedName: normalizedTitle, sportId: sportId),
+            "LoggedActivity requires a non-blank title or a sportId (Sport / Activity Identity round)"
+        )
         precondition((1...1440).contains(durationMinutes), "durationMinutes must be 1-1440 (v1.3 Section 9.1)")
         if let rpe = perceivedExertion {
             precondition((1...10).contains(rpe), "perceivedExertion must be 1-10 (v1.3 Section 9.1)")
@@ -57,7 +66,7 @@ public final class LoggedActivity {
         self.sportId = sportId?.rawValue
         self.categoryIds = categoryIds.map(\.rawValue)
         self.activityType = activityType
-        self.title = title
+        self.title = normalizedTitle
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.durationMinutes = durationMinutes

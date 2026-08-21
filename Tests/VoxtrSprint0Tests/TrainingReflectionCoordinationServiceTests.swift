@@ -75,6 +75,56 @@ struct TrainingReflectionCoordinationServiceTests {
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 
+    /// Sport / Activity Identity domain foundation, Part 6: traces the
+    /// full Planned -> Logged lifecycle exactly as
+    /// `LogActivityViewModel.save()` drives it (copying the planned
+    /// activity's OWN current sportId/title/activityType straight
+    /// through, never inferring anything) — a Sport-only planned
+    /// activity's SportId and its ActivityType both survive unchanged
+    /// onto the resulting LoggedActivity.
+    @Test("Logging a Sport-only PlannedActivity preserves its SportId and ActivityType onto the resulting LoggedActivity")
+    @MainActor
+    func loggingSportOnlyPlannedActivityPreservesSportIdAndActivityType() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let sportId = SportId()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let plannedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .strength,
+            title: nil,
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            sportId: sportId
+        )
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: plannedActivity.plannedActivityId,
+            sportId: plannedActivity.sportId.map(SportId.init(rawValue:)),
+            activityType: plannedActivity.activityType,
+            title: plannedActivity.title,
+            startedAt: .now,
+            authorId: ActorId(),
+            sessionForm: nil
+        )
+
+        #expect(result.loggedActivity.title == nil)
+        #expect(result.loggedActivity.sportId == sportId.rawValue)
+        #expect(result.loggedActivity.activityType == .strength)
+    }
+
     @Test("A reflection write failure preserves the LoggedActivity and reports .failed, never throwing — the activity is never rolled back")
     @MainActor
     func reflectionWriteFailurePreservesLoggedActivityAndReportsFailed() throws {

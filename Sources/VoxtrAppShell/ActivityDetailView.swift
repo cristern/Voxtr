@@ -31,6 +31,7 @@ import VoxtrPlanningDomain
 ///   after they exist — see `LoggedActivityEditFormView`'s own doc
 ///   comment.
 public struct ActivityDetailView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: ActivityDetailViewModel
     @State private var isEditing: Bool = false
     @State private var isLogging: Bool = false
@@ -104,7 +105,7 @@ public struct ActivityDetailView: View {
 
             Section {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
-                LabeledContent("Activity", value: viewModel.activity.title)
+                LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
                 if let startTime = viewModel.activity.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
@@ -233,7 +234,7 @@ public struct ActivityDetailView: View {
         }
         .voxtrScreenBackground()
         .tint(VoxtrColor.accent)
-        .navigationTitle(viewModel.activity.title)
+        .navigationTitle(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
         .sheet(isPresented: $isEditing) {
             ActivityEditFormView(viewModel: viewModel)
         }
@@ -340,6 +341,14 @@ struct ActivityEditFormView: View {
     @Bindable var viewModel: ActivityDetailViewModel
     @Environment(\.dismiss) private var dismiss
 
+    private var availableActivityTypes: [ActivityType] {
+        if viewModel.activity.activityType == .physicalTraining {
+            return [.physicalTraining] + ActivityType.selectableCases
+        } else {
+            return ActivityType.selectableCases
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -348,14 +357,9 @@ struct ActivityEditFormView: View {
                 DatePicker("Date", selection: $viewModel.editDate, displayedComponents: .date)
                     .accessibilityIdentifier("activityDetail.editDatePicker")
                 Picker("Activity type", selection: $viewModel.editActivityType) {
-                    Text("Team training").tag(ActivityType.teamTraining)
-                    Text("Match").tag(ActivityType.match)
-                    Text("Competition").tag(ActivityType.competition)
-                    Text("Individual training").tag(ActivityType.individualTraining)
-                    Text("Physical training").tag(ActivityType.physicalTraining)
-                    Text("Recovery").tag(ActivityType.recovery)
-                    Text("Test").tag(ActivityType.test)
-                    Text("Other").tag(ActivityType.other)
+                    ForEach(availableActivityTypes, id: \.self) { type in
+                        Text(type.displayName).tag(type)
+                    }
                 }
                 .accessibilityIdentifier("activityDetail.editActivityTypePicker")
 

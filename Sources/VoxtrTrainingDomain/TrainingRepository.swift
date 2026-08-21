@@ -36,7 +36,7 @@ public final class TrainingRepository {
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
         activityType: ActivityType,
-        title: String,
+        title: String?,
         startedAt: Date,
         endedAt: Date? = nil,
         durationMinutes: Int,

@@ -19,6 +19,11 @@ public enum TrainingServiceError: Error, Equatable {
     /// never a way to un-complete or un-miss a genuinely resolved
     /// outcome.
     case activityNotCancelled
+    /// Sport / Activity Identity domain foundation: mirrors
+    /// `PlanningServiceError.invalidField(String)` — the same catchable-
+    /// validation pattern, wrapping `ActivityIdentityError.missingIdentity`
+    /// when neither a name nor a Sport is supplied.
+    case invalidField(String)
 }
 
 /// S3.0/S3.1: the domain-level use case for logging completed
@@ -58,7 +63,7 @@ public final class TrainingService {
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
         activityType: ActivityType,
-        title: String,
+        title: String?,
         startedAt: Date,
         endedAt: Date? = nil,
         durationMinutes: Int = 1,
@@ -67,6 +72,20 @@ public final class TrainingService {
         source: String = "manual",
         notes: String? = nil
     ) throws -> LoggedActivity {
+        // Sport / Activity Identity domain foundation: the ONE canonical
+        // rule (`ActivityIdentity`), checked here as a catchable error —
+        // `LoggedActivity.init`'s own precondition (defense-in-depth)
+        // would otherwise crash on correctable user input, the same
+        // reasoning `PlanningService.validate` already established for
+        // Planned/Recurring.
+        if plannedActivityId == nil && activityType == .physicalTraining {
+            throw TrainingServiceError.invalidField("physicalTraining is a legacy activity type and cannot be used for new activities")
+        }
+        do {
+            try ActivityIdentity.validate(name: title, sportId: sportId)
+        } catch is ActivityIdentityError {
+            throw TrainingServiceError.invalidField("title or sportId is required")
+        }
         // S3.2: prevent the same PlannedActivity from being linked more
         // than once — checked before any insert is attempted.
         if let plannedActivityId {

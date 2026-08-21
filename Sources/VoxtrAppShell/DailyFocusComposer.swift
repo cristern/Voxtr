@@ -39,13 +39,14 @@ public struct DailyFocusComposer: Sendable {
     /// caller (`HomeDashboardViewModel`) decides what `nil` means; this
     /// function only treats a `nil` source as having nothing to
     /// contribute to composition, never as a reason to fail itself.
+    @MainActor
     public func compose(
         todaysActivities: [PlannedActivityCompletion]?,
         coaching: CoachingPresentation?
     ) -> DailyFocusPresentation? {
         if let incomplete = todaysActivities?.first(where: { !$0.isCompleted }) {
             return DailyFocusPresentation(
-                title: incomplete.plannedActivity.title,
+                title: ActivityLabelResolver().primaryLabel(for: incomplete.plannedActivity),
                 subtitle: TrainingStrings.notCompletedLabel,
                 action: .none,
                 source: .todaysTraining

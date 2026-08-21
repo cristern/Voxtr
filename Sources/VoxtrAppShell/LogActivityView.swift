@@ -5,6 +5,7 @@ import SwiftUI
 /// are already known from the planned activity and displayed only as
 /// read-only context.
 public struct LogActivityView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: LogActivityViewModel
     @Environment(\.dismiss) private var dismiss
 
@@ -28,7 +29,7 @@ public struct LogActivityView: View {
                 // re-asked.
                 Section {
                     LabeledContent("Athlete", value: viewModel.athleteDisplayName)
-                    LabeledContent("Activity", value: viewModel.plannedActivity.title)
+                    LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.plannedActivity))
                     LabeledContent("Date", value: viewModel.plannedActivity.localDate.isoString)
                 }
                 .voxtrRowSurface()

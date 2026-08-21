@@ -20,6 +20,7 @@ import VoxtrTrainingDomain
 /// remains that athlete's Weekly Plan screen's own job, not duplicated
 /// here.
 public struct FamilyScheduleView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: FamilyScheduleViewModel
     private let actorId: ActorId
     private let planningService: PlanningService
@@ -98,7 +99,7 @@ public struct FamilyScheduleView: View {
             } label: {
                 rowContent(
                     athleteName: familyRow.athleteName,
-                    title: familyRow.plannedActivity.title,
+                    title: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: familyRow.plannedActivity),
                     subtitle: Self.rowSubtitle(
                         startLocalTime: familyRow.plannedActivity.startLocalTime,
                         location: familyRow.plannedActivity.location,
@@ -122,7 +123,7 @@ public struct FamilyScheduleView: View {
             } label: {
                 rowContent(
                     athleteName: athleteName,
-                    title: suggestion.title,
+                    title: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion),
                     // Same-pattern fix (Family Home's own "Recurring
                     // metadata demotion" round): "Recurring" no longer
                     // renders as its own trailing label competing with
