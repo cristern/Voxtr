@@ -151,6 +151,38 @@ struct DailyTrainingViewModelTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
     }
 
+    @Test("Training identity validation uses Daily Training's controlled generic error without leaking raw domain text")
+    @MainActor
+    func missingActivityIdentityUsesGenericError() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: coordinationService,
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
+            athleteId: AthleteId()
+        )
+        viewModel.newLogTitle = ""
+        viewModel.newLogSessionForm = 3
+
+        viewModel.logActivity()
+
+        #expect(viewModel.errorMessage == TrainingStrings.genericError)
+        #expect(viewModel.errorMessage != "title or sportId is required")
+        #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).isEmpty)
+    }
+
     @Test("Linking a log to a PlannedActivity marks it completed after reload")
     @MainActor
     func linkingToPlannedActivityMarksItCompletedAfterReload() throws {
