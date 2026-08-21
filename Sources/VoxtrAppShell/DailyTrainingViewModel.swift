@@ -260,6 +260,13 @@ public final class DailyTrainingViewModel {
             // for exhaustiveness" reasoning as `.loggedActivityNotFound`
             // directly above.
             return TrainingStrings.genericError
+        case .invalidField:
+            // Sport / Activity Identity validation carries an internal
+            // field description for domain/test diagnostics. Daily
+            // Training already has one controlled fallback for save
+            // failures, so keep that presentation contract rather than
+            // exposing the raw validation string or adding new UX copy.
+            return TrainingStrings.genericError
         }
     }
 }
