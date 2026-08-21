@@ -57,21 +57,16 @@ public struct ActivityLabelResolver: Sendable {
         return "Activity"
     }
 
-    public func primaryLabel(name: String?, sportIdString: String?) -> String {
-        let typedSportId = sportIdString.flatMap { UUID(uuidString: $0) }.map(SportId.init(rawValue:))
-        return primaryLabel(name: name, sportId: typedSportId)
-    }
-
     public func primaryLabel(for activity: PlannedActivity) -> String {
-        primaryLabel(name: activity.title, sportIdString: activity.sportId)
+        primaryLabel(name: activity.title, sportId: activity.sportId.map(SportId.init(rawValue:)))
     }
 
     public func primaryLabel(for activity: LoggedActivity) -> String {
-        primaryLabel(name: activity.title, sportIdString: activity.sportId)
+        primaryLabel(name: activity.title, sportId: activity.sportId.map(SportId.init(rawValue:)))
     }
 
     public func primaryLabel(for activity: RecurringPlannedActivity) -> String {
-        primaryLabel(name: activity.title, sportIdString: activity.sportId)
+        primaryLabel(name: activity.title, sportId: activity.sportId.map(SportId.init(rawValue:)))
     }
 
     public func primaryLabel(for suggestion: RecurringActivitySuggestion) -> String {
