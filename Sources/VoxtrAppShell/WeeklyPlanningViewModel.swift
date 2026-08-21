@@ -83,6 +83,10 @@ public final class WeeklyPlanningViewModel {
     public var recurringFormLocation: String = ""
 
     private let service: PlanningService
+    /// Shared, athlete-scoped presentation invalidation. Planning
+    /// remains the canonical mutation owner; this only tells already-
+    /// live read models to refetch after a successful mutation.
+    private let activityChangeBroadcaster: AthleteActivityChangeBroadcaster?
     public let athleteId: AthleteId
     private let committedByActorId: ActorId
     public private(set) var weekStart: LocalDate
@@ -91,12 +95,14 @@ public final class WeeklyPlanningViewModel {
         service: PlanningService,
         athleteId: AthleteId,
         committedByActorId: ActorId,
-        weekStart: LocalDate? = nil
+        weekStart: LocalDate? = nil,
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil
     ) {
         self.service = service
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
         self.weekStart = weekStart ?? Self.currentWeekStart()
+        self.activityChangeBroadcaster = activityChangeBroadcaster
     }
 
     /// Area 4 (Parent Time Navigation package): switches to a
@@ -189,6 +195,7 @@ public final class WeeklyPlanningViewModel {
             newActivityStartTime = .now
             newActivityHasDuration = false
             newActivityDurationMinutes = 60
+            activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
             successfulAddActivityTrigger += 1
         } catch let error as PlanningServiceError {
@@ -215,6 +222,7 @@ public final class WeeklyPlanningViewModel {
                 localDate: localDate,
                 timeZoneId: activity.timeZoneId
             )
+            activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)
@@ -237,6 +245,7 @@ public final class WeeklyPlanningViewModel {
                 expectedWeekPlanId: weekPlan.weekPlanId,
                 deletedBy: committedByActorId
             )
+            activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)
@@ -316,6 +325,7 @@ public final class WeeklyPlanningViewModel {
         errorMessage = nil
         do {
             _ = try service.acceptSuggestion(suggestion, forWeekPlan: weekPlan.weekPlanId)
+            activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
             try reloadSuggestions(for: weekPlan)
         } catch let error as PlanningServiceError {
@@ -498,6 +508,14 @@ public final class WeeklyPlanningViewModel {
 
     private func reloadActivities(for weekPlan: WeekPlan) throws {
         activities = try service.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+    }
+
+    /// Called by the canonical activity-detail flow after its Planning
+    /// edit/delete succeeds. Invalidates only this athlete's live
+    /// presentation caches and reloads this screen from Planning truth.
+    public func refreshAfterActivityDetailMutation() {
+        activityChangeBroadcaster?.activityChanged(for: athleteId)
+        loadOrCreateWeekPlan()
     }
 
     private static func message(for error: PlanningServiceError) -> String {

@@ -135,7 +135,7 @@ public struct WeeklyPlanningView: View {
                             actorId: actorId,
                             planningService: planningService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            onActivityLogged: { viewModel.loadOrCreateWeekPlan() }
+                            onActivityLogged: { viewModel.refreshAfterActivityDetailMutation() }
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {

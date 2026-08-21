@@ -18,6 +18,84 @@ struct WeeklyPlanningViewModelTests {
 
     private static let fixedWeekStart = LocalDate(year: 2026, month: 1, day: 5)
 
+    @MainActor
+    private final class RecordingActivityChangeSubscriber: AthleteActivityChangeSubscriber {
+        private(set) var callCount = 0
+        func athleteActivityDidChange() { callCount += 1 }
+    }
+
+    @Test("Editing through Planning preserves PlannedActivity identity and invalidates only the affected athlete")
+    @MainActor
+    func editInvalidatesAffectedAthleteAndPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+        let plan = try service.getOrCreateWeekPlan(athleteId: athleteA, weekStart: Self.fixedWeekStart)
+        let original = try service.addPlannedActivity(
+            toWeekPlan: plan.weekPlanId, athleteId: athleteA, activityType: .individualTraining,
+            title: "Original", localDate: Self.fixedWeekStart, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let subscriberA = RecordingActivityChangeSubscriber()
+        let subscriberB = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteA, subscriberA)
+        broadcaster.subscribe(athleteId: athleteB, subscriberB)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteA, committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart, activityChangeBroadcaster: broadcaster
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.editActivity(
+            original, title: "Updated", localDate: Self.fixedWeekStart.adding(days: 1),
+            activityType: .teamTraining
+        )
+
+        let refetched = try #require(repository.fetchPlannedActivity(byId: original.plannedActivityId))
+        #expect(refetched.plannedActivityId == original.plannedActivityId)
+        #expect(refetched.title == Optional("Updated"))
+        #expect(refetched.localDate == Self.fixedWeekStart.adding(days: 1))
+        #expect(subscriberA.callCount == 1)
+        #expect(subscriberB.callCount == 0)
+    }
+
+    @Test("Deleting through Planning removes canonical truth and invalidates only the affected athlete")
+    @MainActor
+    func deleteInvalidatesAffectedAthleteWithoutReplacementRow() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+        let plan = try service.getOrCreateWeekPlan(athleteId: athleteA, weekStart: Self.fixedWeekStart)
+        let original = try service.addPlannedActivity(
+            toWeekPlan: plan.weekPlanId, athleteId: athleteA, activityType: .individualTraining,
+            title: "Delete me", localDate: Self.fixedWeekStart, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let subscriberA = RecordingActivityChangeSubscriber()
+        let subscriberB = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteA, subscriberA)
+        broadcaster.subscribe(athleteId: athleteB, subscriberB)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service, athleteId: athleteA, committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart, activityChangeBroadcaster: broadcaster
+        )
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.deleteActivity(original)
+
+        #expect(try repository.fetchPlannedActivity(byId: original.plannedActivityId) == nil)
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: plan.weekPlanId).isEmpty)
+        #expect(viewModel.activities.isEmpty)
+        #expect(subscriberA.callCount == 1)
+        #expect(subscriberB.callCount == 0)
+    }
+
     @Test("Loading with no existing plan creates a draft with no activities")
     @MainActor
     func loadCreatesDraftWhenNoneExists() throws {

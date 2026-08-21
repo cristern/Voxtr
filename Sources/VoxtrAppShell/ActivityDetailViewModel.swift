@@ -95,8 +95,10 @@ public final class ActivityDetailViewModel {
     /// BACK TO to reload its own authoritative data, the same "explicit
     /// success signal, not implicit SwiftUI lifecycle" principle
     /// `successfulLogTrigger`/`onLogged` already establish elsewhere in
-    /// this exact flow. Defaulted to a no-op so existing construction
-    /// sites/tests are unaffected.
+    /// this exact flow. Planning edit/delete use the same host-refresh
+    /// signal; the Weekly Planning host then publishes athlete-scoped
+    /// invalidation after its own canonical refetch. Defaulted to a no-op
+    /// so existing construction sites/tests are unaffected.
     private let onActivityLogged: () -> Void
 
     public init(
@@ -245,6 +247,7 @@ public final class ActivityDetailViewModel {
                 location: editLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editLocation
             )
             activity = updated
+            onActivityLogged()
             return true
         } catch {
             errorMessage = "Could not save changes. Please try again."

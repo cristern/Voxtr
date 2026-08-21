@@ -100,6 +100,61 @@ struct HomeDashboardViewModelTests {
         )
     }
 
+    @Test("Planning edit and delete make a live Athlete Home refetch canonical truth")
+    @MainActor
+    func planningMutationsRefreshLiveAthleteHomeFromRepository() throws {
+        let container = try InMemoryPersistenceController(modelTypes: AppSchema.modelTypes).makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let athleteId = AthleteId()
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let original = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Original", localDate: today, timeZoneId: Self.oslo
+        )
+        let home = HomeDashboardViewModel(
+            trainingPlanningCoordinationService: coordinationService,
+            coachingPresentationProvider: RecordingCoachingPresentationProvider(
+                presentationToReturn: CoachingPresentation(athleteId: athleteId, weekStart: weekStart, sections: [])
+            ),
+            athleteId: athleteId, weekStart: weekStart,
+            activityChangeBroadcaster: broadcaster
+        )
+        let planning = WeeklyPlanningViewModel(
+            service: planningService, athleteId: athleteId, committedByActorId: ActorId(),
+            weekStart: weekStart, activityChangeBroadcaster: broadcaster
+        )
+        planning.loadOrCreateWeekPlan()
+        home.loadTodaysTraining()
+
+        planning.editActivity(original, title: "Updated", localDate: today, activityType: .teamTraining)
+
+        guard case .loaded(let editedRows) = home.todaysTrainingState else {
+            Issue.record("Expected Athlete Home to reload after Planning edit")
+            return
+        }
+        #expect(editedRows.count == 1)
+        #expect(editedRows.first?.plannedActivity.plannedActivityId == original.plannedActivityId)
+        #expect(editedRows.first?.plannedActivity.title == Optional("Updated"))
+
+        let updated = try #require(planningRepository.fetchPlannedActivity(byId: original.plannedActivityId))
+        planning.deleteActivity(updated)
+
+        guard case .loaded(let deletedRows) = home.todaysTrainingState else {
+            Issue.record("Expected Athlete Home to reload after Planning delete")
+            return
+        }
+        #expect(deletedRows.isEmpty)
+        #expect(try planningRepository.fetchPlannedActivity(byId: original.plannedActivityId) == nil)
+    }
+
     @Test("Today's training loads successfully from existing services, with completion already derived")
     @MainActor
     func todaysTrainingLoadsSuccessfully() throws {
