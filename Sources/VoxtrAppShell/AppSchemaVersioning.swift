@@ -79,13 +79,6 @@ public enum AppCurrentSchema: VersionedSchema {
         Schema.Version(1, 0, 0)
     }
 
-    /// FROZEN — do not change. This is the exact 15-entity shape every
-    /// TestFlight build before VX-023 (Sleep V1) shipped under version
-    /// "1.0.0". `AppSchema.modelTypes` has since grown to 17 entities;
-    /// that growth lives in `AppSchemaV2` below, never here. Changing
-    /// this list would silently redefine what an already-persisted
-    /// on-disk "1.0.0" store is assumed to contain — exactly the mistake
-    /// this file's own doc comment above documents fixing.
     public static var models: [any PersistentModel.Type] {
         [
             AppDiagnosticsRecord.self,
@@ -95,15 +88,216 @@ public enum AppCurrentSchema: VersionedSchema {
             WorkspaceParticipant.self,
             AthleteAccessGrant.self,
             WeekPlan.self,
-            PlannedActivity.self,
-            LoggedActivity.self,
+            AppCurrentSchema.PlannedActivity.self,
+            AppCurrentSchema.LoggedActivity.self,
             ActivityLoad.self,
             ActivityReflection.self,
             ParentObservation.self,
             PlannedActivityDeletionTombstone.self,
             WeeklyReflection.self,
-            RecurringPlannedActivity.self,
+            AppCurrentSchema.RecurringPlannedActivity.self,
         ]
+    }
+
+    /// FROZEN — V1 shape of PlannedActivity
+    @Model
+    public final class PlannedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var weekPlanId: UUID
+        public var athleteId: UUID
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String
+        private var localDateRaw: String
+        public var startLocalTime: LocalTime?
+        public var timeZoneId: TimeZoneId
+        public var plannedDurationMinutes: Int?
+        public var plannedIntensity: Int?
+        public var externalSourceId: String?
+        public var externalSourceType: String?
+        public var notes: String?
+        public var location: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            weekPlanId: UUID,
+            athleteId: UUID,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String,
+            localDate: LocalDate,
+            timeZoneId: TimeZoneId,
+            startLocalTime: LocalTime? = nil,
+            plannedDurationMinutes: Int? = nil,
+            plannedIntensity: Int? = nil,
+            externalSourceId: String? = nil,
+            externalSourceType: String? = nil,
+            notes: String? = nil,
+            location: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.weekPlanId = weekPlanId
+            self.athleteId = athleteId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.localDateRaw = localDate.isoString
+            self.timeZoneId = timeZoneId
+            self.startLocalTime = startLocalTime
+            self.plannedDurationMinutes = plannedDurationMinutes
+            self.plannedIntensity = plannedIntensity
+            self.externalSourceId = externalSourceId
+            self.externalSourceType = externalSourceType
+            self.notes = notes
+            self.location = location
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+
+        public var localDate: LocalDate {
+            get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { localDateRaw = newValue.isoString }
+        }
+    }
+
+    /// FROZEN — V1 shape of LoggedActivity
+    @Model
+    public final class LoggedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var plannedActivityId: UUID?
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String
+        public var startedAt: Date
+        public var endedAt: Date?
+        public var durationMinutes: Int
+        public var status: ActivityStatus
+        public var perceivedExertion: Int?
+        public var source: String
+        public var notes: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            plannedActivityId: UUID? = nil,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String,
+            startedAt: Date,
+            endedAt: Date? = nil,
+            durationMinutes: Int,
+            status: ActivityStatus,
+            perceivedExertion: Int? = nil,
+            source: String,
+            notes: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.plannedActivityId = plannedActivityId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.durationMinutes = durationMinutes
+            self.status = status
+            self.perceivedExertion = perceivedExertion
+            self.source = source
+            self.notes = notes
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+    }
+
+    /// FROZEN — V1 shape of RecurringPlannedActivity
+    @Model
+    public final class RecurringPlannedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var title: String
+        public var activityType: ActivityType
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var weekdays: [Weekday]
+        public var startLocalTime: LocalTime?
+        public var plannedDurationMinutes: Int?
+        public var timeZoneId: TimeZoneId
+        public var location: String?
+        private var effectiveStartDateRaw: String
+        private var effectiveEndDateRaw: String
+        public var isEnabled: Bool
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            title: String,
+            activityType: ActivityType,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            weekdays: [Weekday],
+            startLocalTime: LocalTime? = nil,
+            plannedDurationMinutes: Int? = nil,
+            timeZoneId: TimeZoneId,
+            location: String? = nil,
+            effectiveStartDate: LocalDate,
+            effectiveEndDate: LocalDate,
+            isEnabled: Bool = true,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.title = title
+            self.activityType = activityType
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.weekdays = weekdays
+            self.startLocalTime = startLocalTime
+            self.plannedDurationMinutes = plannedDurationMinutes
+            self.timeZoneId = timeZoneId
+            self.location = location
+            self.effectiveStartDateRaw = effectiveStartDate.isoString
+            self.effectiveEndDateRaw = effectiveEndDate.isoString
+            self.isEnabled = isEnabled
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+
+        public var effectiveStartDate: LocalDate {
+            get { LocalDate(isoString: effectiveStartDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveStartDateRaw = newValue.isoString }
+        }
+
+        public var effectiveEndDate: LocalDate {
+            get { LocalDate(isoString: effectiveEndDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveEndDateRaw = newValue.isoString }
+        }
     }
 }
 
@@ -164,17 +358,218 @@ public enum AppSchemaV2: VersionedSchema {
             WorkspaceParticipant.self,
             AthleteAccessGrant.self,
             WeekPlan.self,
-            PlannedActivity.self,
-            LoggedActivity.self,
+            AppSchemaV2.PlannedActivity.self,
+            AppSchemaV2.LoggedActivity.self,
             ActivityLoad.self,
             ActivityReflection.self,
             ParentObservation.self,
             PlannedActivityDeletionTombstone.self,
             WeeklyReflection.self,
-            RecurringPlannedActivity.self,
+            AppSchemaV2.RecurringPlannedActivity.self,
             DailyStatus.self,
-            AthleteSettings.self,
+            AppSchemaV2.AthleteSettings.self,
         ]
+    }
+
+    /// FROZEN — V2 shape of PlannedActivity
+    @Model
+    public final class PlannedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var weekPlanId: UUID
+        public var athleteId: UUID
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String
+        private var localDateRaw: String
+        public var startLocalTime: LocalTime?
+        public var timeZoneId: TimeZoneId
+        public var plannedDurationMinutes: Int?
+        public var plannedIntensity: Int?
+        public var externalSourceId: String?
+        public var externalSourceType: String?
+        public var notes: String?
+        public var location: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            weekPlanId: UUID,
+            athleteId: UUID,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String,
+            localDate: LocalDate,
+            timeZoneId: TimeZoneId,
+            startLocalTime: LocalTime? = nil,
+            plannedDurationMinutes: Int? = nil,
+            plannedIntensity: Int? = nil,
+            externalSourceId: String? = nil,
+            externalSourceType: String? = nil,
+            notes: String? = nil,
+            location: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.weekPlanId = weekPlanId
+            self.athleteId = athleteId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.localDateRaw = localDate.isoString
+            self.timeZoneId = timeZoneId
+            self.startLocalTime = startLocalTime
+            self.plannedDurationMinutes = plannedDurationMinutes
+            self.plannedIntensity = plannedIntensity
+            self.externalSourceId = externalSourceId
+            self.externalSourceType = externalSourceType
+            self.notes = notes
+            self.location = location
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+
+        public var localDate: LocalDate {
+            get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { localDateRaw = newValue.isoString }
+        }
+    }
+
+    /// FROZEN — V2 shape of LoggedActivity
+    @Model
+    public final class LoggedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var plannedActivityId: UUID?
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String
+        public var startedAt: Date
+        public var endedAt: Date?
+        public var durationMinutes: Int
+        public var status: ActivityStatus
+        public var perceivedExertion: Int?
+        public var source: String
+        public var notes: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            plannedActivityId: UUID? = nil,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String,
+            startedAt: Date,
+            endedAt: Date? = nil,
+            durationMinutes: Int,
+            status: ActivityStatus,
+            perceivedExertion: Int? = nil,
+            source: String,
+            notes: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.plannedActivityId = plannedActivityId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.durationMinutes = durationMinutes
+            self.status = status
+            self.perceivedExertion = perceivedExertion
+            self.source = source
+            self.notes = notes
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+    }
+
+    /// FROZEN — V2 shape of RecurringPlannedActivity
+    @Model
+    public final class RecurringPlannedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var title: String
+        public var activityType: ActivityType
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var weekdays: [Weekday]
+        public var startLocalTime: LocalTime?
+        public var plannedDurationMinutes: Int?
+        public var timeZoneId: TimeZoneId
+        public var location: String?
+        private var effectiveStartDateRaw: String
+        private var effectiveEndDateRaw: String
+        public var isEnabled: Bool
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            title: String,
+            activityType: ActivityType,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            weekdays: [Weekday],
+            startLocalTime: LocalTime? = nil,
+            plannedDurationMinutes: Int? = nil,
+            timeZoneId: TimeZoneId,
+            location: String? = nil,
+            effectiveStartDate: LocalDate,
+            effectiveEndDate: LocalDate,
+            isEnabled: Bool = true,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.title = title
+            self.activityType = activityType
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.weekdays = weekdays
+            self.startLocalTime = startLocalTime
+            self.plannedDurationMinutes = plannedDurationMinutes
+            self.timeZoneId = timeZoneId
+            self.location = location
+            self.effectiveStartDateRaw = effectiveStartDate.isoString
+            self.effectiveEndDateRaw = effectiveEndDate.isoString
+            self.isEnabled = isEnabled
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+
+        public var effectiveStartDate: LocalDate {
+            get { LocalDate(isoString: effectiveStartDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveStartDateRaw = newValue.isoString }
+        }
+
+        public var effectiveEndDate: LocalDate {
+            get { LocalDate(isoString: effectiveEndDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveEndDateRaw = newValue.isoString }
+        }
     }
 
     /// FROZEN — the genuine V2-era shape of `AthleteSettings`, the
