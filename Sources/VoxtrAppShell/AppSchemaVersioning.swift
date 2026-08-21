@@ -283,7 +283,7 @@ public enum AppSchemaV3: VersionedSchema {
         ]
     }
 
-    /// FROZEN — the genuine V3-era shape of `PlannedActivity` with non-optional `title: String`.
+    /// FROZEN — the genuine V3-era shape of `PlannedActivity` with non-optional `title: String` and `localDateRaw: String`.
     @Model
     public final class PlannedActivity {
         @Attribute(.unique) public var id: UUID
@@ -293,9 +293,9 @@ public enum AppSchemaV3: VersionedSchema {
         public var categoryIds: [UUID]
         public var activityType: ActivityType
         public var title: String
-        public var localDate: LocalDate
-        public var timeZoneId: TimeZoneId
+        private var localDateRaw: String
         public var startLocalTime: LocalTime?
+        public var timeZoneId: TimeZoneId
         public var plannedDurationMinutes: Int?
         public var plannedIntensity: Int?
         public var externalSourceId: String?
@@ -334,7 +334,7 @@ public enum AppSchemaV3: VersionedSchema {
             self.categoryIds = categoryIds
             self.activityType = activityType
             self.title = title
-            self.localDate = localDate
+            self.localDateRaw = localDate.isoString
             self.timeZoneId = timeZoneId
             self.startLocalTime = startLocalTime
             self.plannedDurationMinutes = plannedDurationMinutes
@@ -346,6 +346,11 @@ public enum AppSchemaV3: VersionedSchema {
             self.createdAt = createdAt
             self.updatedAt = updatedAt
             self.schemaVersion = schemaVersion
+        }
+
+        public var localDate: LocalDate {
+            get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { localDateRaw = newValue.isoString }
         }
     }
 
@@ -409,7 +414,7 @@ public enum AppSchemaV3: VersionedSchema {
         }
     }
 
-    /// FROZEN — the genuine V3-era shape of `RecurringPlannedActivity` with non-optional `title: String`.
+    /// FROZEN — the genuine V3-era shape of `RecurringPlannedActivity` with non-optional `title: String` and raw string dates.
     @Model
     public final class RecurringPlannedActivity {
         @Attribute(.unique) public var id: UUID
@@ -423,8 +428,8 @@ public enum AppSchemaV3: VersionedSchema {
         public var plannedDurationMinutes: Int?
         public var timeZoneId: TimeZoneId
         public var location: String?
-        public var effectiveStartDate: LocalDate
-        public var effectiveEndDate: LocalDate
+        private var effectiveStartDateRaw: String
+        private var effectiveEndDateRaw: String
         public var isEnabled: Bool
         public var createdAt: Date
         public var updatedAt: Date
@@ -460,12 +465,22 @@ public enum AppSchemaV3: VersionedSchema {
             self.plannedDurationMinutes = plannedDurationMinutes
             self.timeZoneId = timeZoneId
             self.location = location
-            self.effectiveStartDate = effectiveStartDate
-            self.effectiveEndDate = effectiveEndDate
+            self.effectiveStartDateRaw = effectiveStartDate.isoString
+            self.effectiveEndDateRaw = effectiveEndDate.isoString
             self.isEnabled = isEnabled
             self.createdAt = createdAt
             self.updatedAt = updatedAt
             self.schemaVersion = schemaVersion
+        }
+
+        public var effectiveStartDate: LocalDate {
+            get { LocalDate(isoString: effectiveStartDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveStartDateRaw = newValue.isoString }
+        }
+
+        public var effectiveEndDate: LocalDate {
+            get { LocalDate(isoString: effectiveEndDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { effectiveEndDateRaw = newValue.isoString }
         }
     }
 }
@@ -486,34 +501,12 @@ public enum AppSchemaV3: VersionedSchema {
 ///   - `ActivityType`: `physicalTraining` retained as legacy case for backward
 ///     compatibility; `strength` + `conditioning` added.
 ///
-/// Per step 4's own instruction to "seriously consider whether the
-/// disproportionate complexity... [of frozen legacy copies]... [is]
-/// worth it for whatever data is actually at stake": there is still no
-/// production data at stake (this app has never left TestFlight/Internal
-/// Alpha), and this exact codebase already has a directly-precedented,
-/// already-accepted answer for that situation —
-/// `RecurringPlannedActivity.weekdays`'s own shape change (`Weekday` →
-/// `[Weekday]`) shipped with NO frozen legacy copy, only a documented
-/// "existing installs may need a reinstall/store reset" Internal Alpha
-/// note. The title-optionality and `ActivityType` changes follow that
-/// same precedent here, for the same reason: building three fully
-/// duplicated nested legacy entity copies (`PlannedActivity`,
-/// `LoggedActivity`, `RecurringPlannedActivity`) to preserve field shapes
-/// nobody's real data depends on would reintroduce exactly the
-/// "disproportionate complexity" this file's own history (the deleted
-/// six-version `LegacySchemaTypes.swift` saga) already burned real launch
-/// failures to learn from — see `ActivityType`'s own doc comment in
-/// `SharedEnums.swift` for the equivalent, explicit "Internal Alpha
-/// limitation, reinstall required" note for that change specifically.
-/// `.lightweight` is still the correct stage kind: SwiftData's own
-/// migration guidance covers "new optional properties" (the title
-/// changes) the same way regardless of whether the OLD shape is
-/// separately frozen — a `.lightweight` stage does not require a source
-/// type to exist for a property that is simply becoming optional on the
-/// SAME live type; there is no separate V3-shaped `PlannedActivity` for
-/// it to migrate FROM in the first place; the `ActivityType` raw-value
-/// change carries the same accepted Internal Alpha risk described above
-/// regardless of migration-stage kind.
+/// `AppSchemaV3` explicitly freezes historical declarations for
+/// `PlannedActivity`, `LoggedActivity`, and `RecurringPlannedActivity`
+/// (non-optional `title: String` and raw-string backing fields).
+/// Lightweight migration V3 → V4 preserves historical activity data
+/// across the `title` optionality transition and `ActivityType.physicalTraining`
+/// backward compatibility, with no store reset or reinstall required.
 ///
 /// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
 /// now the LATEST version); it will need freezing itself the next time a

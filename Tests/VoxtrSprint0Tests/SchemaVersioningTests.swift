@@ -222,6 +222,8 @@ struct SchemaVersioningTests {
         #expect(migratedRecurring.sportId == nil)
         #expect(migratedRecurring.plannedDurationMinutes == 60)
         #expect(migratedRecurring.weekdays == [.wednesday])
+        #expect(migratedRecurring.effectiveStartDate == originalDate)
+        #expect(migratedRecurring.effectiveEndDate == originalDate.adding(days: 30))
         #expect(migratedRecurring.activityType == .physicalTraining)
     }
 }
