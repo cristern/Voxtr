@@ -142,6 +142,9 @@ public struct WeeklyPlanningView: View {
                             Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
+                            Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
                             Text(Self.rowSubtitle(for: activity))
                                 .font(VoxtrTypography.metadata)
                                 .foregroundStyle(VoxtrColor.textSecondary)
@@ -165,12 +168,14 @@ public struct WeeklyPlanningView: View {
 
             if !viewModel.isCommitted {
                 Section {
-                    TextField("Title", text: $viewModel.newActivityTitle)
-                        .accessibilityIdentifier("planning.newActivityTitleField")
+                    ActivityIdentityInputView(
+                        sportId: $viewModel.newActivitySportId,
+                        activityType: $viewModel.newActivityType,
+                        activityName: $viewModel.newActivityTitle,
+                        accessibilityPrefix: "planning.newActivity"
+                    )
                     DatePicker("Date", selection: $viewModel.newActivityDate, displayedComponents: .date)
                         .accessibilityIdentifier("planning.newActivityDatePicker")
-                    activityTypePicker(selection: $viewModel.newActivityType)
-                        .accessibilityIdentifier("planning.newActivityTypePicker")
                     Toggle("Has start time", isOn: $viewModel.newActivityHasStartTime)
                         .accessibilityIdentifier("planning.newActivityHasStartTimeToggle")
                     if viewModel.newActivityHasStartTime {
@@ -267,16 +272,6 @@ public struct WeeklyPlanningView: View {
                 proxy.scrollTo("weeklyPlanning.top", anchor: .top)
             }
         }
-        }
-    }
-
-    /// Shared between the add form and the edit sheet — same set of
-    /// cases either way, so this avoids two copies drifting apart.
-    private func activityTypePicker(selection: Binding<ActivityType>) -> some View {
-        Picker("Activity type", selection: selection) {
-            ForEach(ActivityType.selectableCases, id: \.self) { type in
-                Text(type.displayName).tag(type)
-            }
         }
     }
 
@@ -416,6 +411,9 @@ struct RecurringActivityManagementView: View {
                                 Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: recurringActivity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
+                                Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: recurringActivity))
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
                                     .font(VoxtrTypography.metadata)
                                     .foregroundStyle(VoxtrColor.textSecondary)
@@ -521,15 +519,13 @@ struct RecurringActivityFormView: View {
                 }
 
                 Section {
-                    TextField("Title", text: $viewModel.recurringFormTitle)
-                        .accessibilityIdentifier("planning.recurringFormTitleField")
-
-                    Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
-                        ForEach(availableActivityTypes, id: \.self) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
+                    ActivityIdentityInputView(
+                        sportId: $viewModel.recurringFormSportId,
+                        activityType: $viewModel.recurringFormActivityType,
+                        activityName: $viewModel.recurringFormTitle,
+                        availableActivityTypes: availableActivityTypes,
+                        accessibilityPrefix: "planning.recurringForm"
+                    )
                 } header: {
                     VoxtrSectionHeading("Activity")
                 }

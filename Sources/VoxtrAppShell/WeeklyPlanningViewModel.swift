@@ -17,6 +17,7 @@ public final class WeeklyPlanningViewModel {
 
     // Add-activity form fields.
     public var newActivityTitle: String = ""
+    public var newActivitySportId: SportId?
     public var newActivityDate: Date = .now
     public var newActivityType: ActivityType = .individualTraining
     public var newActivityLocation: String = ""
@@ -66,6 +67,7 @@ public final class WeeklyPlanningViewModel {
 
     // Recurring-activity management form fields.
     public var recurringFormTitle: String = ""
+    public var recurringFormSportId: SportId?
     public var recurringFormActivityType: ActivityType = .individualTraining
     /// Sprint 1.2B: one or more weekdays — replaces the previous
     /// single `recurringFormWeekday: Weekday`. `Set<Weekday>` (not
@@ -184,11 +186,13 @@ public final class WeeklyPlanningViewModel {
                 title: trimmedTitle,
                 localDate: localDate,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
+                sportId: newActivitySportId,
                 startLocalTime: newActivityHasStartTime ? Self.localTime(from: newActivityStartTime) : nil,
                 plannedDurationMinutes: newActivityHasDuration ? newActivityDurationMinutes : nil,
                 location: newActivityLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newActivityLocation
             )
             newActivityTitle = ""
+            newActivitySportId = nil
             newActivityDate = .now
             newActivityLocation = ""
             newActivityHasStartTime = false
@@ -211,6 +215,22 @@ public final class WeeklyPlanningViewModel {
         localDate: LocalDate,
         activityType: ActivityType
     ) {
+        editActivity(
+            activity,
+            title: title,
+            localDate: localDate,
+            activityType: activityType,
+            sportId: activity.sportId.map { SportId(rawValue: $0) }
+        )
+    }
+
+    public func editActivity(
+        _ activity: PlannedActivity,
+        title: String,
+        localDate: LocalDate,
+        activityType: ActivityType,
+        sportId: SportId?
+    ) {
         guard let weekPlan else { return }
         errorMessage = nil
         do {
@@ -220,7 +240,8 @@ public final class WeeklyPlanningViewModel {
                 activityType: activityType,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 localDate: localDate,
-                timeZoneId: activity.timeZoneId
+                timeZoneId: activity.timeZoneId,
+                sportId: sportId
             )
             activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
@@ -373,6 +394,7 @@ public final class WeeklyPlanningViewModel {
                 athleteId: athleteId,
                 title: trimmedTitle,
                 activityType: recurringFormActivityType,
+                sportId: recurringFormSportId,
                 weekdays: Array(recurringFormWeekdays),
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
@@ -406,6 +428,7 @@ public final class WeeklyPlanningViewModel {
                 recurringActivity.recurringPlannedActivityId,
                 title: trimmedTitle,
                 activityType: recurringFormActivityType,
+                sportId: recurringFormSportId,
                 weekdays: Array(recurringFormWeekdays),
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,
@@ -447,6 +470,7 @@ public final class WeeklyPlanningViewModel {
     /// activity, so the edit sheet opens pre-filled.
     public func beginEditingRecurringActivity(_ recurringActivity: RecurringPlannedActivity) {
         recurringFormTitle = recurringActivity.title ?? ""
+        recurringFormSportId = recurringActivity.sportId.map { SportId(rawValue: $0) }
         recurringFormActivityType = recurringActivity.activityType
         recurringFormWeekdays = Set(recurringActivity.weekdays)
         if let startLocalTime = recurringActivity.startLocalTime {
@@ -470,6 +494,7 @@ public final class WeeklyPlanningViewModel {
 
     public func resetRecurringForm() {
         recurringFormTitle = ""
+        recurringFormSportId = nil
         recurringFormActivityType = .individualTraining
         recurringFormWeekdays = [.monday]
         recurringFormHasStartTime = false
@@ -524,8 +549,10 @@ public final class WeeklyPlanningViewModel {
             return PlanningStrings.weekPlanNotFoundError
         case .weekPlanNotDraft:
             return PlanningStrings.weekPlanNotDraftError
-        case .invalidField:
-            return PlanningStrings.activityTitleRequired
+        case .invalidField(let field):
+            return field == "title or sportId is required"
+                ? PlanningStrings.activityIdentityRequired
+                : PlanningStrings.genericServiceError
         case .plannedActivityNotFound, .plannedActivityDoesNotBelongToWeekPlan,
              .recurringPlannedActivityNotFound, .recurringOccurrenceAlreadyAccepted,
              .recurringOccurrenceAthleteMismatch, .recurringOccurrenceOutsideWeekPlan,

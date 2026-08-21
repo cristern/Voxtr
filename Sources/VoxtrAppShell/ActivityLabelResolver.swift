@@ -46,15 +46,22 @@ public struct ActivityLabelResolver: Sendable {
         if let normalized = ActivityIdentity.normalizedName(name) {
             return normalized
         }
-        if let sportId {
-            if let customSportLookup, let resolved = customSportLookup(sportId) {
-                return resolved
-            }
-            if let sportRepository, let sport = try? sportRepository.fetchSport(byId: sportId) {
-                return sport.displayName
-            }
+        if let sportId, let sportLabel = resolvedSportLabel(for: sportId) {
+            return sportLabel
         }
         return "Activity"
+    }
+
+    /// Factual secondary identity, never a replacement primary label.
+    /// A named activity can show its Sport and Type; when Sport is the
+    /// primary label, Type remains the only secondary classification.
+    public func metadataLabel(name: String?, sportId: SportId?, activityType: ActivityType) -> String {
+        if ActivityIdentity.normalizedName(name) != nil,
+           let sportId,
+           let sportLabel = resolvedSportLabel(for: sportId) {
+            return "\(sportLabel) · \(activityType.displayName)"
+        }
+        return activityType.displayName
     }
 
     public func primaryLabel(for activity: PlannedActivity) -> String {
@@ -71,5 +78,39 @@ public struct ActivityLabelResolver: Sendable {
 
     public func primaryLabel(for suggestion: RecurringActivitySuggestion) -> String {
         primaryLabel(name: suggestion.title, sportId: suggestion.sportId)
+    }
+
+    public func metadataLabel(for activity: PlannedActivity) -> String {
+        metadataLabel(
+            name: activity.title,
+            sportId: activity.sportId.map(SportId.init(rawValue:)),
+            activityType: activity.activityType
+        )
+    }
+
+    public func metadataLabel(for activity: LoggedActivity) -> String {
+        metadataLabel(
+            name: activity.title,
+            sportId: activity.sportId.map(SportId.init(rawValue:)),
+            activityType: activity.activityType
+        )
+    }
+
+    public func metadataLabel(for activity: RecurringPlannedActivity) -> String {
+        metadataLabel(
+            name: activity.title,
+            sportId: activity.sportId.map(SportId.init(rawValue:)),
+            activityType: activity.activityType
+        )
+    }
+
+    private func resolvedSportLabel(for sportId: SportId) -> String? {
+        if let customSportLookup, let resolved = customSportLookup(sportId) {
+            return resolved
+        }
+        if let sportRepository, let sport = try? sportRepository.fetchSport(byId: sportId) {
+            return sport.displayName
+        }
+        return nil
     }
 }

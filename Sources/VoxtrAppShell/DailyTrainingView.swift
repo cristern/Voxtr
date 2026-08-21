@@ -156,6 +156,9 @@ public struct DailyTrainingView: View {
                                 Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
+                                Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
                                 // Review follow-up (duration/logged-consumer
                                 // audit): a Cancelled/Missed entry must show
                                 // its outcome, never present its schema
@@ -175,15 +178,12 @@ public struct DailyTrainingView: View {
                 .accessibilityIdentifier("training.loggedActivitiesList")
 
                 Section {
-                    TextField("Title", text: $viewModel.newLogTitle)
-                        .accessibilityIdentifier("training.newLogTitleField")
-
-                    Picker("Activity type", selection: $viewModel.newLogActivityType) {
-                        ForEach(ActivityType.selectableCases, id: \.self) { type in
-                            Text(type.displayName).tag(type)
-                        }
-                    }
-                    .accessibilityIdentifier("training.newLogActivityTypePicker")
+                    ActivityIdentityInputView(
+                        sportId: $viewModel.newLogSportId,
+                        activityType: $viewModel.newLogActivityType,
+                        activityName: $viewModel.newLogTitle,
+                        accessibilityPrefix: "training.newLog"
+                    )
 
                     DatePicker("Started at", selection: $viewModel.newLogStartedAt)
                         .accessibilityIdentifier("training.newLogStartedAtPicker")

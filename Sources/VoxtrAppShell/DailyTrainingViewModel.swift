@@ -22,6 +22,7 @@ public final class DailyTrainingViewModel {
     // Log-activity form fields — LoggedActivity's existing fields only,
     // nothing new.
     public var newLogTitle: String = ""
+    public var newLogSportId: SportId?
     public var newLogActivityType: ActivityType = .individualTraining
     public var newLogStartedAt: Date = .now
     /// Sprint 1.1 closeout, Item 5: 1 was the validation floor
@@ -192,6 +193,7 @@ public final class DailyTrainingViewModel {
             let result = try trainingReflectionCoordinationService.logActivity(
                 athleteId: athleteId,
                 plannedActivityId: selectedPlannedActivityId,
+                sportId: newLogSportId,
                 activityType: newLogActivityType,
                 title: newLogTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 startedAt: newLogStartedAt,
@@ -202,6 +204,7 @@ public final class DailyTrainingViewModel {
                 sessionForm: newLogSessionForm
             )
             newLogTitle = ""
+            newLogSportId = nil
             newLogNotes = ""
             newLogPerceivedExertion = nil
             selectedPlannedActivityId = nil
@@ -262,11 +265,10 @@ public final class DailyTrainingViewModel {
             return TrainingStrings.genericError
         case .invalidField:
             // Sport / Activity Identity validation carries an internal
-            // field description for domain/test diagnostics. Daily
-            // Training already has one controlled fallback for save
-            // failures, so keep that presentation contract rather than
-            // exposing the raw validation string or adding new UX copy.
-            return TrainingStrings.genericError
+            // field description for domain/test diagnostics. Present
+            // the shared concise identity guidance instead of exposing
+            // that raw validation string.
+            return TrainingStrings.activityIdentityRequired
         }
     }
 }
