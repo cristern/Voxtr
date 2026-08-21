@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
+import VoxtrAppShell
 import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrPlanningDomain
