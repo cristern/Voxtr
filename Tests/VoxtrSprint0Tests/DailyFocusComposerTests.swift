@@ -12,6 +12,7 @@ import VoxtrTrainingDomain
 /// `CoachingEngineTests`' pattern exactly.
 
 @Suite("DailyFocusComposer (Sprint 13, architecture correction)", .serialized)
+@MainActor
 struct DailyFocusComposerTests {
 
     private static let athleteId = AthleteId()
