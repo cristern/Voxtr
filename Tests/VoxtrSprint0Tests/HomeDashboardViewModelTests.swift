@@ -144,7 +144,8 @@ struct HomeDashboardViewModelTests {
         #expect(editedRows.first?.plannedActivity.plannedActivityId == original.plannedActivityId)
         #expect(editedRows.first?.plannedActivity.title == Optional("Updated"))
 
-        let updated = try #require(planningRepository.fetchPlannedActivity(byId: original.plannedActivityId))
+        let fetched = try planningRepository.fetchPlannedActivity(byId: original.plannedActivityId)
+        let updated = try #require(fetched)
         planning.deleteActivity(updated)
 
         guard case .loaded(let deletedRows) = home.todaysTrainingState else {

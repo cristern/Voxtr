@@ -54,7 +54,8 @@ struct WeeklyPlanningViewModelTests {
             activityType: .teamTraining
         )
 
-        let refetched = try #require(repository.fetchPlannedActivity(byId: original.plannedActivityId))
+        let fetched = try repository.fetchPlannedActivity(byId: original.plannedActivityId)
+        let refetched = try #require(fetched)
         #expect(refetched.plannedActivityId == original.plannedActivityId)
         #expect(refetched.title == Optional("Updated"))
         #expect(refetched.localDate == Self.fixedWeekStart.adding(days: 1))
