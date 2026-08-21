@@ -12,7 +12,7 @@ import VoxtrTrainingDomain
 // types and require the Xcode/macOS SwiftData runtime — written but not
 // executed in this sandbox.
 //
-// These tests exercise AppCurrentSchema/AppSchemaMigrationPlan directly
+// These tests exercise the current AppSchemaV4/AppSchemaMigrationPlan directly
 // via Schema(versionedSchema:)/ModelContainer(migrationPlan:) — the
 // same real SwiftData API SwiftDataPersistenceController's versioned
 // initializer wraps — rather than going through
@@ -20,22 +20,28 @@ import VoxtrTrainingDomain
 // targets the app's default on-disk location (not test-appropriate: no
 // isolation between test runs).
 //
-// Critical persistence recovery: after collapsing the schema history to
-// a single AppCurrentSchema (see AppSchemaVersioning.swift's own doc
-// comment for why), all three tests here now reference that one schema
-// — there is no longer an "old version" vs. "current version" split to
-// exercise separately.
-//
 // Following the S1.1 lesson: no shared private helper methods for
 // container construction — every test builds its own inline.
 
 @Suite("Schema versioning", .serialized)
 struct SchemaVersioningTests {
 
-    @Test("A versioned model container can be created from AppCurrentSchema + AppSchemaMigrationPlan")
+    @Test("AppSchemaV4 registers the live activity domain model types")
+    func currentSchemaRegistersLiveActivityDomainTypes() {
+        let registeredTypes = Set(AppSchemaV4.models.map { ObjectIdentifier($0) })
+
+        #expect(registeredTypes.contains(ObjectIdentifier(PlannedActivity.self)))
+        #expect(registeredTypes.contains(ObjectIdentifier(LoggedActivity.self)))
+        #expect(registeredTypes.contains(ObjectIdentifier(RecurringPlannedActivity.self)))
+        #expect(!registeredTypes.contains(ObjectIdentifier(AppSchemaV3.PlannedActivity.self)))
+        #expect(!registeredTypes.contains(ObjectIdentifier(AppSchemaV3.LoggedActivity.self)))
+        #expect(!registeredTypes.contains(ObjectIdentifier(AppSchemaV3.RecurringPlannedActivity.self)))
+    }
+
+    @Test("A versioned model container can be created from AppSchemaV4 + AppSchemaMigrationPlan")
     @MainActor
     func versionedModelContainerCanBeCreated() throws {
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
 
         let container = try ModelContainer(
@@ -44,13 +50,13 @@ struct SchemaVersioningTests {
             configurations: [configuration]
         )
 
-        #expect(container.schema.entities.count == AppCurrentSchema.models.count)
+        #expect(container.schema.entities.count == AppSchemaV4.models.count)
     }
 
     @Test("Current entities can still be written and fetched through the versioned schema")
     @MainActor
     func currentEntitiesCanStillBeWrittenAndFetched() throws {
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,
@@ -74,30 +80,45 @@ struct SchemaVersioningTests {
         #expect(fetched.first?.givenName == "Jonas")
     }
 
-    @Test("Persistence survives the ModelContainer itself being discarded and recreated against the same on-disk store, via the migration plan")
+    @Test("A current V4 PlannedActivity survives ModelContainer recreation and fetches as the live domain type")
     @MainActor
     func persistenceSurvivesContainerRecreation() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("schema-versioning-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
+        let athleteId = AthleteId()
+        let activityId = PlannedActivityId()
 
-        let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
-        let firstContainer = try ModelContainer(
-            for: schema,
-            migrationPlan: AppSchemaMigrationPlan.self,
-            configurations: [firstConfiguration]
-        )
-        let athlete = AthleteProfile(
-            workspaceId: WorkspaceId(),
-            givenName: "Kari",
-            birthDate: LocalDate(year: 2011, month: 9, day: 2),
-            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-            developmentStage: .parentLed
-        )
-        firstContainer.mainContext.insert(athlete)
-        try firstContainer.mainContext.save()
+        do {
+            let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
+            let firstContainer = try ModelContainer(
+                for: schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [firstConfiguration]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(),
+                givenName: "Kari",
+                birthDate: LocalDate(year: 2011, month: 9, day: 2),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                developmentStage: .parentLed
+            )
+            firstContainer.mainContext.insert(athlete)
+            let activity = PlannedActivity(
+                id: activityId,
+                weekPlanId: WeekPlanId(),
+                athleteId: athleteId,
+                activityType: .individualTraining,
+                title: "Endurance run",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            firstContainer.mainContext.insert(activity)
+            try firstContainer.mainContext.save()
+        }
 
-        // A genuinely new ModelContainer, built the same way a real app
+        // The first container is out of scope. A genuinely new
+        // ModelContainer is built the same way a real app
         // relaunch would — same versioned schema, same migration plan,
         // same on-disk file.
         let secondConfiguration = ModelConfiguration(schema: schema, url: storeURL)
@@ -108,9 +129,14 @@ struct SchemaVersioningTests {
         )
 
         let fetched = try secondContainer.mainContext.fetch(FetchDescriptor<AthleteProfile>())
+        let fetchedActivities = try secondContainer.mainContext.fetch(FetchDescriptor<PlannedActivity>())
 
         #expect(fetched.count == 1)
         #expect(fetched.first?.givenName == "Kari")
+        #expect(fetchedActivities.count == 1)
+        #expect(fetchedActivities.first?.plannedActivityId == activityId)
+        #expect(fetchedActivities.first?.title == "Endurance run")
+        #expect(fetchedActivities.first?.sportId == nil)
     }
 
     @Test("Persisted V1 store with physicalTraining activities migrates cleanly through stages to V4 with legacy activityType preserved")
