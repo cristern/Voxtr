@@ -40,6 +40,7 @@ public final class ActivityDetailViewModel {
     // Edit form fields — prefilled from `activity` on open, matching
     // WeeklyPlanningView's own established edit-sheet convention.
     public var editTitle: String = ""
+    public var editSportId: SportId?
     public var editDate: Date = .now
     public var editActivityType: ActivityType = .individualTraining
     public var editStartTime: Date = .now
@@ -212,6 +213,7 @@ public final class ActivityDetailViewModel {
 
     public func prefillEditForm() {
         editTitle = activity.title ?? ""
+        editSportId = activity.sportId.map { SportId(rawValue: $0) }
         editDate = Self.date(from: activity.localDate)
         editActivityType = activity.activityType
         if let startTime = activity.startLocalTime {
@@ -241,6 +243,7 @@ public final class ActivityDetailViewModel {
                 title: editTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 localDate: Self.localDate(from: editDate),
                 timeZoneId: activity.timeZoneId,
+                sportId: editSportId,
                 startLocalTime: editHasStartTime ? Self.localTime(from: editStartTime) : nil,
                 plannedDurationMinutes: editHasDuration ? editDurationMinutes : nil,
                 notes: editNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editNotes,
@@ -249,6 +252,13 @@ public final class ActivityDetailViewModel {
             activity = updated
             onActivityLogged()
             return true
+        } catch let error as PlanningServiceError {
+            if case .invalidField(let field) = error, field == "title or sportId is required" {
+                errorMessage = PlanningStrings.activityIdentityRequired
+            } else {
+                errorMessage = "Could not save changes. Please try again."
+            }
+            return false
         } catch {
             errorMessage = "Could not save changes. Please try again."
             return false

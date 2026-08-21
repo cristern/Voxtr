@@ -106,6 +106,7 @@ public struct ActivityDetailView: View {
             Section {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                 LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
+                LabeledContent("Identity", value: ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: viewModel.activity))
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
                 if let startTime = viewModel.activity.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
@@ -352,16 +353,20 @@ struct ActivityEditFormView: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Title", text: $viewModel.editTitle)
-                    .accessibilityIdentifier("activityDetail.editTitleField")
+                if let errorMessage = viewModel.errorMessage {
+                    Text(errorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("activityDetail.editErrorMessage")
+                }
+                ActivityIdentityInputView(
+                    sportId: $viewModel.editSportId,
+                    activityType: $viewModel.editActivityType,
+                    activityName: $viewModel.editTitle,
+                    availableActivityTypes: availableActivityTypes,
+                    accessibilityPrefix: "activityDetail.edit"
+                )
                 DatePicker("Date", selection: $viewModel.editDate, displayedComponents: .date)
                     .accessibilityIdentifier("activityDetail.editDatePicker")
-                Picker("Activity type", selection: $viewModel.editActivityType) {
-                    ForEach(availableActivityTypes, id: \.self) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
-                .accessibilityIdentifier("activityDetail.editActivityTypePicker")
 
                 Toggle("Has start time", isOn: $viewModel.editHasStartTime)
                 if viewModel.editHasStartTime {

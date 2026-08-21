@@ -143,6 +143,67 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("Planning form saves a Sport-only identity and clears Sport back to nil")
+    @MainActor
+    func addSportOnlyActivityPersistsSportAndClearsForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let viewModel = WeeklyPlanningViewModel(
+            service: PlanningService(repository: repository),
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        let sportId = SportId()
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "   "
+        viewModel.newActivitySportId = sportId
+        viewModel.newActivityType = .teamTraining
+
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.count == 1)
+        #expect(viewModel.activities.first?.title == nil)
+        #expect(viewModel.activities.first?.sportId == sportId.rawValue)
+        #expect(viewModel.activities.first?.activityType == .teamTraining)
+        #expect(viewModel.newActivitySportId == nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("Planning edit clears Sport without replacing stable PlannedActivity identity")
+    @MainActor
+    func editActivityClearsSportAndPreservesStableIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let viewModel = WeeklyPlanningViewModel(
+            service: PlanningService(repository: repository),
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Named session"
+        viewModel.newActivitySportId = SportId()
+        viewModel.addActivity()
+        let original = try #require(viewModel.activities.first)
+
+        viewModel.editActivity(
+            original,
+            title: "Renamed session",
+            localDate: original.localDate,
+            activityType: .individualTraining,
+            sportId: nil
+        )
+
+        let fetched = try repository.fetchPlannedActivity(byId: original.plannedActivityId)
+        let edited = try #require(fetched)
+        #expect(edited.plannedActivityId == original.plannedActivityId)
+        #expect(edited.title == "Renamed session")
+        #expect(edited.sportId == nil)
+    }
+
     @Test("Planned/Logged Activity lifecycle consistency cleanup: adding an activity with 'Has duration' on persists the entered planned duration and resets the form")
     @MainActor
     func addActivityWithDurationPersistsPlannedDuration() throws {
@@ -869,6 +930,32 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         #expect(viewModel.recurringPlannedActivities.contains { $0.title == "Football" })
         #expect(viewModel.recurringFormTitle.isEmpty)
         #expect(viewModel.errorMessage == nil)
+    }
+
+    @Test("Recurring form saves a Sport-only identity")
+    @MainActor
+    func createRecurringActivityWithSportOnlyIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let viewModel = WeeklyPlanningViewModel(
+            service: PlanningService(repository: repository), athleteId: AthleteId(),
+            committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+        )
+        let sportId = SportId()
+        viewModel.recurringFormTitle = " \n "
+        viewModel.recurringFormSportId = sportId
+        viewModel.recurringFormActivityType = .conditioning
+        viewModel.recurringFormWeekdays = [.monday]
+        viewModel.recurringFormStartDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? .now
+        viewModel.recurringFormEndDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 31)) ?? .now
+
+        let succeeded = viewModel.createRecurringActivity()
+
+        #expect(succeeded)
+        #expect(viewModel.recurringPlannedActivities.first?.title == nil)
+        #expect(viewModel.recurringPlannedActivities.first?.sportId == sportId.rawValue)
+        #expect(viewModel.recurringPlannedActivities.first?.activityType == .conditioning)
     }
 
     @Test("Creating a recurring activity while the current week's WeekPlan is loaded refreshes its suggestions")

@@ -306,6 +306,29 @@ struct ActivityLabelResolverTests {
         let result = resolver.primaryLabel(name: nil, sportId: unknownSportId)
         #expect(result == "Activity")
     }
+
+    @Test("Factual metadata is Sport and Type for named activities, otherwise Type")
+    @MainActor
+    func factualMetadataFollowsPrimaryIdentity() {
+        let resolver = ActivityLabelResolver(customSportLookup: { id in
+            id == Self.footballId ? "Football" : nil
+        })
+
+        #expect(
+            resolver.metadataLabel(
+                name: "Passing practice", sportId: Self.footballId, activityType: .teamTraining
+            ) == "Football · Team training"
+        )
+        #expect(
+            resolver.metadataLabel(
+                name: nil, sportId: Self.footballId, activityType: .teamTraining
+            ) == "Team training"
+        )
+        #expect(
+            resolver.metadataLabel(name: "Run", sportId: nil, activityType: .conditioning)
+                == "Conditioning"
+        )
+    }
 }
 
 /// Sport / Activity Identity domain foundation, Part 1/2: the

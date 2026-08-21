@@ -89,6 +89,43 @@ struct DailyTrainingViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("Daily Training saves a Sport-only identity and clears Sport back to nil")
+    @MainActor
+    func logSportOnlyActivityPersistsSportAndClearsForm() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let viewModel = DailyTrainingViewModel(
+            trainingService: trainingService,
+            coordinationService: TrainingPlanningCoordinationService(
+                planningRepository: planningRepository, trainingRepository: trainingRepository
+            ),
+            trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
+                trainingService: trainingService, reflectionService: reflectionService
+            ),
+            authorId: ActorId(),
+            athleteId: AthleteId()
+        )
+        let sportId = SportId()
+        viewModel.newLogTitle = "  "
+        viewModel.newLogSportId = sportId
+        viewModel.newLogActivityType = .match
+        viewModel.newLogDurationMinutes = 30
+        viewModel.newLogSessionForm = 3
+
+        viewModel.logActivity()
+
+        #expect(viewModel.loggedActivities.count == 1)
+        #expect(viewModel.loggedActivities.first?.title == nil)
+        #expect(viewModel.loggedActivities.first?.sportId == sportId.rawValue)
+        #expect(viewModel.loggedActivities.first?.activityType == .match)
+        #expect(viewModel.newLogSportId == nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
     @Test("Logging with an out-of-range duration surfaces an error and does not persist")
     @MainActor
     func logActivityWithInvalidDurationSurfacesError() throws {
@@ -151,7 +188,7 @@ struct DailyTrainingViewModelTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
     }
 
-    @Test("Training identity validation uses Daily Training's controlled generic error without leaking raw domain text")
+    @Test("Training identity validation uses concise UI guidance without leaking raw domain text")
     @MainActor
     func missingActivityIdentityUsesGenericError() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -178,7 +215,7 @@ struct DailyTrainingViewModelTests {
 
         viewModel.logActivity()
 
-        #expect(viewModel.errorMessage == TrainingStrings.genericError)
+        #expect(viewModel.errorMessage == TrainingStrings.activityIdentityRequired)
         #expect(viewModel.errorMessage != "title or sportId is required")
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).isEmpty)
     }

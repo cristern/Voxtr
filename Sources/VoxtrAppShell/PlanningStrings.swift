@@ -32,7 +32,10 @@ public enum PlanningStrings {
         )
     }
 
-    public static var activityTitleRequired: String {
-        String(localized: "planning.activity.titleRequired", defaultValue: "Enter a title for this activity.")
+    public static var activityIdentityRequired: String {
+        String(
+            localized: "planning.activity.identityRequired",
+            defaultValue: "Choose a sport or enter an activity name."
+        )
     }
 }

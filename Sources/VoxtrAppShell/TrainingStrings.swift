@@ -12,6 +12,13 @@ public enum TrainingStrings {
         String(localized: "training.error.generic", defaultValue: "Something went wrong. Please try again.")
     }
 
+    public static var activityIdentityRequired: String {
+        String(
+            localized: "training.error.activityIdentityRequired",
+            defaultValue: "Choose a sport or enter an activity name."
+        )
+    }
+
     public static var invalidDuration: String {
         String(localized: "training.error.invalidDuration", defaultValue: "Duration must be between 1 and 1440 minutes.")
     }
