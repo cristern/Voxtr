@@ -255,7 +255,9 @@ struct ActivityLabelResolverTests {
     @Test("3. Sport only -> Canonical Sport display name")
     @MainActor
     func sportOnlyReturnsSportDisplayName() {
-        let resolver = ActivityLabelResolver()
+        let resolver = ActivityLabelResolver(customSportLookup: { id in
+            id == Self.footballId ? "Football" : nil
+        })
         let result = resolver.primaryLabel(name: nil, sportId: Self.footballId)
         #expect(result == "Football")
     }
@@ -263,7 +265,9 @@ struct ActivityLabelResolverTests {
     @Test("4. Whitespace-only Name + Sport -> Canonical Sport display name")
     @MainActor
     func whitespaceNameAndSportReturnsSportDisplayName() {
-        let resolver = ActivityLabelResolver()
+        let resolver = ActivityLabelResolver(customSportLookup: { id in
+            id == Self.footballId ? "Football" : nil
+        })
         let result = resolver.primaryLabel(name: "   \n\t  ", sportId: Self.footballId)
         #expect(result == "Football")
     }

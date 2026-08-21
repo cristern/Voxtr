@@ -106,6 +106,7 @@ final class HomeDashboardViewModelCache {
 /// athlete is added, archived, or edited after launch. See
 /// `FamilyHomeViewModel`'s own doc comment for the full explanation.
 public struct FamilyHomeContentView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: FamilyHomeViewModel
     /// Athlete Home mounted-instance fix: see `HomeDashboardViewModelCache`'s
     /// own doc comment. Held via `@State` only so it survives this
@@ -450,7 +451,7 @@ public struct FamilyHomeContentView: View {
                         .foregroundStyle(VoxtrColor.textSecondary)
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(ActivityLabelResolver().primaryLabel(for: suggestion))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             // Recurring metadata demotion round: "Recurring"
@@ -487,7 +488,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(ActivityLabelResolver().primaryLabel(for: loggedActivity))
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: loggedActivity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text("Unplanned · Logged")
@@ -537,7 +538,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(ActivityLabelResolver().primaryLabel(for: row.plannedActivity))
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: row.plannedActivity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text(Self.rowSubtitle(for: row))

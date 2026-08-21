@@ -134,11 +134,11 @@ struct SchemaVersioningTests {
         let originalDate = LocalDate(year: 2026, month: 3, day: 4)
         let originalTitle = "Wednesday Gym Session"
 
-        // 1. PlannedActivity with physicalTraining
-        let planned = PlannedActivity(
-            plannedActivityId: plannedId,
-            weekPlanId: weekPlanId,
-            athleteId: athleteId,
+        // 1. AppSchemaV3.PlannedActivity with physicalTraining (frozen V3 shape: title is non-optional String)
+        let planned = AppSchemaV3.PlannedActivity(
+            id: plannedId.rawValue,
+            weekPlanId: weekPlanId.rawValue,
+            athleteId: athleteId.rawValue,
             activityType: .physicalTraining,
             title: originalTitle,
             localDate: originalDate,
@@ -147,12 +147,12 @@ struct SchemaVersioningTests {
         )
         v3Container.mainContext.insert(planned)
 
-        // 2. LoggedActivity with physicalTraining
+        // 2. AppSchemaV3.LoggedActivity with physicalTraining (frozen V3 shape: title is non-optional String)
         let startedAt = Date()
-        let logged = LoggedActivity(
-            loggedActivityId: loggedId,
-            athleteId: athleteId,
-            plannedActivityId: plannedId,
+        let logged = AppSchemaV3.LoggedActivity(
+            id: loggedId.rawValue,
+            athleteId: athleteId.rawValue,
+            plannedActivityId: plannedId.rawValue,
             activityType: .physicalTraining,
             title: originalTitle,
             startedAt: startedAt,
@@ -162,10 +162,10 @@ struct SchemaVersioningTests {
         )
         v3Container.mainContext.insert(logged)
 
-        // 3. RecurringPlannedActivity with physicalTraining
-        let recurring = RecurringPlannedActivity(
-            recurringPlannedActivityId: recurringId,
-            athleteId: athleteId,
+        // 3. AppSchemaV3.RecurringPlannedActivity with physicalTraining (frozen V3 shape: title is non-optional String)
+        let recurring = AppSchemaV3.RecurringPlannedActivity(
+            id: recurringId.rawValue,
+            athleteId: athleteId.rawValue,
             title: originalTitle,
             activityType: .physicalTraining,
             weekdays: [.wednesday],

@@ -9,6 +9,7 @@ import VoxtrReflectionDomain
 /// achieved") — only plain counts, per the approved contract. No
 /// sibling comparison, no ratings, no gamification.
 public struct WeeklyHistoryView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: WeeklyHistoryViewModel
     @State private var isShowingReflectionForm = false
     let athleteDisplayName: String
@@ -82,7 +83,7 @@ public struct WeeklyHistoryView: View {
                 Section {
                     ForEach(plannedActivities, id: \.plannedActivity.id) { completion in
                         HStack {
-                            Text(ActivityLabelResolver().primaryLabel(for: completion.plannedActivity))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: completion.plannedActivity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
@@ -111,7 +112,7 @@ public struct WeeklyHistoryView: View {
             if !viewModel.additionalLoggedActivities.isEmpty {
                 Section {
                     ForEach(viewModel.additionalLoggedActivities, id: \.id) { logged in
-                        Text(ActivityLabelResolver().primaryLabel(for: logged))
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: logged))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                     }

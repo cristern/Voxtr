@@ -37,6 +37,7 @@ import VoxtrTrainingDomain
 /// applying the same lesson to new code. Fixed the same way:
 /// `.sheet(item:)` — presence and content are now one piece of state.
 public struct RecurringOccurrencePreviewView: View {
+    @Environment(\.modelContext) private var modelContext
     let suggestion: RecurringActivitySuggestion
     let athleteDisplayName: String
     let planningService: PlanningService
@@ -104,7 +105,7 @@ public struct RecurringOccurrencePreviewView: View {
 
             Section {
                 LabeledContent("Athlete", value: athleteDisplayName)
-                LabeledContent("Activity", value: ActivityLabelResolver().primaryLabel(for: suggestion))
+                LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                 LabeledContent("Date", value: suggestion.occurrenceDate.isoString)
                 if let startTime = suggestion.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))

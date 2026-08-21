@@ -12,6 +12,7 @@ import VoxtrReflectionDomain
 /// `WeeklyReviewViewModel.loadState`'s `WeeklyReviewResult` — this view
 /// recomputes no completion state, no ordering, no date scoping.
 public struct WeeklyReviewView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: WeeklyReviewViewModel
     @State private var isShowingReflectionForm = false
     private let athleteDisplayName: String
@@ -162,7 +163,7 @@ public struct WeeklyReviewView: View {
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
                         HStack {
-                            Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: item.plannedActivity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Spacer()
@@ -254,7 +255,7 @@ public struct WeeklyReviewView: View {
                         Text(WeeklyPlanningView.weekdayLabel(for: Self.localDate(for: activity.startedAt).weekday))
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
-                        Text(ActivityLabelResolver().primaryLabel(for: activity))
+                        Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         // Review follow-up (duration/logged-consumer

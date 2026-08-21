@@ -9,6 +9,7 @@ import VoxtrTrainingDomain
 /// `TrainingPlanningCoordinationService` — this view holds no business
 /// logic.
 public struct DailyTrainingView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: DailyTrainingViewModel
     @State private var recurringManagementSheetItem: RecurringManagementSheetItem?
     private let planningService: PlanningService
@@ -70,7 +71,7 @@ public struct DailyTrainingView: View {
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
+                                    Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: item.plannedActivity))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     if let location = item.plannedActivity.location, !location.isEmpty {
@@ -126,7 +127,7 @@ public struct DailyTrainingView: View {
                                 )
                             } label: {
                                 HStack {
-                                    Text(ActivityLabelResolver().primaryLabel(for: suggestion))
+                                    Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     Spacer()
@@ -152,7 +153,7 @@ public struct DailyTrainingView: View {
                     } else {
                         ForEach(viewModel.loggedActivities, id: \.id) { activity in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(ActivityLabelResolver().primaryLabel(for: activity))
+                                Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 // Review follow-up (duration/logged-consumer
@@ -218,7 +219,7 @@ public struct DailyTrainingView: View {
                     Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
                         Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
                         ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                            Text(ActivityLabelResolver().primaryLabel(for: item.plannedActivity))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: item.plannedActivity))
                                 .tag(Optional(item.plannedActivity.plannedActivityId))
                                 .disabled(item.isCompleted)
                         }

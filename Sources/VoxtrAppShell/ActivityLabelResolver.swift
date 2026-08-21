@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
@@ -9,7 +10,7 @@ import VoxtrTrainingDomain
 ///
 /// Semantic contract:
 /// 1. normalized Activity Name, if present
-/// 2. otherwise canonical Sport display name
+/// 2. otherwise canonical Sport display name from `SportRepository` / `Sport`
 ///
 /// Requirements:
 /// - Activity Name wins when present
@@ -18,20 +19,20 @@ import VoxtrTrainingDomain
 /// - stable SportId used for lookup
 /// - no title/string matching
 /// - no ActivityType fallback
+/// - no second/hardcoded Sport truth map
 /// - one semantic implementation across Views
 @MainActor
 public struct ActivityLabelResolver: Sendable {
     private let sportRepository: SportRepository?
     private let customSportLookup: (@Sendable (SportId) -> String?)?
 
-    private static let wellKnownSportNames: [SportId: String] = [
-        SportId(rawValue: UUID(uuidString: "9E3F6E9E-2B7A-4A0B-8C1D-000000000001")!): "Football",
-        SportId(rawValue: UUID(uuidString: "9E3F6E9E-2B7A-4A0B-8C1D-000000000002")!): "Hockey",
-        SportId(rawValue: UUID(uuidString: "9E3F6E9E-2B7A-4A0B-8C1D-000000000003")!): "Bandy"
-    ]
-
     public init(sportRepository: SportRepository? = nil) {
         self.sportRepository = sportRepository
+        self.customSportLookup = nil
+    }
+
+    public init(modelContext: ModelContext) {
+        self.sportRepository = SportRepository(modelContext: modelContext)
         self.customSportLookup = nil
     }
 
@@ -51,9 +52,6 @@ public struct ActivityLabelResolver: Sendable {
             }
             if let sportRepository, let sport = try? sportRepository.fetchSport(byId: sportId) {
                 return sport.displayName
-            }
-            if let wellKnown = Self.wellKnownSportNames[sportId] {
-                return wellKnown
             }
         }
         return "Activity"

@@ -17,6 +17,7 @@ import VoxtrPlanningDomain
 /// missing one (delete/cancel buttons, per-row identifiers, both
 /// activity-type pickers).
 public struct WeeklyPlanningView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: WeeklyPlanningViewModel
     @State private var isManagingRecurringActivities: Bool = false
     @State private var isPresentingReopenPlanningConfirmation: Bool = false
@@ -98,7 +99,7 @@ public struct WeeklyPlanningView: View {
                 Section {
                     ForEach(viewModel.recurringSuggestions) { suggestion in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(ActivityLabelResolver().primaryLabel(for: suggestion))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.suggestionSubtitle(for: suggestion))
@@ -138,7 +139,7 @@ public struct WeeklyPlanningView: View {
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(ActivityLabelResolver().primaryLabel(for: activity))
+                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.rowSubtitle(for: activity))
@@ -411,7 +412,7 @@ struct RecurringActivityManagementView: View {
                     VStack(alignment: .leading) {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(ActivityLabelResolver().primaryLabel(for: recurringActivity))
+                                Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: recurringActivity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))

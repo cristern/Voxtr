@@ -31,6 +31,7 @@ import VoxtrPlanningDomain
 ///   after they exist — see `LoggedActivityEditFormView`'s own doc
 ///   comment.
 public struct ActivityDetailView: View {
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel: ActivityDetailViewModel
     @State private var isEditing: Bool = false
     @State private var isLogging: Bool = false
@@ -104,7 +105,7 @@ public struct ActivityDetailView: View {
 
             Section {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
-                LabeledContent("Activity", value: ActivityLabelResolver().primaryLabel(for: viewModel.activity))
+                LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
                 if let startTime = viewModel.activity.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
@@ -233,7 +234,7 @@ public struct ActivityDetailView: View {
         }
         .voxtrScreenBackground()
         .tint(VoxtrColor.accent)
-        .navigationTitle(ActivityLabelResolver().primaryLabel(for: viewModel.activity))
+        .navigationTitle(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
         .sheet(isPresented: $isEditing) {
             ActivityEditFormView(viewModel: viewModel)
         }
