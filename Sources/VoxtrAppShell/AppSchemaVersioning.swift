@@ -632,25 +632,12 @@ public enum AppSchemaV2: VersionedSchema {
 }
 
 /// Design Foundation V0.1 (Athlete Color canonical preference round):
-/// the current, live version. `AthleteSettings` gains one new OPTIONAL
-/// property (`preferredColor: AthleteColor?`) — no model *type* is
-/// added or removed, so `AppSchema.modelTypes` itself is unchanged (see
-/// that file's own "HOW TO ADD" step 3); this is purely the field-level
-/// case step 4 describes, and `.lightweight` is exactly what Apple's own
-/// SwiftData migration guidance documents as covering "new optional
-/// properties with inferable defaults" — `nil` is the only value an
-/// existing row's new column can mean, with nothing to transform.
-/// `models` was a live passthrough to `AppSchema.modelTypes` while V3
-/// was the latest version; now FROZEN (Sport / Activity Identity domain
-/// foundation round) to the exact 17-entity shape it shipped with, since
-/// `AppSchemaV4` below is now latest — same freezing rationale as
-/// `AppCurrentSchema`/`AppSchemaV2` above. No entity here diverges in
-/// field shape from its live top-level declaration (the title-optional
-/// and `ActivityType` raw-value changes landed directly on the live
-/// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity` types
-/// with no version-specific nested copy — see `AppSchemaV4`'s own doc
-/// comment for why), so freezing the type LIST here is sufficient; no
-/// nested legacy copy is needed for this version.
+/// `AthleteSettings` gained `preferredColor: AthleteColor?`.
+/// `models` is frozen to the V3-era 17-entity shape. `PlannedActivity`,
+/// `LoggedActivity`, and `RecurringPlannedActivity` are represented by nested
+/// `AppSchemaV3` historical copies because their persisted title shape diverges
+/// in V4 (`title: String` -> `String?`). The nested copies preserve the actual
+/// V3 stored-property shapes.
 public enum AppSchemaV3: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(3, 0, 0)
