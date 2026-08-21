@@ -389,22 +389,27 @@ struct PersistenceRecoveryTests {
             try v3Container.mainContext.save()
             athleteRawId = athlete.id
 
-            // A genuine pre-this-round record: mandatory title, no
-            // Sport — exactly what every Internal Alpha record already
-            // looks like (see this round's audit findings).
-            let planningRepository = PlanningRepository(modelContext: v3Container.mainContext)
-            let weekPlan = try planningRepository.insertWeekPlan(
-                athleteId: AthleteId(rawValue: athleteRawId),
+            // A genuine pre-this-round record must be written using the
+            // frozen model type registered by AppSchemaV3. Using the live
+            // PlanningRepository here would insert the distinct V4 domain
+            // type into a V3 context and leave SwiftData trying to cast
+            // between two Swift classes for the same persisted entity name.
+            let athleteId = AthleteId(rawValue: athleteRawId)
+            let weekPlan = WeekPlan(
+                athleteId: athleteId,
                 weekStart: LocalDate(year: 2026, month: 8, day: 17)
             )
-            let plannedActivity = try planningRepository.insertPlannedActivity(
-                weekPlanId: weekPlan.weekPlanId,
-                athleteId: AthleteId(rawValue: athleteRawId),
+            v3Container.mainContext.insert(weekPlan)
+            let plannedActivity = AppSchemaV3.PlannedActivity(
+                weekPlanId: weekPlan.id,
+                athleteId: athleteRawId,
                 activityType: .teamTraining,
                 title: "Football practice",
                 localDate: LocalDate(year: 2026, month: 8, day: 18),
                 timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
             )
+            v3Container.mainContext.insert(plannedActivity)
+            try v3Container.mainContext.save()
             plannedActivityRawId = plannedActivity.id
             // No Sport table exists at all under V3 — nothing to seed.
         }
