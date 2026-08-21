@@ -144,24 +144,31 @@ struct PlannedActivityDeletionTombstoneTests {
     func deletionAndTombstoneSurviveContainerRecreation() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("a2-tombstone-\(UUID().uuidString).sqlite")
         defer { try? FileManager.default.removeItem(at: storeURL) }
-        let schema = Schema(versionedSchema: AppCurrentSchema.self)
+        // This is a current-store reopen test, so it must use the current
+        // V4 schema that registers the live Planning domain model types.
+        // AppCurrentSchema is the frozen historical V1 schema.
+        let schema = Schema(versionedSchema: AppSchemaV4.self)
         let athleteId = AthleteId()
 
-        let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
-        let firstContainer = try ModelContainer(
-            for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: [firstConfiguration]
-        )
-        let firstRepository = PlanningRepository(modelContext: firstContainer.mainContext)
-        let firstService = PlanningService(repository: firstRepository)
-        let weekPlan = try firstService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
-        let activity = try firstService.addPlannedActivity(
-            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
-            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
-        )
-        try firstService.deletePlannedActivity(
-            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId()
-        )
+        var deletedActivityRawId: UUID
+        do {
+            let firstConfiguration = ModelConfiguration(schema: schema, url: storeURL)
+            let firstContainer = try ModelContainer(
+                for: schema, migrationPlan: AppSchemaMigrationPlan.self, configurations: [firstConfiguration]
+            )
+            let firstRepository = PlanningRepository(modelContext: firstContainer.mainContext)
+            let firstService = PlanningService(repository: firstRepository)
+            let weekPlan = try firstService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+            let activity = try firstService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            deletedActivityRawId = activity.id
+            try firstService.deletePlannedActivity(
+                activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId()
+            )
+        }
 
         let secondConfiguration = ModelConfiguration(schema: schema, url: storeURL)
         let secondContainer = try ModelContainer(
@@ -172,7 +179,7 @@ struct PlannedActivityDeletionTombstoneTests {
         let activities = try secondContainer.mainContext.fetch(FetchDescriptor<PlannedActivity>())
 
         #expect(tombstones.count == 1)
-        #expect(tombstones.first?.entityId == activity.id)
+        #expect(tombstones.first?.entityId == deletedActivityRawId)
         #expect(activities.isEmpty)
     }
 }
