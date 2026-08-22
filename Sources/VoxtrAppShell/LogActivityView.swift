@@ -56,19 +56,14 @@ public struct LogActivityView: View {
                     .pickerStyle(.segmented)
                     .accessibilityIdentifier("logActivity.outcomePicker")
 
-                    // Activity outcome consistency closeout (item D):
-                    // `OptionalDurationPickerView` (below), not a
-                    // `Binding<Int>` bridge defaulting to 60 — that
-                    // bridge made the UI SHOW 60 as though it were the
-                    // current value even when `viewModel.durationMinutes`
-                    // was genuinely nil (no planned duration, nothing
-                    // entered yet), while `save()`'s own validation
-                    // still correctly rejected it — a visible value the
-                    // canonical edit state didn't actually contain. Only
-                    // shown for Completed — Missed never requires or
-                    // asks for duration.
+                    // Completed requires actual duration. Nil remains
+                    // visibly "Not set" until an explicit Set duration
+                    // action; once set, the picker binds directly to the
+                    // ViewModel and cannot be cleared. Missed hides this
+                    // required-only control while retaining transient edit
+                    // state if the user switches back to Completed.
                     if viewModel.isCompleted {
-                        OptionalDurationPickerView(durationMinutes: $viewModel.durationMinutes)
+                        RequiredDurationPickerView(durationMinutes: $viewModel.durationMinutes)
                     }
 
                     Picker("RPE", selection: $viewModel.perceivedExertion) {
