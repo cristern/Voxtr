@@ -24,6 +24,10 @@ public final class ReflectionRepository {
         self.modelContext = modelContext
     }
 
+    public func uses(modelContext: ModelContext) -> Bool {
+        self.modelContext === modelContext
+    }
+
     /// Inserts an `ActivityReflection` linked to a `LoggedActivity` by
     /// typed ID. `visibility` has no default here, matching the
     /// entity's own initializer — the current product decision that the
@@ -123,6 +127,21 @@ public final class ReflectionRepository {
         reflection.bodyFeeling = bodyFeeling
         reflection.updatedAt = .now
         try modelContext.save()
+    }
+
+    /// Removes the exact reflection through Reflection's canonical
+    /// repository. Used when its owning LoggedActivity is intentionally
+    /// removed by the cross-domain reopen lifecycle command.
+    public func deleteActivityReflection(_ reflection: ActivityReflection) throws {
+        modelContext.delete(reflection)
+        try modelContext.save()
+    }
+
+    /// Stages Reflection's canonical deletion for a cross-domain unit
+    /// of work. Reflection retains ownership of this mutation while the
+    /// AppShell coordinator owns the eventual save/rollback boundary.
+    public func stageDeleteActivityReflection(_ reflection: ActivityReflection) {
+        modelContext.delete(reflection)
     }
 
     /// Ordered deterministically by `localDate`, then `id` — same

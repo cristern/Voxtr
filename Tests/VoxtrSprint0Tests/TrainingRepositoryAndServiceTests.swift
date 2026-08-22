@@ -353,7 +353,7 @@ struct TrainingRepositoryAndServiceTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 2)
     }
 
-    // MARK: - Reversibility principle: reopenCancelledActivity
+    // MARK: - Reversibility principle: reopenNoTrainingOutcome
 
     @Test("Reopening a cancelled activity removes the LoggedActivity link — the same PlannedActivity is loggable again")
     @MainActor
@@ -371,7 +371,7 @@ struct TrainingRepositoryAndServiceTests {
             durationMinutes: 1, status: .cancelled
         )
 
-        try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: athleteId)
+        try service.reopenNoTrainingOutcome(cancelled.loggedActivityId, athleteId: athleteId)
 
         #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
         // The PlannedActivity is loggable again — the exact contract a
@@ -391,7 +391,7 @@ struct TrainingRepositoryAndServiceTests {
     @MainActor
     func reopenPreservesMaterializedRecurringPlannedActivityIdentity() throws {
         // The exact PlannedActivityId a recurring occurrence's own
-        // materialization would have produced — reopenCancelledActivity
+        // materialization would have produced — reopenNoTrainingOutcome
         // has no special-case knowledge of recurring occurrences at all;
         // it only ever deletes the LoggedActivity, so the SAME id must
         // survive untouched regardless of the PlannedActivity's origin.
@@ -408,7 +408,7 @@ struct TrainingRepositoryAndServiceTests {
             durationMinutes: 1, status: .cancelled
         )
 
-        try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: athleteId)
+        try service.reopenNoTrainingOutcome(cancelled.loggedActivityId, athleteId: athleteId)
 
         // No LoggedActivity remains linked to this exact PlannedActivityId
         // — the materialized occurrence itself (its own stable identity,
@@ -436,22 +436,22 @@ struct TrainingRepositoryAndServiceTests {
         )
 
         #expect(throws: TrainingServiceError.loggedActivityNotFound) {
-            try service.reopenCancelledActivity(cancelled.loggedActivityId, athleteId: otherAthleteId)
+            try service.reopenNoTrainingOutcome(cancelled.loggedActivityId, athleteId: otherAthleteId)
         }
         // Untouched.
         #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).count == 1)
     }
 
-    @Test("Reopen Activity is rejected for a genuinely resolved outcome — Completed, PartiallyCompleted, and Missed are never reopenable")
+    @Test("Reopen Activity is rejected for Completed and PartiallyCompleted outcomes")
     @MainActor
-    func reopenRejectedForNonCancelledOutcomes() throws {
+    func reopenRejectedForTrainingOutcomes() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = TrainingRepository(modelContext: container.mainContext)
         let service = TrainingService(repository: repository)
         let athleteId = AthleteId()
 
-        for status: ActivityStatus in [.completed, .partiallyCompleted, .missed] {
+        for status: ActivityStatus in [.completed, .partiallyCompleted] {
             let plannedActivityId = PlannedActivityId()
             let logged = try service.logActivity(
                 athleteId: athleteId, plannedActivityId: plannedActivityId,
@@ -460,11 +460,35 @@ struct TrainingRepositoryAndServiceTests {
                 durationMinutes: 30, status: status
             )
 
-            #expect(throws: TrainingServiceError.activityNotCancelled) {
-                try service.reopenCancelledActivity(logged.loggedActivityId, athleteId: athleteId)
+            #expect(throws: TrainingServiceError.activityNotReopenable) {
+                try service.reopenNoTrainingOutcome(logged.loggedActivityId, athleteId: athleteId)
             }
             // Untouched.
             #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).count == 1)
         }
+    }
+
+    @Test("Reopening Missed removes only the LoggedActivity link")
+    @MainActor
+    func reopenMissedRemovesTheLink() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let plannedActivityId = PlannedActivityId()
+        let missed = try service.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Missed session",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 1,
+            status: .missed
+        )
+
+        try service.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
+
+        #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
     }
 }

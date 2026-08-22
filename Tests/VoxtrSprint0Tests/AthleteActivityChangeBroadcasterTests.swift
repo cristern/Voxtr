@@ -15,7 +15,7 @@ import VoxtrReflectionDomain
 /// Recurring reopen stale-Athlete-Home fix (architecture round): the
 /// invariant this whole redesign rests on — a successful canonical
 /// activity-lifecycle mutation (`TrainingReflectionCoordinationService.logActivity`/
-/// `correctLoggedActivity`/`reopenCancelledActivity`) notifies every
+/// `correctLoggedActivity`/`reopenNoTrainingOutcome`) notifies every
 /// still-live `AthleteActivityChangeSubscriber` registered for the
 /// mutated athlete exactly once, a failed mutation notifies none, and
 /// isolation/subscription lifecycle hold regardless of which screen
@@ -48,7 +48,8 @@ struct AthleteActivityChangeBroadcasterTests {
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService, reflectionService: reflectionService,
-            activityChangeBroadcaster: broadcaster
+            activityChangeBroadcaster: broadcaster,
+            modelContext: container.mainContext
         )
         return (planningService, trainingService, coordinator)
     }
@@ -76,7 +77,7 @@ struct AthleteActivityChangeBroadcasterTests {
 
     // MARK: - 2. Failure emits none
 
-    @Test("A failed reopenCancelledActivity call (not actually cancelled) notifies no subscriber")
+    @Test("A failed reopenNoTrainingOutcome call (completed outcome) notifies no subscriber")
     @MainActor
     func failedMutationEmitsNone() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -88,18 +89,164 @@ struct AthleteActivityChangeBroadcasterTests {
         broadcaster.subscribe(athleteId: athleteId, subscriber)
 
         // A genuinely COMPLETED (never cancelled) activity — reopen must
-        // throw .activityNotCancelled and never reach the broadcast.
+        // throw .activityNotReopenable and never reach the broadcast.
         let logged = try coordinator.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
             startedAt: .now, durationMinutes: 30, authorId: ActorId(), sessionForm: nil
         )
         #expect(subscriber.callCount == 1) // from the successful log above
 
-        #expect(throws: TrainingServiceError.activityNotCancelled) {
-            try coordinator.reopenCancelledActivity(logged.loggedActivity.loggedActivityId, athleteId: athleteId)
+        #expect(throws: TrainingServiceError.activityNotReopenable) {
+            try coordinator.reopenNoTrainingOutcome(logged.loggedActivity.loggedActivityId, athleteId: athleteId)
         }
         // Unchanged by the failed reopen attempt.
         #expect(subscriber.callCount == 1)
+    }
+
+    @Test("A successful missed-outcome reopen notifies only after the canonical deletion succeeds")
+    @MainActor
+    func successfulMissedReopenEmitsAfterMutation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (planning, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let weekPlan = try planning.getOrCreateWeekPlan(
+            athleteId: athleteId,
+            weekStart: TrainingPlanningCoordinationService.weekStart()
+        )
+        let planned = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Missed session",
+            localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: Self.oslo
+        )
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: planned.plannedActivityId,
+            activityType: planned.activityType,
+            title: planned.title,
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+
+        #expect(!container.mainContext.hasChanges)
+        try coordinator.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
+
+        #expect(subscriber.callCount == 1)
+        #expect(!container.mainContext.hasChanges)
+        #expect(try training.fetchLoggedActivities(forPlannedActivity: planned.plannedActivityId).isEmpty)
+    }
+
+    @Test("A rolled-back reopen emits no invalidation and preserves both records")
+    @MainActor
+    func rolledBackReopenEmitsNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Mistaken missed",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: missed.loggedActivityId,
+            authorId: ActorId(),
+            visibility: .privateToAthlete,
+            bodyFeeling: 3
+        )
+
+        #expect(throws: TrainingReflectionCoordinationService.SimulatedReopenFailure.self) {
+            try coordinator.reopenNoTrainingOutcome(
+                missed.loggedActivityId,
+                athleteId: athleteId,
+                failAt: nil,
+                saveOverride: { throw TrainingReflectionCoordinationService.SimulatedReopenFailure() }
+            )
+        }
+
+        #expect(subscriber.callCount == 0)
+        #expect(try training.fetchLoggedActivity(byId: missed.loggedActivityId, athleteId: athleteId).loggedActivityId == missed.loggedActivityId)
+        #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: missed.loggedActivityId) != nil)
+    }
+
+    @Test("Reopen refuses a dirty shared context without touching pending or canonical state")
+    @MainActor
+    func dirtyContextRefusalPreservesEverythingAndEmitsNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Canonical missed",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        let reflection = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: missed.loggedActivityId,
+            authorId: authorId,
+            visibility: .sharedWithGuardians,
+            bodyFeeling: 2,
+            learningNote: "Canonical reflection"
+        )
+
+        // An unrelated workflow has staged, but deliberately not saved,
+        // this parent observation in the shared app context.
+        let pendingId = UUID()
+        let pendingDate = LocalDate(year: 2026, month: 8, day: 22)
+        let pending = ParentObservation(
+            id: pendingId,
+            athleteId: AthleteId(),
+            authorId: ActorId(),
+            localDate: pendingDate,
+            text: "Unrelated pending content",
+            visibility: .sharedWithGuardians
+        )
+        container.mainContext.insert(pending)
+        #expect(container.mainContext.hasChanges)
+
+        #expect(throws: TrainingReflectionCoordinationService.ReopenError.transactionBoundaryUnavailable) {
+            try coordinator.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
+        }
+
+        // Refusal neither saves nor rolls back the unrelated workflow.
+        #expect(container.mainContext.hasChanges)
+        #expect(pending.id == pendingId)
+        #expect(pending.localDate == pendingDate)
+        #expect(pending.text == "Unrelated pending content")
+        #expect(pending.visibility == .sharedWithGuardians)
+
+        // Neither canonical reopen deletion was staged or persisted.
+        let stillLogged = try training.fetchLoggedActivity(byId: missed.loggedActivityId, athleteId: athleteId)
+        let stillReflected = try reflectionService.fetchActivityReflection(forLoggedActivity: missed.loggedActivityId)
+        #expect(stillLogged.loggedActivityId == missed.loggedActivityId)
+        #expect(stillReflected?.reflectionId == reflection.reflectionId)
+        #expect(stillReflected?.bodyFeeling == 2)
+        #expect(stillReflected?.learningNote == "Canonical reflection")
+        #expect(subscriber.callCount == 0)
     }
 
     // MARK: - 3. Athlete isolation

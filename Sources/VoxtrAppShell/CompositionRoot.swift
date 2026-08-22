@@ -161,7 +161,8 @@ public final class CompositionRoot {
         let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
             trainingService: container.resolve(TrainingService.self),
             reflectionService: container.resolve(ReflectionService.self),
-            activityChangeBroadcaster: activityChangeBroadcaster
+            activityChangeBroadcaster: activityChangeBroadcaster,
+            modelContext: modelContext
         )
         container.register(TrainingReflectionCoordinationService.self) { trainingReflectionCoordinationService }
 

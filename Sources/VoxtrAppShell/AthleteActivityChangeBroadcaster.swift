@@ -21,7 +21,7 @@ public protocol AthleteActivityChangeSubscriber: AnyObject {
 /// regardless of which screen performed the mutation.
 /// `TrainingReflectionCoordinationService` calls `activityChanged(for:)`
 /// after each of its three mutating methods succeeds
-/// (`logActivity`/`correctLoggedActivity`/`reopenCancelledActivity`);
+/// (`logActivity`/`correctLoggedActivity`/`reopenNoTrainingOutcome`);
 /// `WeeklyPlanningViewModel` also calls it after successful canonical
 /// PlannedActivity create/edit/delete/materialization paths. Never on a
 /// thrown mutation failure, since every call site sits after the

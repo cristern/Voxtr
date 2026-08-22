@@ -3,7 +3,7 @@ import Foundation
 import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
-import VoxtrAppShell
+@testable import VoxtrAppShell
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -521,5 +521,240 @@ struct TrainingReflectionCoordinationServiceTests {
         let missedDetail = try #require(try coordinator.loggedActivityDetail(forPlannedActivity: missedActivity.plannedActivityId))
         #expect(cancelledDetail.loggedActivity.status == .cancelled)
         #expect(missedDetail.loggedActivity.status == .missed)
+    }
+
+    @Test("Logged detail resolves planned-linked and standalone logs by exact LoggedActivityId")
+    @MainActor
+    func loggedDetailUsesExactStableIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        )
+        let athleteId = AthleteId()
+        let sameInstant = Date(timeIntervalSince1970: 1_767_000_000)
+        let plannedActivityId = PlannedActivityId()
+        let linked = try trainingService.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Same label",
+            startedAt: sameInstant,
+            durationMinutes: 30,
+            status: .completed
+        )
+        let standalone = try trainingService.logActivity(
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Same label",
+            startedAt: sameInstant,
+            durationMinutes: 45,
+            status: .completed
+        )
+
+        let linkedDetail = try coordinator.loggedActivityDetail(
+            loggedActivityId: linked.loggedActivityId,
+            athleteId: athleteId
+        )
+        let standaloneDetail = try coordinator.loggedActivityDetail(
+            loggedActivityId: standalone.loggedActivityId,
+            athleteId: athleteId
+        )
+
+        #expect(linkedDetail.loggedActivity.loggedActivityId == linked.loggedActivityId)
+        #expect(linkedDetail.loggedActivity.plannedActivityId == plannedActivityId.rawValue)
+        #expect(linkedDetail.loggedActivity.durationMinutes == 30)
+        #expect(standaloneDetail.loggedActivity.loggedActivityId == standalone.loggedActivityId)
+        #expect(standaloneDetail.loggedActivity.plannedActivityId == nil)
+        #expect(standaloneDetail.loggedActivity.durationMinutes == 45)
+    }
+
+    @Test("Reopening Missed or Cancelled removes its linked ActivityReflection before removing the log")
+    @MainActor
+    func reopenNoTrainingOutcomeCleansReflectionIntegrity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            modelContext: container.mainContext
+        )
+        let athleteId = AthleteId()
+        for status: ActivityStatus in [.missed, .cancelled] {
+            let plannedActivityId = PlannedActivityId()
+            let result = try coordinator.logActivity(
+                athleteId: athleteId,
+                plannedActivityId: plannedActivityId,
+                activityType: .individualTraining,
+                title: "No-training outcome",
+                startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+                durationMinutes: 1,
+                status: status,
+                authorId: ActorId(),
+                sessionForm: 3
+            )
+            let loggedActivityId = result.loggedActivity.loggedActivityId
+            #expect(
+                try reflectionService.fetchActivityReflection(
+                    forLoggedActivity: loggedActivityId
+                ) != nil
+            )
+
+            try coordinator.reopenNoTrainingOutcome(
+                loggedActivityId,
+                athleteId: athleteId
+            )
+
+            #expect(try trainingService.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
+            #expect(
+                try reflectionService.fetchActivityReflection(
+                    forLoggedActivity: loggedActivityId
+                ) == nil
+            )
+        }
+    }
+
+    @Test("A reflection-stage failure leaves both canonical records unchanged")
+    @MainActor
+    func reopenReflectionFailureRollsBackEverything() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            modelContext: container.mainContext
+        )
+        let athleteId = AthleteId()
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Rest day",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: logged.loggedActivityId,
+            authorId: ActorId(),
+            visibility: .privateToAthlete,
+            bodyFeeling: 2
+        )
+
+        #expect(throws: TrainingReflectionCoordinationService.SimulatedReopenFailure.self) {
+            try coordinator.reopenNoTrainingOutcome(
+                logged.loggedActivityId,
+                athleteId: athleteId,
+                failAt: .beforeReflectionDeletion
+            )
+        }
+
+        #expect(try trainingService.fetchLoggedActivity(byId: logged.loggedActivityId, athleteId: athleteId).loggedActivityId == logged.loggedActivityId)
+        #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: logged.loggedActivityId) != nil)
+    }
+
+    @Test("A downstream Training failure restores the exact original reflection")
+    @MainActor
+    func reopenTrainingFailureRollsBackExactReflection() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            modelContext: container.mainContext
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Mistaken cancellation",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .cancelled
+        )
+        let original = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: logged.loggedActivityId,
+            authorId: authorId,
+            visibility: .sharedWithGuardians,
+            bodyFeeling: 2,
+            energy: 3,
+            satisfaction: 4,
+            perceivedExertion: 5,
+            mostSatisfiedWith: "Exact strength",
+            learningNote: "Exact learning",
+            nextTimeNote: "Exact next step"
+        )
+        let originalId = original.reflectionId
+        let originalCreatedAt = original.createdAt
+        let originalUpdatedAt = original.updatedAt
+        let originalSchemaVersion = original.schemaVersion
+
+        #expect(throws: TrainingReflectionCoordinationService.SimulatedReopenFailure.self) {
+            try coordinator.reopenNoTrainingOutcome(
+                logged.loggedActivityId,
+                athleteId: athleteId,
+                failAt: nil,
+                saveOverride: { throw TrainingReflectionCoordinationService.SimulatedReopenFailure() }
+            )
+        }
+
+        let fetchedReflection = try reflectionService.fetchActivityReflection(forLoggedActivity: logged.loggedActivityId)
+        let restored = try #require(fetchedReflection)
+        #expect(try trainingService.fetchLoggedActivity(byId: logged.loggedActivityId, athleteId: athleteId).loggedActivityId == logged.loggedActivityId)
+        #expect(restored.reflectionId == originalId)
+        #expect(restored.athleteId == athleteId.rawValue)
+        #expect(restored.loggedActivityId == logged.loggedActivityId.rawValue)
+        #expect(restored.authorId == authorId.rawValue)
+        #expect(restored.visibility == .sharedWithGuardians)
+        #expect(restored.bodyFeeling == 2)
+        #expect(restored.energy == 3)
+        #expect(restored.satisfaction == 4)
+        #expect(restored.perceivedExertion == 5)
+        #expect(restored.mostSatisfiedWith == "Exact strength")
+        #expect(restored.learningNote == "Exact learning")
+        #expect(restored.nextTimeNote == "Exact next step")
+        #expect(restored.createdAt == originalCreatedAt)
+        #expect(restored.updatedAt == originalUpdatedAt)
+        #expect(restored.schemaVersion == originalSchemaVersion)
+    }
+
+    @Test("A no-reflection Missed or Cancelled outcome reopens successfully")
+    @MainActor
+    func reopenWithoutReflectionSucceeds() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            modelContext: container.mainContext
+        )
+        let athleteId = AthleteId()
+
+        for status: ActivityStatus in [.missed, .cancelled] {
+            let logged = try trainingService.logActivity(
+                athleteId: athleteId,
+                activityType: .other,
+                title: "No reflection",
+                startedAt: .now,
+                durationMinutes: 1,
+                status: status
+            )
+            try coordinator.reopenNoTrainingOutcome(logged.loggedActivityId, athleteId: athleteId)
+            #expect(throws: TrainingServiceError.loggedActivityNotFound) {
+                try trainingService.fetchLoggedActivity(byId: logged.loggedActivityId, athleteId: athleteId)
+            }
+        }
     }
 }

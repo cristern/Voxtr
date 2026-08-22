@@ -185,10 +185,12 @@ public final class ActivityDetailViewModel {
 
     /// Reversibility principle: "Reopen Activity" is offered ONLY for a
     /// canonical outcome of exactly `.cancelled` — never Completed,
-    /// PartiallyCompleted, or Missed. Undoing an erroneous cancellation
-    /// is the one approved reversible case here; a genuinely resolved
-    /// training outcome is never reopenable through this action.
-    public var canReopen: Bool { outcomeStatus == .cancelled }
+    /// PartiallyCompleted. Undoing an erroneous Cancelled or Missed
+    /// no-training outcome is approved; a genuinely completed training
+    /// outcome is never reopenable through this action.
+    public var canReopen: Bool {
+        outcomeStatus == .cancelled || outcomeStatus == .missed
+    }
 
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
     /// Logged Activity -> RPE + Form): offered whenever a
@@ -349,11 +351,11 @@ public final class ActivityDetailViewModel {
         }
     }
 
-    /// Reversibility principle: undoes an erroneous cancellation.
-    /// Removes exactly the `.cancelled` `LoggedActivity` this screen
+    /// Reversibility principle: undoes an erroneous no-training outcome.
+    /// Removes exactly the `.cancelled` or `.missed` `LoggedActivity` this screen
     /// already resolved via the canonical `loggedActivity` relationship
     /// (never a second lookup, never title/date matching) through
-    /// `TrainingReflectionCoordinationService.reopenCancelledActivity` —
+    /// `TrainingReflectionCoordinationService.reopenNoTrainingOutcome` —
     /// the SAME `PlannedActivity` (`activity` here is never reassigned
     /// or recreated) becomes unresolved again: `loggedActivity` and
     /// `outcomeStatus` return to `nil`, `isCompleted` returns to `false`,
@@ -367,7 +369,10 @@ public final class ActivityDetailViewModel {
         errorMessage = nil
         guard let loggedActivity, canReopen else { return false }
         do {
-            try trainingReflectionCoordinationService.reopenCancelledActivity(loggedActivity.loggedActivityId, athleteId: athleteId)
+            try trainingReflectionCoordinationService.reopenNoTrainingOutcome(
+                loggedActivity.loggedActivityId,
+                athleteId: athleteId
+            )
             self.loggedActivity = nil
             self.activityReflection = nil
             isCompleted = false

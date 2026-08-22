@@ -8,15 +8,14 @@ import VoxtrTrainingDomain
 /// through `TrainingService` (logging) or `TrainingPlanningCoordinationService`
 /// (reading today's planned activities with completion state) — this
 /// type holds no business rules of its own, only orchestrates calls and
-/// turns thrown errors into a single user-facing `errorMessage`, the
-/// same pattern `CreateFamilyViewModel`/`WeeklyPlanningViewModel`
-/// already established.
+/// turns thrown errors into explicit screen-load and log-action states.
 @MainActor
 @Observable
 public final class DailyTrainingViewModel {
     public private(set) var plannedActivities: [PlannedActivityCompletion] = []
     public private(set) var loggedActivities: [LoggedActivity] = []
     public private(set) var errorMessage: String?
+    public private(set) var logErrorMessage: String?
     public private(set) var isSubmitting = false
 
     // Log-activity form fields — LoggedActivity's existing fields only,
@@ -132,7 +131,7 @@ public final class DailyTrainingViewModel {
 
     public func logActivity() {
         guard !isSubmitting else { return }
-        errorMessage = nil
+        logErrorMessage = nil
 
         if let pendingSessionFormLoggedActivityId {
             // Retry path: the activity itself was already logged
@@ -158,23 +157,23 @@ public final class DailyTrainingViewModel {
                 load()
             } catch {
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
+                logErrorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
             }
             return
         }
 
         if let durationError = TrainingValidator.validateDurationMinutes(newLogDurationMinutes) {
-            errorMessage = durationError
+            logErrorMessage = durationError
             return
         }
         if let exertionError = TrainingValidator.validatePerceivedExertion(newLogPerceivedExertion) {
-            errorMessage = exertionError
+            logErrorMessage = exertionError
             return
         }
         let trimmedNotes = newLogNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         let notesOrNil = trimmedNotes.isEmpty ? nil : trimmedNotes
         if let notesError = TrainingValidator.validateNotes(notesOrNil) {
-            errorMessage = notesError
+            logErrorMessage = notesError
             return
         }
         // VX-022: every log through this flow represents a completed
@@ -182,7 +181,7 @@ public final class DailyTrainingViewModel {
         // unconditionally required, checked before anything is
         // created, so a log can never be reported as saved without it.
         if let formError = TrainingValidator.validateForm(newLogSessionForm) {
-            errorMessage = formError
+            logErrorMessage = formError
             return
         }
 
@@ -208,6 +207,7 @@ public final class DailyTrainingViewModel {
             newLogNotes = ""
             newLogPerceivedExertion = nil
             selectedPlannedActivityId = nil
+            logErrorMessage = nil
             load()
             // Sprint 1.2B runtime closeout: a simple counter, not a
             // Bool — .onChange must fire on every successful log, not
@@ -226,12 +226,12 @@ public final class DailyTrainingViewModel {
                 // silently discarded.
                 pendingSessionFormLoggedActivityId = result.loggedActivity.loggedActivityId
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
+                logErrorMessage = "Activity logged. Form could not be saved — tap Log activity to try again."
             }
         } catch let error as TrainingServiceError {
-            errorMessage = Self.message(for: error)
+            logErrorMessage = Self.message(for: error)
         } catch {
-            errorMessage = TrainingStrings.genericError
+            logErrorMessage = TrainingStrings.genericError
         }
     }
 
@@ -254,9 +254,9 @@ public final class DailyTrainingViewModel {
             // non-`TrainingServiceError` failure — not a new message,
             // not a new product flow.
             return TrainingStrings.genericError
-        case .activityNotCancelled:
+        case .activityNotReopenable:
             // Reversibility principle (Reopen Activity): thrown only by
-            // `TrainingService.reopenCancelledActivity`, a capability
+            // `TrainingService.reopenNoTrainingOutcome`, a capability
             // this ViewModel's own `logActivity()` never calls (it only
             // ever creates a `LoggedActivity`, never reopens one) — same
             // "unreachable through this exact call site, handled anyway

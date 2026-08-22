@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCoreContracts
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -107,8 +108,14 @@ public struct LoggedActivityDetail {
 ///   duplicate `LoggedActivity`.
 @MainActor
 public final class TrainingReflectionCoordinationService {
+    public enum ReopenError: Error, Equatable {
+        case missingSharedModelContext
+        case transactionBoundaryUnavailable
+    }
+
     private let trainingService: TrainingService
     private let reflectionService: ReflectionService
+    private let modelContext: ModelContext?
     /// Recurring reopen stale-Athlete-Home fix (architecture round): the
     /// single fan-out point told "athlete X's canonical activity state
     /// changed" after each of this type's three mutating methods below
@@ -123,11 +130,13 @@ public final class TrainingReflectionCoordinationService {
     public init(
         trainingService: TrainingService,
         reflectionService: ReflectionService,
-        activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil
+        activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil,
+        modelContext: ModelContext? = nil
     ) {
         self.trainingService = trainingService
         self.reflectionService = reflectionService
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.modelContext = modelContext
     }
 
     /// Logs a completed activity through the canonical `TrainingService.logActivity`
@@ -236,6 +245,20 @@ public final class TrainingReflectionCoordinationService {
         return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
     }
 
+    /// Resolves one exact logged result for review, including standalone
+    /// manual logs that have no PlannedActivity relationship.
+    public func loggedActivityDetail(
+        loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId
+    ) throws -> LoggedActivityDetail {
+        let loggedActivity = try trainingService.fetchLoggedActivity(
+            byId: loggedActivityId,
+            athleteId: athleteId
+        )
+        let reflection = try reflectionService.fetchActivityReflection(forLoggedActivity: loggedActivityId)
+        return LoggedActivityDetail(loggedActivity: loggedActivity, reflection: reflection)
+    }
+
     /// Planned/Logged Activity lifecycle consistency cleanup (Edit
     /// Logged Activity -> RPE + Form), extended by review follow-up to
     /// also correct actual duration: the correction counterpart to
@@ -323,17 +346,73 @@ public final class TrainingReflectionCoordinationService {
     }
 
     /// Reversibility principle (Reopen Activity): a pure passthrough to
-    /// `TrainingService.reopenCancelledActivity`, same as
-    /// `correctLoggedActivity` above is for `TrainingService.correctLoggedActivity` —
-    /// this coordinator stays the one place `ActivityDetailViewModel`
-    /// mutates a `LoggedActivity` through, even for a mutation with no
-    /// reflection involvement at all (cancellation never records a
-    /// Session Form, so there is nothing here to clean up).
-    public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
-        try trainingService.reopenCancelledActivity(loggedActivityId, athleteId: athleteId)
-        // Only reached once the delete above has already succeeded — a
-        // thrown .loggedActivityNotFound/.activityNotCancelled never
-        // reaches this line, so a failed reopen broadcasts nothing.
+    /// `TrainingService.reopenNoTrainingOutcome`, while coordinating a
+    /// real cross-domain SwiftData unit of work. Reflection stages its
+    /// owned reflection deletion and Training stages its owned logged
+    /// outcome deletion in the same verified `ModelContext`; one save
+    /// commits both, while any failure rolls both back. The planned
+    /// activity is never touched, and invalidation is emitted only after
+    /// the shared commit succeeds.
+    public func reopenNoTrainingOutcome(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+        try reopenNoTrainingOutcome(loggedActivityId, athleteId: athleteId, failAt: nil, saveOverride: nil)
+    }
+
+    enum ReopenFailurePoint {
+        case beforeReflectionDeletion
+        case afterReflectionDeletion
+    }
+
+    struct SimulatedReopenFailure: Error {}
+
+    func reopenNoTrainingOutcome(
+        _ loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId,
+        failAt: ReopenFailurePoint?,
+        saveOverride: (() throws -> Void)? = nil
+    ) throws {
+        guard let modelContext,
+              trainingService.uses(modelContext: modelContext),
+              reflectionService.uses(modelContext: modelContext) else {
+            throw ReopenError.missingSharedModelContext
+        }
+        // A ModelContext save/rollback covers every pending mutation in
+        // that context. Reopen may therefore claim this transaction
+        // boundary only while it is clean: saving first would commit
+        // another workflow's work, while rolling back later could erase
+        // it. Refuse before fetching/staging anything and leave the
+        // existing pending state entirely untouched.
+        guard !modelContext.hasChanges else {
+            throw ReopenError.transactionBoundaryUnavailable
+        }
+        let detail = try loggedActivityDetail(loggedActivityId: loggedActivityId, athleteId: athleteId)
+        guard detail.loggedActivity.status == .cancelled || detail.loggedActivity.status == .missed else {
+            throw TrainingServiceError.activityNotReopenable
+        }
+
+        let previousAutosaveSetting = modelContext.autosaveEnabled
+        modelContext.autosaveEnabled = false
+        defer { modelContext.autosaveEnabled = previousAutosaveSetting }
+
+        do {
+            if failAt == .beforeReflectionDeletion { throw SimulatedReopenFailure() }
+            if let reflection = detail.reflection {
+                try reflectionService.stageDeleteActivityReflection(
+                    reflection.reflectionId,
+                    athleteId: athleteId
+                )
+            }
+            if failAt == .afterReflectionDeletion { throw SimulatedReopenFailure() }
+            try trainingService.stageReopenNoTrainingOutcome(loggedActivityId, athleteId: athleteId)
+            if let saveOverride {
+                try saveOverride()
+            } else {
+                try modelContext.save()
+            }
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+
         activityChangeBroadcaster?.activityChanged(for: athleteId)
     }
 }

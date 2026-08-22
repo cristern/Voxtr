@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 
@@ -12,13 +13,10 @@ public enum TrainingServiceError: Error, Equatable {
     /// athlete isolation, never inferred from title/date.
     case loggedActivityNotFound
     /// Reversibility principle (Reopen Activity): thrown by
-    /// `reopenCancelledActivity` when the `LoggedActivity` it was asked
-    /// to reopen exists and belongs to the caller's athlete, but its
-    /// `status` is not `.cancelled` — this lifecycle command is
-    /// deliberately narrow to undoing an erroneous cancellation only,
-    /// never a way to un-complete or un-miss a genuinely resolved
-    /// outcome.
-    case activityNotCancelled
+    /// `reopenNoTrainingOutcome` when the `LoggedActivity` it was asked
+    /// to reopen records actual training rather than a reversible
+    /// no-training outcome.
+    case activityNotReopenable
     /// Sport / Activity Identity domain foundation: mirrors
     /// `PlanningServiceError.invalidField(String)` — the same catchable-
     /// validation pattern, wrapping `ActivityIdentityError.missingIdentity`
@@ -174,9 +172,9 @@ public final class TrainingService {
         return activity
     }
 
-    /// Reversibility principle: undoes an erroneous cancellation.
-    /// Cancellation is represented as a `PlannedActivity` with a linked
-    /// `LoggedActivity(status: .cancelled)` — never a flag on
+    /// Reversibility principle: undoes an erroneous no-training outcome.
+    /// Cancelled and Missed are represented as a `PlannedActivity` with
+    /// a linked `LoggedActivity` — never a flag on
     /// `PlannedActivity` itself. Reopening therefore means removing
     /// exactly that `LoggedActivity`, never touching the
     /// `PlannedActivity` it was linked to: the plan's own stable
@@ -187,17 +185,46 @@ public final class TrainingService {
     /// activity. Athlete-scoped and status-scoped: throws
     /// `.loggedActivityNotFound` for a missing or cross-athlete id (the
     /// same isolation `correctLoggedActivity` above already enforces),
-    /// and `.activityNotCancelled` for any other status — this command
-    /// can never un-complete or un-miss a genuinely resolved outcome,
-    /// only undo a cancellation.
-    public func reopenCancelledActivity(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+    /// and `.activityNotReopenable` for any other status — this command
+    /// can never un-complete actual training, only undo an erroneous
+    /// Cancelled or Missed outcome.
+    public func fetchLoggedActivity(
+        byId loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId
+    ) throws -> LoggedActivity {
         guard let activity = try repository.fetchLoggedActivity(byId: loggedActivityId),
               activity.athleteId == athleteId.rawValue else {
             throw TrainingServiceError.loggedActivityNotFound
         }
-        guard activity.status == .cancelled else {
-            throw TrainingServiceError.activityNotCancelled
+        return activity
+    }
+
+    /// Reopens an outcome where canonical training truth says no
+    /// training occurred. Both Cancelled and Missed are reversible;
+    /// Completed and Partially Completed remain immutable outcomes.
+    public func reopenNoTrainingOutcome(_ loggedActivityId: LoggedActivityId, athleteId: AthleteId) throws {
+        let activity = try fetchLoggedActivity(byId: loggedActivityId, athleteId: athleteId)
+        guard activity.status == .cancelled || activity.status == .missed else {
+            throw TrainingServiceError.activityNotReopenable
         }
         try repository.deleteLoggedActivity(activity)
+    }
+
+    /// Stages the same validated reopen mutation for an AppShell-owned
+    /// cross-domain transaction. Training still owns validation and the
+    /// LoggedActivity deletion; this method deliberately does not save.
+    public func stageReopenNoTrainingOutcome(
+        _ loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId
+    ) throws {
+        let activity = try fetchLoggedActivity(byId: loggedActivityId, athleteId: athleteId)
+        guard activity.status == .cancelled || activity.status == .missed else {
+            throw TrainingServiceError.activityNotReopenable
+        }
+        repository.stageDeleteLoggedActivity(activity)
+    }
+
+    public func uses(modelContext: ModelContext) -> Bool {
+        repository.uses(modelContext: modelContext)
     }
 }
