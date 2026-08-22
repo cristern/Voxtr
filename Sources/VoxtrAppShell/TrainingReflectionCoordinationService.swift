@@ -108,8 +108,9 @@ public struct LoggedActivityDetail {
 ///   duplicate `LoggedActivity`.
 @MainActor
 public final class TrainingReflectionCoordinationService {
-    public enum ReopenError: Error {
+    public enum ReopenError: Error, Equatable {
         case missingSharedModelContext
+        case transactionBoundaryUnavailable
     }
 
     private let trainingService: TrainingService
@@ -373,6 +374,15 @@ public final class TrainingReflectionCoordinationService {
               trainingService.uses(modelContext: modelContext),
               reflectionService.uses(modelContext: modelContext) else {
             throw ReopenError.missingSharedModelContext
+        }
+        // A ModelContext save/rollback covers every pending mutation in
+        // that context. Reopen may therefore claim this transaction
+        // boundary only while it is clean: saving first would commit
+        // another workflow's work, while rolling back later could erase
+        // it. Refuse before fetching/staging anything and leave the
+        // existing pending state entirely untouched.
+        guard !modelContext.hasChanges else {
+            throw ReopenError.transactionBoundaryUnavailable
         }
         let detail = try loggedActivityDetail(loggedActivityId: loggedActivityId, athleteId: athleteId)
         guard detail.loggedActivity.status == .cancelled || detail.loggedActivity.status == .missed else {

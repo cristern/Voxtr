@@ -135,9 +135,11 @@ struct AthleteActivityChangeBroadcasterTests {
             status: .missed
         )
 
+        #expect(!container.mainContext.hasChanges)
         try coordinator.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
 
         #expect(subscriber.callCount == 1)
+        #expect(!container.mainContext.hasChanges)
         #expect(try training.fetchLoggedActivities(forPlannedActivity: planned.plannedActivityId).isEmpty)
     }
 
@@ -180,6 +182,71 @@ struct AthleteActivityChangeBroadcasterTests {
         #expect(subscriber.callCount == 0)
         #expect(try training.fetchLoggedActivity(byId: missed.loggedActivityId, athleteId: athleteId).loggedActivityId == missed.loggedActivityId)
         #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: missed.loggedActivityId) != nil)
+    }
+
+    @Test("Reopen refuses a dirty shared context without touching pending or canonical state")
+    @MainActor
+    func dirtyContextRefusalPreservesEverythingAndEmitsNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Canonical missed",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        let reflection = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: missed.loggedActivityId,
+            authorId: authorId,
+            visibility: .sharedWithGuardians,
+            bodyFeeling: 2,
+            learningNote: "Canonical reflection"
+        )
+
+        // An unrelated workflow has staged, but deliberately not saved,
+        // this parent observation in the shared app context.
+        let pendingId = UUID()
+        let pendingDate = LocalDate(year: 2026, month: 8, day: 22)
+        let pending = ParentObservation(
+            id: pendingId,
+            athleteId: AthleteId(),
+            authorId: ActorId(),
+            localDate: pendingDate,
+            text: "Unrelated pending content",
+            visibility: .sharedWithGuardians
+        )
+        container.mainContext.insert(pending)
+        #expect(container.mainContext.hasChanges)
+
+        #expect(throws: TrainingReflectionCoordinationService.ReopenError.transactionBoundaryUnavailable) {
+            try coordinator.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
+        }
+
+        // Refusal neither saves nor rolls back the unrelated workflow.
+        #expect(container.mainContext.hasChanges)
+        #expect(pending.id == pendingId)
+        #expect(pending.localDate == pendingDate)
+        #expect(pending.text == "Unrelated pending content")
+        #expect(pending.visibility == .sharedWithGuardians)
+
+        // Neither canonical reopen deletion was staged or persisted.
+        let stillLogged = try training.fetchLoggedActivity(byId: missed.loggedActivityId, athleteId: athleteId)
+        let stillReflected = try reflectionService.fetchActivityReflection(forLoggedActivity: missed.loggedActivityId)
+        #expect(stillLogged.loggedActivityId == missed.loggedActivityId)
+        #expect(stillReflected?.reflectionId == reflection.reflectionId)
+        #expect(stillReflected?.bodyFeeling == 2)
+        #expect(stillReflected?.learningNote == "Canonical reflection")
+        #expect(subscriber.callCount == 0)
     }
 
     // MARK: - 3. Athlete isolation
