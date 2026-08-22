@@ -162,7 +162,7 @@ public final class CompositionRoot {
             trainingService: container.resolve(TrainingService.self),
             reflectionService: container.resolve(ReflectionService.self),
             activityChangeBroadcaster: activityChangeBroadcaster,
-            modelContext: modelContext
+            modelContext: modelContainer.mainContext
         )
         container.register(TrainingReflectionCoordinationService.self) { trainingReflectionCoordinationService }
 
