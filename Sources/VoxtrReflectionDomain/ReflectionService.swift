@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 
@@ -163,6 +164,21 @@ public final class ReflectionService {
             throw ReflectionServiceError.activityReflectionNotFound
         }
         try repository.deleteActivityReflection(reflection)
+    }
+
+    public func stageDeleteActivityReflection(
+        _ reflectionId: ReflectionId,
+        athleteId: AthleteId
+    ) throws {
+        guard let reflection = try repository.fetchActivityReflection(byId: reflectionId),
+              reflection.athleteId == athleteId.rawValue else {
+            throw ReflectionServiceError.activityReflectionNotFound
+        }
+        repository.stageDeleteActivityReflection(reflection)
+    }
+
+    public func uses(modelContext: ModelContext) -> Bool {
+        repository.uses(modelContext: modelContext)
     }
 
     public func fetchParentObservations(forAthlete athleteId: AthleteId) throws -> [ParentObservation] {

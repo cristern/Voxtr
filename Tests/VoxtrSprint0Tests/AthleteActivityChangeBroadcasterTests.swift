@@ -48,7 +48,8 @@ struct AthleteActivityChangeBroadcasterTests {
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService, reflectionService: reflectionService,
-            activityChangeBroadcaster: broadcaster
+            activityChangeBroadcaster: broadcaster,
+            modelContext: container.mainContext
         )
         return (planningService, trainingService, coordinator)
     }
@@ -138,6 +139,47 @@ struct AthleteActivityChangeBroadcasterTests {
 
         #expect(subscriber.callCount == 1)
         #expect(try training.fetchLoggedActivities(forPlannedActivity: planned.plannedActivityId).isEmpty)
+    }
+
+    @Test("A rolled-back reopen emits no invalidation and preserves both records")
+    @MainActor
+    func rolledBackReopenEmitsNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let broadcaster = AthleteActivityChangeBroadcaster()
+        let (_, training, coordinator) = makeCoordinator(container: container, broadcaster: broadcaster)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let athleteId = AthleteId()
+        let subscriber = RecordingActivityChangeSubscriber()
+        broadcaster.subscribe(athleteId: athleteId, subscriber)
+        let missed = try training.logActivity(
+            athleteId: athleteId,
+            activityType: .other,
+            title: "Mistaken missed",
+            startedAt: .now,
+            durationMinutes: 1,
+            status: .missed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId,
+            loggedActivityId: missed.loggedActivityId,
+            authorId: ActorId(),
+            visibility: .privateToAthlete,
+            bodyFeeling: 3
+        )
+
+        #expect(throws: TrainingReflectionCoordinationService.SimulatedReopenFailure.self) {
+            try coordinator.reopenNoTrainingOutcome(
+                missed.loggedActivityId,
+                athleteId: athleteId,
+                failAt: nil,
+                saveOverride: { throw TrainingReflectionCoordinationService.SimulatedReopenFailure() }
+            )
+        }
+
+        #expect(subscriber.callCount == 0)
+        #expect(try training.fetchLoggedActivity(byId: missed.loggedActivityId, athleteId: athleteId).loggedActivityId == missed.loggedActivityId)
+        #expect(try reflectionService.fetchActivityReflection(forLoggedActivity: missed.loggedActivityId) != nil)
     }
 
     // MARK: - 3. Athlete isolation

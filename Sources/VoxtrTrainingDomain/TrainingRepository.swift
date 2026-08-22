@@ -25,6 +25,13 @@ public final class TrainingRepository {
         self.modelContext = modelContext
     }
 
+    /// Cross-domain coordinators may only form a single SwiftData unit
+    /// of work when every participating repository owns this exact
+    /// context instance.
+    public func uses(modelContext: ModelContext) -> Bool {
+        self.modelContext === modelContext
+    }
+
     /// Inserts a `LoggedActivity`. `plannedActivityId` is optional —
     /// linking a log to a `PlannedActivity` is by typed ID only, per
     /// scope; nothing here verifies that `PlannedActivity` exists
@@ -143,12 +150,19 @@ public final class TrainingRepository {
     /// removal primitive — not itself exposed as a general UI
     /// capability. `TrainingService.reopenNoTrainingOutcome` is the one
     /// caller, and only after verifying athlete ownership and that the
-    /// `LoggedActivity` being removed is genuinely `.cancelled`. The
+    /// `LoggedActivity` is a reversible `.cancelled`/`.missed` outcome. The
     /// linked `PlannedActivity` (if any) is completely untouched — this
     /// only ever removes the `LoggedActivity` row itself, the same
     /// entity `insertLoggedActivity` above creates.
     public func deleteLoggedActivity(_ activity: LoggedActivity) throws {
         modelContext.delete(activity)
         try modelContext.save()
+    }
+
+    /// Stages the Training-owned deletion without committing it. The
+    /// AppShell reopen coordinator combines this with Reflection's own
+    /// staged deletion and owns the single save/rollback boundary.
+    public func stageDeleteLoggedActivity(_ activity: LoggedActivity) {
+        modelContext.delete(activity)
     }
 }

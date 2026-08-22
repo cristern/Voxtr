@@ -357,7 +357,8 @@ struct Sprint1CoreFlowCompletionTests {
         let planningService = PlanningService(repository: planningRepository)
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
-            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
@@ -818,7 +819,8 @@ struct Sprint1CoreFlowCompletionTests {
         let trainingService = TrainingService(repository: trainingRepository)
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService,
-            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
@@ -1185,7 +1187,8 @@ struct Sprint1CoreFlowCompletionTests {
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService,
             reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
-            activityChangeBroadcaster: broadcaster
+            activityChangeBroadcaster: broadcaster,
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(
@@ -1244,7 +1247,8 @@ struct Sprint1CoreFlowCompletionTests {
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: TrainingService(repository: trainingRepository),
-            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
@@ -1292,7 +1296,8 @@ struct Sprint1CoreFlowCompletionTests {
         let trainingRepository = TrainingRepository(modelContext: container.mainContext)
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: TrainingService(repository: trainingRepository),
-            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
@@ -1327,7 +1332,8 @@ struct Sprint1CoreFlowCompletionTests {
         let planningService = PlanningService(repository: planningRepository)
         let coordinator = TrainingReflectionCoordinationService(
             trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
-            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext)),
+            modelContext: container.mainContext
         )
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 
@@ -207,5 +208,23 @@ public final class TrainingService {
             throw TrainingServiceError.activityNotReopenable
         }
         try repository.deleteLoggedActivity(activity)
+    }
+
+    /// Stages the same validated reopen mutation for an AppShell-owned
+    /// cross-domain transaction. Training still owns validation and the
+    /// LoggedActivity deletion; this method deliberately does not save.
+    public func stageReopenNoTrainingOutcome(
+        _ loggedActivityId: LoggedActivityId,
+        athleteId: AthleteId
+    ) throws {
+        let activity = try fetchLoggedActivity(byId: loggedActivityId, athleteId: athleteId)
+        guard activity.status == .cancelled || activity.status == .missed else {
+            throw TrainingServiceError.activityNotReopenable
+        }
+        repository.stageDeleteLoggedActivity(activity)
+    }
+
+    public func uses(modelContext: ModelContext) -> Bool {
+        repository.uses(modelContext: modelContext)
     }
 }

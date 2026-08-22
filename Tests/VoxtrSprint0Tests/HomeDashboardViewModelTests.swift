@@ -1015,7 +1015,8 @@ struct HomeDashboardViewModelTests {
         // the reopen deliberately goes through a DIFFERENT instance).
         let athleteHomeCoordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService, reflectionService: reflectionService,
-            activityChangeBroadcaster: activityChangeBroadcaster
+            activityChangeBroadcaster: activityChangeBroadcaster,
+            modelContext: container.mainContext
         )
         // A SEPARATE coordinator instance, standing in for whichever
         // OTHER screen actually performs the mutation — sharing the same
@@ -1024,7 +1025,8 @@ struct HomeDashboardViewModelTests {
         // as athleteHomeCoordinator.
         let otherScreenCoordinator = TrainingReflectionCoordinationService(
             trainingService: trainingService, reflectionService: reflectionService,
-            activityChangeBroadcaster: activityChangeBroadcaster
+            activityChangeBroadcaster: activityChangeBroadcaster,
+            modelContext: container.mainContext
         )
 
         let athleteId = AthleteId()
