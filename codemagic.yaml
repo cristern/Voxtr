@@ -254,14 +254,13 @@ workflows:
     triggering:
       events:
         - pull_request
-      # Only PRs targeting main. source:false = match the PR's TARGET
-      # branch. No push event declared at all, so (unlike the workflows
-      # above in earlier rounds) there is no push-to-main leak here —
-      # this workflow structurally cannot run on any push.
+      # Only PRs targeting develop. source:false = match the PR's TARGET
+      # branch. No push event is declared, so this workflow structurally
+      # cannot run on any push.
       branch_patterns:
         - pattern: "*"
           include: false
-        - pattern: main
+        - pattern: develop
           include: true
           source: false
       cancel_previous_builds: true
