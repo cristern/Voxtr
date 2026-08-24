@@ -8,6 +8,7 @@ import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrReflectionDomain
 import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 import VoxtrCoreReferenceData
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
@@ -357,16 +358,30 @@ struct PersistenceRecoveryTests {
     /// Sport / Activity Identity domain foundation, Part 8 (historical
     /// data): simulates the scenario every existing TestFlight install
     /// hits after updating to a build containing this round — a store
-    /// already on disk under the OLD, now-frozen V3 schema, holding a
-    /// `PlannedActivity` written under the PRE-this-round contract
-    /// (title was mandatory 1-120 characters, `Sport` was never
-    /// persisted at all). Confirms: the existing name-only record reads
-    /// back completely unchanged (never backfilled with a Sport, never
-    /// touched), and the new `Sport` table genuinely exists and is
-    /// usable against the migrated store (proves the `.lightweight`
-    /// stage actually created it, not merely that the container
-    /// opened).
-    @Test("A store created under AppSchemaV3 (17 entities, no Sport table) reopens successfully under AppSchemaV4 via the lightweight migration stage — the existing name-only PlannedActivity survives untouched with no Sport ever inferred from its title, and the new Sport table is genuinely usable against the migrated store")
+    /// already on disk under the OLD, now-frozen V3 schema, holding:
+    /// - a `PlannedActivity` written under the PRE-this-round contract
+    ///   (title was mandatory 1-120 characters, `Sport` was never
+    ///   persisted at all);
+    /// - a SECOND `PlannedActivity`, a `LoggedActivity`, AND a
+    ///   `RecurringPlannedActivity` — all three independently persisted
+    ///   with the OLD `activityType` raw value `"physicalTraining"`,
+    ///   exactly as a genuine pre-this-round install would have.
+    ///
+    /// Review correction (Blocker A): a prior version of this migration
+    /// removed `physicalTraining` from the `ActivityType` enum outright,
+    /// which would have made every one of these four rows fail to
+    /// decode on the very next launch — completely unacceptable, and
+    /// exactly what this test now proves does NOT happen.
+    ///
+    /// Confirms for every row: migration succeeds, the row still exists
+    /// with its id/title/duration/date/provenance completely unchanged,
+    /// its `activityType` still honestly reads back as `physicalTraining`
+    /// (never silently reclassified to `strength`/`conditioning`/`other`,
+    /// never discarded), and no Sport is ever inferred from it. Also
+    /// confirms the new `Sport` table genuinely exists and is usable
+    /// against the migrated store (proves the `.lightweight` stage
+    /// actually created it, not merely that the container opened).
+    @Test("A store created under AppSchemaV3 reopens successfully under AppSchemaV4 via the lightweight migration stage — existing PlannedActivity/LoggedActivity/RecurringPlannedActivity rows persisted with the legacy physicalTraining ActivityType all survive untouched and honestly re-readable as physicalTraining, the name-only PlannedActivity survives with no Sport ever inferred from its title, and the new Sport table is genuinely usable against the migrated store")
     @MainActor
     func existingV3StoreMigratesToV4Successfully() throws {
         let storeURL = URL.temporaryDirectory.appendingPathComponent("v3-to-v4-\(UUID().uuidString).sqlite")
@@ -374,6 +389,10 @@ struct PersistenceRecoveryTests {
         let v3Schema = Schema(versionedSchema: AppSchemaV3.self)
         var athleteRawId: UUID
         var plannedActivityRawId: UUID
+        var legacyPlannedActivityRawId: UUID
+        var legacyLoggedActivityRawId: UUID
+        var legacyRecurringActivityRawId: UUID
+        let legacyStartedAt = Date(timeIntervalSince1970: 1_755_000_000)
         do {
             let v3Container = try ModelContainer(
                 for: v3Schema,
@@ -388,18 +407,19 @@ struct PersistenceRecoveryTests {
             v3Container.mainContext.insert(athlete)
             try v3Container.mainContext.save()
             athleteRawId = athlete.id
+            let athleteId = AthleteId(rawValue: athleteRawId)
 
             // A genuine pre-this-round record: mandatory title, no
             // Sport — exactly what every Internal Alpha record already
             // looks like (see this round's audit findings).
             let planningRepository = PlanningRepository(modelContext: v3Container.mainContext)
             let weekPlan = try planningRepository.insertWeekPlan(
-                athleteId: AthleteId(rawValue: athleteRawId),
+                athleteId: athleteId,
                 weekStart: LocalDate(year: 2026, month: 8, day: 17)
             )
             let plannedActivity = try planningRepository.insertPlannedActivity(
                 weekPlanId: weekPlan.weekPlanId,
-                athleteId: AthleteId(rawValue: athleteRawId),
+                athleteId: athleteId,
                 activityType: .teamTraining,
                 title: "Football practice",
                 localDate: LocalDate(year: 2026, month: 8, day: 18),
@@ -407,6 +427,52 @@ struct PersistenceRecoveryTests {
             )
             plannedActivityRawId = plannedActivity.id
             // No Sport table exists at all under V3 — nothing to seed.
+
+            // The actual real-world case Blocker A is about: a
+            // PlannedActivity ALREADY persisted, under V3, with the OLD
+            // `activityType` raw value — inserted directly against the
+            // real V3-schema ModelContext, exercising the true on-disk
+            // representation, not merely an in-memory enum decode.
+            let legacyPlannedActivity = try planningRepository.insertPlannedActivity(
+                weekPlanId: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .physicalTraining,
+                title: "Wednesday gym",
+                localDate: LocalDate(year: 2026, month: 8, day: 19),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                plannedDurationMinutes: 45,
+                notes: "Legacy pre-round classification"
+            )
+            legacyPlannedActivityRawId = legacyPlannedActivity.id
+
+            // Same legacy raw value, independently persisted on
+            // LoggedActivity — proves this isn't only fixed for
+            // PlannedActivity.
+            let trainingRepository = TrainingRepository(modelContext: v3Container.mainContext)
+            let legacyLoggedActivity = try trainingRepository.insertLoggedActivity(
+                athleteId: athleteId,
+                activityType: .physicalTraining,
+                title: "Wednesday gym",
+                startedAt: legacyStartedAt,
+                durationMinutes: 45,
+                status: .completed,
+                source: "manual"
+            )
+            legacyLoggedActivityRawId = legacyLoggedActivity.id
+
+            // Same legacy raw value, independently persisted on
+            // RecurringPlannedActivity — proves this isn't only fixed
+            // for one-off activities.
+            let legacyRecurringActivity = try planningRepository.insertRecurringPlannedActivity(
+                athleteId: athleteId,
+                title: "Wednesday gym",
+                activityType: .physicalTraining,
+                weekdays: [.wednesday],
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                effectiveStartDate: LocalDate(year: 2026, month: 8, day: 1),
+                effectiveEndDate: LocalDate(year: 2026, month: 12, day: 31)
+            )
+            legacyRecurringActivityRawId = legacyRecurringActivity.id
         }
         // Container above goes out of scope — genuinely closed, matching
         // a real app relaunch rather than a container kept alive.
@@ -424,10 +490,47 @@ struct PersistenceRecoveryTests {
         // The pre-existing name-only PlannedActivity survived completely
         // untouched: same id, same title, no Sport ever backfilled from
         // it.
-        let migratedActivity = try v4Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
-        #expect(migratedActivity?.id == plannedActivityRawId)
+        let allPlannedActivities = try v4Container.mainContext.fetch(FetchDescriptor<PlannedActivity>())
+        let migratedActivity = allPlannedActivities.first { $0.id == plannedActivityRawId }
         #expect(migratedActivity?.title == "Football practice")
         #expect(migratedActivity?.sportId == nil)
+
+        // The legacy physicalTraining PlannedActivity: migration
+        // succeeded, the row still exists, and every field — id, title,
+        // duration, date, notes — is completely unchanged. Its
+        // classification still honestly reads back as `physicalTraining`
+        // — never silently reclassified, never discarded — and it
+        // remains excluded from `selectableCases`, so nothing NEW can
+        // ever be created with it again.
+        let migratedLegacyActivity = allPlannedActivities.first { $0.id == legacyPlannedActivityRawId }
+        #expect(migratedLegacyActivity != nil)
+        #expect(migratedLegacyActivity?.title == "Wednesday gym")
+        #expect(migratedLegacyActivity?.activityType == .physicalTraining)
+        #expect(migratedLegacyActivity?.activityType.isLegacyPersistenceOnly == true)
+        #expect(migratedLegacyActivity?.plannedDurationMinutes == 45)
+        #expect(migratedLegacyActivity?.notes == "Legacy pre-round classification")
+        #expect(migratedLegacyActivity?.localDate == LocalDate(year: 2026, month: 8, day: 19))
+        #expect(migratedLegacyActivity?.sportId == nil)
+
+        // Same proof for LoggedActivity.
+        let migratedLegacyLoggedActivity = try v4Container.mainContext
+            .fetch(FetchDescriptor<LoggedActivity>())
+            .first { $0.id == legacyLoggedActivityRawId }
+        #expect(migratedLegacyLoggedActivity != nil)
+        #expect(migratedLegacyLoggedActivity?.title == "Wednesday gym")
+        #expect(migratedLegacyLoggedActivity?.activityType == .physicalTraining)
+        #expect(migratedLegacyLoggedActivity?.durationMinutes == 45)
+        #expect(migratedLegacyLoggedActivity?.startedAt == legacyStartedAt)
+        #expect(migratedLegacyLoggedActivity?.athleteId == athleteRawId)
+
+        // Same proof for RecurringPlannedActivity.
+        let migratedLegacyRecurringActivity = try v4Container.mainContext
+            .fetch(FetchDescriptor<RecurringPlannedActivity>())
+            .first { $0.id == legacyRecurringActivityRawId }
+        #expect(migratedLegacyRecurringActivity != nil)
+        #expect(migratedLegacyRecurringActivity?.title == "Wednesday gym")
+        #expect(migratedLegacyRecurringActivity?.activityType == .physicalTraining)
+        #expect(migratedLegacyRecurringActivity?.weekdays == [.wednesday])
 
         // The new Sport table is genuinely usable against the migrated
         // store — proves the lightweight stage actually created it, not

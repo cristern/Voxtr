@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
 
 /// S2.4: backs `WeeklyPlanningView`. Every state-changing action goes
@@ -86,17 +87,48 @@ public final class WeeklyPlanningViewModel {
     public let athleteId: AthleteId
     private let committedByActorId: ActorId
     public private(set) var weekStart: LocalDate
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveSport` injected-closure pattern established
+    /// on `FamilyScheduleViewModel` — see that type's own doc comment.
+    /// Defaulted to `{ _ in nil }` so every pre-existing construction
+    /// site keeps compiling.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         service: PlanningService,
         athleteId: AthleteId,
         committedByActorId: ActorId,
-        weekStart: LocalDate? = nil
+        weekStart: LocalDate? = nil,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.service = service
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
         self.weekStart = weekStart ?? Self.currentWeekStart()
+        self.resolveSport = resolveSport
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// one function every row on this screen calls for its primary
+    /// label — mirrors `FamilyScheduleViewModel.primaryLabel(for:)`.
+    public func primaryLabel(for activity: PlannedActivity) -> String {
+        ActivityLabelResolver.primaryLabel(
+            name: activity.title,
+            sportId: activity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
+    }
+
+    public func primaryLabel(for suggestion: RecurringActivitySuggestion) -> String {
+        ActivityLabelResolver.primaryLabel(name: suggestion.title, sportId: suggestion.sportId, resolveSport: resolveSport)
+    }
+
+    public func primaryLabel(for recurringActivity: RecurringPlannedActivity) -> String {
+        ActivityLabelResolver.primaryLabel(
+            name: recurringActivity.title,
+            sportId: recurringActivity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
     }
 
     /// Area 4 (Parent Time Navigation package): switches to a
@@ -213,7 +245,13 @@ public final class WeeklyPlanningViewModel {
                 activityType: activityType,
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines),
                 localDate: localDate,
-                timeZoneId: activity.timeZoneId
+                timeZoneId: activity.timeZoneId,
+                // Sport / Activity Identity domain foundation (same-
+                // pattern audit): this method has no Sport parameter of
+                // its own, so the activity's CURRENT sportId is
+                // preserved unchanged — same fix, same reasoning as
+                // `ActivityDetailViewModel.saveEdit()`.
+                sportId: activity.sportId.map(SportId.init(rawValue:))
             )
             try reloadActivities(for: weekPlan)
         } catch let error as PlanningServiceError {
@@ -396,6 +434,12 @@ public final class WeeklyPlanningViewModel {
                 recurringActivity.recurringPlannedActivityId,
                 title: trimmedTitle,
                 activityType: recurringFormActivityType,
+                // Sport / Activity Identity domain foundation (same-
+                // pattern audit): this form has no Sport-editing UI this
+                // round (explicitly out of scope), so the definition's
+                // CURRENT sportId is preserved unchanged — same fix,
+                // same reasoning as `ActivityDetailViewModel.saveEdit()`.
+                sportId: recurringActivity.sportId.map(SportId.init(rawValue:)),
                 weekdays: Array(recurringFormWeekdays),
                 startLocalTime: recurringFormHasStartTime ? Self.localTime(from: recurringFormStartTime) : nil,
                 plannedDurationMinutes: recurringFormHasDuration ? recurringFormDurationMinutes : nil,

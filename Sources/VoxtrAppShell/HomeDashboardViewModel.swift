@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -188,6 +189,15 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
     /// comment for the exact semantics this implements.
     private var sleepPromptDismissedLocalDate: LocalDate?
 
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveAthleteColor`/`resolveSport` injected-closure
+    /// pattern already established on `FamilyScheduleViewModel` — see
+    /// that type's own doc comment. Defaulted to `{ _ in nil }` so every
+    /// pre-existing construction site keeps compiling; `primaryLabel(for:)`
+    /// still resolves to `ActivityLabelResolver`'s own honest
+    /// missing-reference fallback in that case, never a blank string.
+    private let resolveSport: (SportId) -> Sport?
+
     public init(
         trainingPlanningCoordinationService: any TodaysTrainingProviding,
         coachingPresentationProvider: any CoachingPresentationProviding,
@@ -197,7 +207,8 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
         todayActivityComposer: TodayActivityComposer? = nil,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepStatusProvider: (any SleepStatusProviding)? = nil,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.coachingPresentationProvider = coachingPresentationProvider
@@ -206,6 +217,7 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
         self.weekStart = weekStart
         self.todayActivityComposer = todayActivityComposer
         self.sleepStatusProvider = sleepStatusProvider
+        self.resolveSport = resolveSport
         self.activityChangeSubscription = nil
         self.sleepChangeSubscription = nil
         // Recurring reopen stale-Athlete-Home fix (architecture round):
@@ -242,6 +254,13 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
     public func athleteActivityDidChange() {
         loadTodaysTraining()
         loadTodayActivityRows()
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// one function every row on this screen calls for its primary
+    /// label — mirrors `FamilyScheduleViewModel.primaryLabel(for:)`.
+    public func primaryLabel(for row: TodayActivityRow) -> String {
+        row.primaryLabel(resolveSport: resolveSport)
     }
 
     public func loadTodayActivityRows() {
@@ -416,11 +435,11 @@ public final class HomeDashboardViewModel: AthleteActivityChangeSubscriber, Athl
         case (.failed, .failed):
             return .failed
         case (.loaded(let activities), .failed):
-            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: nil))
+            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: nil, resolveSport: resolveSport))
         case (.failed, .loaded(let coaching)):
-            return .loaded(DailyFocusComposer().compose(todaysActivities: nil, coaching: coaching))
+            return .loaded(DailyFocusComposer().compose(todaysActivities: nil, coaching: coaching, resolveSport: resolveSport))
         case (.loaded(let activities), .loaded(let coaching)):
-            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: coaching))
+            return .loaded(DailyFocusComposer().compose(todaysActivities: activities, coaching: coaching, resolveSport: resolveSport))
         }
     }
 }

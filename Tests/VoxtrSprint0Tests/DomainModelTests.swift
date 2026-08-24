@@ -165,17 +165,20 @@ struct TrainingDomainModelTests {
         #expect(conditioning.activityType == .conditioning)
     }
 
-    /// ActivityType migration: `physicalTraining` was removed, not kept
-    /// as a deprecated alias — proves the raw-value change is genuine at
-    /// the type level. Any already-persisted row whose stored raw
-    /// string is still `"physicalTraining"` fails to decode, exactly as
-    /// documented on `ActivityType`'s own doc comment (an accepted,
-    /// explicit Internal Alpha limitation — no fuzzy auto-migration to
-    /// `strength` or `conditioning` was written, since neither can be
-    /// proven correct for an arbitrary historical row).
-    @Test("ActivityType no longer has a physicalTraining case — the old raw value fails to decode")
-    func physicalTrainingRawValueNoLongerDecodes() {
-        #expect(ActivityType(rawValue: "physicalTraining") == nil)
+    /// Blocker A fix (review correction): `physicalTraining` stays a
+    /// REAL, decodable case — a prior version of this round removed it
+    /// outright, which review correctly rejected (it would have made
+    /// any already-persisted row fail to decode). It is legacy/
+    /// persistence-compatibility only: excluded from `selectableCases`
+    /// and flagged by `isLegacyPersistenceOnly`, so nothing new can ever
+    /// be created with it, but existing history reads back exactly as
+    /// it always did.
+    @Test("ActivityType.physicalTraining still decodes (existing history stays readable) but is excluded from selectableCases")
+    func physicalTrainingStillDecodesButIsNotSelectable() {
+        #expect(ActivityType(rawValue: "physicalTraining") == .physicalTraining)
+        #expect(ActivityType.physicalTraining.isLegacyPersistenceOnly)
+        #expect(!ActivityType.selectableCases.contains(.physicalTraining))
+        #expect(ActivityType.selectableCases.count == ActivityType.allCases.count - 1)
         #expect(ActivityType(rawValue: "strength") == .strength)
         #expect(ActivityType(rawValue: "conditioning") == .conditioning)
     }

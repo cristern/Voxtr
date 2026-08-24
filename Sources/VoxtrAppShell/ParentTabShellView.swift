@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrParentDomain
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
@@ -58,6 +59,12 @@ public struct ParentTabShellView: View {
     /// coordination service/broadcaster pair.
     public let sleepCoordinationService: SleepCoordinationService
     public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// threaded exactly like `athleteRepository` above — every screen
+    /// that needs to resolve a Sport-only activity's primary label
+    /// builds its own `ActivityLabelResolver`-backed closure from this
+    /// same shared instance, never a second, locally-invented lookup.
+    public let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -72,7 +79,8 @@ public struct ParentTabShellView: View {
         athleteFamilyManagementService: AthleteFamilyManagementService,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -87,6 +95,7 @@ public struct ParentTabShellView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.sportRepository = sportRepository
     }
 
     public var body: some View {
@@ -110,7 +119,8 @@ public struct ParentTabShellView: View {
                 athleteFamilyManagementService: athleteFamilyManagementService,
                 activityChangeBroadcaster: activityChangeBroadcaster,
                 sleepCoordinationService: sleepCoordinationService,
-                sleepChangeBroadcaster: sleepChangeBroadcaster
+                sleepChangeBroadcaster: sleepChangeBroadcaster,
+                sportRepository: sportRepository
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -129,7 +139,8 @@ public struct ParentTabShellView: View {
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 athleteRepository: athleteRepository,
-                actorId: ActorId(rawValue: family.participant.id)
+                actorId: ActorId(rawValue: family.participant.id),
+                sportRepository: sportRepository
             )
             .tabItem { Label("Plan", systemImage: "calendar") }
             .accessibilityIdentifier("parentTabs.plan")
@@ -155,7 +166,8 @@ public struct ParentTabShellView: View {
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
-                actorId: ActorId(rawValue: family.participant.id)
+                actorId: ActorId(rawValue: family.participant.id),
+                sportRepository: sportRepository
             )
             .tabItem { Label("Training", systemImage: "figure.run") }
             .accessibilityIdentifier("parentTabs.training")
@@ -253,6 +265,7 @@ private struct ParentPlanTabView: View {
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let athleteRepository: AthleteRepository
     let actorId: ActorId
+    let sportRepository: SportRepository
 
     @State private var activeAthletes: [AthleteProfile]
     /// Design Foundation extension round: this Plan tab is the OTHER
@@ -273,7 +286,8 @@ private struct ParentPlanTabView: View {
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         athleteRepository: AthleteRepository,
-        actorId: ActorId
+        actorId: ActorId,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -282,7 +296,16 @@ private struct ParentPlanTabView: View {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.athleteRepository = athleteRepository
         self.actorId = actorId
+        self.sportRepository = sportRepository
         _activeAthletes = State(initialValue: family.activeAthletes)
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors `resolvedColor(for:)` immediately below — the ONE
+    /// canonical `ActivityLabelResolver`-backed lookup this tab's own
+    /// rows use, never a second, locally-invented one.
+    private func resolveSport(_ sportId: SportId) -> Sport? {
+        try? sportRepository.fetchSport(byId: sportId)
     }
 
     var body: some View {
@@ -295,12 +318,14 @@ private struct ParentPlanTabView: View {
                                 provideActiveAthletes: { activeAthletes },
                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                                 planningService: planningService,
-                                resolveAthleteColor: resolvedColor
+                                resolveAthleteColor: resolvedColor,
+                                resolveSport: resolveSport
                             ),
                             actorId: actorId,
                             planningService: planningService,
                             trainingService: trainingService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                            resolveSport: resolveSport
                         )
                     }
                     .accessibilityIdentifier("parentPlan.familyScheduleLink")
@@ -315,12 +340,14 @@ private struct ParentPlanTabView: View {
                                     viewModel: WeeklyPlanningViewModel(
                                         service: planningService,
                                         athleteId: athlete.athleteId,
-                                        committedByActorId: actorId
+                                        committedByActorId: actorId,
+                                        resolveSport: resolveSport
                                     ),
                                     athleteDisplayName: athlete.givenName,
                                     planningService: planningService,
                                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                    actorId: actorId
+                                    actorId: actorId,
+                                    resolveSport: resolveSport
                                 )
                             } label: {
                                 Text(athlete.givenName)
@@ -394,6 +421,7 @@ private struct ParentTrainingTabView: View {
     let coachingApplicationService: CoachingApplicationService
     let athleteRepository: AthleteRepository
     let actorId: ActorId
+    let sportRepository: SportRepository
 
     @State private var activeAthletes: [AthleteProfile]
     /// Design Foundation extension round: Training is a shared/multi-
@@ -420,7 +448,8 @@ private struct ParentTrainingTabView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
-        actorId: ActorId
+        actorId: ActorId,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -432,7 +461,15 @@ private struct ParentTrainingTabView: View {
         self.coachingApplicationService = coachingApplicationService
         self.athleteRepository = athleteRepository
         self.actorId = actorId
+        self.sportRepository = sportRepository
         _activeAthletes = State(initialValue: family.activeAthletes)
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors `resolvedColor(for:)` below — the ONE canonical
+    /// `ActivityLabelResolver`-backed lookup this tab's own rows use.
+    private func resolveSport(_ sportId: SportId) -> Sport? {
+        try? sportRepository.fetchSport(byId: sportId)
     }
 
     var body: some View {
@@ -461,13 +498,15 @@ private struct ParentTrainingTabView: View {
                                                 planningService: planningService,
                                                 trainingService: trainingService,
                                                 trainingPlanningCoordinationService: trainingPlanningCoordinationService
-                                            )
+                                            ),
+                                            resolveSport: resolveSport
                                         ),
                                         planningService: planningService,
                                         trainingService: trainingService,
                                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                         actorId: actorId,
-                                        athleteDisplayName: athlete.givenName
+                                        athleteDisplayName: athlete.givenName,
+                                        resolveSport: resolveSport
                                     )
                                 } label: {
                                     Text(athlete.givenName)
@@ -489,7 +528,8 @@ private struct ParentTrainingTabView: View {
                                             coordinationService: weeklyReviewCoordinationService,
                                             coachingPresentationProvider: coachingApplicationService,
                                             athleteId: athlete.athleteId,
-                                            weekStart: WeeklyPlanningViewModel.currentWeekStart()
+                                            weekStart: WeeklyPlanningViewModel.currentWeekStart(),
+                                            resolveSport: resolveSport
                                         ),
                                         athleteDisplayName: athlete.givenName,
                                         reflectionService: weeklyReflectionService,
@@ -523,7 +563,8 @@ private struct ParentTrainingTabView: View {
                                                 viewModel: WeeklyHistoryViewModel(
                                                     coordinationService: weeklyReviewCoordinationService,
                                                     athleteId: athlete.athleteId,
-                                                    weekStart: selectedWeekStart
+                                                    weekStart: selectedWeekStart,
+                                                    resolveSport: resolveSport
                                                 ),
                                                 athleteDisplayName: athlete.givenName,
                                                 reflectionService: weeklyReflectionService,

@@ -125,6 +125,16 @@ public final class PlanningService {
         guard try repository.fetchWeekPlan(byId: weekPlanId) != nil else {
             throw PlanningServiceError.weekPlanNotFound
         }
+        // Sport / Activity Identity domain foundation, Blocker A fix:
+        // `physicalTraining` is legacy/persistence-compatibility only —
+        // a genuinely NEW PlannedActivity may never be created with it.
+        // Editing an existing (possibly legacy-typed) activity is
+        // deliberately NOT guarded here (see `editPlannedActivity`'s own
+        // doc comment) — only creation, where a human is freely
+        // choosing from a Picker that already never offers this case.
+        guard !activityType.isLegacyPersistenceOnly else {
+            throw PlanningServiceError.invalidField("physicalTraining is a legacy classification and cannot be used for new activities")
+        }
         try Self.validate(
             title: title,
             sportId: sportId,
@@ -156,6 +166,18 @@ public final class PlanningService {
     /// `athleteId`, and `createdAt` are identity/ownership/audit fields
     /// and are not editable through this method — everything else
     /// `PlannedActivity` stores is.
+    ///
+    /// Sport / Activity Identity domain foundation, Blocker A fix:
+    /// deliberately does NOT reject `activityType == .physicalTraining`
+    /// the way `addPlannedActivity` does — the edit form's own Picker
+    /// already never offers that case for a fresh choice, but a legacy
+    /// activity's OTHER fields (title, date, duration, ...) must remain
+    /// editable without forcing an unrelated, unrequested reclassification
+    /// decision first. If the caller leaves `activityType` untouched, the
+    /// legacy value round-trips unchanged — same as any other unedited
+    /// field; if the caller explicitly picks a new value, it can only
+    /// ever be one of `ActivityType.selectableCases`, so a legacy value
+    /// is never re-chosen, only ever replaced.
     public func editPlannedActivity(
         _ plannedActivityId: PlannedActivityId,
         expectedWeekPlanId weekPlanId: WeekPlanId,
@@ -408,6 +430,13 @@ public final class PlanningService {
         effectiveStartDate: LocalDate,
         effectiveEndDate: LocalDate
     ) throws -> RecurringPlannedActivity {
+        // Sport / Activity Identity domain foundation, Blocker A fix:
+        // same create-only guard as `addPlannedActivity` — see that
+        // method's own doc comment for why edit is deliberately not
+        // guarded the same way.
+        guard !activityType.isLegacyPersistenceOnly else {
+            throw PlanningServiceError.invalidField("physicalTraining is a legacy classification and cannot be used for new activities")
+        }
         try Self.validateRecurringActivity(
             title: title,
             sportId: sportId,

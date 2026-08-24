@@ -103,4 +103,54 @@ public enum TrainingStrings {
     public static var noLoggedActivitiesToday: String {
         String(localized: "training.loggedActivities.empty", defaultValue: "Nothing logged yet today")
     }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix
+    /// (review correction): `ActivityLabelResolver`'s own explicit
+    /// missing-reference fallback — reached ONLY when an activity has
+    /// no name AND its `sportId` fails to resolve (a stale/deleted Sport
+    /// row; the domain invariant itself guarantees one of name/Sport
+    /// exists, so this is never reached for a genuinely valid activity
+    /// with intact reference data). Deliberately distinct from any real
+    /// resolved name or Sport display name, so a corrupted-reference
+    /// state is never mistaken for one.
+    public static var unresolvedActivityLabel: String {
+        String(localized: "training.activity.unresolvedLabel", defaultValue: "Unnamed activity")
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker A review
+    /// correction: the one canonical label for each product-selectable
+    /// `ActivityType` case, shared by every create/edit Picker in this
+    /// app (`ActivityDetailView`, `WeeklyPlanningView`'s add/edit/
+    /// recurring forms, `DailyTrainingView`'s log form) — previously
+    /// each Picker duplicated its own hard-coded `Text`/`.tag()` list of
+    /// the same 9 cases, which is exactly the drift risk the review
+    /// flagged: nothing would have caught a Picker that still listed
+    /// `.physicalTraining`, or one that silently fell out of sync with
+    /// `ActivityType.selectableCases`, since each list was independent.
+    /// Every Picker now iterates `ActivityType.selectableCases` itself
+    /// (see that property's own doc comment) and asks this function for
+    /// the label — `.physicalTraining` is structurally impossible to
+    /// offer here since it is never a member of that collection, not
+    /// merely omitted from each Picker's own list by convention.
+    public static func activityTypeLabel(for activityType: ActivityType) -> String {
+        switch activityType {
+        case .teamTraining: return "Team training"
+        case .match: return "Match"
+        case .competition: return "Competition"
+        case .individualTraining: return "Individual training"
+        case .strength: return "Strength"
+        case .conditioning: return "Conditioning"
+        case .recovery: return "Recovery"
+        case .test: return "Test"
+        case .other: return "Other"
+        case .physicalTraining:
+            // Legacy persistence-only case: never offered by any
+            // Picker (excluded from `selectableCases`), but a real
+            // label is still returned rather than trapping — this
+            // function must stay total over the whole enum so a
+            // future non-exhaustive-switch compile error surfaces
+            // anywhere ELSE this case is mishandled, not here.
+            return "Physical training (legacy)"
+        }
+    }
 }

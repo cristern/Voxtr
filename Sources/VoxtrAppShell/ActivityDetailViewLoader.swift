@@ -1,6 +1,7 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrCoreReferenceData
 
 /// Sprint 1 completion package, Item 3: the ONE canonical way any
 /// screen navigates from a `PlannedActivity` representation to
@@ -48,6 +49,11 @@ public struct ActivityDetailViewLoader: View {
     /// after this deep a push/sheet/pop chain. Defaulted to a no-op so
     /// existing call sites/tests are unaffected.
     let onActivityLogged: () -> Void
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// threaded straight through to `ActivityDetailViewModel`, this
+    /// loader's one construction site — same closure-injection pattern
+    /// as every other resolver call site in this app.
+    let resolveSport: (SportId) -> Sport?
     @State private var viewModel: ActivityDetailViewModel?
 
     public init(
@@ -57,7 +63,8 @@ public struct ActivityDetailViewLoader: View {
         actorId: ActorId,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        onActivityLogged: @escaping () -> Void = {}
+        onActivityLogged: @escaping () -> Void = {},
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
@@ -66,6 +73,7 @@ public struct ActivityDetailViewLoader: View {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onActivityLogged = onActivityLogged
+        self.resolveSport = resolveSport
     }
 
     public var body: some View {
@@ -115,7 +123,8 @@ public struct ActivityDetailViewLoader: View {
                 deletedByActorId: actorId,
                 planningService: planningService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                onActivityLogged: onActivityLogged
+                onActivityLogged: onActivityLogged,
+                resolveSport: resolveSport
             )
         }
     }

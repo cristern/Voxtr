@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// Sprint 1 (Daily Use Foundation), Part 1. Each destination carries
 /// its own identity directly — there is no shared, mutable "currently
@@ -138,6 +139,11 @@ public struct FamilyHomeContentView: View {
     /// coordination service/broadcaster pair.
     private let sleepCoordinationService: SleepCoordinationService
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// one canonical `SportRepository` this screen and everything it
+    /// constructs resolves Sport-only primary labels through — never a
+    /// second, locally-invented lookup.
+    private let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -152,7 +158,8 @@ public struct FamilyHomeContentView: View {
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -166,6 +173,7 @@ public struct FamilyHomeContentView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.sportRepository = sportRepository
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -175,8 +183,13 @@ public struct FamilyHomeContentView: View {
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReflectionService: weeklyReflectionService,
             sleepStatusProvider: sleepCoordinationService,
-            sleepChangeBroadcaster: sleepChangeBroadcaster
+            sleepChangeBroadcaster: sleepChangeBroadcaster,
+            sportRepository: sportRepository
         ))
+    }
+
+    private func resolveSport(_ sportId: SportId) -> Sport? {
+        try? sportRepository.fetchSport(byId: sportId)
     }
 
     public var body: some View {
@@ -273,7 +286,8 @@ public struct FamilyHomeContentView: View {
                             trainingService: trainingService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                             actorId: ActorId(rawValue: family.participant.id),
-                            onActivityLogged: { viewModel.refresh() }
+                            onActivityLogged: { viewModel.refresh() },
+                            resolveSport: resolveSport
                         )
                     }
                 case .familySchedule:
@@ -282,12 +296,14 @@ public struct FamilyHomeContentView: View {
                             provideActiveAthletes: { viewModel.activeAthletes },
                             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                             planningService: planningService,
-                            resolveAthleteColor: viewModel.resolvedAthleteColor
+                            resolveAthleteColor: viewModel.resolvedAthleteColor,
+                            resolveSport: resolveSport
                         ),
                         actorId: ActorId(rawValue: family.participant.id),
                         planningService: planningService,
                         trainingService: trainingService,
-                        trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        resolveSport: resolveSport
                     )
                 case .sleepCapture(let athleteId):
                     if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
@@ -450,7 +466,7 @@ public struct FamilyHomeContentView: View {
                         .foregroundStyle(VoxtrColor.textSecondary)
                     HStack {
                         VStack(alignment: .leading) {
-                            Text(suggestion.title ?? "")
+                            Text(viewModel.primaryLabel(for: row))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             // Recurring metadata demotion round: "Recurring"
@@ -487,7 +503,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(loggedActivity.title ?? "")
+                        Text(viewModel.primaryLabel(for: row))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text("Unplanned · Logged")
@@ -537,7 +553,7 @@ public struct FamilyHomeContentView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(row.plannedActivity.title ?? "")
+                        Text(viewModel.primaryLabel(for: row))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         Text(Self.rowSubtitle(for: row))
@@ -822,7 +838,8 @@ public struct FamilyHomeContentView: View {
                     ),
                     activityChangeBroadcaster: activityChangeBroadcaster,
                     sleepStatusProvider: sleepCoordinationService,
-                    sleepChangeBroadcaster: sleepChangeBroadcaster
+                    sleepChangeBroadcaster: sleepChangeBroadcaster,
+                    resolveSport: resolveSport
                 )
             },
             athleteDisplayName: athlete.givenName,
@@ -838,7 +855,8 @@ public struct FamilyHomeContentView: View {
             athleteManagementViewModel: athleteManagementViewModel,
             activityChangeBroadcaster: activityChangeBroadcaster,
             sleepCoordinationService: sleepCoordinationService,
-            sleepChangeBroadcaster: sleepChangeBroadcaster
+            sleepChangeBroadcaster: sleepChangeBroadcaster,
+            sportRepository: sportRepository
         )
     }
 
@@ -850,7 +868,8 @@ public struct FamilyHomeContentView: View {
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-            onActivityLogged: { viewModel.refresh() }
+            onActivityLogged: { viewModel.refresh() },
+            resolveSport: resolveSport
         )
     }
 }

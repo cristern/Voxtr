@@ -12,32 +12,60 @@ public enum DevelopmentStage: String, Codable, Sendable, CaseIterable {
     case parentLed, sharedOwnership, guidedIndependence, athleteLed
 }
 
-/// Sport / Activity Identity domain foundation round: `physicalTraining`
-/// was replaced with `strength`/`conditioning` — Statistics needs these
-/// independently queryable, and the single broad case could not express
-/// that. This is a genuine, intentional raw-value change (not additive):
-/// any already-persisted row whose stored `activityType` raw string is
-/// still `"physicalTraining"` will fail to decode after this change.
+/// Sport / Activity Identity domain foundation round: `strength`/
+/// `conditioning` were added as the new, independently-queryable
+/// replacements for the old single `physicalTraining` case — Statistics
+/// needs the two queryable separately, and review correctly rejected
+/// this round's first attempt (removing `physicalTraining` outright),
+/// since that would have made any already-persisted row whose stored
+/// `activityType` raw string is `"physicalTraining"` fail to decode —
+/// existing activity history must remain readable, full stop, never
+/// conditioned on a reinstall.
+///
+/// `physicalTraining` therefore stays a REAL case — decoding an
+/// existing row never fails — but it is LEGACY / PERSISTENCE
+/// COMPATIBILITY ONLY: never offered by any Picker, never a valid
+/// choice for a newly-created `PlannedActivity`/`RecurringPlannedActivity`
+/// (`PlanningService.addPlannedActivity`/`createRecurringPlannedActivity`
+/// both reject it — see `ActivityType.isLegacyPersistenceOnly`).
 /// Repository evidence (existing test fixtures/usage before this round)
 /// showed no consistent, recoverable signal for which of the two new
 /// cases any given historical `physicalTraining` activity actually
 /// meant — one fixture used it for "Strength," another for "Wednesday
-/// gym" (which could equally mean conditioning) — so no deterministic
-/// or "neutral default" auto-migration was written; inventing one would
-/// silently misclassify some activities as a category their user never
-/// chose. Per this codebase's own established Internal Alpha policy for
-/// genuine field/enum reshapes with no production data at stake (see
-/// `RecurringPlannedActivity.weekdays`'s own doc comment for the
-/// identical precedent), this is documented as an explicit, accepted
-/// Internal Alpha limitation rather than a fuzzy-mapped migration: any
-/// existing local/TestFlight store containing a `physicalTraining`-typed
-/// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity` row
-/// needs a fresh install/store reset to pick this up cleanly. This must
-/// be revisited with a real, explicit user-facing correction flow before
-/// genuine production data exists.
+/// gym" (which could equally mean conditioning) — so no fuzzy/"neutral
+/// default" auto-remap was written; inventing one would silently
+/// misclassify some activities as a category their user never chose.
+/// Keeping the honest, ambiguous historical value — rather than
+/// guessing or discarding it — is the deliberate choice here: it reads
+/// back exactly as it always did, and `isLegacyPersistenceOnly` is what
+/// stops it from ever being written again, without requiring any
+/// destructive migration, reinstall, or store reset.
 public enum ActivityType: String, Codable, Sendable, CaseIterable {
     case teamTraining, match, competition, individualTraining
     case strength, conditioning, recovery, test, other
+    /// LEGACY / PERSISTENCE COMPATIBILITY ONLY. Never offered by any
+    /// Picker, never returned by `selectableCases`, and rejected by
+    /// every genuinely-new-activity creation path (`PlanningService
+    /// .addPlannedActivity`/`.createRecurringPlannedActivity`). Exists
+    /// solely so an existing pre-this-round row keeps decoding — see
+    /// this enum's own doc comment.
+    case physicalTraining
+}
+
+public extension ActivityType {
+    /// The product-facing case list every NEW-activity Picker/
+    /// create-path must offer — excludes `physicalTraining`. Use this,
+    /// never `allCases` directly, anywhere a human is choosing a
+    /// classification for something new.
+    static var selectableCases: [ActivityType] {
+        [.teamTraining, .match, .competition, .individualTraining, .strength, .conditioning, .recovery, .test, .other]
+    }
+
+    /// True only for `physicalTraining` — the one case existing storage
+    /// may still contain, never a case a human can newly choose.
+    var isLegacyPersistenceOnly: Bool {
+        self == .physicalTraining
+    }
 }
 
 public enum ActivityStatus: String, Codable, Sendable, CaseIterable {

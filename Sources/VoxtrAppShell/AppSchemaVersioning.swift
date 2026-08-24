@@ -251,7 +251,7 @@ public enum AppSchemaV2: VersionedSchema {
 /// `AppSchemaV4` below is now latest — same freezing rationale as
 /// `AppCurrentSchema`/`AppSchemaV2` above. No entity here diverges in
 /// field shape from its live top-level declaration (the title-optional
-/// and `ActivityType` raw-value changes landed directly on the live
+/// change landed directly on the live
 /// `PlannedActivity`/`LoggedActivity`/`RecurringPlannedActivity` types
 /// with no version-specific nested copy — see `AppSchemaV4`'s own doc
 /// comment for why), so freezing the type LIST here is sufficient; no
@@ -297,8 +297,15 @@ public enum AppSchemaV3: VersionedSchema {
 ///   - `PlannedActivity.title` / `LoggedActivity.title` /
 ///     `RecurringPlannedActivity.title`: `String` → `String?`
 ///     (Activity Name becomes optional; see `ActivityIdentity.swift`).
-///   - `ActivityType`: `physicalTraining` removed, `strength` +
-///     `conditioning` added (raw-value change, not additive).
+///   - `ActivityType`: `strength` + `conditioning` added as the new
+///     product-facing replacements for `physicalTraining`. Review
+///     correctly rejected this round's first attempt at this change
+///     (removing `physicalTraining` from the enum outright) — existing
+///     activity history must remain readable, never conditioned on a
+///     reinstall. `physicalTraining` therefore STAYS a real case (see
+///     its own doc comment in `SharedEnums.swift`), so this is a purely
+///     ADDITIVE enum change, not a raw-value removal — no existing row
+///     is ever at risk of failing to decode.
 ///
 /// Per step 4's own instruction to "seriously consider whether the
 /// disproportionate complexity... [of frozen legacy copies]... [is]
@@ -309,25 +316,27 @@ public enum AppSchemaV3: VersionedSchema {
 /// `RecurringPlannedActivity.weekdays`'s own shape change (`Weekday` →
 /// `[Weekday]`) shipped with NO frozen legacy copy, only a documented
 /// "existing installs may need a reinstall/store reset" Internal Alpha
-/// note. The title-optionality and `ActivityType` changes follow that
-/// same precedent here, for the same reason: building three fully
-/// duplicated nested legacy entity copies (`PlannedActivity`,
-/// `LoggedActivity`, `RecurringPlannedActivity`) to preserve field shapes
-/// nobody's real data depends on would reintroduce exactly the
-/// "disproportionate complexity" this file's own history (the deleted
-/// six-version `LegacySchemaTypes.swift` saga) already burned real launch
-/// failures to learn from — see `ActivityType`'s own doc comment in
-/// `SharedEnums.swift` for the equivalent, explicit "Internal Alpha
-/// limitation, reinstall required" note for that change specifically.
+/// note. The title-optionality change follows that same precedent here,
+/// for the same reason: building three fully duplicated nested legacy
+/// entity copies (`PlannedActivity`, `LoggedActivity`,
+/// `RecurringPlannedActivity`) to preserve field shapes nobody's real
+/// data depends on would reintroduce exactly the "disproportionate
+/// complexity" this file's own history (the deleted six-version
+/// `LegacySchemaTypes.swift` saga) already burned real launch failures
+/// to learn from. The `ActivityType` change is different in kind from
+/// that precedent, though — it is purely additive (see above), so it
+/// carries NO reinstall risk at all, unlike `weekdays`' own genuine
+/// shape change; this is the one respect in which this round does NOT
+/// follow that precedent, precisely because review required it not to.
 /// `.lightweight` is still the correct stage kind: SwiftData's own
 /// migration guidance covers "new optional properties" (the title
-/// changes) the same way regardless of whether the OLD shape is
-/// separately frozen — a `.lightweight` stage does not require a source
-/// type to exist for a property that is simply becoming optional on the
-/// SAME live type; there is no separate V3-shaped `PlannedActivity` for
-/// it to migrate FROM in the first place; the `ActivityType` raw-value
-/// change carries the same accepted Internal Alpha risk described above
-/// regardless of migration-stage kind.
+/// changes) and "new enum cases" (the `ActivityType` addition) the same
+/// way regardless of whether the OLD shape is separately frozen — a
+/// `.lightweight` stage does not require a source type to exist for a
+/// property that is simply becoming optional, or a case that is simply
+/// being added, on the SAME live type; there is no separate V3-shaped
+/// `PlannedActivity`/`ActivityType` for either change to migrate FROM in
+/// the first place.
 ///
 /// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
 /// now the LATEST version); it will need freezing itself the next time a
@@ -419,12 +428,15 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// every athlete with no row at all — is completely unaffected by
     /// this migration; there is nothing to transform.
     /// V3 ("3.0.0", 17 entities) → V4 ("4.0.0", 18 entities — adds
-    /// `Sport.self`; also carries the title-optionality and
-    /// `ActivityType` raw-value changes described on `AppSchemaV4`'s own
-    /// doc comment). `.lightweight`: the only structural change SwiftData
-    /// itself needs to reason about here is the new `Sport` entity/table,
-    /// which is purely additive — same class of change as V1→V2's
-    /// `DailyStatus`/`AthleteSettings` addition above. A fresh install
+    /// `Sport.self`; also carries the title-optionality change and the
+    /// purely-additive `ActivityType.strength`/`.conditioning` cases
+    /// described on `AppSchemaV4`'s own doc comment).
+    /// `.lightweight`: every structural change SwiftData itself needs to
+    /// reason about here — the new `Sport` entity/table, the new
+    /// optional `title` column, the two new `ActivityType` cases — is
+    /// purely additive; no existing entity, property, or persisted enum
+    /// case is removed or retyped, so no existing row is ever at risk of
+    /// failing to decode. A fresh install
     /// starts directly under V4 (`Sport` seeded empty, then populated by
     /// `SportRepository.seedCanonicalSportsIfNeeded()` at first launch);
     /// an existing V3 store gains the new empty `Sport` table with its

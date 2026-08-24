@@ -5,6 +5,7 @@ import VoxtrMotivationDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// TestFlight regression fix (stale mounted Athlete Home after Log/Cancel):
 /// temporary, `#if DEBUG`-only tracing for the exact boundary this
@@ -190,6 +191,15 @@ public struct HomeDashboardView: View {
     /// sheet's own nested `HomeDashboardViewModel` construction below —
     /// same rationale as `activityChangeBroadcaster` immediately above.
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// threaded through only to construct real `resolveSport` closures
+    /// for this screen's own `RecurringOccurrencePreviewView`/
+    /// `WeeklyReviewViewModel` constructions below — `viewModel`'s own
+    /// primary-label resolution already has its own copy (see
+    /// `FamilyHomeContentView`'s construction of `HomeDashboardViewModel`),
+    /// this is not a second Sport truth, only a second call site needing
+    /// the same canonical repository.
+    private let sportRepository: SportRepository
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -207,7 +217,8 @@ public struct HomeDashboardView: View {
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        sportRepository: SportRepository
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -224,6 +235,11 @@ public struct HomeDashboardView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.sportRepository = sportRepository
+    }
+
+    private func resolveSport(_ sportId: SportId) -> Sport? {
+        try? sportRepository.fetchSport(byId: sportId)
     }
 
     public var body: some View {
@@ -310,7 +326,8 @@ public struct HomeDashboardView: View {
                             homeDashboardDebugLog("onActivityLogged fired for rowId=\(rowId)")
                             viewModel.loadTodaysTraining()
                             viewModel.loadTodayActivityRows()
-                        }
+                        },
+                        resolveSport: resolveSport
                     )
                 }
             case .recurringOccurrence(let id):
@@ -326,7 +343,8 @@ public struct HomeDashboardView: View {
                             homeDashboardDebugLog("onActivityLogged fired for recurringOccurrence id=\(id)")
                             viewModel.loadTodaysTraining()
                             viewModel.loadTodayActivityRows()
-                        }
+                        },
+                        resolveSport: resolveSport
                     )
                 }
             }
@@ -502,7 +520,8 @@ public struct HomeDashboardView: View {
                                 coordinationService: weeklyReviewCoordinationService,
                                 coachingPresentationProvider: coachingApplicationService,
                                 athleteId: athleteId,
-                                weekStart: viewModel.weekStart
+                                weekStart: viewModel.weekStart,
+                                resolveSport: resolveSport
                             ),
                             athleteDisplayName: athleteDisplayName,
                             reflectionService: weeklyReflectionService,
@@ -557,7 +576,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.activity(rowId: familyHomeRow.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(familyHomeRow.plannedActivity.title ?? "")
+                        Text(viewModel.primaryLabel(for: row))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = familyHomeRow.plannedActivity.location, !location.isEmpty {
@@ -590,7 +609,7 @@ public struct HomeDashboardView: View {
             NavigationLink(value: HomeDashboardDestination.recurringOccurrence(id: suggestion.id)) {
                 HStack {
                     VStack(alignment: .leading) {
-                        Text(suggestion.title ?? "")
+                        Text(viewModel.primaryLabel(for: row))
                             .font(VoxtrTypography.cardTitle)
                             .foregroundStyle(VoxtrColor.textPrimary)
                         if let location = suggestion.location, !location.isEmpty {
@@ -609,7 +628,7 @@ public struct HomeDashboardView: View {
         case .unplannedLogged(_, _, let loggedActivity):
             HStack {
                 VStack(alignment: .leading) {
-                    Text(loggedActivity.title ?? "")
+                    Text(viewModel.primaryLabel(for: row))
                         .font(VoxtrTypography.cardTitle)
                         .foregroundStyle(VoxtrColor.textPrimary)
                     Text("Unplanned · Logged")
@@ -710,7 +729,8 @@ public struct HomeDashboardView: View {
                         coordinationService: weeklyReviewCoordinationService,
                         coachingPresentationProvider: coachingApplicationService,
                         athleteId: athleteId,
-                        weekStart: viewModel.weekStart
+                        weekStart: viewModel.weekStart,
+                        resolveSport: resolveSport
                     ),
                     athleteDisplayName: athleteDisplayName,
                     reflectionService: weeklyReflectionService,

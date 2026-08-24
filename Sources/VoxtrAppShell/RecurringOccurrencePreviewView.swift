@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 
@@ -51,6 +52,18 @@ public struct RecurringOccurrencePreviewView: View {
     /// and dismisses itself on successful log the same way. Defaulted
     /// to a no-op so existing call sites/tests are unaffected.
     let onActivityLogged: () -> Void
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveSport` injected-closure pattern established
+    /// on `FamilyScheduleViewModel` — see that type's own doc comment.
+    /// Defaulted to `{ _ in nil }` so every pre-existing construction
+    /// site keeps compiling.
+    let resolveSport: (SportId) -> Sport?
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: this
+    /// screen's own primary label — mirrors `ActivityDetailViewModel.primaryLabel`.
+    private var primaryLabel: String {
+        ActivityLabelResolver.primaryLabel(name: suggestion.title, sportId: suggestion.sportId, resolveSport: resolveSport)
+    }
 
     @State private var editSheetItem: RecurringEditSheetItem?
     @State private var materializedActivity: MaterializedActivityItem?
@@ -80,7 +93,8 @@ public struct RecurringOccurrencePreviewView: View {
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         actorId: ActorId,
-        onActivityLogged: @escaping () -> Void = {}
+        onActivityLogged: @escaping () -> Void = {},
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.suggestion = suggestion
         self.athleteDisplayName = athleteDisplayName
@@ -89,6 +103,7 @@ public struct RecurringOccurrencePreviewView: View {
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
         self.onActivityLogged = onActivityLogged
+        self.resolveSport = resolveSport
     }
 
     public var body: some View {
@@ -104,7 +119,7 @@ public struct RecurringOccurrencePreviewView: View {
 
             Section {
                 LabeledContent("Athlete", value: athleteDisplayName)
-                LabeledContent("Activity", value: suggestion.title ?? "")
+                LabeledContent("Activity", value: primaryLabel)
                 LabeledContent("Date", value: suggestion.occurrenceDate.isoString)
                 if let startTime = suggestion.startLocalTime {
                     LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
@@ -176,7 +191,8 @@ public struct RecurringOccurrencePreviewView: View {
                     onLogged: {
                         onActivityLogged()
                         isDismissingAfterLog = true
-                    }
+                    },
+                    resolveSport: resolveSport
                 )
             )
         }
@@ -383,7 +399,8 @@ public struct RecurringOccurrencePreviewView: View {
             let viewModel = WeeklyPlanningViewModel(
                 service: planningService,
                 athleteId: suggestion.athleteId,
-                committedByActorId: actorId
+                committedByActorId: actorId,
+                resolveSport: resolveSport
             )
             editSheetItem = RecurringEditSheetItem(viewModel: viewModel, recurringActivity: fetched)
         } catch {

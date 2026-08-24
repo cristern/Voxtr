@@ -1,6 +1,7 @@
 import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrCoreReferenceData
 
 /// S2.4: first functional Weekly Planning UI. Deliberately unpolished —
 /// design polish is explicitly out of scope. All state changes go
@@ -24,19 +25,27 @@ public struct WeeklyPlanningView: View {
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let actorId: ActorId
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// same closure `viewModel`'s own primary-label resolution already
+    /// uses (it is private there), threaded here separately only to
+    /// pass into this screen's own `ActivityDetailViewLoader`
+    /// construction below.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         viewModel: WeeklyPlanningViewModel,
         athleteDisplayName: String,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        actorId: ActorId
+        actorId: ActorId,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
+        self.resolveSport = resolveSport
     }
 
     public var body: some View {
@@ -98,7 +107,7 @@ public struct WeeklyPlanningView: View {
                 Section {
                     ForEach(viewModel.recurringSuggestions) { suggestion in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(suggestion.title ?? "")
+                            Text(viewModel.primaryLabel(for: suggestion))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.suggestionSubtitle(for: suggestion))
@@ -134,11 +143,12 @@ public struct WeeklyPlanningView: View {
                             actorId: actorId,
                             planningService: planningService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            onActivityLogged: { viewModel.loadOrCreateWeekPlan() }
+                            onActivityLogged: { viewModel.loadOrCreateWeekPlan() },
+                            resolveSport: resolveSport
                         )
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(activity.title ?? "")
+                            Text(viewModel.primaryLabel(for: activity))
                                 .font(VoxtrTypography.cardTitle)
                                 .foregroundStyle(VoxtrColor.textPrimary)
                             Text(Self.rowSubtitle(for: activity))
@@ -273,15 +283,9 @@ public struct WeeklyPlanningView: View {
     /// cases either way, so this avoids two copies drifting apart.
     private func activityTypePicker(selection: Binding<ActivityType>) -> some View {
         Picker("Activity type", selection: selection) {
-            Text("Team training").tag(ActivityType.teamTraining)
-            Text("Match").tag(ActivityType.match)
-            Text("Competition").tag(ActivityType.competition)
-            Text("Individual training").tag(ActivityType.individualTraining)
-            Text("Strength").tag(ActivityType.strength)
-            Text("Conditioning").tag(ActivityType.conditioning)
-            Text("Recovery").tag(ActivityType.recovery)
-            Text("Test").tag(ActivityType.test)
-            Text("Other").tag(ActivityType.other)
+            ForEach(ActivityType.selectableCases, id: \.self) { activityType in
+                Text(TrainingStrings.activityTypeLabel(for: activityType)).tag(activityType)
+            }
         }
     }
 
@@ -417,7 +421,7 @@ struct RecurringActivityManagementView: View {
                     VStack(alignment: .leading) {
                         HStack {
                             VStack(alignment: .leading) {
-                                Text(recurringActivity.title ?? "")
+                                Text(viewModel.primaryLabel(for: recurringActivity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 Text(WeeklyPlanningView.weekdaysLabel(for: recurringActivity.weekdays))
@@ -521,15 +525,9 @@ struct RecurringActivityFormView: View {
                         .accessibilityIdentifier("planning.recurringFormTitleField")
 
                     Picker("Activity type", selection: $viewModel.recurringFormActivityType) {
-                        Text("Team training").tag(ActivityType.teamTraining)
-                        Text("Match").tag(ActivityType.match)
-                        Text("Competition").tag(ActivityType.competition)
-                        Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Strength").tag(ActivityType.strength)
-                        Text("Conditioning").tag(ActivityType.conditioning)
-                        Text("Recovery").tag(ActivityType.recovery)
-                        Text("Test").tag(ActivityType.test)
-                        Text("Other").tag(ActivityType.other)
+                        ForEach(ActivityType.selectableCases, id: \.self) { activityType in
+                            Text(TrainingStrings.activityTypeLabel(for: activityType)).tag(activityType)
+                        }
                     }
                     .accessibilityIdentifier("planning.recurringFormActivityTypePicker")
                 } header: {

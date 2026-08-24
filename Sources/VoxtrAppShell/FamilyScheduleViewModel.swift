@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
@@ -31,17 +32,22 @@ public enum FamilyScheduleRow: Identifiable {
         }
     }
 
-    /// Sport / Activity Identity domain foundation: Activity Name is now
-    /// optional on the underlying entities — this row's own `title`
-    /// stays non-optional `String` (a compile-safe presentation
-    /// fallback only, never a fabricated name) so every existing
-    /// consumer of this shared row type is unaffected. The canonical
-    /// Sport/Activity Name display resolver is explicitly out of scope
-    /// this round (see `ActivityIdentity.swift`).
-    public var title: String {
+    /// Sport / Activity Identity domain foundation, Blocker B fix
+    /// (review correction): routes through the one shared
+    /// `ActivityLabelResolver` — see that type's own doc comment for
+    /// the exact `name ?? Sport display name` contract. A prior version
+    /// of this property fell back to `?? ""`, which review correctly
+    /// rejected.
+    public func primaryLabel(resolveSport: (SportId) -> Sport?) -> String {
         switch self {
-        case .planned(let row): return row.plannedActivity.title ?? ""
-        case .recurringSuggestion(_, _, _, let suggestion): return suggestion.title ?? ""
+        case .planned(let row):
+            return ActivityLabelResolver.primaryLabel(
+                name: row.plannedActivity.title,
+                sportId: row.plannedActivity.sportId.map(SportId.init(rawValue:)),
+                resolveSport: resolveSport
+            )
+        case .recurringSuggestion(_, _, _, let suggestion):
+            return ActivityLabelResolver.primaryLabel(name: suggestion.title, sportId: suggestion.sportId, resolveSport: resolveSport)
         }
     }
 
@@ -118,6 +124,16 @@ public final class FamilyScheduleViewModel {
     /// keeps its existing deterministic behaviour unchanged.
     private let resolveAthleteColor: (AthleteId) -> AthleteColor
 
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors `resolveAthleteColor` immediately above — the same
+    /// injected-closure shape for the same reason (a shared, cross-
+    /// cutting reference-data concern this ViewModel doesn't own the
+    /// source of truth for). Defaulted to `{ _ in nil }` so every
+    /// pre-existing construction site keeps compiling; `primaryLabel(for:)`
+    /// still resolves to `ActivityLabelResolver`'s own honest
+    /// missing-reference fallback in that case, never a blank string.
+    private let resolveSport: (SportId) -> Sport?
+
     /// Fix: previously `tomorrow` through `+14 days` — omitted today
     /// entirely, and went twice as far ahead as the approved contract.
     /// This is a family logistics surface, not Weekly Planning (which
@@ -131,12 +147,14 @@ public final class FamilyScheduleViewModel {
         provideActiveAthletes: @escaping () -> [AthleteProfile],
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         planningService: PlanningService,
-        resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId
+        resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.provideActiveAthletes = provideActiveAthletes
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.planningService = planningService
         self.resolveAthleteColor = resolveAthleteColor
+        self.resolveSport = resolveSport
     }
 
     /// The one function every Family Schedule row calls for an
@@ -145,6 +163,12 @@ public final class FamilyScheduleViewModel {
     /// here instead of a locally-owned cache.
     public func resolvedAthleteColor(for athleteId: AthleteId) -> AthleteColor {
         resolveAthleteColor(athleteId)
+    }
+
+    /// The one function every Family Schedule row calls for its primary
+    /// label — mirrors `resolvedAthleteColor(for:)` immediately above.
+    public func primaryLabel(for row: FamilyScheduleRow) -> String {
+        row.primaryLabel(resolveSport: resolveSport)
     }
 
     public func loadSchedule() {

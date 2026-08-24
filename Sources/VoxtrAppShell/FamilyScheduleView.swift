@@ -2,6 +2,7 @@ import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrCoreReferenceData
 
 /// Sprint 1 completion package, Part 5, extended in Sprint 1.1 P1.
 /// "Family Schedule" — a forward-looking overview of upcoming planned
@@ -25,19 +26,26 @@ public struct FamilyScheduleView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// same closure `viewModel`'s own primary-label resolution already
+    /// uses, threaded here only to pass into this screen's own
+    /// `RecurringOccurrencePreviewView` construction below.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         viewModel: FamilyScheduleViewModel,
         actorId: ActorId,
         planningService: PlanningService,
         trainingService: TrainingService,
-        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         _viewModel = State(initialValue: viewModel)
         self.actorId = actorId
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.resolveSport = resolveSport
     }
 
     public var body: some View {
@@ -93,12 +101,13 @@ public struct FamilyScheduleView: View {
                     actorId: actorId,
                     planningService: planningService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                    onActivityLogged: { viewModel.loadSchedule() }
+                    onActivityLogged: { viewModel.loadSchedule() },
+                    resolveSport: resolveSport
                 )
             } label: {
                 rowContent(
                     athleteName: familyRow.athleteName,
-                    title: familyRow.plannedActivity.title ?? "",
+                    title: viewModel.primaryLabel(for: row),
                     subtitle: Self.rowSubtitle(
                         startLocalTime: familyRow.plannedActivity.startLocalTime,
                         location: familyRow.plannedActivity.location,
@@ -117,12 +126,13 @@ public struct FamilyScheduleView: View {
                     trainingService: trainingService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     actorId: actorId,
-                    onActivityLogged: { viewModel.loadSchedule() }
+                    onActivityLogged: { viewModel.loadSchedule() },
+                    resolveSport: resolveSport
                 )
             } label: {
                 rowContent(
                     athleteName: athleteName,
-                    title: suggestion.title ?? "",
+                    title: viewModel.primaryLabel(for: row),
                     // Same-pattern fix (Family Home's own "Recurring
                     // metadata demotion" round): "Recurring" no longer
                     // renders as its own trailing label competing with

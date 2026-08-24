@@ -1,4 +1,6 @@
 import Foundation
+import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrTrainingDomain
 
 /// Sprint 13 (architecture correction): composes `DailyFocusPresentation`
@@ -12,9 +14,11 @@ import VoxtrTrainingDomain
 /// shape as `CoachingEngine`/`CoachingPresentationMapper`, for the same
 /// reason: there is no state to hold and nothing to inject, so there is
 /// no class and no actor isolation here. Never touches SwiftData, a
-/// repository, or any service — confirmed by inspection: this file
-/// imports only `Foundation` and `VoxtrTrainingDomain` (needed only for
-/// the `PlannedActivityCompletion` parameter type).
+/// repository, or any service — `compose`'s own `resolveSport` closure
+/// parameter (Sport / Activity Identity domain foundation, Blocker B
+/// fix) is the caller's already-resolved lookup, never a repository
+/// this type reaches for itself; `VoxtrCoreReferenceData` is imported
+/// only for the `Sport` type that closure's signature names.
 public struct DailyFocusComposer: Sendable {
     public init() {}
 
@@ -39,13 +43,25 @@ public struct DailyFocusComposer: Sendable {
     /// caller (`HomeDashboardViewModel`) decides what `nil` means; this
     /// function only treats a `nil` source as having nothing to
     /// contribute to composition, never as a reason to fail itself.
+    /// Sport / Activity Identity domain foundation, Blocker B fix
+    /// (review correction): `resolveSport` is a plain parameter, not
+    /// stored state — this type stays exactly as stateless/pure as its
+    /// own doc comment above describes, it just now takes the one extra
+    /// input it needs to resolve a Sport-only activity's honest label
+    /// instead of the rejected `?? ""` fallback. Defaulted to
+    /// `{ _ in nil }` so every pre-existing call site keeps compiling.
     public func compose(
         todaysActivities: [PlannedActivityCompletion]?,
-        coaching: CoachingPresentation?
+        coaching: CoachingPresentation?,
+        resolveSport: (SportId) -> Sport? = { _ in nil }
     ) -> DailyFocusPresentation? {
         if let incomplete = todaysActivities?.first(where: { !$0.isCompleted }) {
             return DailyFocusPresentation(
-                title: incomplete.plannedActivity.title ?? "",
+                title: ActivityLabelResolver.primaryLabel(
+                    name: incomplete.plannedActivity.title,
+                    sportId: incomplete.plannedActivity.sportId.map(SportId.init(rawValue:)),
+                    resolveSport: resolveSport
+                ),
                 subtitle: TrainingStrings.notCompletedLabel,
                 action: .none,
                 source: .todaysTraining

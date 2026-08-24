@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 
@@ -89,6 +90,12 @@ public final class DailyTrainingViewModel {
     /// dependency already establishes.
     private let todayActivityComposer: TodayActivityComposer?
     private let athleteDisplayName: String
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveSport` injected-closure pattern established
+    /// on `FamilyScheduleViewModel`/`HomeDashboardViewModel` — see
+    /// those types' own doc comments. Defaulted to `{ _ in nil }` so
+    /// every pre-existing construction site keeps compiling.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         trainingService: TrainingService,
@@ -97,7 +104,8 @@ public final class DailyTrainingViewModel {
         authorId: ActorId,
         athleteId: AthleteId,
         athleteDisplayName: String = "",
-        todayActivityComposer: TodayActivityComposer? = nil
+        todayActivityComposer: TodayActivityComposer? = nil,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.trainingService = trainingService
         self.coordinationService = coordinationService
@@ -106,6 +114,30 @@ public final class DailyTrainingViewModel {
         self.athleteId = athleteId
         self.athleteDisplayName = athleteDisplayName
         self.todayActivityComposer = todayActivityComposer
+        self.resolveSport = resolveSport
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// one function every row on this screen calls for its primary
+    /// label — mirrors `FamilyScheduleViewModel.primaryLabel(for:)`.
+    public func primaryLabel(for completion: PlannedActivityCompletion) -> String {
+        ActivityLabelResolver.primaryLabel(
+            name: completion.plannedActivity.title,
+            sportId: completion.plannedActivity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
+    }
+
+    public func primaryLabel(for suggestion: RecurringActivitySuggestion) -> String {
+        ActivityLabelResolver.primaryLabel(name: suggestion.title, sportId: suggestion.sportId, resolveSport: resolveSport)
+    }
+
+    public func primaryLabel(for loggedActivity: LoggedActivity) -> String {
+        ActivityLabelResolver.primaryLabel(
+            name: loggedActivity.title,
+            sportId: loggedActivity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
     }
 
     /// Loads today's planned activities (with completion state),

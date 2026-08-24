@@ -65,10 +65,11 @@ import VoxtrCoreReferenceData
 /// `RecurringPlannedActivity`/`DevelopmentGoal`, but was never itself
 /// registered/persisted until this round. This is a genuine model-type
 /// addition (`AppSchemaV4`, see `AppSchemaVersioning.swift`), bundled in
-/// the same version bump as this round's `ActivityType` raw-value change
-/// and the optional-title field changes on the three activity entities —
-/// see that file's own doc comment for why no frozen legacy copies were
-/// needed for the field-level changes.
+/// the same version bump as this round's purely-additive
+/// `ActivityType.strength`/`.conditioning` cases and the optional-title
+/// field changes on the three activity entities — see that file's own
+/// doc comment for why no frozen legacy copies were needed for the
+/// field-level changes.
 ///
 /// IMPORTANT: any change to this list is a schema version change — see
 /// `AppSchemaVersioning.swift`'s "HOW TO ADD" instructions before

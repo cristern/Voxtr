@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCore
+import VoxtrCoreReferenceData
 import VoxtrParentDomain
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
@@ -42,7 +43,8 @@ public struct RootView: View {
                 athleteFamilyManagementService: root.container.resolve(AthleteFamilyManagementService.self),
                 activityChangeBroadcaster: root.container.resolve(AthleteActivityChangeBroadcaster.self),
                 sleepCoordinationService: root.container.resolve(SleepCoordinationService.self),
-                sleepChangeBroadcaster: root.container.resolve(AthleteSleepChangeBroadcaster.self)
+                sleepChangeBroadcaster: root.container.resolve(AthleteSleepChangeBroadcaster.self),
+                sportRepository: root.container.resolve(SportRepository.self)
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)

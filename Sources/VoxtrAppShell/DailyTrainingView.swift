@@ -2,6 +2,7 @@ import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrCoreReferenceData
 
 /// S3.3: first functional Daily Training UI. Deliberately unpolished —
 /// mirrors `WeeklyPlanningView`'s style. All state changes go through
@@ -16,6 +17,15 @@ public struct DailyTrainingView: View {
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let actorId: ActorId
     private let athleteDisplayName: String
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// same closure `viewModel`'s own primary-label resolution already
+    /// uses, threaded here only to pass into this screen's own
+    /// `RecurringOccurrencePreviewView`/"Manage Recurring Activities"
+    /// `WeeklyPlanningViewModel` constructions below — not a second
+    /// Sport truth, the same shared `SportRepository`-backed closure
+    /// `ParentTabShellView` builds once and passes to every call site
+    /// that needs one.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         viewModel: DailyTrainingViewModel,
@@ -23,7 +33,8 @@ public struct DailyTrainingView: View {
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         actorId: ActorId,
-        athleteDisplayName: String
+        athleteDisplayName: String,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         _viewModel = State(initialValue: viewModel)
         self.planningService = planningService
@@ -31,6 +42,7 @@ public struct DailyTrainingView: View {
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.actorId = actorId
         self.athleteDisplayName = athleteDisplayName
+        self.resolveSport = resolveSport
     }
 
     public var body: some View {
@@ -65,12 +77,13 @@ public struct DailyTrainingView: View {
                                 actorId: actorId,
                                 planningService: planningService,
                                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                onActivityLogged: { viewModel.load() }
+                                onActivityLogged: { viewModel.load() },
+                                resolveSport: resolveSport
                             )
                         } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(item.plannedActivity.title ?? "")
+                                    Text(viewModel.primaryLabel(for: item))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     if let location = item.plannedActivity.location, !location.isEmpty {
@@ -122,11 +135,12 @@ public struct DailyTrainingView: View {
                                     trainingService: trainingService,
                                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                     actorId: actorId,
-                                    onActivityLogged: { viewModel.load() }
+                                    onActivityLogged: { viewModel.load() },
+                                    resolveSport: resolveSport
                                 )
                             } label: {
                                 HStack {
-                                    Text(suggestion.title ?? "")
+                                    Text(viewModel.primaryLabel(for: suggestion))
                                         .font(VoxtrTypography.cardTitle)
                                         .foregroundStyle(VoxtrColor.textPrimary)
                                     Spacer()
@@ -152,7 +166,7 @@ public struct DailyTrainingView: View {
                     } else {
                         ForEach(viewModel.loggedActivities, id: \.id) { activity in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(activity.title ?? "")
+                                Text(viewModel.primaryLabel(for: activity))
                                     .font(VoxtrTypography.cardTitle)
                                     .foregroundStyle(VoxtrColor.textPrimary)
                                 // Review follow-up (duration/logged-consumer
@@ -178,15 +192,9 @@ public struct DailyTrainingView: View {
                         .accessibilityIdentifier("training.newLogTitleField")
 
                     Picker("Activity type", selection: $viewModel.newLogActivityType) {
-                        Text("Team training").tag(ActivityType.teamTraining)
-                        Text("Match").tag(ActivityType.match)
-                        Text("Competition").tag(ActivityType.competition)
-                        Text("Individual training").tag(ActivityType.individualTraining)
-                        Text("Strength").tag(ActivityType.strength)
-                        Text("Conditioning").tag(ActivityType.conditioning)
-                        Text("Recovery").tag(ActivityType.recovery)
-                        Text("Test").tag(ActivityType.test)
-                        Text("Other").tag(ActivityType.other)
+                        ForEach(ActivityType.selectableCases, id: \.self) { activityType in
+                            Text(TrainingStrings.activityTypeLabel(for: activityType)).tag(activityType)
+                        }
                     }
                     .accessibilityIdentifier("training.newLogActivityTypePicker")
 
@@ -224,7 +232,7 @@ public struct DailyTrainingView: View {
                     Picker("Link to planned activity", selection: $viewModel.selectedPlannedActivityId) {
                         Text(TrainingStrings.noneOptionLabel).tag(PlannedActivityId?.none)
                         ForEach(viewModel.plannedActivities, id: \.plannedActivity.id) { item in
-                            Text(item.plannedActivity.title ?? "")
+                            Text(viewModel.primaryLabel(for: item))
                                 .tag(Optional(item.plannedActivity.plannedActivityId))
                                 .disabled(item.isCompleted)
                         }
@@ -252,7 +260,8 @@ public struct DailyTrainingView: View {
                         let recurringViewModel = WeeklyPlanningViewModel(
                             service: planningService,
                             athleteId: viewModel.athleteId,
-                            committedByActorId: actorId
+                            committedByActorId: actorId,
+                            resolveSport: resolveSport
                         )
                         recurringViewModel.loadRecurringActivities()
                         recurringManagementSheetItem = RecurringManagementSheetItem(viewModel: recurringViewModel)

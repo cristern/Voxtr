@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 
@@ -71,6 +72,12 @@ public final class LogActivityViewModel {
     /// `sessionFormPendingRetry`), never `logActivity` again, so a retry
     /// can never create a duplicate `LoggedActivity`.
     private var loggedActivityId: LoggedActivityId?
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveSport` injected-closure pattern established
+    /// on `FamilyScheduleViewModel` — see that type's own doc comment.
+    /// Defaulted to `{ _ in nil }` so every pre-existing construction
+    /// site keeps compiling.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         plannedActivity: PlannedActivity,
@@ -78,7 +85,8 @@ public final class LogActivityViewModel {
         athleteDisplayName: String,
         authorId: ActorId,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        onLogged: @escaping () -> Void
+        onLogged: @escaping () -> Void,
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
@@ -86,12 +94,24 @@ public final class LogActivityViewModel {
         self.authorId = authorId
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onLogged = onLogged
+        self.resolveSport = resolveSport
         // Prefilled from the plan itself where a sensible starting
         // value exists — the parent only adjusts if reality differed.
         // `nil` (not a fabricated fallback) when the plan itself has no
         // duration; `save()` requires an explicit value before a
         // completed log can succeed.
         self.durationMinutes = plannedActivity.plannedDurationMinutes
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: this
+    /// screen's own primary label — mirrors
+    /// `ActivityDetailViewModel.primaryLabel`.
+    public var primaryLabel: String {
+        ActivityLabelResolver.primaryLabel(
+            name: plannedActivity.title,
+            sportId: plannedActivity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
     }
 
     @discardableResult

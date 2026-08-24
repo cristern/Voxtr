@@ -458,6 +458,72 @@ struct PlanningServiceTests {
         #expect(try sportRepository.fetchAllSports().count == 3)
     }
 
+    /// Blocker A fix: `physicalTraining` remains a real, decodable
+    /// `ActivityType` case (so existing history stays readable — see
+    /// that case's own doc comment), but a genuinely NEW PlannedActivity
+    /// may never be created with it.
+    @Test("Adding a PlannedActivity with the legacy physicalTraining ActivityType is rejected without persisting")
+    @MainActor
+    func addPlannedActivityRejectsLegacyPhysicalTraining() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .physicalTraining,
+                title: "Gym",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).isEmpty)
+    }
+
+    /// Editing is deliberately NOT guarded the same way — a legacy
+    /// activity's other fields must remain editable without forcing an
+    /// unrelated, unrequested reclassification decision. Leaving
+    /// `activityType` unchanged on an edit must round-trip the legacy
+    /// value exactly like any other untouched field.
+    @Test("Editing a PlannedActivity's other fields succeeds without forcing a reclassification away from a legacy physicalTraining type")
+    @MainActor
+    func editPlannedActivityPreservesLegacyPhysicalTrainingWhenUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        // Simulates a legacy activity that survived migration — inserted
+        // directly through the repository (bypassing the create-only
+        // guard), exactly as a migrated V3 row would already exist.
+        let legacy = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .physicalTraining,
+            title: "Gym",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let edited = try service.editPlannedActivity(
+            legacy.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .physicalTraining,
+            title: "Gym (updated location)",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(edited.title == "Gym (updated location)")
+        #expect(edited.activityType == .physicalTraining)
+    }
+
     @Test("Adding a PlannedActivity with an invalid title is rejected without persisting")
     @MainActor
     func addPlannedActivityRejectsInvalidTitle() throws {
@@ -916,6 +982,27 @@ struct PlanningServiceRecurringActivityTests {
                 athleteId: AthleteId(),
                 title: nil,
                 activityType: .teamTraining,
+                weekdays: [.monday],
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                effectiveStartDate: Self.rangeStart,
+                effectiveEndDate: Self.rangeEnd
+            )
+        }
+    }
+
+    @Test("createRecurringPlannedActivity rejects the legacy physicalTraining ActivityType")
+    @MainActor
+    func createRecurringPlannedActivityRejectsLegacyPhysicalTraining() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.createRecurringPlannedActivity(
+                athleteId: AthleteId(),
+                title: "Gym",
+                activityType: .physicalTraining,
                 weekdays: [.monday],
                 timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
                 effectiveStartDate: Self.rangeStart,

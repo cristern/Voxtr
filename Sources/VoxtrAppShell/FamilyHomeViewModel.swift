@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
@@ -167,6 +168,14 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
     /// (e.g. `.onAppear`), same as every pre-Sleep behavior on this
     /// screen already works.
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster?
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// optional/defaulted `nil`, same "one dependency's absence never
+    /// corrupts the rest of this ViewModel" reasoning `sleepStatusProvider`
+    /// above already establishes — every pre-existing construction site
+    /// keeps compiling, and `primaryLabel(for:)` still resolves to
+    /// `ActivityLabelResolver`'s own honest missing-reference fallback
+    /// when none is supplied, never a blank string.
+    private let sportRepository: SportRepository?
     /// One `SleepChangeSubscription` per currently-active athlete,
     /// reconciled in `refreshActiveAthletes()` below whenever the
     /// roster changes — never left dangling for an athlete that's no
@@ -188,7 +197,8 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
         sleepStatusProvider: (any SleepStatusProviding)? = nil,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster? = nil,
+        sportRepository: SportRepository? = nil
     ) {
         self.activeAthletes = activeAthletes
         self.workspaceId = workspaceId
@@ -202,6 +212,7 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
         )
         self.sleepStatusProvider = sleepStatusProvider
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.sportRepository = sportRepository
         // Subscribe for whatever roster was passed in at construction —
         // refreshActiveAthletes() reconciles this further on every
         // refresh(). Must run after every other stored property is set
@@ -276,6 +287,31 @@ public final class FamilyHomeViewModel: AthleteSleepChangeSubscriber {
     /// is never left with no colour at all.
     public func resolvedAthleteColor(for athleteId: AthleteId) -> AthleteColor {
         athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: the
+    /// one function every Family Home row calls for its primary label —
+    /// mirrors `resolvedAthleteColor(for:)` immediately above. Falls
+    /// through to `ActivityLabelResolver`'s own honest missing-reference
+    /// fallback when `sportRepository` wasn't supplied, never a blank
+    /// string.
+    public func primaryLabel(for row: TodayActivityRow) -> String {
+        row.primaryLabel(resolveSport: { [sportRepository] sportId in
+            sportRepository.flatMap { try? $0.fetchSport(byId: sportId) }
+        })
+    }
+
+    /// Same resolver, for the `.planned` case rendered directly as a
+    /// bare `FamilyHomeRow` (`familyHomeRow(_:)`'s own call site, not
+    /// wrapped in a `TodayActivityRow`).
+    public func primaryLabel(for row: FamilyHomeRow) -> String {
+        ActivityLabelResolver.primaryLabel(
+            name: row.plannedActivity.title,
+            sportId: row.plannedActivity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: { [sportRepository] sportId in
+                sportRepository.flatMap { try? $0.fetchSport(byId: sportId) }
+            }
+        )
     }
 
     /// VX-023: one `AthleteSleepSummary` per active athlete with Sleep

@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrParentDomain
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
@@ -57,6 +58,10 @@ public struct FamilyHomeView: View {
     /// `activityChangeBroadcaster` above.
     public let sleepCoordinationService: SleepCoordinationService
     public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// threaded straight through to `FamilyHomeContentView`, the same
+    /// pattern as every other shared service on this struct.
+    public let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -71,7 +76,8 @@ public struct FamilyHomeView: View {
         athleteFamilyManagementService: AthleteFamilyManagementService,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -86,6 +92,7 @@ public struct FamilyHomeView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.sportRepository = sportRepository
     }
 
     public var body: some View {
@@ -103,7 +110,8 @@ public struct FamilyHomeView: View {
                 athleteManagementViewModel: makeAthleteManagementViewModel(),
                 activityChangeBroadcaster: activityChangeBroadcaster,
                 sleepCoordinationService: sleepCoordinationService,
-                sleepChangeBroadcaster: sleepChangeBroadcaster
+                sleepChangeBroadcaster: sleepChangeBroadcaster,
+                sportRepository: sportRepository
             )
         } else {
             NavigationStack {

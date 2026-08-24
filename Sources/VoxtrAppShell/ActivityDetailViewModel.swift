@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
@@ -98,6 +99,12 @@ public final class ActivityDetailViewModel {
     /// this exact flow. Defaulted to a no-op so existing construction
     /// sites/tests are unaffected.
     private let onActivityLogged: () -> Void
+    /// Sport / Activity Identity domain foundation, Blocker B fix:
+    /// mirrors the `resolveSport` injected-closure pattern established
+    /// on `FamilyScheduleViewModel` — see that type's own doc comment.
+    /// Defaulted to `{ _ in nil }` so every pre-existing construction
+    /// site keeps compiling.
+    private let resolveSport: (SportId) -> Sport?
 
     public init(
         activity: PlannedActivity,
@@ -111,7 +118,8 @@ public final class ActivityDetailViewModel {
         deletedByActorId: ActorId,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        onActivityLogged: @escaping () -> Void = {}
+        onActivityLogged: @escaping () -> Void = {},
+        resolveSport: @escaping (SportId) -> Sport? = { _ in nil }
     ) {
         self.activity = activity
         self.isCompleted = isCompleted
@@ -125,7 +133,19 @@ public final class ActivityDetailViewModel {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onActivityLogged = onActivityLogged
+        self.resolveSport = resolveSport
         prefillEditForm()
+    }
+
+    /// Sport / Activity Identity domain foundation, Blocker B fix: this
+    /// screen's own primary label — mirrors
+    /// `FamilyScheduleViewModel.primaryLabel(for:)`.
+    public var primaryLabel: String {
+        ActivityLabelResolver.primaryLabel(
+            name: activity.title,
+            sportId: activity.sportId.map(SportId.init(rawValue:)),
+            resolveSport: resolveSport
+        )
     }
 
     /// RPE — read directly from the canonical `LoggedActivity` field,
@@ -239,6 +259,14 @@ public final class ActivityDetailViewModel {
                 title: editTitle.trimmingCharacters(in: .whitespacesAndNewlines),
                 localDate: Self.localDate(from: editDate),
                 timeZoneId: activity.timeZoneId,
+                // Sport / Activity Identity domain foundation (same-
+                // pattern audit): this form has no Sport-editing UI this
+                // round (explicitly out of scope), so the activity's
+                // CURRENT sportId is preserved unchanged — omitting this
+                // would silently default to `nil` and strip an existing
+                // Sport on every save, exactly the "no data loss"
+                // requirement this round's own review demanded.
+                sportId: activity.sportId.map(SportId.init(rawValue:)),
                 startLocalTime: editHasStartTime ? Self.localTime(from: editStartTime) : nil,
                 plannedDurationMinutes: editHasDuration ? editDurationMinutes : nil,
                 notes: editNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editNotes,
@@ -475,7 +503,8 @@ public final class ActivityDetailViewModel {
                 self?.isCompleted = true
                 self?.onActivityLogged()
                 onDismiss()
-            }
+            },
+            resolveSport: resolveSport
         )
     }
 
