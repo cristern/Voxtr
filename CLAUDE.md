@@ -39,7 +39,8 @@ Reuse canonical services/read models where they already exist.
 - One task branch should normally correspond to one PR.
 - Do not merge to `develop`.
 - Push only the task branch.
-- Stop after push and wait for review/approval.
+- Create a PR targeting `develop`, then stop and wait for review/approval.
+- A PR exists for CI and traceability; creating it does not constitute merge approval.
 - A branch is considered finished after its PR is merged; use a new branch for subsequent fixes.
 - One Claude Code task branch should normally correspond to one PR.
 - Once that PR has been merged, that task branch is considered finished.
@@ -70,7 +71,8 @@ For every task:
 7. Review the final diff.
 8. Commit on the task branch.
 9. Push only the task branch.
-10. Report and stop for review.
+10. Create a PR targeting `develop`.
+11. Report and stop for review. Never merge before explicit approval.
 
 ## 7. Compile-oriented audit
 Before delivery, explicitly check relevant:
@@ -186,6 +188,7 @@ Claude Code must never merge to `main` unless explicitly instructed.
 The required lifecycle is:
 Claude Code task branch
 → push
+→ PR targeting `develop` (CI/traceability only)
 → human/product/architecture review
 → explicit approval
 → PR merge to `develop`
