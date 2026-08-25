@@ -98,30 +98,27 @@ struct Sprint1CoreFlowCompletionTests {
 
     // MARK: - Post-mutation navigation and stale-state consistency audit (Issue A)
 
-    /// Issue A's exact contract: a successful log through
-    /// `ActivityDetailViewModel.makeLogActivityViewModel()` must not
-    /// only flip `isCompleted` locally — it must also fire the explicit
-    /// `onActivityLogged` signal the screen that pushed Activity Detail
-    /// relies on to reload its own authoritative data, THEN dismiss
-    /// itself exactly once via `onDismiss` — never the other order,
-    /// never twice. `callOrder` (not two separate counters) proves both
-    /// the count AND the ordering in one assertion: the returning host
-    /// must reread canonical state before this screen disappears, and
-    /// `isCompleted` — `private(set)`, mutated in exactly one place in
-    /// this whole codebase (the same `onLogged` closure both `onActivityLogged`
-    /// and `onDismiss` fire from) — has no other transition that could
-    /// cause a second, independent dismiss trigger; `ActivityDetailView`
-    /// no longer keeps a separate `.onChange(of: isCompleted)` observer
-    /// for exactly that reason. Exercised at the ViewModel/contract
-    /// level (not via real SwiftUI navigation, which is not something
-    /// Swift Testing can drive) — this is the deterministic, testable
-    /// half of the fix; the SwiftUI wiring at each of the 5 call sites
-    /// is what actually connects `onActivityLogged` to each source
-    /// screen's own `load`/`refresh` method, and `onDismiss` to
-    /// `ActivityDetailView`'s own `@Environment(\.dismiss)`.
-    @Test("A successful log fires onActivityLogged then dismisses exactly once, in that order")
+    /// TestFlight closeout (blank-screen-after-Save fix): a successful
+    /// log through `ActivityDetailViewModel.makeLogActivityViewModel()`
+    /// must fire the explicit `onActivityLogged` signal the screen that
+    /// pushed Activity Detail relies on to reload its own authoritative
+    /// data — but must NEVER request that `ActivityDetailView` itself
+    /// dismiss. Logging is an in-context correction/update flow: the
+    /// user stays on the same Activity Detail screen, which now reflects
+    /// the newly logged outcome and recorded data (`loggedActivity`/
+    /// `activityReflection`, refreshed here via the SAME canonical
+    /// `loggedActivityDetail(forPlannedActivity:)` read
+    /// `ActivityDetailViewLoader` uses to build this state initially —
+    /// never a caller-supplied snapshot, never inferred). Exercised at
+    /// the ViewModel/contract level (not via real SwiftUI navigation,
+    /// which is not something Swift Testing can drive) — the SwiftUI
+    /// wiring at each of the 5 `ActivityDetailViewLoader` call sites is
+    /// what actually connects `onActivityLogged` to each source screen's
+    /// own `load`/`refresh` method; `makeLogActivityViewModel()` no
+    /// longer accepts (or needs) an `onDismiss` closure at all.
+    @Test("A successful log fires onActivityLogged, never requests a parent dismiss, and Activity Detail reflects the canonical logged outcome")
     @MainActor
-    func successfulLogFiresOnActivityLoggedThenDismissesExactlyOnce() throws {
+    func successfulLogFiresOnActivityLoggedAndReflectsCanonicalState() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -140,35 +137,52 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var callOrder: [String] = []
+        var reloadCallCount = 0
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { callOrder.append("reload") }
+            onActivityLogged: { reloadCallCount += 1 }
         )
+        #expect(viewModel.loggedActivity == nil)
 
-        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
+        // `makeLogActivityViewModel()` takes no `onDismiss` parameter —
+        // there is nothing left for a caller to wire up to a dismiss.
+        let logViewModel = viewModel.makeLogActivityViewModel()
         // Planned/Logged Activity lifecycle consistency cleanup: actual
         // duration is required for a completed log; `activity` itself
         // has no planned duration, so it must be entered explicitly.
         logViewModel.durationMinutes = 45
+        logViewModel.perceivedExertion = 7
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
+        #expect(reloadCallCount == 1)
         #expect(viewModel.isCompleted == true)
-        #expect(callOrder == ["reload", "dismiss"])
+        #expect(viewModel.errorMessage == nil)
+
+        // Activity Detail reflects the exact canonical record just
+        // created — not a locally-fabricated stand-in.
+        let loggedActivity = try #require(viewModel.loggedActivity)
+        #expect(loggedActivity.status == .completed)
+        #expect(loggedActivity.durationMinutes == 45)
+        #expect(viewModel.perceivedExertion == 7)
+        #expect(viewModel.formValue == 3)
     }
 
     /// A failed log (Form required but missing) must neither flip
-    /// `isCompleted`, nor fire `onActivityLogged`, nor dismiss — the
-    /// same "no false refresh/navigation on failure" contract required
-    /// for the successful path above, now covering the dismiss half
-    /// too.
-    @Test("A failed log fires neither onActivityLogged nor dismiss, and does not flip isCompleted")
+    /// `isCompleted` nor mutate `loggedActivity`/`activityReflection`,
+    /// nor fire `onActivityLogged` — the same "no false refresh/
+    /// navigation on failure" contract as before, now also covering the
+    /// canonical-state refresh this round adds. The error itself stays
+    /// on `logViewModel.errorMessage` (rendered locally inside
+    /// `LogActivityView`'s own "How did it go?" section) — it never
+    /// leaks onto `ActivityDetailViewModel.errorMessage`, the separate
+    /// top-of-screen error this screen's own mutations use.
+    @Test("A failed log fires neither onActivityLogged nor a canonical-state refresh, and keeps the error local to Log Activity")
     @MainActor
-    func failedLogFiresNeitherOnActivityLoggedNorDismiss() throws {
+    func failedLogFiresNeitherOnActivityLoggedNorStateRefresh() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -187,21 +201,24 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var callOrder: [String] = []
+        var reloadCallCount = 0
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { callOrder.append("reload") }
+            onActivityLogged: { reloadCallCount += 1 }
         )
 
-        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
+        let logViewModel = viewModel.makeLogActivityViewModel()
         // sessionForm left nil — Form is required for a completed log.
 
         #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(reloadCallCount == 0)
         #expect(viewModel.isCompleted == false)
-        #expect(callOrder.isEmpty)
+        #expect(viewModel.loggedActivity == nil)
+        #expect(viewModel.errorMessage == nil)
     }
 
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion

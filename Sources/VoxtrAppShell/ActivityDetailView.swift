@@ -38,29 +38,6 @@ public struct ActivityDetailView: View {
     @State private var isPresentingDeleteConfirmation: Bool = false
     @State private var isPresentingCancelConfirmation: Bool = false
     @State private var isEditingLoggedActivity: Bool = false
-    /// TestFlight regression fix (Log Activity -> mounted Athlete Home
-    /// still stale): a successful log used to call THIS screen's own
-    /// `dismiss()` directly from inside `LogActivityView`'s Save button
-    /// action, synchronously as part of `LogActivityViewModel.save()` —
-    /// BEFORE `save()` even returned to that button, i.e. BEFORE
-    /// `LogActivityView`'s own `dismiss()` (its own `@Environment(\.dismiss)`,
-    /// called immediately afterward once `save()` returns `true`) ever
-    /// ran. That popped this screen (the sheet's OWN presenter) off the
-    /// NavigationStack WHILE its sheet was still actively presented,
-    /// with the sheet's own, separate dismiss following only afterward —
-    /// backwards from the well-defined "dismiss the child sheet, THEN
-    /// the parent" order, and with no settled render pass in between for
-    /// the `HomeDashboardViewModel` mutation `onActivityLogged()` had
-    /// just made. Cancel Activity never has this problem: it presents no
-    /// sheet at all, and this screen's own dismiss only ever happens
-    /// later, from a completely separate user-initiated back-navigation
-    /// tap — a fully settled render cycle after the mutation, every
-    /// time. This flag defers this screen's own dismiss until
-    /// `.sheet(isPresented:onDismiss:)`'s native "the sheet has now
-    /// fully closed" completion — a standard, built-in SwiftUI signal
-    /// (not a manual delay/timing hack) that only fires once
-    /// `LogActivityView`'s own dismiss has cleanly finished first.
-    @State private var isDismissingAfterLog: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     public init(viewModel: ActivityDetailViewModel) {
@@ -242,28 +219,19 @@ public struct ActivityDetailView: View {
         .sheet(isPresented: $isEditingLoggedActivity) {
             LoggedActivityEditFormView(viewModel: viewModel)
         }
-        .sheet(isPresented: $isLogging, onDismiss: {
-            // Fires only once LogActivityView's OWN dismiss (its Save
-            // button, or Cancel/swipe-to-dismiss) has fully finished —
-            // see `isDismissingAfterLog`'s own doc comment above for why
-            // this ordering is the actual fix, not merely a stylistic
-            // change.
-            if isDismissingAfterLog {
-                isDismissingAfterLog = false
-                dismiss()
-            }
-        }) {
-            // Athlete Home stale-state fix, single-owner closeout
-            // (unchanged): `onDismiss` still fires SYNCHRONOUSLY inside
-            // the same `onLogged` closure that fires `onActivityLogged()`,
-            // the moment a save genuinely succeeds — `isCompleted` is
-            // still `private(set)` with exactly one mutation site. What
-            // changed is what THIS closure does with that signal: it no
-            // longer dismisses this screen directly (see
-            // `isDismissingAfterLog` above) — it only records that a
-            // dismiss should happen once the sheet itself has cleanly
-            // closed.
-            LogActivityView(viewModel: viewModel.makeLogActivityViewModel(onDismiss: { isDismissingAfterLog = true }))
+        .sheet(isPresented: $isLogging) {
+            // TestFlight closeout: logging is an in-context correction/
+            // update flow — a successful Save dismisses ONLY this sheet
+            // (`LogActivityView`'s own `@Environment(\.dismiss)`, called
+            // from its Save button once `save()` returns `true`).
+            // `ActivityDetailView` itself never dismisses in response to
+            // a log; `makeLogActivityViewModel()`'s own `onLogged`
+            // closure already refreshes `loggedActivity`/
+            // `activityReflection` from canonical state before the sheet
+            // closes, so this screen shows the real logged outcome the
+            // moment it becomes visible again — see that method's own
+            // doc comment for the full reasoning.
+            LogActivityView(viewModel: viewModel.makeLogActivityViewModel())
         }
         .confirmationDialog(
             "Delete this planned activity?",
