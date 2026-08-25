@@ -391,6 +391,105 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(reflectionCount == 1)
     }
 
+    /// Round 4 review follow-up: the exact regression the review
+    /// caught — round 3's `finishSave` logic returned early on a Form
+    /// failure, before `onLogged()`/`refreshMountedState()` ever ran.
+    /// So a user who logged successfully, hit a Form failure, then
+    /// chose Cancel instead of retrying, would leave the mounted
+    /// Activity Detail (and the parent surface behind it) never told
+    /// the activity was logged at all — a One Truth violation, since
+    /// the canonical `LoggedActivity` genuinely exists.
+    ///
+    /// Reaching a genuine "Form remains pending/failed" state through
+    /// `LogActivityViewModel`'s own public `save()` is not possible
+    /// without either bypassing `TrainingValidator`'s required (1...5)
+    /// gate (a Completed log's Form is always validated before
+    /// `logActivity` is ever called, so it can never fail afterward with
+    /// a valid input) or a domain-invalid Missed+Form combination
+    /// (explicitly disallowed). This test instead uses
+    /// `presetForFormRetryTesting` — a package-internal, test-only seam
+    /// — to put the view model into the exact "already logged, Form
+    /// retry pending" state a genuine failure leaves behind, backed by a
+    /// REAL, already-persisted `LoggedActivity` (created directly
+    /// through the coordinator, the same pattern several other tests in
+    /// this file already use). The retry's own `recordSessionForm` call
+    /// is real, unvalidated production code — the failure itself comes
+    /// from a genuinely out-of-range value (99), the same technique
+    /// already established elsewhere in this codebase for simulating a
+    /// Session Form write failure — never a fabricated result.
+    @Test("A retry with Form still unresolved still fires the canonical refresh signal and attempts the mounted refresh, keeps save() false without duplicating the LoggedActivity, and a later valid retry succeeds")
+    @MainActor
+    func formStillUnresolvedOnRetryStillRefreshesCanonicalStateWithoutDuplicating() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        // The base LoggedActivity genuinely persisted already — created
+        // directly through the coordinator with no Form, mirroring the
+        // state a real `save()` call reaches the instant `logActivity`
+        // itself succeeds, before Form is ever attempted.
+        let logged = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: activity.title, startedAt: .now, durationMinutes: 45, status: .completed,
+            authorId: ActorId(), sessionForm: nil
+        )
+
+        var onLoggedCallCount = 0
+        var refreshCallCount = 0
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity,
+            athleteId: athleteId,
+            athleteDisplayName: "Oliver",
+            authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: { onLoggedCallCount += 1 },
+            refreshMountedState: { refreshCallCount += 1; return true }
+        )
+        // Out-of-range — genuinely fails ReflectionService's own
+        // validation on the real `recordSessionForm` call the retry
+        // branch makes, not a fabricated result.
+        logViewModel.presetForFormRetryTesting(loggedActivityId: logged.loggedActivityId, sessionForm: 99)
+
+        #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(logViewModel.sessionFormPendingRetry)
+        // The canonical refresh signal still fired, even though Form
+        // remains unresolved — the exact fix this round makes.
+        #expect(onLoggedCallCount == 1)
+        #expect(refreshCallCount == 1)
+
+        var links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivityId).count == 0)
+
+        // A later retry with a valid Form value succeeds, without ever
+        // re-invoking logActivity.
+        logViewModel.sessionForm = 3
+        #expect(logViewModel.save())
+        #expect(logViewModel.sessionFormPendingRetry == false)
+        #expect(onLoggedCallCount == 2)
+        #expect(refreshCallCount == 2)
+
+        links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivityId).count == 1)
+    }
+
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion
 
     /// The exact defect this closeout fixes: `ActivityDetailViewLoader`

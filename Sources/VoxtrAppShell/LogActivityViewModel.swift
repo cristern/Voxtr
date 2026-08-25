@@ -113,6 +113,31 @@ public final class LogActivityViewModel {
         self.durationMinutes = plannedActivity.plannedDurationMinutes
     }
 
+    /// Test-only seam (round 4 review follow-up): puts this view model
+    /// directly into the exact "already logged, Session Form retry
+    /// pending" state a genuine Session Form write failure leaves
+    /// behind — the state `save()`'s retry branch (`if let
+    /// loggedActivityId`) is written for. No production caller ever
+    /// needs this: every real caller reaches that state exclusively
+    /// through a genuine failed `save()` call, never by construction.
+    /// It exists because a genuine FIRST-attempt Session Form failure
+    /// cannot be produced through this type's own public API without
+    /// either bypassing `TrainingValidator`'s required (1...5) Form
+    /// gate at the call site that matters (undermining the very
+    /// validation this fix does not touch) or encoding a domain-invalid
+    /// Missed+Form scenario (explicitly disallowed) — this lets a test
+    /// exercise the retry branch's real, unvalidated `recordSessionForm`
+    /// call directly instead, the same "deliberately out-of-range value"
+    /// technique already established elsewhere in this codebase for
+    /// simulating a Session Form write failure. Package-internal only —
+    /// reachable from tests via `@testable import`, never `public`.
+    func presetForFormRetryTesting(loggedActivityId: LoggedActivityId, sessionForm: Int?) {
+        self.loggedActivityId = loggedActivityId
+        self.sessionFormPendingRetry = true
+        self.sessionForm = sessionForm
+        self.didLog = true
+    }
+
     @discardableResult
     public func save() -> Bool {
         errorMessage = nil
@@ -121,14 +146,13 @@ public final class LogActivityViewModel {
             // Retry path: the activity itself was already logged
             // successfully on a prior attempt. Never re-invokes
             // logActivity, so this can never create a duplicate
-            // `LoggedActivity`. Two independent things may still need
-            // retrying here, and this checks both every time: the
-            // Session Form write (`sessionFormPendingRetry`), and the
-            // mounted screen's own canonical refresh (`refreshMountedState`,
-            // re-attempted unconditionally below — cheap, idempotent, and
-            // never itself a write, so retrying it on every pass through
-            // here — even one where only the OTHER thing needed retrying —
-            // is safe and never risks a duplicate Form write either).
+            // `LoggedActivity`. Only the Session Form write is retried
+            // here (`sessionFormPendingRetry`) — `finishSave(formFailed:)`
+            // below is what always fires `onLogged()` and always attempts
+            // `refreshMountedState`, regardless of whether the Form retry
+            // itself succeeds, per the review follow-up (round 4) fixed
+            // there.
+            var formFailed = false
             if sessionFormPendingRetry {
                 if let sessionForm {
                     do {
@@ -141,19 +165,13 @@ public final class LogActivityViewModel {
                         sessionFormPendingRetry = false
                     } catch {
                         sessionFormPendingRetry = true
-                        errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
-                        return false
+                        formFailed = true
                     }
                 } else {
                     sessionFormPendingRetry = false
                 }
             }
-            onLogged()
-            guard refreshMountedState?() ?? true else {
-                errorMessage = "Activity logged. Could not refresh — tap Save to try again."
-                return false
-            }
-            return true
+            return finishSave(formFailed: formFailed)
         }
 
         // Planned/Logged Activity lifecycle consistency cleanup: actual
@@ -236,36 +254,61 @@ public final class LogActivityViewModel {
             }
             didLog = true
 
+            let formFailed: Bool
             switch result.sessionFormOutcome {
             case .notRequested, .saved:
                 sessionFormPendingRetry = false
+                formFailed = false
             case .failed:
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
-                return false
+                formFailed = true
             }
 
-            // Review follow-up (blank-screen-after-Save closeout, round
-            // 3): logging and Form are both settled at this point — only
-            // now is a mounted screen's own canonical refresh attempted,
-            // and only a SUCCESSFUL refresh lets `save()` itself report
-            // success. `onLogged()` still fires unconditionally: the
-            // screen this one was pushed from reads its OWN canonical
-            // state independently via `onActivityLogged()` and is
-            // correct regardless of whether THIS screen's local refresh
-            // (`refreshMountedState`) happens to succeed.
-            onLogged()
-            guard refreshMountedState?() ?? true else {
-                errorMessage = "Activity logged. Could not refresh — tap Save to try again."
-                return false
-            }
-            return true
+            return finishSave(formFailed: formFailed)
         } catch TrainingServiceError.plannedActivityAlreadyLinked {
             errorMessage = "This activity has already been logged."
             return false
         } catch {
             errorMessage = "Could not save this log. Please try again."
             return false
+        }
+    }
+
+    /// Review follow-up (round 4): the exact regression the review
+    /// caught — once the base `LoggedActivity` itself has genuinely
+    /// persisted, `onLogged()` and `refreshMountedState()` must ALWAYS
+    /// run, even when Session Form persistence failed (or is still
+    /// pending retry). Before this fix, a Form failure returned early
+    /// and skipped both — so a user who logged successfully, hit a Form
+    /// failure, then chose Cancel instead of retrying, would leave the
+    /// mounted Activity Detail (and the parent surface behind it) never
+    /// told the activity was logged at all: a genuine One Truth
+    /// violation, since the canonical `LoggedActivity` already exists.
+    /// Called from BOTH the initial-log path and the retry path, each of
+    /// which independently determines whether Form itself failed on
+    /// THIS pass — this function's only job is what happens after that:
+    /// fire both signals unconditionally, then decide `save()`'s own
+    /// result from whichever of the two independent outcomes (Form,
+    /// mounted refresh) is worse, without ever fabricating success for
+    /// either. `sessionFormPendingRetry` (set by the caller before this
+    /// runs) and `refreshMountedState` being a pure, idempotent read are
+    /// what make a subsequent retry safe here — this function itself
+    /// never re-invokes `logActivity` or `recordSessionForm`.
+    private func finishSave(formFailed: Bool) -> Bool {
+        onLogged()
+        let refreshSucceeded = refreshMountedState?() ?? true
+        switch (formFailed, refreshSucceeded) {
+        case (true, false):
+            errorMessage = "Activity logged. Form could not be saved and the screen could not refresh — tap Save to try again."
+            return false
+        case (true, true):
+            errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
+            return false
+        case (false, false):
+            errorMessage = "Activity logged. Could not refresh — tap Save to try again."
+            return false
+        case (false, true):
+            return true
         }
     }
 
