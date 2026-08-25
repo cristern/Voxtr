@@ -35,7 +35,7 @@ These workflows are defined in `codemagic.yaml`. All of them can still be starte
 
 ### On pull request
 
-- **`pr-validation`** — the only automatic PR check, and only for PRs targeting `main`. Runs in strict order: package unit tests (hard-fails if zero tests execute) → **only if that passes** → build AthleteApp for the Simulator → **only if that passes** → build ParentApp for the Simulator. Any failed step stops everything after it — there is no `ignore_failure` anywhere in this workflow, so a failed test run means neither simulator build ever starts.
+- **`pr-validation`** — the only automatic PR check, and only for PRs targeting `develop` — normal Vǫxtr development merges task branches into `develop`, so that is the branch this gate protects. Runs in strict order: package unit tests (hard-fails if zero tests execute) → **only if that passes** → build AthleteApp for the Simulator → **only if that passes** → build ParentApp for the Simulator. Any failed step stops everything after it — there is no `ignore_failure` anywhere in this workflow, so a failed test run means neither simulator build ever starts.
 
 ### On release tag
 
