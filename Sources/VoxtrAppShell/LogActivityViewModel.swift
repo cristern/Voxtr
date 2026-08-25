@@ -114,6 +114,29 @@ public final class LogActivityViewModel {
                     bodyFeeling: sessionForm
                 )
                 sessionFormPendingRetry = false
+                // Review follow-up (blank-screen-after-Save closeout,
+                // round 2): the FIRST successful call below (the
+                // `didLog = true; onLogged()` further down this
+                // function) already refreshes the mounted Activity
+                // Detail's canonical `loggedActivity`/`activityReflection`
+                // the moment the base activity is created — but a Form
+                // write that fails on that same first attempt leaves
+                // Activity Detail refreshed WITHOUT the Form value. Since
+                // this retry branch used to return without calling
+                // `onLogged()` at all, a LATER successful retry (this
+                // exact call) would let the sheet close with the correct
+                // Form now persisted in the database, while the still-
+                // mounted Activity Detail kept showing the stale,
+                // Form-less snapshot from the first call — the sheet
+                // dismissing is the user's only signal that Save
+                // succeeded, so it must always carry a fresh refresh
+                // with it. `onLogged()` is the same one-shot signal the
+                // main path below already fires on every genuine
+                // canonical-state change; calling it again here is
+                // exactly that same contract, not a new one — it never
+                // re-invokes `logActivity` and therefore can never
+                // create a second `LoggedActivity`.
+                onLogged()
                 return true
             } catch {
                 sessionFormPendingRetry = true

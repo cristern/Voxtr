@@ -505,13 +505,38 @@ public final class ActivityDetailViewModel {
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             onLogged: { [weak self] in
                 guard let self else { return }
+                // Review follow-up (blank-screen-after-Save closeout,
+                // round 2): `isCompleted` and `loggedActivity` must
+                // never diverge — One Truth. This canonical refetch can
+                // fail (a transient fetch error; `try?` was already
+                // discarding that possibility silently) without the
+                // underlying write itself having failed, since the log
+                // that triggered this closure already genuinely
+                // succeeded. Setting `isCompleted = true` unconditionally
+                // in that case would have claimed "logged" while
+                // `loggedActivity` stayed nil/stale — enough to
+                // re-surface the "Log Activity" button for an activity
+                // that is already logged in the database. `isCompleted`
+                // is now derived FROM a successful refresh, exactly like
+                // `cancelActivity()`/`reopenActivity()` already set both
+                // together from one atomic source, never independently.
+                // On a failed refresh, `isCompleted` simply stays at
+                // whatever it already was — an honest "still don't know"
+                // rather than a false "definitely logged" — self-
+                // correcting the next time this screen (or a fresh one,
+                // via `ActivityDetailViewLoader`) re-reads canonical
+                // state. `onActivityLogged()` still fires regardless: the
+                // screen this one was pushed from reads its OWN fresh
+                // canonical state independently and is not affected by
+                // whether this screen's local refresh happened to
+                // succeed.
                 if let detail = try? self.trainingReflectionCoordinationService.loggedActivityDetail(
                     forPlannedActivity: self.activity.plannedActivityId
                 ) {
                     self.loggedActivity = detail.loggedActivity
                     self.activityReflection = detail.reflection
+                    self.isCompleted = true
                 }
-                self.isCompleted = true
                 self.onActivityLogged()
             }
         )

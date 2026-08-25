@@ -221,6 +221,97 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    /// Review follow-up (blank-screen-after-Save closeout, round 2): the
+    /// exact gap the review found — `LogActivityViewModel.save()`'s
+    /// Session Form RETRY branch (reached whenever `loggedActivityId` is
+    /// already set, i.e. a prior `save()` call already logged the base
+    /// activity) never fired `onLogged()` on a successful retry, so the
+    /// sheet could close on a genuinely successful Save while the
+    /// mounted `ActivityDetailViewModel` still showed the stale,
+    /// Form-less snapshot from the FIRST call.
+    ///
+    /// Reaching the retry branch honestly, through real production code
+    /// (never a test-only seam), requires `loggedActivityId` to already
+    /// be set — the only way to do that is a prior successful `save()`
+    /// call. A genuine "the base log succeeds but the Session Form write
+    /// itself throws" first attempt is not reachable through the public
+    /// API surface `LogActivityViewModel` actually calls: the only
+    /// Form-write failure `ReflectionService` can produce with an
+    /// otherwise-valid `LogActivityViewModel` (an out-of-range value)
+    /// is already rejected by `TrainingValidator.validateForm` before
+    /// `logActivity` is ever called, so it can never reach that point in
+    /// the first place. This test instead reaches the SAME retry branch
+    /// the SAME way any second `save()` call after a first success does
+    /// (logging as Missed first — Form not required, so the first call
+    /// succeeds cleanly with no Form attempted — then entering a Form
+    /// value and saving again) — proving the exact code path the fix
+    /// touches: a successful retry-branch write fires `onLogged()`,
+    /// which is the ONLY thing that changed.
+    @Test("A successful Session Form retry (the RETRY branch of save(), not the initial log) also refreshes Activity Detail's canonical state and never duplicates the LoggedActivity")
+    @MainActor
+    func successfulSessionFormRetryRefreshesCanonicalState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+
+        let logViewModel = viewModel.makeLogActivityViewModel()
+        // First attempt: log as Missed — Form is not required for this
+        // outcome, so this succeeds cleanly with no Form ever attempted,
+        // setting `loggedActivityId` internally and reaching the retry
+        // branch on any later `save()` call.
+        logViewModel.isCompleted = false
+        #expect(logViewModel.save())
+        #expect(reloadCallCount == 1)
+        #expect(viewModel.loggedActivity?.status == .missed)
+        #expect(viewModel.formValue == nil)
+
+        // Second attempt: the SAME logViewModel, now with a Form value
+        // entered — this is the exact RETRY branch the fix touches.
+        logViewModel.sessionForm = 3
+        #expect(logViewModel.save())
+        #expect(logViewModel.sessionFormPendingRetry == false)
+
+        // No duplicate LoggedActivity from either call.
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+
+        // The mounted Activity Detail now exposes the canonical Form
+        // value the retry just persisted — not the stale, Form-less
+        // snapshot from the first call.
+        #expect(reloadCallCount == 2)
+        #expect(viewModel.formValue == 3)
+        #expect(viewModel.loggedActivity?.status == .missed)
+
+        // `makeLogActivityViewModel()` accepts no dismiss closure of any
+        // kind (see the successful/failed-log tests above) — there is
+        // structurally nothing here that could request a parent
+        // dismiss, on the initial log or on this retry.
+    }
+
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion
 
     /// The exact defect this closeout fixes: `ActivityDetailViewLoader`
