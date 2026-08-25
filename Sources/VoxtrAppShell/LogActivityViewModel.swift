@@ -66,10 +66,27 @@ public final class LogActivityViewModel {
     private let authorId: ActorId
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let onLogged: () -> Void
+    /// Review follow-up (blank-screen-after-Save closeout, round 3): a
+    /// SEPARATE, optional signal from `onLogged` above — callers with a
+    /// mounted screen whose OWN canonical state must be refreshed before
+    /// a successful Save can safely let its sheet close
+    /// (`ActivityDetailViewModel`, currently the only such caller)
+    /// supply this closure; its return value determines whether `save()`
+    /// itself reports success, exactly as if refreshing that mounted
+    /// state were as load-bearing as the persistence writes above it —
+    /// which it is, per the approved contract ("a successful Save that
+    /// dismisses the sheet -> mounted Activity Detail already reflects
+    /// canonical logged state"). Defaulted to `nil`, treated as an
+    /// unconditional success (`?? true`) — `onLogged`'s existing
+    /// `() -> Void` contract and every existing construction site
+    /// (production and test) keep compiling and behaving unchanged; this
+    /// is additive, never a replacement for `onLogged`.
+    private let refreshMountedState: (() -> Bool)?
     /// Set once the first `save()` call successfully logs the activity —
     /// from then on, `save()` retries only the Session Form write (see
-    /// `sessionFormPendingRetry`), never `logActivity` again, so a retry
-    /// can never create a duplicate `LoggedActivity`.
+    /// `sessionFormPendingRetry`) and/or `refreshMountedState` above,
+    /// never `logActivity` again, so a retry can never create a
+    /// duplicate `LoggedActivity`.
     private var loggedActivityId: LoggedActivityId?
 
     public init(
@@ -78,7 +95,8 @@ public final class LogActivityViewModel {
         athleteDisplayName: String,
         authorId: ActorId,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        onLogged: @escaping () -> Void
+        onLogged: @escaping () -> Void,
+        refreshMountedState: (() -> Bool)? = nil
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
@@ -86,6 +104,7 @@ public final class LogActivityViewModel {
         self.authorId = authorId
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onLogged = onLogged
+        self.refreshMountedState = refreshMountedState
         // Prefilled from the plan itself where a sensible starting
         // value exists — the parent only adjusts if reality differed.
         // `nil` (not a fabricated fallback) when the plan itself has no
@@ -100,49 +119,41 @@ public final class LogActivityViewModel {
 
         if let loggedActivityId {
             // Retry path: the activity itself was already logged
-            // successfully on a prior attempt — only the Session Form
-            // write failed. Never re-invokes logActivity.
-            guard let sessionForm else {
-                sessionFormPendingRetry = false
-                return true
+            // successfully on a prior attempt. Never re-invokes
+            // logActivity, so this can never create a duplicate
+            // `LoggedActivity`. Two independent things may still need
+            // retrying here, and this checks both every time: the
+            // Session Form write (`sessionFormPendingRetry`), and the
+            // mounted screen's own canonical refresh (`refreshMountedState`,
+            // re-attempted unconditionally below — cheap, idempotent, and
+            // never itself a write, so retrying it on every pass through
+            // here — even one where only the OTHER thing needed retrying —
+            // is safe and never risks a duplicate Form write either).
+            if sessionFormPendingRetry {
+                if let sessionForm {
+                    do {
+                        _ = try trainingReflectionCoordinationService.recordSessionForm(
+                            athleteId: athleteId,
+                            loggedActivityId: loggedActivityId,
+                            authorId: authorId,
+                            bodyFeeling: sessionForm
+                        )
+                        sessionFormPendingRetry = false
+                    } catch {
+                        sessionFormPendingRetry = true
+                        errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
+                        return false
+                    }
+                } else {
+                    sessionFormPendingRetry = false
+                }
             }
-            do {
-                _ = try trainingReflectionCoordinationService.recordSessionForm(
-                    athleteId: athleteId,
-                    loggedActivityId: loggedActivityId,
-                    authorId: authorId,
-                    bodyFeeling: sessionForm
-                )
-                sessionFormPendingRetry = false
-                // Review follow-up (blank-screen-after-Save closeout,
-                // round 2): the FIRST successful call below (the
-                // `didLog = true; onLogged()` further down this
-                // function) already refreshes the mounted Activity
-                // Detail's canonical `loggedActivity`/`activityReflection`
-                // the moment the base activity is created — but a Form
-                // write that fails on that same first attempt leaves
-                // Activity Detail refreshed WITHOUT the Form value. Since
-                // this retry branch used to return without calling
-                // `onLogged()` at all, a LATER successful retry (this
-                // exact call) would let the sheet close with the correct
-                // Form now persisted in the database, while the still-
-                // mounted Activity Detail kept showing the stale,
-                // Form-less snapshot from the first call — the sheet
-                // dismissing is the user's only signal that Save
-                // succeeded, so it must always carry a fresh refresh
-                // with it. `onLogged()` is the same one-shot signal the
-                // main path below already fires on every genuine
-                // canonical-state change; calling it again here is
-                // exactly that same contract, not a new one — it never
-                // re-invokes `logActivity` and therefore can never
-                // create a second `LoggedActivity`.
-                onLogged()
-                return true
-            } catch {
-                sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
+            onLogged()
+            guard refreshMountedState?() ?? true else {
+                errorMessage = "Activity logged. Could not refresh — tap Save to try again."
                 return false
             }
+            return true
         }
 
         // Planned/Logged Activity lifecycle consistency cleanup: actual
@@ -224,17 +235,31 @@ public final class LogActivityViewModel {
                 sessionForm = nil
             }
             didLog = true
-            onLogged()
 
             switch result.sessionFormOutcome {
             case .notRequested, .saved:
                 sessionFormPendingRetry = false
-                return true
             case .failed:
                 sessionFormPendingRetry = true
                 errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
                 return false
             }
+
+            // Review follow-up (blank-screen-after-Save closeout, round
+            // 3): logging and Form are both settled at this point — only
+            // now is a mounted screen's own canonical refresh attempted,
+            // and only a SUCCESSFUL refresh lets `save()` itself report
+            // success. `onLogged()` still fires unconditionally: the
+            // screen this one was pushed from reads its OWN canonical
+            // state independently via `onActivityLogged()` and is
+            // correct regardless of whether THIS screen's local refresh
+            // (`refreshMountedState`) happens to succeed.
+            onLogged()
+            guard refreshMountedState?() ?? true else {
+                errorMessage = "Activity logged. Could not refresh — tap Save to try again."
+                return false
+            }
+            return true
         } catch TrainingServiceError.plannedActivityAlreadyLinked {
             errorMessage = "This activity has already been logged."
             return false

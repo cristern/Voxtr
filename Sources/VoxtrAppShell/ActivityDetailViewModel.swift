@@ -503,41 +503,40 @@ public final class ActivityDetailViewModel {
             // separately-resolved one.
             authorId: deletedByActorId,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            // Review follow-up (blank-screen-after-Save closeout, round
+            // 3): split from the refresh below — this fires
+            // unconditionally, regardless of whether THIS screen's own
+            // canonical refresh succeeds, because the screen this one was
+            // pushed from reads its own canonical state independently and
+            // is correct either way.
             onLogged: { [weak self] in
-                guard let self else { return }
-                // Review follow-up (blank-screen-after-Save closeout,
-                // round 2): `isCompleted` and `loggedActivity` must
-                // never diverge — One Truth. This canonical refetch can
-                // fail (a transient fetch error; `try?` was already
-                // discarding that possibility silently) without the
-                // underlying write itself having failed, since the log
-                // that triggered this closure already genuinely
-                // succeeded. Setting `isCompleted = true` unconditionally
-                // in that case would have claimed "logged" while
-                // `loggedActivity` stayed nil/stale — enough to
-                // re-surface the "Log Activity" button for an activity
-                // that is already logged in the database. `isCompleted`
-                // is now derived FROM a successful refresh, exactly like
-                // `cancelActivity()`/`reopenActivity()` already set both
-                // together from one atomic source, never independently.
-                // On a failed refresh, `isCompleted` simply stays at
-                // whatever it already was — an honest "still don't know"
-                // rather than a false "definitely logged" — self-
-                // correcting the next time this screen (or a fresh one,
-                // via `ActivityDetailViewLoader`) re-reads canonical
-                // state. `onActivityLogged()` still fires regardless: the
-                // screen this one was pushed from reads its OWN fresh
-                // canonical state independently and is not affected by
-                // whether this screen's local refresh happened to
-                // succeed.
-                if let detail = try? self.trainingReflectionCoordinationService.loggedActivityDetail(
+                self?.onActivityLogged()
+            },
+            // Review follow-up (blank-screen-after-Save closeout, round
+            // 3): reports success/failure back to `LogActivityViewModel.save()`
+            // so a failed refresh here keeps the sheet open for retry
+            // instead of dismissing onto a screen it never actually
+            // updated. `isCompleted` and `loggedActivity` must never
+            // diverge — One Truth — so both are still set together, ONLY
+            // inside the success branch, exactly as round 2 already
+            // established; the only change here is that failure is now
+            // reported outward instead of silently swallowed by `try?`.
+            // On failure, nothing here is mutated — an honest "still
+            // don't know" rather than a false "definitely logged" —
+            // self-correcting the next time this screen (or a fresh one,
+            // via `ActivityDetailViewLoader`) re-reads canonical state, or
+            // the next time `save()` retries this same closure.
+            refreshMountedState: { [weak self] in
+                guard let self else { return false }
+                guard let detail = try? self.trainingReflectionCoordinationService.loggedActivityDetail(
                     forPlannedActivity: self.activity.plannedActivityId
-                ) {
-                    self.loggedActivity = detail.loggedActivity
-                    self.activityReflection = detail.reflection
-                    self.isCompleted = true
+                ) else {
+                    return false
                 }
-                self.onActivityLogged()
+                self.loggedActivity = detail.loggedActivity
+                self.activityReflection = detail.reflection
+                self.isCompleted = true
+                return true
             }
         )
     }
