@@ -42,7 +42,10 @@ public final class AthleteStatisticsViewModel {
     /// Fixed for this screen's lifetime once loaded — a period/filter
     /// change recomputes the interval from the SAME reference date
     /// rather than silently drifting to a new "today" mid-session.
-    private let today: LocalDate
+    /// `public` (read-only) so the View can bound its calendar-month
+    /// year picker relative to it, without a second "what is today"
+    /// concept of its own.
+    public let today: LocalDate
 
     public init(
         statisticsService: StatisticsService,

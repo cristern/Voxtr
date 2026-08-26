@@ -118,16 +118,73 @@ public struct AthleteStatisticsView: View {
         }
     }
 
+    /// Review follow-up (PR #24) — locked V1 period contract: quick
+    /// rolling choices (Last 4/13/26 Weeks) plus a compact "Month…"
+    /// option that reveals a Month/Year sub-picker, never a full
+    /// arbitrary custom-date-range picker. The mode Picker's own
+    /// selection is DERIVED from `viewModel.period` (via `PeriodModeTag`)
+    /// rather than tracked as separate View state, so there is exactly
+    /// one source of truth for "what period is selected."
     private var periodPicker: some View {
-        Picker("Period", selection: Binding(
-            get: { viewModel.period },
-            set: { viewModel.setPeriod($0) }
-        )) {
-            ForEach(StatisticsPeriod.allCases) { period in
-                Text(period.displayName).tag(period)
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Period", selection: Binding(
+                get: { PeriodModeTag(period: viewModel.period) },
+                set: { newTag in
+                    switch newTag {
+                    case .rolling(let window):
+                        viewModel.setPeriod(.rolling(window))
+                    case .month:
+                        // Entering Month mode for the first time defaults
+                        // to the calendar month `today` falls in — the
+                        // sub-pickers below then let the user change it.
+                        if case .calendarMonth = viewModel.period { return }
+                        viewModel.setPeriod(.calendarMonth(year: viewModel.today.year, month: viewModel.today.month))
+                    }
+                }
+            )) {
+                ForEach(StatisticsPeriod.RollingWindow.allCases) { window in
+                    Text(window.displayName).tag(PeriodModeTag.rolling(window))
+                }
+                Text("Month…").tag(PeriodModeTag.month)
+            }
+            .accessibilityIdentifier("athleteStatistics.periodPicker")
+
+            if case .calendarMonth(let year, let month) = viewModel.period {
+                monthYearPicker(year: year, month: month)
             }
         }
-        .accessibilityIdentifier("athleteStatistics.periodPicker")
+    }
+
+    private func monthYearPicker(year: Int, month: Int) -> some View {
+        HStack {
+            Picker("Month", selection: Binding(
+                get: { month },
+                set: { viewModel.setPeriod(.calendarMonth(year: year, month: $0)) }
+            )) {
+                ForEach(1...12, id: \.self) { candidateMonth in
+                    Text(StatisticsPeriod.monthName(candidateMonth)).tag(candidateMonth)
+                }
+            }
+            .accessibilityIdentifier("athleteStatistics.monthPicker")
+
+            Picker("Year", selection: Binding(
+                get: { year },
+                set: { viewModel.setPeriod(.calendarMonth(year: $0, month: month)) }
+            )) {
+                ForEach(calendarMonthYearRange, id: \.self) { candidateYear in
+                    Text(String(candidateYear)).tag(candidateYear)
+                }
+            }
+            .accessibilityIdentifier("athleteStatistics.yearPicker")
+        }
+    }
+
+    /// A bounded, small range (not an arbitrary/unbounded year picker) —
+    /// two years back through the current year, relative to the SAME
+    /// `today` the ViewModel itself uses.
+    private var calendarMonthYearRange: ClosedRange<Int> {
+        let currentYear = viewModel.today.year
+        return (currentYear - 2)...currentYear
     }
 
     /// No "No sport" filter option in this V1 UI — `StatisticsFilter
@@ -185,5 +242,25 @@ public struct AthleteStatisticsView: View {
     private func loadSportsIfNeeded() {
         guard sports.isEmpty else { return }
         sports = (try? sportRepository.fetchAllSports()) ?? []
+    }
+}
+
+/// A `Picker`-tag-friendly projection of `StatisticsPeriod`'s two modes
+/// — needed only because `.calendarMonth(year:month:)`'s associated
+/// values would otherwise make every candidate year/month combination a
+/// distinct Picker option; this collapses the whole `.calendarMonth`
+/// case to a single "Month…" tag, with the actual year/month chosen by
+/// the separate sub-pickers in `monthYearPicker(year:month:)`.
+private enum PeriodModeTag: Hashable {
+    case rolling(StatisticsPeriod.RollingWindow)
+    case month
+
+    init(period: StatisticsPeriod) {
+        switch period {
+        case .rolling(let window):
+            self = .rolling(window)
+        case .calendarMonth:
+            self = .month
+        }
     }
 }

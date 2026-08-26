@@ -68,7 +68,7 @@ public struct StatisticsRootView: View {
                                 .accessibilityIdentifier("statistics.root.athleteCard.\(card.athleteId.rawValue.uuidString)")
                             }
                         } header: {
-                            VoxtrSectionHeading("Last Month")
+                            VoxtrSectionHeading(StatisticsPeriod.default.displayName)
                         }
                         .voxtrRowSurface()
                     }

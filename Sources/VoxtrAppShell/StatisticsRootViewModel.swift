@@ -4,8 +4,8 @@ import VoxtrCoreContracts
 import VoxtrAthleteDomain
 
 /// Statistics V1 UI: the Parent Statistics root — a family overview,
-/// one card per active athlete, `StatisticsPeriod.default` ("Last
-/// Month"), no filter, no ranking. Never user-adjustable at the root
+/// one card per active athlete, `StatisticsPeriod.default` ("Last 4
+/// Weeks"), no filter, no ranking. Never user-adjustable at the root
 /// (no period/filter controls here) — those live on Athlete Statistics
 /// once an athlete card is opened.
 ///

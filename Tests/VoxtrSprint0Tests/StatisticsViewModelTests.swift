@@ -80,16 +80,18 @@ struct StatisticsViewModelTests {
 
     // MARK: - Required ViewModel test 8: default period semantics
 
-    @Test("StatisticsPeriod.default is Last Month, spanning exactly the trailing 28 days ending today")
-    func defaultPeriodSpansTrailingTwentyEightDays() {
-        #expect(StatisticsPeriod.default == .lastMonth)
+    @Test("StatisticsPeriod.default is rolling Last 4 Weeks, starting at the current week's own Monday minus 3 weeks")
+    func defaultPeriodIsRollingLast4WeeksFromCurrentWeekStart() {
+        #expect(StatisticsPeriod.default == .rolling(.last4Weeks))
+        // 2026-03-31 is a Tuesday; its own week starts 2026-03-30 (Monday).
         let today = LocalDate(year: 2026, month: 3, day: 31)
         let interval = StatisticsPeriod.default.interval(today: today)
         #expect(interval.upperBound == today)
-        #expect(interval.lowerBound == LocalDate(year: 2026, month: 3, day: 4))
+        #expect(interval.lowerBound == LocalDate(year: 2026, month: 3, day: 9))
+        #expect(interval.lowerBound.weekday == .monday)
     }
 
-    @Test("Root's default-period card excludes an activity outside the trailing 28 days and includes one inside it")
+    @Test("Root's default-period card excludes an activity outside the Last 4 Weeks window and includes one inside it")
     @MainActor
     func rootDefaultPeriodExcludesActivityOutsideWindow() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -111,7 +113,7 @@ struct StatisticsViewModelTests {
         )
 
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
-        // Outside the trailing-28-days window ending 2026-03-31 (window starts 2026-03-04).
+        // Outside the Last 4 Weeks window ending 2026-03-31 (window starts 2026-03-09).
         _ = try trainingService.logActivity(
             athleteId: athlete.athlete.athleteId, activityType: .individualTraining, title: "Too old",
             startedAt: Self.date(2026, 2, 1), durationMinutes: 40, status: .completed
@@ -136,6 +138,168 @@ struct StatisticsViewModelTests {
         }
         #expect(card.summary.totalActualMinutes == 25)
         #expect(card.summary.performedActivityCount == 1)
+    }
+
+    /// Review follow-up (PR #24), locked contract: each rolling window
+    /// must produce EXACTLY that many canonical week buckets, for a
+    /// `today` that falls mid-week (not just when `today` happens to be
+    /// a Monday) — the exact scenario the contract mismatch bug
+    /// produced 5 buckets for. `2026-03-31` is a Tuesday, deliberately
+    /// not a Monday. Following the S1.1 lesson: no shared private
+    /// helper methods for container construction — each test below
+    /// builds its own inline.
+    @Test("Last 4 Weeks produces exactly 4 canonical weekly buckets for a mid-week today, with a Monday lower bound")
+    @MainActor
+    func last4WeeksProducesExactlyFourBuckets() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let today = LocalDate(year: 2026, month: 3, day: 31)
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last4Weeks), today: today
+        )
+        viewModel.load()
+
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(summary.weeklyBuckets.count == 4)
+        #expect(summary.weeklyBuckets.first?.weekStart.weekday == .monday)
+        #expect(summary.intervalStart.weekday == .monday)
+    }
+
+    @Test("Last 13 Weeks produces exactly 13 canonical weekly buckets for a mid-week today, with a Monday lower bound")
+    @MainActor
+    func last13WeeksProducesExactlyThirteenBuckets() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let today = LocalDate(year: 2026, month: 3, day: 31)
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last13Weeks), today: today
+        )
+        viewModel.load()
+
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(summary.weeklyBuckets.count == 13)
+        #expect(summary.weeklyBuckets.first?.weekStart.weekday == .monday)
+        #expect(summary.intervalStart.weekday == .monday)
+    }
+
+    @Test("Last 26 Weeks produces exactly 26 canonical weekly buckets for a mid-week today, with a Monday lower bound")
+    @MainActor
+    func last26WeeksProducesExactlyTwentySixBuckets() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let today = LocalDate(year: 2026, month: 3, day: 31)
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last26Weeks), today: today
+        )
+        viewModel.load()
+
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(summary.weeklyBuckets.count == 26)
+        #expect(summary.weeklyBuckets.first?.weekStart.weekday == .monday)
+        #expect(summary.intervalStart.weekday == .monday)
+    }
+
+    // MARK: - Additional locked requirement: calendar month period
+
+    @Test("A calendar month period resolves to the exact first-through-last day of that month")
+    func calendarMonthResolvesToExactMonthBounds() {
+        let interval = StatisticsPeriod.calendarMonth(year: 2026, month: 6).interval(today: LocalDate(year: 2026, month: 8, day: 1))
+        #expect(interval.lowerBound == LocalDate(year: 2026, month: 6, day: 1))
+        #expect(interval.upperBound == LocalDate(year: 2026, month: 6, day: 30))
+    }
+
+    @Test("A calendar month period resolves February correctly for a leap year (29 days)")
+    func calendarMonthResolvesLeapFebruaryCorrectly() {
+        let interval = StatisticsPeriod.calendarMonth(year: 2024, month: 2).interval(today: LocalDate(year: 2026, month: 8, day: 1))
+        #expect(interval.lowerBound == LocalDate(year: 2024, month: 2, day: 1))
+        #expect(interval.upperBound == LocalDate(year: 2024, month: 2, day: 29))
+    }
+
+    @Test("A calendar month period resolves February correctly for a non-leap year (28 days)")
+    func calendarMonthResolvesNonLeapFebruaryCorrectly() {
+        let interval = StatisticsPeriod.calendarMonth(year: 2026, month: 2).interval(today: LocalDate(year: 2026, month: 8, day: 1))
+        #expect(interval.lowerBound == LocalDate(year: 2026, month: 2, day: 1))
+        #expect(interval.upperBound == LocalDate(year: 2026, month: 2, day: 28))
+    }
+
+    /// Integration proof: February 2026 starts on a Sunday and ends on
+    /// a Saturday, so its calendar-month interval genuinely straddles a
+    /// partial FIRST canonical week (starting Monday 2026-01-26, mostly
+    /// outside the month) and a partial LAST canonical week (starting
+    /// Monday 2026-02-23, extending past the month's own end) — proving
+    /// the Development Timeline's weekly buckets are never forced onto
+    /// the calendar-month boundary. Also proves data outside the
+    /// selected month never contributes, even when adjacent (Jan 31 /
+    /// Mar 1 fixtures just outside the boundary).
+    @Test("Calendar-month weekly buckets may include partial first/last weeks, and no data outside the month contributes")
+    @MainActor
+    func calendarMonthProducesPartialBoundaryWeeksAndExcludesOutsideData() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+
+        // Just outside the month on both sides — must not contribute.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Last day of January",
+            startedAt: Self.date(2026, 1, 31), durationMinutes: 50, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "First day of March",
+            startedAt: Self.date(2026, 3, 1), durationMinutes: 60, status: .completed
+        )
+        // Inside the month.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Mid-February",
+            startedAt: Self.date(2026, 2, 14), durationMinutes: 30, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .calendarMonth(year: 2026, month: 2), today: LocalDate(year: 2026, month: 8, day: 1)
+        )
+        viewModel.load()
+
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(summary.totalActualMinutes == 30)
+        #expect(summary.performedActivityCount == 1)
+        #expect(summary.intervalStart == LocalDate(year: 2026, month: 2, day: 1))
+        #expect(summary.intervalEnd == LocalDate(year: 2026, month: 2, day: 28))
+        #expect(summary.weeklyBuckets.count == 5)
+        #expect(summary.weeklyBuckets.first?.weekStart == LocalDate(year: 2026, month: 1, day: 26))
+        #expect(summary.weeklyBuckets.last?.weekStart == LocalDate(year: 2026, month: 2, day: 23))
     }
 
     // MARK: - Required ViewModel test 9: filter updates request the correct StatisticsFilter
