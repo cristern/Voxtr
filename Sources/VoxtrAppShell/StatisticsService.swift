@@ -81,12 +81,15 @@ public struct StatisticsAggregate: Equatable, Sendable {
 
 // MARK: - Weekly bucket
 
-/// One Monday-start week within a requested interval. Unlike Form/Sleep
-/// above, a week with zero performed training is a genuine, correctly
-/// representable fact (`totalActualMinutes == 0`) — not a "missing
-/// value" to omit, since a week can honestly have had no training at
-/// all. Every week whose Monday falls within the requested interval is
-/// represented, even when it contributes nothing, so a month-grouped-
+/// One Monday-start week overlapping a requested interval. Unlike
+/// Form/Sleep above, a week with zero performed training is a genuine,
+/// correctly representable fact (`totalActualMinutes == 0`) — not a
+/// "missing value" to omit, since a week can honestly have had no
+/// training at all. Every canonical week that overlaps
+/// `[intervalStart, intervalEnd]` is represented, even when it
+/// contributes nothing — including the first week, whose own Monday
+/// (`intervalStart.startOfWeek`) may fall BEFORE `intervalStart` when
+/// the interval itself doesn't start on a Monday — so a month-grouped-
 /// into-weeks view has a complete, stable row set to render.
 public struct StatisticsWeekBucket: Equatable, Sendable {
     public let weekStart: LocalDate
@@ -175,8 +178,20 @@ public final class StatisticsService {
         filter: StatisticsFilter = .none,
         calendar: Calendar = .current
     ) throws -> StatisticsAthleteSummary {
-        let (startDate, endDate) = Self.dateBounds(from: intervalStart, through: intervalEnd, calendar: calendar)
-        let loggedActivities = try trainingService.fetchLoggedActivities(forAthlete: athleteId, from: startDate, to: endDate)
+        let (startDate, endExclusive) = Self.dateBounds(from: intervalStart, through: intervalEnd, calendar: calendar)
+        // The repository read below is inclusive on its own `to` bound
+        // (`startedAt <= to`), so passing `endExclusive` (midnight at the
+        // start of the day AFTER `intervalEnd`) as `to` fetches a superset
+        // that could in principle include an activity landing exactly on
+        // that boundary instant. The `< endExclusive` filter enforces the
+        // true `[intervalStart, intervalEnd]`-inclusive contract without
+        // reimplementing the repository's own range-matching logic — one
+        // business truth (the repository's `<=`), refined by one
+        // additional, exact comparison against the same `endExclusive`
+        // this method itself derived.
+        let loggedActivities = try trainingService
+            .fetchLoggedActivities(forAthlete: athleteId, from: startDate, to: endExclusive)
+            .filter { $0.startedAt < endExclusive }
         let performed = loggedActivities.filter { Self.isPerformed($0.status) && filter.matches($0) }
 
         let totalActualMinutes = performed.reduce(0) { $0 + $1.durationMinutes }
@@ -263,11 +278,16 @@ public final class StatisticsService {
     }
 
     /// Converts an inclusive `[LocalDate, LocalDate]` interval into the
-    /// `Date` bounds `TrainingService.fetchLoggedActivities(forAthlete:from:to:)`
-    /// needs — the exact "start of day / end of day" conversion
-    /// `TrainingService.fetchTodaysLoggedActivities` already establishes
-    /// for the identical purpose, generalized from "today" to an
-    /// arbitrary interval rather than reimplemented. Deliberately uses
+    /// `Date` bounds this method's caller needs: `startInclusive` is
+    /// midnight at the start of `intervalStart`; `endExclusive` is
+    /// midnight at the start of the day AFTER `intervalEnd` — i.e. every
+    /// instant of `intervalEnd` itself, down to sub-second precision, is
+    /// `< endExclusive`. Computed as a genuine calendar-day boundary
+    /// (`intervalEnd.adding(days: 1)`, then converted to `Date` the same
+    /// way `intervalStart` is) rather than "next day minus one second/
+    /// millisecond" — `Date` has sub-second precision, so any fixed
+    /// subtracted offset would still incorrectly exclude an activity in
+    /// the final fraction of a second of `intervalEnd`. Deliberately uses
     /// `Calendar.current` semantics (via the injected `calendar`
     /// parameter), the SAME device-local convention every other
     /// Date<->LocalDate boundary in this codebase already uses
@@ -279,13 +299,13 @@ public final class StatisticsService {
         from intervalStart: LocalDate,
         through intervalEnd: LocalDate,
         calendar: Calendar
-    ) -> (Date, Date) {
+    ) -> (startInclusive: Date, endExclusive: Date) {
         let startComponents = DateComponents(year: intervalStart.year, month: intervalStart.month, day: intervalStart.day)
-        let startDate = calendar.date(from: startComponents) ?? .distantPast
-        let endComponents = DateComponents(year: intervalEnd.year, month: intervalEnd.month, day: intervalEnd.day)
-        let endOfDayStart = calendar.date(from: endComponents) ?? .distantFuture
-        let endDate = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: endOfDayStart) ?? endOfDayStart
-        return (startDate, endDate)
+        let startInclusive = calendar.date(from: startComponents) ?? .distantPast
+        let dayAfterEnd = intervalEnd.adding(days: 1)
+        let endComponents = DateComponents(year: dayAfterEnd.year, month: dayAfterEnd.month, day: dayAfterEnd.day)
+        let endExclusive = calendar.date(from: endComponents) ?? .distantFuture
+        return (startInclusive, endExclusive)
     }
 
     /// Every Monday (`LocalDate.startOfWeek` — the one canonical week

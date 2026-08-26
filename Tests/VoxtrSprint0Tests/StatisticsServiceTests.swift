@@ -4,6 +4,7 @@ import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -457,5 +458,166 @@ struct StatisticsServiceTests {
     /// depends on the device's current timezone or CI run time.
     private static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
         Self.utcCalendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12)) ?? .now
+    }
+
+    /// Exact-instant `Date` construction (down to sub-second precision),
+    /// for the interval-boundary regression test below — `Self.date`
+    /// above always pins to noon and cannot express "the last half-second
+    /// of a day."
+    private static func exactDate(_ year: Int, _ month: Int, _ day: Int, hour: Int, minute: Int, second: Int, nanosecond: Int = 0) -> Date {
+        Self.utcCalendar.date(from: DateComponents(
+            year: year, month: month, day: day, hour: hour, minute: minute, second: second, nanosecond: nanosecond
+        )) ?? .now
+    }
+
+    /// Review follow-up (PR #23), item 1: `[intervalStart, intervalEnd]`
+    /// is documented as fully inclusive, down to `Date`'s own sub-second
+    /// precision — not "inclusive to the second." An activity in the
+    /// final half-second of `intervalEnd` must still be included, and an
+    /// activity exactly at the start of the day AFTER `intervalEnd` (a
+    /// distinct calendar day entirely) must be excluded.
+    @Test("Interval end is inclusive to sub-second precision; the instant after it is excluded")
+    @MainActor
+    func intervalEndIsInclusiveToSubSecondPrecision() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 1)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 31)
+
+        // The last half-second of intervalEnd itself — must be included.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Last instant of the interval",
+            startedAt: Self.exactDate(2026, 3, 31, hour: 23, minute: 59, second: 59, nanosecond: 500_000_000),
+            durationMinutes: 10, status: .completed
+        )
+        // Midnight at the start of the NEXT day — a distinct calendar
+        // day outside the interval — must be excluded.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Start of the next day",
+            startedAt: Self.exactDate(2026, 4, 1, hour: 0, minute: 0, second: 0),
+            durationMinutes: 20, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.totalActualMinutes == 10)
+        #expect(summary.performedActivityCount == 1)
+    }
+
+    /// Review follow-up (PR #23), item 2: Statistics must use the
+    /// canonical ACTUAL logged duration, never the PlannedActivity's own
+    /// planned duration — proven here by planning one duration and
+    /// logging a genuinely different one against the same
+    /// PlannedActivity. Uses the same `getOrCreateWeekPlan`/
+    /// `addPlannedActivity`/`logActivity(plannedActivityId:)` sequence
+    /// `ActivityCompletionReviewFlowTests` already establishes for
+    /// planned-and-logged fixtures.
+    @Test("Statistics uses the actual logged duration, never the PlannedActivity's planned duration")
+    @MainActor
+    func statisticsUsesActualDurationNotPlannedDuration() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let planned = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run", localDate: LocalDate(year: 2026, month: 3, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 60
+        )
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: planned.plannedActivityId,
+            activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 35, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.totalActualMinutes == 35)
+        #expect(summary.performedActivityCount == 1)
+    }
+
+    /// Review follow-up (PR #23), item 3: a valid interval with no data
+    /// at all for this athlete must report every measure as a genuine
+    /// "nothing happened" fact — zero volume/count, `nil`/zero-sample
+    /// Form and Sleep, and weekly buckets that are present but
+    /// themselves all zero (never fabricated, never omitted).
+    @Test("A valid interval with no data reports zero volume, nil Form/Sleep, and all-zero weekly buckets")
+    @MainActor
+    func emptyIntervalReportsFactualZeroesNotFabricatedValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        // 2026-03-02 is a Monday; this spans exactly 2 canonical weeks.
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 15)
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.totalActualMinutes == 0)
+        #expect(summary.performedActivityCount == 0)
+        #expect(summary.form.mean == nil)
+        #expect(summary.form.sampleCount == 0)
+        #expect(summary.sleep.mean == nil)
+        #expect(summary.sleep.sampleCount == 0)
+        #expect(summary.weeklyBuckets.count == 2)
+        for bucket in summary.weeklyBuckets {
+            #expect(bucket.totalActualMinutes == 0)
+            #expect(bucket.performedActivityCount == 0)
+        }
+    }
+
+    /// Review follow-up (PR #23), item 4: an `ActivityReflection` can
+    /// legally exist with some other field recorded (e.g. `energy`) and
+    /// `bodyFeeling == nil` — this must contribute neither a fabricated
+    /// zero nor a counted sample to the Form aggregate, exactly like a
+    /// performed activity with no reflection at all.
+    @Test("A Reflection recorded without bodyFeeling contributes no Form sample")
+    @MainActor
+    func reflectionWithoutBodyFeelingContributesNoFormSample() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+        )
+        // Legally valid reflection: energy recorded, bodyFeeling omitted.
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, energy: 4
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.form.sampleCount == 0)
+        #expect(summary.form.mean == nil)
     }
 }
