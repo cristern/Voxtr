@@ -16,15 +16,6 @@ public struct LogActivityView: View {
     public var body: some View {
         NavigationStack {
             Form {
-                if let errorMessage = viewModel.errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                            .accessibilityIdentifier("logActivity.errorMessage")
-                    }
-                    .voxtrRowSurface()
-                }
-
                 // Read-only context — already known from the plan, never
                 // re-asked.
                 Section {
@@ -89,6 +80,21 @@ public struct LogActivityView: View {
 
                     TextField("Notes", text: $viewModel.notes, axis: .vertical)
                         .accessibilityIdentifier("logActivity.notesField")
+
+                    // TestFlight closeout: validation/error feedback lives
+                    // right where the user is acting — the last row of
+                    // this same section, immediately above the Save
+                    // action in the toolbar — rather than a detached
+                    // message at the top of the screen the user has to
+                    // scroll back up to notice. Same local-placement
+                    // convention DailyTrainingView's own manual log form
+                    // already establishes for its own `logErrorMessage`
+                    // (right before that flow's own inline Save button).
+                    if let errorMessage = viewModel.errorMessage {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("logActivity.errorMessage")
+                    }
                 } header: {
                     VoxtrSectionHeading("How did it go?")
                 }

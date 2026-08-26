@@ -66,10 +66,27 @@ public final class LogActivityViewModel {
     private let authorId: ActorId
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let onLogged: () -> Void
+    /// Review follow-up (blank-screen-after-Save closeout, round 3): a
+    /// SEPARATE, optional signal from `onLogged` above — callers with a
+    /// mounted screen whose OWN canonical state must be refreshed before
+    /// a successful Save can safely let its sheet close
+    /// (`ActivityDetailViewModel`, currently the only such caller)
+    /// supply this closure; its return value determines whether `save()`
+    /// itself reports success, exactly as if refreshing that mounted
+    /// state were as load-bearing as the persistence writes above it —
+    /// which it is, per the approved contract ("a successful Save that
+    /// dismisses the sheet -> mounted Activity Detail already reflects
+    /// canonical logged state"). Defaulted to `nil`, treated as an
+    /// unconditional success (`?? true`) — `onLogged`'s existing
+    /// `() -> Void` contract and every existing construction site
+    /// (production and test) keep compiling and behaving unchanged; this
+    /// is additive, never a replacement for `onLogged`.
+    private let refreshMountedState: (() -> Bool)?
     /// Set once the first `save()` call successfully logs the activity —
     /// from then on, `save()` retries only the Session Form write (see
-    /// `sessionFormPendingRetry`), never `logActivity` again, so a retry
-    /// can never create a duplicate `LoggedActivity`.
+    /// `sessionFormPendingRetry`) and/or `refreshMountedState` above,
+    /// never `logActivity` again, so a retry can never create a
+    /// duplicate `LoggedActivity`.
     private var loggedActivityId: LoggedActivityId?
 
     public init(
@@ -78,7 +95,8 @@ public final class LogActivityViewModel {
         athleteDisplayName: String,
         authorId: ActorId,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        onLogged: @escaping () -> Void
+        onLogged: @escaping () -> Void,
+        refreshMountedState: (() -> Bool)? = nil
     ) {
         self.plannedActivity = plannedActivity
         self.athleteId = athleteId
@@ -86,6 +104,7 @@ public final class LogActivityViewModel {
         self.authorId = authorId
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.onLogged = onLogged
+        self.refreshMountedState = refreshMountedState
         // Prefilled from the plan itself where a sensible starting
         // value exists — the parent only adjusts if reality differed.
         // `nil` (not a fabricated fallback) when the plan itself has no
@@ -94,32 +113,65 @@ public final class LogActivityViewModel {
         self.durationMinutes = plannedActivity.plannedDurationMinutes
     }
 
+    /// Test-only seam (round 4 review follow-up): puts this view model
+    /// directly into the exact "already logged, Session Form retry
+    /// pending" state a genuine Session Form write failure leaves
+    /// behind — the state `save()`'s retry branch (`if let
+    /// loggedActivityId`) is written for. No production caller ever
+    /// needs this: every real caller reaches that state exclusively
+    /// through a genuine failed `save()` call, never by construction.
+    /// It exists because a genuine FIRST-attempt Session Form failure
+    /// cannot be produced through this type's own public API without
+    /// either bypassing `TrainingValidator`'s required (1...5) Form
+    /// gate at the call site that matters (undermining the very
+    /// validation this fix does not touch) or encoding a domain-invalid
+    /// Missed+Form scenario (explicitly disallowed) — this lets a test
+    /// exercise the retry branch's real, unvalidated `recordSessionForm`
+    /// call directly instead, the same "deliberately out-of-range value"
+    /// technique already established elsewhere in this codebase for
+    /// simulating a Session Form write failure. Package-internal only —
+    /// reachable from tests via `@testable import`, never `public`.
+    func presetForFormRetryTesting(loggedActivityId: LoggedActivityId, sessionForm: Int?) {
+        self.loggedActivityId = loggedActivityId
+        self.sessionFormPendingRetry = true
+        self.sessionForm = sessionForm
+        self.didLog = true
+    }
+
     @discardableResult
     public func save() -> Bool {
         errorMessage = nil
 
         if let loggedActivityId {
             // Retry path: the activity itself was already logged
-            // successfully on a prior attempt — only the Session Form
-            // write failed. Never re-invokes logActivity.
-            guard let sessionForm else {
-                sessionFormPendingRetry = false
-                return true
+            // successfully on a prior attempt. Never re-invokes
+            // logActivity, so this can never create a duplicate
+            // `LoggedActivity`. Only the Session Form write is retried
+            // here (`sessionFormPendingRetry`) — `finishSave(formFailed:)`
+            // below is what always fires `onLogged()` and always attempts
+            // `refreshMountedState`, regardless of whether the Form retry
+            // itself succeeds, per the review follow-up (round 4) fixed
+            // there.
+            var formFailed = false
+            if sessionFormPendingRetry {
+                if let sessionForm {
+                    do {
+                        _ = try trainingReflectionCoordinationService.recordSessionForm(
+                            athleteId: athleteId,
+                            loggedActivityId: loggedActivityId,
+                            authorId: authorId,
+                            bodyFeeling: sessionForm
+                        )
+                        sessionFormPendingRetry = false
+                    } catch {
+                        sessionFormPendingRetry = true
+                        formFailed = true
+                    }
+                } else {
+                    sessionFormPendingRetry = false
+                }
             }
-            do {
-                _ = try trainingReflectionCoordinationService.recordSessionForm(
-                    athleteId: athleteId,
-                    loggedActivityId: loggedActivityId,
-                    authorId: authorId,
-                    bodyFeeling: sessionForm
-                )
-                sessionFormPendingRetry = false
-                return true
-            } catch {
-                sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
-                return false
-            }
+            return finishSave(formFailed: formFailed)
         }
 
         // Planned/Logged Activity lifecycle consistency cleanup: actual
@@ -201,23 +253,62 @@ public final class LogActivityViewModel {
                 sessionForm = nil
             }
             didLog = true
-            onLogged()
 
+            let formFailed: Bool
             switch result.sessionFormOutcome {
             case .notRequested, .saved:
                 sessionFormPendingRetry = false
-                return true
+                formFailed = false
             case .failed:
                 sessionFormPendingRetry = true
-                errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
-                return false
+                formFailed = true
             }
+
+            return finishSave(formFailed: formFailed)
         } catch TrainingServiceError.plannedActivityAlreadyLinked {
             errorMessage = "This activity has already been logged."
             return false
         } catch {
             errorMessage = "Could not save this log. Please try again."
             return false
+        }
+    }
+
+    /// Review follow-up (round 4): the exact regression the review
+    /// caught — once the base `LoggedActivity` itself has genuinely
+    /// persisted, `onLogged()` and `refreshMountedState()` must ALWAYS
+    /// run, even when Session Form persistence failed (or is still
+    /// pending retry). Before this fix, a Form failure returned early
+    /// and skipped both — so a user who logged successfully, hit a Form
+    /// failure, then chose Cancel instead of retrying, would leave the
+    /// mounted Activity Detail (and the parent surface behind it) never
+    /// told the activity was logged at all: a genuine One Truth
+    /// violation, since the canonical `LoggedActivity` already exists.
+    /// Called from BOTH the initial-log path and the retry path, each of
+    /// which independently determines whether Form itself failed on
+    /// THIS pass — this function's only job is what happens after that:
+    /// fire both signals unconditionally, then decide `save()`'s own
+    /// result from whichever of the two independent outcomes (Form,
+    /// mounted refresh) is worse, without ever fabricating success for
+    /// either. `sessionFormPendingRetry` (set by the caller before this
+    /// runs) and `refreshMountedState` being a pure, idempotent read are
+    /// what make a subsequent retry safe here — this function itself
+    /// never re-invokes `logActivity` or `recordSessionForm`.
+    private func finishSave(formFailed: Bool) -> Bool {
+        onLogged()
+        let refreshSucceeded = refreshMountedState?() ?? true
+        switch (formFailed, refreshSucceeded) {
+        case (true, false):
+            errorMessage = "Activity logged. Form could not be saved and the screen could not refresh — tap Save to try again."
+            return false
+        case (true, true):
+            errorMessage = "Activity logged. Form could not be saved — tap Save to try again."
+            return false
+        case (false, false):
+            errorMessage = "Activity logged. Could not refresh — tap Save to try again."
+            return false
+        case (false, true):
+            return true
         }
     }
 

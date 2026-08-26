@@ -67,10 +67,19 @@ public struct RecurringOccurrencePreviewView: View {
     /// sheet's OWN presenter) off the stack WHILE its sheet was still
     /// actively presented — backwards from the well-defined "dismiss the
     /// child sheet, THEN the parent" order — with no settled render pass
-    /// in between for the `onActivityLogged()` mutation. See
-    /// `ActivityDetailView.isDismissingAfterLog`'s own doc comment for
-    /// the full diagnosis; this is the identical pattern in this
-    /// screen's own `.sheet(item: $materializedActivity)`.
+    /// in between for the `onActivityLogged()` mutation. This defers
+    /// this screen's own dismiss until `.sheet(item:onDismiss:)`'s
+    /// native "the sheet has now fully closed" completion below — a
+    /// standard, built-in SwiftUI signal, not a manual delay/timing
+    /// hack. TestFlight closeout (blank-screen-after-Save fix): unlike
+    /// `ActivityDetailView`, which no longer dismisses itself in
+    /// response to a successful log at all (that screen has real,
+    /// updatable state to show instead), THIS screen's own dismiss-after-
+    /// log remains correct and unchanged — its content is static text
+    /// ("hasn't been added to a specific week's plan yet") that becomes
+    /// meaningless the instant the occurrence materializes and logs, so
+    /// unwinding to whatever surface pushed it is still the right
+    /// outcome here.
     @State private var isDismissingAfterLog = false
     @Environment(\.dismiss) private var dismiss
 

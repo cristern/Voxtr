@@ -98,30 +98,27 @@ struct Sprint1CoreFlowCompletionTests {
 
     // MARK: - Post-mutation navigation and stale-state consistency audit (Issue A)
 
-    /// Issue A's exact contract: a successful log through
-    /// `ActivityDetailViewModel.makeLogActivityViewModel()` must not
-    /// only flip `isCompleted` locally — it must also fire the explicit
-    /// `onActivityLogged` signal the screen that pushed Activity Detail
-    /// relies on to reload its own authoritative data, THEN dismiss
-    /// itself exactly once via `onDismiss` — never the other order,
-    /// never twice. `callOrder` (not two separate counters) proves both
-    /// the count AND the ordering in one assertion: the returning host
-    /// must reread canonical state before this screen disappears, and
-    /// `isCompleted` — `private(set)`, mutated in exactly one place in
-    /// this whole codebase (the same `onLogged` closure both `onActivityLogged`
-    /// and `onDismiss` fire from) — has no other transition that could
-    /// cause a second, independent dismiss trigger; `ActivityDetailView`
-    /// no longer keeps a separate `.onChange(of: isCompleted)` observer
-    /// for exactly that reason. Exercised at the ViewModel/contract
-    /// level (not via real SwiftUI navigation, which is not something
-    /// Swift Testing can drive) — this is the deterministic, testable
-    /// half of the fix; the SwiftUI wiring at each of the 5 call sites
-    /// is what actually connects `onActivityLogged` to each source
-    /// screen's own `load`/`refresh` method, and `onDismiss` to
-    /// `ActivityDetailView`'s own `@Environment(\.dismiss)`.
-    @Test("A successful log fires onActivityLogged then dismisses exactly once, in that order")
+    /// TestFlight closeout (blank-screen-after-Save fix): a successful
+    /// log through `ActivityDetailViewModel.makeLogActivityViewModel()`
+    /// must fire the explicit `onActivityLogged` signal the screen that
+    /// pushed Activity Detail relies on to reload its own authoritative
+    /// data — but must NEVER request that `ActivityDetailView` itself
+    /// dismiss. Logging is an in-context correction/update flow: the
+    /// user stays on the same Activity Detail screen, which now reflects
+    /// the newly logged outcome and recorded data (`loggedActivity`/
+    /// `activityReflection`, refreshed here via the SAME canonical
+    /// `loggedActivityDetail(forPlannedActivity:)` read
+    /// `ActivityDetailViewLoader` uses to build this state initially —
+    /// never a caller-supplied snapshot, never inferred). Exercised at
+    /// the ViewModel/contract level (not via real SwiftUI navigation,
+    /// which is not something Swift Testing can drive) — the SwiftUI
+    /// wiring at each of the 5 `ActivityDetailViewLoader` call sites is
+    /// what actually connects `onActivityLogged` to each source screen's
+    /// own `load`/`refresh` method; `makeLogActivityViewModel()` no
+    /// longer accepts (or needs) an `onDismiss` closure at all.
+    @Test("A successful log fires onActivityLogged, never requests a parent dismiss, and Activity Detail reflects the canonical logged outcome")
     @MainActor
-    func successfulLogFiresOnActivityLoggedThenDismissesExactlyOnce() throws {
+    func successfulLogFiresOnActivityLoggedAndReflectsCanonicalState() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -140,35 +137,52 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var callOrder: [String] = []
+        var reloadCallCount = 0
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { callOrder.append("reload") }
+            onActivityLogged: { reloadCallCount += 1 }
         )
+        #expect(viewModel.loggedActivity == nil)
 
-        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
+        // `makeLogActivityViewModel()` takes no `onDismiss` parameter —
+        // there is nothing left for a caller to wire up to a dismiss.
+        let logViewModel = viewModel.makeLogActivityViewModel()
         // Planned/Logged Activity lifecycle consistency cleanup: actual
         // duration is required for a completed log; `activity` itself
         // has no planned duration, so it must be entered explicitly.
         logViewModel.durationMinutes = 45
+        logViewModel.perceivedExertion = 7
         logViewModel.sessionForm = 3
 
         #expect(logViewModel.save())
+        #expect(reloadCallCount == 1)
         #expect(viewModel.isCompleted == true)
-        #expect(callOrder == ["reload", "dismiss"])
+        #expect(viewModel.errorMessage == nil)
+
+        // Activity Detail reflects the exact canonical record just
+        // created — not a locally-fabricated stand-in.
+        let loggedActivity = try #require(viewModel.loggedActivity)
+        #expect(loggedActivity.status == .completed)
+        #expect(loggedActivity.durationMinutes == 45)
+        #expect(viewModel.perceivedExertion == 7)
+        #expect(viewModel.formValue == 3)
     }
 
     /// A failed log (Form required but missing) must neither flip
-    /// `isCompleted`, nor fire `onActivityLogged`, nor dismiss — the
-    /// same "no false refresh/navigation on failure" contract required
-    /// for the successful path above, now covering the dismiss half
-    /// too.
-    @Test("A failed log fires neither onActivityLogged nor dismiss, and does not flip isCompleted")
+    /// `isCompleted` nor mutate `loggedActivity`/`activityReflection`,
+    /// nor fire `onActivityLogged` — the same "no false refresh/
+    /// navigation on failure" contract as before, now also covering the
+    /// canonical-state refresh this round adds. The error itself stays
+    /// on `logViewModel.errorMessage` (rendered locally inside
+    /// `LogActivityView`'s own "How did it go?" section) — it never
+    /// leaks onto `ActivityDetailViewModel.errorMessage`, the separate
+    /// top-of-screen error this screen's own mutations use.
+    @Test("A failed log fires neither onActivityLogged nor a canonical-state refresh, and keeps the error local to Log Activity")
     @MainActor
-    func failedLogFiresNeitherOnActivityLoggedNorDismiss() throws {
+    func failedLogFiresNeitherOnActivityLoggedNorStateRefresh() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -187,21 +201,297 @@ struct Sprint1CoreFlowCompletionTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        var callOrder: [String] = []
+        var reloadCallCount = 0
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
-            onActivityLogged: { callOrder.append("reload") }
+            onActivityLogged: { reloadCallCount += 1 }
         )
 
-        let logViewModel = viewModel.makeLogActivityViewModel(onDismiss: { callOrder.append("dismiss") })
+        let logViewModel = viewModel.makeLogActivityViewModel()
         // sessionForm left nil — Form is required for a completed log.
 
         #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(reloadCallCount == 0)
         #expect(viewModel.isCompleted == false)
-        #expect(callOrder.isEmpty)
+        #expect(viewModel.loggedActivity == nil)
+        #expect(viewModel.errorMessage == nil)
+    }
+
+    /// Review follow-up (blank-screen-after-Save closeout, round 2): the
+    /// exact gap the review found — `LogActivityViewModel.save()`'s
+    /// RETRY branch (reached whenever `loggedActivityId` is already set,
+    /// i.e. a prior `save()` call already logged the base activity)
+    /// never fired `onLogged()` on a successful retry, so the sheet
+    /// could close on a genuinely successful Save while the mounted
+    /// `ActivityDetailViewModel` still showed the stale snapshot from
+    /// the FIRST call.
+    ///
+    /// Round 3 review follow-up: the PRIOR version of this test reached
+    /// the retry branch via an invalid domain combination (logging as
+    /// Missed, then entering a Form value and saving again) — Missed
+    /// means no training occurred, so Form must never be recorded
+    /// against it, and that combination must never be encoded as valid
+    /// test behavior even to reach an otherwise-legitimate code path.
+    /// This version reaches the SAME retry branch through a genuinely
+    /// valid scenario instead: a normal COMPLETED log with a valid Form
+    /// value succeeds outright on the first `save()` call (Form already
+    /// `.saved`, nothing pending), then `save()` is called a SECOND time
+    /// on the same `logViewModel` — e.g. a duplicate tap of Save — which
+    /// is exactly what routes through the retry branch once
+    /// `loggedActivityId` is already set. Proves the fix: a retry-branch
+    /// pass, even one with nothing left to retry, still refreshes
+    /// Activity Detail's canonical state via `onLogged()`, and — the
+    /// retry branch's own core guarantee, unchanged by this fix — never
+    /// creates a duplicate `LoggedActivity`.
+    @Test("A retry save() call after an already-persisted completed log refreshes Activity Detail's canonical state and never duplicates the LoggedActivity")
+    @MainActor
+    func retrySaveAfterPersistedLogRefreshesCanonicalStateWithoutDuplicating() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var reloadCallCount = 0
+        let viewModel = ActivityDetailViewModel(
+            activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
+            planningService: planningService,
+            trainingReflectionCoordinationService: coordinator,
+            onActivityLogged: { reloadCallCount += 1 }
+        )
+
+        let logViewModel = viewModel.makeLogActivityViewModel()
+        // First attempt: a normal Completed log with a valid Form —
+        // succeeds outright, Form already saved, nothing pending.
+        logViewModel.durationMinutes = 45
+        logViewModel.sessionForm = 3
+        #expect(logViewModel.save())
+        #expect(logViewModel.sessionFormPendingRetry == false)
+        #expect(reloadCallCount == 1)
+        #expect(viewModel.formValue == 3)
+
+        // Second attempt: the SAME logViewModel, called again — this is
+        // the exact RETRY branch the fix touches, even though there is
+        // nothing left for it to actually retry.
+        #expect(logViewModel.save())
+
+        // No duplicate LoggedActivity from either call.
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+
+        // The retry pass still refreshed Activity Detail's canonical
+        // state — not skipped just because nothing needed retrying.
+        #expect(reloadCallCount == 2)
+        #expect(viewModel.formValue == 3)
+        #expect(viewModel.loggedActivity?.status == .completed)
+
+        // `makeLogActivityViewModel()` accepts no dismiss closure of any
+        // kind (see the successful/failed-log tests above) — there is
+        // structurally nothing here that could request a parent
+        // dismiss, on the initial log or on this retry.
+    }
+
+    /// Round 3 review follow-up, Blocker 2: even after round 2's fix,
+    /// `LogActivityViewModel.save()` still returned `true` unconditionally
+    /// once persistence succeeded, regardless of whether the MOUNTED
+    /// `ActivityDetailViewModel`'s own canonical refresh succeeded — so
+    /// the sheet could still dismiss while Activity Detail stayed stale.
+    /// `refreshMountedState` is the new, directly-injectable seam that
+    /// closes this gap: constructed here on `LogActivityViewModel`
+    /// itself (not via `ActivityDetailViewModel.makeLogActivityViewModel()`,
+    /// which always wires a real, working refresh) so the refresh's
+    /// success/failure can be controlled directly, without needing any
+    /// domain-invalid or otherwise-unreachable-without-new-seams
+    /// simulation — genuine coverage, not a disclosed workaround.
+    @Test("A failed mounted-state refresh keeps save() reporting failure without a duplicate log; a subsequent successful refresh then reports success")
+    @MainActor
+    func failedMountedRefreshKeepsSaveFailingUntilRetrySucceeds() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        var onLoggedCallCount = 0
+        var refreshShouldSucceed = false
+        var refreshCallCount = 0
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity,
+            athleteId: athleteId,
+            athleteDisplayName: "Oliver",
+            authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: { onLoggedCallCount += 1 },
+            refreshMountedState: {
+                refreshCallCount += 1
+                return refreshShouldSucceed
+            }
+        )
+        logViewModel.durationMinutes = 45
+        logViewModel.sessionForm = 3
+
+        // First attempt: persistence succeeds, but the mounted refresh
+        // fails — save() must report failure, never a fabricated
+        // success, and the sheet's caller must be able to tell.
+        #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(logViewModel.didLog)
+        #expect(onLoggedCallCount == 1)
+        #expect(refreshCallCount == 1)
+
+        var links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+
+        // Retry: the underlying log is NOT re-created (no duplicate),
+        // only the refresh is re-attempted — now succeeding.
+        refreshShouldSucceed = true
+        #expect(logViewModel.save())
+        #expect(onLoggedCallCount == 2)
+        #expect(refreshCallCount == 2)
+
+        links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+
+        // Session Form itself was never touched by any of this — exactly
+        // one reflection, matching the single underlying log.
+        let reflectionCount = try reflectionService.fetchActivityReflections(
+            forLoggedActivity: links[0].loggedActivityId
+        ).count
+        #expect(reflectionCount == 1)
+    }
+
+    /// Round 4 review follow-up: the exact regression the review
+    /// caught — round 3's `finishSave` logic returned early on a Form
+    /// failure, before `onLogged()`/`refreshMountedState()` ever ran.
+    /// So a user who logged successfully, hit a Form failure, then
+    /// chose Cancel instead of retrying, would leave the mounted
+    /// Activity Detail (and the parent surface behind it) never told
+    /// the activity was logged at all — a One Truth violation, since
+    /// the canonical `LoggedActivity` genuinely exists.
+    ///
+    /// Reaching a genuine "Form remains pending/failed" state through
+    /// `LogActivityViewModel`'s own public `save()` is not possible
+    /// without either bypassing `TrainingValidator`'s required (1...5)
+    /// gate (a Completed log's Form is always validated before
+    /// `logActivity` is ever called, so it can never fail afterward with
+    /// a valid input) or a domain-invalid Missed+Form combination
+    /// (explicitly disallowed). This test instead uses
+    /// `presetForFormRetryTesting` — a package-internal, test-only seam
+    /// — to put the view model into the exact "already logged, Form
+    /// retry pending" state a genuine failure leaves behind, backed by a
+    /// REAL, already-persisted `LoggedActivity` (created directly
+    /// through the coordinator, the same pattern several other tests in
+    /// this file already use). The retry's own `recordSessionForm` call
+    /// is real, unvalidated production code — the failure itself comes
+    /// from a genuinely out-of-range value (99), the same technique
+    /// already established elsewhere in this codebase for simulating a
+    /// Session Form write failure — never a fabricated result.
+    @Test("A retry with Form still unresolved still fires the canonical refresh signal and attempts the mounted refresh, keeps save() false without duplicating the LoggedActivity, and a later valid retry succeeds")
+    @MainActor
+    func formStillUnresolvedOnRetryStillRefreshesCanonicalStateWithoutDuplicating() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: TrainingPlanningCoordinationService.today(),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        // The base LoggedActivity genuinely persisted already — created
+        // directly through the coordinator with no Form, mirroring the
+        // state a real `save()` call reaches the instant `logActivity`
+        // itself succeeds, before Form is ever attempted.
+        let logged = try coordinator.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: activity.title, startedAt: .now, durationMinutes: 45, status: .completed,
+            authorId: ActorId(), sessionForm: nil
+        )
+
+        var onLoggedCallCount = 0
+        var refreshCallCount = 0
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity,
+            athleteId: athleteId,
+            athleteDisplayName: "Oliver",
+            authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: { onLoggedCallCount += 1 },
+            refreshMountedState: { refreshCallCount += 1; return true }
+        )
+        // `sessionForm: 99` is out-of-range — genuinely fails
+        // ReflectionService's own validation on the real
+        // `recordSessionForm` call the retry branch makes, not a
+        // fabricated result. `TrainingReflectionCoordinationService.logActivity`
+        // returns `LoggedActivityWithSessionForm` — the `LoggedActivity`
+        // itself, and its `loggedActivityId`, live under its own
+        // `.loggedActivity` member, not directly on the result.
+        logViewModel.presetForFormRetryTesting(loggedActivityId: logged.loggedActivity.loggedActivityId, sessionForm: 99)
+
+        #expect(logViewModel.save() == false)
+        #expect(logViewModel.errorMessage != nil)
+        #expect(logViewModel.sessionFormPendingRetry)
+        // The canonical refresh signal still fired, even though Form
+        // remains unresolved — the exact fix this round makes.
+        #expect(onLoggedCallCount == 1)
+        #expect(refreshCallCount == 1)
+
+        var links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivity.loggedActivityId).count == 0)
+
+        // A later retry with a valid Form value succeeds, without ever
+        // re-invoking logActivity.
+        logViewModel.sessionForm = 3
+        #expect(logViewModel.save())
+        #expect(logViewModel.sessionFormPendingRetry == false)
+        #expect(onLoggedCallCount == 2)
+        #expect(refreshCallCount == 2)
+
+        links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivity.loggedActivityId).count == 1)
     }
 
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion

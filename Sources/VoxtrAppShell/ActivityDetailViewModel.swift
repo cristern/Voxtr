@@ -87,19 +87,27 @@ public final class ActivityDetailViewModel {
     /// explicit signal back to whichever screen pushed this one (Family
     /// Home, Athlete Home, Daily Training, Family Schedule, Weekly
     /// Planning), fired the moment a log genuinely succeeds — never a
-    /// mere `.onAppear` refire assumption. This screen also pops itself
-    /// on successful log, synchronously, via the SAME `onLogged`
-    /// closure (see `makeLogActivityViewModel`'s own `onDismiss`
-    /// parameter) — the returning host is signaled to reload BEFORE
-    /// this screen dismisses, never after. This closure is the
-    /// deterministic counterpart that tells the screen being popped
-    /// BACK TO to reload its own authoritative data, the same "explicit
+    /// mere `.onAppear` refire assumption. This closure is the
+    /// deterministic counterpart that tells the screen ALREADY BEHIND
+    /// this one to reload its own authoritative data, the same "explicit
     /// success signal, not implicit SwiftUI lifecycle" principle
     /// `successfulLogTrigger`/`onLogged` already establish elsewhere in
     /// this exact flow. Planning edit/delete use the same host-refresh
     /// signal; the Weekly Planning host then publishes athlete-scoped
     /// invalidation after its own canonical refetch. Defaulted to a no-op
     /// so existing construction sites/tests are unaffected.
+    ///
+    /// TestFlight closeout: logging a planned activity is an in-context
+    /// correction/update flow, not a hand-off to a new screen —
+    /// `ActivityDetailView` itself no longer dismisses in response to a
+    /// successful log (see `makeLogActivityViewModel`'s own doc comment
+    /// for the previous, buggy behavior this replaces). `onActivityLogged`
+    /// here still only reaches the screen THIS one was pushed FROM, so
+    /// that screen's own row list is fresh whenever the user eventually
+    /// navigates back to it — this screen's OWN freshness after a log is
+    /// handled separately, in place, by `makeLogActivityViewModel`'s
+    /// `onLogged` closure updating `loggedActivity`/`activityReflection`
+    /// directly.
     private let onActivityLogged: () -> Void
 
     public init(
@@ -462,23 +470,29 @@ public final class ActivityDetailViewModel {
     /// Builds the logging ViewModel with every planned-activity value
     /// already known, prefilled — Part 4's own core requirement.
     ///
-    /// `onDismiss` (Athlete Home stale-state fix, single-owner
-    /// closeout): `ActivityDetailView` passes its own
-    /// `@Environment(\.dismiss)` here, called SYNCHRONOUSLY in the same
-    /// `onLogged` closure as `onActivityLogged()` — the exact timing
-    /// `RecurringOccurrencePreviewView`'s own already-verified-working
-    /// `onLogged: { onActivityLogged(); dismiss() }` already uses. This
-    /// is now the ONE place a successful log dismisses
-    /// `ActivityDetailView` — `isCompleted` is `private(set)` and this
-    /// closure (line below) is its only mutation site anywhere in this
-    /// codebase, so `ActivityDetailView` no longer also observes
-    /// `isCompleted` via `.onChange` to dismiss reactively; that
-    /// would-be second, independent trigger was removed rather than
-    /// kept as a "safety net" — a successful log has exactly one
-    /// navigation owner, not two. Defaulted to a no-op so existing
-    /// callers/tests that only care about `isCompleted`/`onActivityLogged`
-    /// are unaffected.
-    public func makeLogActivityViewModel(onDismiss: @escaping () -> Void = {}) -> LogActivityViewModel {
+    /// TestFlight closeout (blank-screen-after-Save fix): this used to
+    /// take an `onDismiss` closure that `ActivityDetailView` wired to its
+    /// own `@Environment(\.dismiss)`, called synchronously the moment a
+    /// log succeeded — so a successful Save popped `ActivityDetailView`
+    /// itself off the NavigationStack, not just the `LogActivityView`
+    /// sheet. Logging a planned activity is an in-context correction/
+    /// update flow, not a hand-off to a new screen (unlike
+    /// `RecurringOccurrencePreviewView`'s own, DELIBERATELY different
+    /// `onLogged: { onActivityLogged(); dismiss() }` — that screen's own
+    /// content is static text that becomes meaningless the instant the
+    /// occurrence materializes, so dismissing itself there is correct;
+    /// `ActivityDetailView` has real, updatable state to show instead,
+    /// so it must not copy that pattern). `onDismiss` is removed
+    /// entirely — nothing here asks the presenting screen to dismiss
+    /// anymore. `onLogged` below now refreshes `loggedActivity`/
+    /// `activityReflection` from the SAME canonical read
+    /// `ActivityDetailViewLoader.onAppear` already uses to build this
+    /// exact state initially (`loggedActivityDetail(forPlannedActivity:)`),
+    /// so the moment the sheet closes (via `LogActivityView`'s own
+    /// `dismiss()`, unrelated to this closure), `ActivityDetailView` is
+    /// already showing the real logged outcome and recorded data — no
+    /// forced refresh, no timing workaround, no fabricated local state.
+    public func makeLogActivityViewModel() -> LogActivityViewModel {
         LogActivityViewModel(
             plannedActivity: activity,
             athleteId: athleteId,
@@ -489,10 +503,40 @@ public final class ActivityDetailViewModel {
             // separately-resolved one.
             authorId: deletedByActorId,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            // Review follow-up (blank-screen-after-Save closeout, round
+            // 3): split from the refresh below — this fires
+            // unconditionally, regardless of whether THIS screen's own
+            // canonical refresh succeeds, because the screen this one was
+            // pushed from reads its own canonical state independently and
+            // is correct either way.
             onLogged: { [weak self] in
-                self?.isCompleted = true
                 self?.onActivityLogged()
-                onDismiss()
+            },
+            // Review follow-up (blank-screen-after-Save closeout, round
+            // 3): reports success/failure back to `LogActivityViewModel.save()`
+            // so a failed refresh here keeps the sheet open for retry
+            // instead of dismissing onto a screen it never actually
+            // updated. `isCompleted` and `loggedActivity` must never
+            // diverge — One Truth — so both are still set together, ONLY
+            // inside the success branch, exactly as round 2 already
+            // established; the only change here is that failure is now
+            // reported outward instead of silently swallowed by `try?`.
+            // On failure, nothing here is mutated — an honest "still
+            // don't know" rather than a false "definitely logged" —
+            // self-correcting the next time this screen (or a fresh one,
+            // via `ActivityDetailViewLoader`) re-reads canonical state, or
+            // the next time `save()` retries this same closure.
+            refreshMountedState: { [weak self] in
+                guard let self else { return false }
+                guard let detail = try? self.trainingReflectionCoordinationService.loggedActivityDetail(
+                    forPlannedActivity: self.activity.plannedActivityId
+                ) else {
+                    return false
+                }
+                self.loggedActivity = detail.loggedActivity
+                self.activityReflection = detail.reflection
+                self.isCompleted = true
+                return true
             }
         )
     }
