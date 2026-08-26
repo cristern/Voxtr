@@ -19,12 +19,19 @@ import VoxtrReflectionDomain
 struct Sprint111Tests {
 
     /// Item 1: a materialized Tomorrow activity's identity is
-    /// resolvable the same way a Today activity's is —
-    /// `FamilyHomeDestination.activity(rowId:)`'s own resolution logic
-    /// searches `viewModel.rows + viewModel.tomorrowRows`, so a
-    /// Tomorrow-only row's id is findable there. This is the concrete,
-    /// testable half of the navigation identity the white-screen
-    /// investigation covers below the SwiftUI runtime.
+    /// resolvable the same way a Today activity's is — `viewModel.rows`/
+    /// `viewModel.tomorrowRows` both compose `FamilyHomeRow` the same
+    /// way, so a Tomorrow-only row carries the exact same stable
+    /// `plannedActivity`/`athleteId` identity a Today row does. This is
+    /// the concrete, testable half of the navigation identity the
+    /// white-screen investigation covers below the SwiftUI runtime.
+    /// (White-screen-after-Save fix: `FamilyHomeDestination.activity`
+    /// no longer performs a rowId lookup at all — it carries the
+    /// resolved `FamilyHomeRow` directly, see that enum's own doc
+    /// comment — so this test's own manual `plannedRowsToday +
+    /// plannedRowsTomorrow` composition below proves the row itself is
+    /// findable in either collection, which is what `NavigationLink(value:)`
+    /// reads from at tap time.)
     @Test("Tomorrow's materialized activity preserves PlannedActivityId/AthleteId navigation identity")
     @MainActor
     func tomorrowMaterializedActivityPreservesNavigationIdentity() throws {
@@ -68,7 +75,9 @@ struct Sprint111Tests {
         viewModel.loadTomorrow()
 
         #expect(viewModel.tomorrowRows.count == 1)
-        // The exact identity FamilyHomeDestination.activity(rowId:) resolves against.
+        // The stable row id `FamilyHomeRow.id` itself carries — the
+        // same identity `FamilyHomeDestination.activity` now embeds
+        // directly rather than looking up.
         let rowId = created.plannedActivityId.rawValue.uuidString
         let plannedRowsToday: [FamilyHomeRow] = viewModel.rows.compactMap {
             if case .planned(let row) = $0 { return row }

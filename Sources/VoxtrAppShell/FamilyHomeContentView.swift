@@ -11,10 +11,41 @@ import VoxtrReflectionDomain
 /// selected athlete" anywhere in this type or its view, matching "no
 /// global selected athlete state." A `NavigationLink(value:)` for one
 /// row's athlete and one for its activity are both fully self-contained.
+///
+/// White-screen-after-Save (stable navigation destination) fix:
+/// `.activity`/`.recurringOccurrence` used to carry a bare `String` id,
+/// resolved back into a `FamilyHomeRow`/`RecurringActivitySuggestion`
+/// by searching `viewModel.rows`/`tomorrowRows` fresh every time
+/// `.navigationDestination(for:)`'s closure ran — including while the
+/// destination it already resolved is on screen, since that closure is
+/// re-invoked on ordinary body re-evaluations, not just once per push
+/// (see `HomeDashboardViewModelCache`'s own doc comment for the first,
+/// differently-shaped bug this exact SwiftUI behavior already caused in
+/// this app). A successful Log Activity Save triggers exactly this: its
+/// `onActivityLogged` callback calls `viewModel.refresh()`, mutating
+/// `rows`/`tomorrowRows` while the just-logged activity's own Activity
+/// Detail is the visible pushed screen. If that row's id could not be
+/// found in the collection at the moment the closure happened to
+/// re-run — a real possibility this collection offers no guarantee
+/// against, matching `HomeDashboardDestination`'s own proven case — the
+/// destination resolved to nothing, a blank pushed screen.
+///
+/// Both cases now carry the full, already-resolved value directly —
+/// captured once, at the moment `NavigationLink(value:)` is tapped, from
+/// whichever row was actually rendered — so `.navigationDestination(for:)`
+/// never performs a lookup against a mutable collection to resolve an
+/// ALREADY-pushed destination; it only ever destructures the value the
+/// enum case itself already carries. A parent list refresh changes
+/// `viewModel.rows`/`tomorrowRows` freely and independently — this
+/// destination's own identity is untouched by that, by construction,
+/// not by a promise this file has to keep manually. See
+/// `FamilyHomeRow`/`RecurringActivitySuggestion`'s own new `Hashable`
+/// conformance doc comments for why hashing/equality is by stable id
+/// alone, not a deep snapshot comparison.
 enum FamilyHomeDestination: Hashable {
     case athlete(AthleteId)
-    case activity(rowId: String)
-    case recurringOccurrence(id: String)
+    case activity(FamilyHomeRow)
+    case recurringOccurrence(athleteId: AthleteId, athleteName: String, suggestion: RecurringActivitySuggestion)
     // Family Home athlete navigation round: `.reflection(AthleteId)` is
     // removed — its only trigger was `reflectionNavigationSection`'s
     // per-athlete "Add Reflection" shortcut, replaced by `athletesSection`
@@ -253,30 +284,18 @@ public struct FamilyHomeContentView: View {
                     if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
                         athleteOverview(for: athlete)
                     }
-                case .activity(let rowId):
-                    let plannedRowsToday: [FamilyHomeRow] = viewModel.rows.compactMap {
-                        if case .planned(let row) = $0 { return row }
-                        return nil
-                    }
-                    let plannedRowsTomorrow: [FamilyHomeRow] = viewModel.tomorrowRows.compactMap {
-                        if case .planned(let row) = $0 { return row }
-                        return nil
-                    }
-                    if let row = (plannedRowsToday + plannedRowsTomorrow).first(where: { $0.id == rowId }) {
-                        activityDetail(for: row)
-                    }
-                case .recurringOccurrence(let id):
-                    if case .recurringOccurrence(let athleteId, let athleteName, let suggestion) = (viewModel.rows + viewModel.tomorrowRows).first(where: { $0.id == id }) {
-                        RecurringOccurrencePreviewView(
-                            suggestion: suggestion,
-                            athleteDisplayName: athleteName,
-                            planningService: planningService,
-                            trainingService: trainingService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            actorId: ActorId(rawValue: family.participant.id),
-                            onActivityLogged: { viewModel.refresh() }
-                        )
-                    }
+                case .activity(let row):
+                    activityDetail(for: row)
+                case .recurringOccurrence(_, let athleteName, let suggestion):
+                    RecurringOccurrencePreviewView(
+                        suggestion: suggestion,
+                        athleteDisplayName: athleteName,
+                        planningService: planningService,
+                        trainingService: trainingService,
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        actorId: ActorId(rawValue: family.participant.id),
+                        onActivityLogged: { viewModel.refresh() }
+                    )
                 case .familySchedule:
                     FamilyScheduleView(
                         viewModel: FamilyScheduleViewModel(
@@ -444,7 +463,7 @@ public struct FamilyHomeContentView: View {
             // shortcut this removes is not a lost capability — Family
             // Home's own Athletes section already exists as the
             // canonical way to open an athlete's Home from this screen.
-            NavigationLink(value: FamilyHomeDestination.recurringOccurrence(id: suggestion.id)) {
+            NavigationLink(value: FamilyHomeDestination.recurringOccurrence(athleteId: athleteId, athleteName: athleteName, suggestion: suggestion)) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(athleteName)
                         .font(VoxtrTypography.metadata)
@@ -529,9 +548,12 @@ public struct FamilyHomeContentView: View {
     /// `NavigationLink` into the ONE `NavigationLink` below — see
     /// `todayActivityRow`'s `.recurringOccurrence` case for the full
     /// root-cause explanation; the same fix applies here. Destination
-    /// (`FamilyHomeDestination.activity(rowId:)`) is unchanged.
+    /// case (`FamilyHomeDestination.activity`) is the same one as
+    /// before this round's merge — only its own payload shape changed
+    /// since, per the White-screen-after-Save fix (see that enum's own
+    /// doc comment).
     private func familyHomeRow(_ row: FamilyHomeRow) -> some View {
-        NavigationLink(value: FamilyHomeDestination.activity(rowId: row.id)) {
+        NavigationLink(value: FamilyHomeDestination.activity(row)) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.athleteName)
                     .font(VoxtrTypography.metadata)
