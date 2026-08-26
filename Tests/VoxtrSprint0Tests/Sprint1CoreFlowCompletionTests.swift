@@ -460,10 +460,14 @@ struct Sprint1CoreFlowCompletionTests {
             onLogged: { onLoggedCallCount += 1 },
             refreshMountedState: { refreshCallCount += 1; return true }
         )
-        // Out-of-range — genuinely fails ReflectionService's own
-        // validation on the real `recordSessionForm` call the retry
-        // branch makes, not a fabricated result.
-        logViewModel.presetForFormRetryTesting(loggedActivityId: logged.loggedActivityId, sessionForm: 99)
+        // `sessionForm: 99` is out-of-range — genuinely fails
+        // ReflectionService's own validation on the real
+        // `recordSessionForm` call the retry branch makes, not a
+        // fabricated result. `TrainingReflectionCoordinationService.logActivity`
+        // returns `LoggedActivityWithSessionForm` — the `LoggedActivity`
+        // itself, and its `loggedActivityId`, live under its own
+        // `.loggedActivity` member, not directly on the result.
+        logViewModel.presetForFormRetryTesting(loggedActivityId: logged.loggedActivity.loggedActivityId, sessionForm: 99)
 
         #expect(logViewModel.save() == false)
         #expect(logViewModel.errorMessage != nil)
@@ -475,7 +479,7 @@ struct Sprint1CoreFlowCompletionTests {
 
         var links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
         #expect(links.count == 1)
-        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivityId).count == 0)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivity.loggedActivityId).count == 0)
 
         // A later retry with a valid Form value succeeds, without ever
         // re-invoking logActivity.
@@ -487,7 +491,7 @@ struct Sprint1CoreFlowCompletionTests {
 
         links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
         #expect(links.count == 1)
-        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivityId).count == 1)
+        #expect(try reflectionService.fetchActivityReflections(forLoggedActivity: logged.loggedActivity.loggedActivityId).count == 1)
     }
 
     // MARK: - Post-mutation consistency closeout: One Truth for Activity Detail completion
