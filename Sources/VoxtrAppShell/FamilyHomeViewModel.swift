@@ -9,7 +9,7 @@ import VoxtrReflectionDomain
 /// Today's Schedule — a `PlannedActivity` tagged with which athlete it
 /// belongs to. Never carries a "selected athlete" of its own; each row
 /// is self-contained, matching "no global selected athlete state."
-public struct FamilyHomeRow: Identifiable {
+public struct FamilyHomeRow: Identifiable, Hashable {
     public let id: String
     public let athleteId: AthleteId
     public let athleteName: String
@@ -70,6 +70,31 @@ public struct FamilyHomeRow: Identifiable {
     /// recomposition.
     public var isFromRecurring: Bool {
         plannedActivity.externalSourceType == RecurringPlannedActivity.externalSourceType
+    }
+
+    /// White-screen-after-Save (stable navigation destination) fix:
+    /// `Hashable`/`Equatable` by `id` alone — the same stable string
+    /// identity `Identifiable` above already uses, derived from
+    /// `PlannedActivity.id`, never a deep comparison of every field.
+    /// This row is now carried DIRECTLY inside `FamilyHomeDestination`/
+    /// `HomeDashboardDestination`'s own `.activity` case (see those
+    /// types' own doc comments) so `.navigationDestination(for:)` never
+    /// needs to look this row back up in a mutable, refreshable
+    /// collection to resolve an already-pushed destination. Hashing only
+    /// `id` — rather than deriving conformance from every stored
+    /// property, which would also require `PlannedActivity`/
+    /// `LoggedActivity` (SwiftData `@Model` reference types) to
+    /// participate — means the SAME logical activity still hashes/
+    /// compares equal across a refresh even though `isCompleted`/
+    /// `loggedActivity` legitimately changed; SwiftUI's own navigation
+    /// identity for this destination should track "which activity," not
+    /// "what did it look like at push time."
+    public static func == (lhs: FamilyHomeRow, rhs: FamilyHomeRow) -> Bool {
+        lhs.id == rhs.id
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }
 

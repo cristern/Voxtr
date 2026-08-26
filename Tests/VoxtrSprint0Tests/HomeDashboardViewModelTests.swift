@@ -854,24 +854,26 @@ struct HomeDashboardViewModelTests {
 
     // MARK: - TestFlight regression: stale mounted Athlete Home after Log/Cancel
 
-    /// The prior test (`successfulLogReflectsInHomeDashboardCanonicalState`)
-    /// already proved the reload callback fires and `HomeDashboardViewModel`'s
-    /// OWN canonical state comes back fresh — and TestFlight still showed
-    /// a stale row. The actual defect was in `HomeDashboardView`'s row
-    /// navigation: `NavigationLink(destination: ActivityDetailViewLoader(...))`
-    /// (the legacy, eager-destination form) captured `FamilyHomeRow` at
-    /// row-render time as part of ONE `NavigationLink` value tied to a
-    /// single push identity, instead of resolving it fresh each time.
-    /// The fix extracts that resolution into `HomeDashboardRowResolver`
-    /// — a plain function of whatever `TodayActivityLoadState` is passed
-    /// to it, called by `.navigationDestination(for:)` on every
-    /// invocation. This test proves exactly that: the SAME row id,
-    /// resolved against a state captured BEFORE a mutation and again
-    /// against a state loaded AFTER one, returns the CORRECT, DIFFERENT
-    /// outcome each time — not a value frozen at the first resolution.
-    @Test("HomeDashboardRowResolver.plannedRow resolves the fresh outcome from a newly-loaded state, never a value frozen from an earlier state")
+    /// White-screen-after-Save (stable navigation destination) fix: the
+    /// prior version of this test proved `HomeDashboardRowResolver`
+    /// resolved fresh from `viewModel.todayActivityState` on every call —
+    /// which was itself the actual defect the round 5 review caught:
+    /// `.navigationDestination(for:)` calls that resolver against
+    /// whatever state happens to be current at that moment, including
+    /// the transient `.loading` state `loadTodayActivityRows()` sets
+    /// BEFORE recomputing rows — and `HomeDashboardRowResolver` returns
+    /// `nil` for any non-`.loaded` state. `HomeDashboardRowResolver` is
+    /// removed; `HomeDashboardDestination.activity`/`.recurringOccurrence`
+    /// now carry the resolved `FamilyHomeRow`/`RecurringActivitySuggestion`
+    /// value directly (see that enum's own doc comment). This test
+    /// proves the actual contract that replaces the old one: a
+    /// destination value captured for a `PlannedActivity` BEFORE a
+    /// mutation still correctly identifies that SAME activity after the
+    /// underlying data changes AND the parent state is reloaded through
+    /// it — never a lookup that could fail to find it.
+    @Test("A HomeDashboardDestination.activity captured before a mutation still identifies the same PlannedActivity after the mutation and a parent reload")
     @MainActor
-    func rowResolverReflectsFreshStateAfterMutation() throws {
+    func activityDestinationRemainsResolvableAfterMutationAndReload() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let planningRepository = PlanningRepository(modelContext: container.mainContext)
@@ -889,7 +891,6 @@ struct HomeDashboardViewModelTests {
             toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
             title: "Evening swim", localDate: today, timeZoneId: Self.oslo
         )
-        let rowId = activity.id.uuidString
 
         let homeDashboardViewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
@@ -904,17 +905,17 @@ struct HomeDashboardViewModelTests {
             activityChangeBroadcaster: AthleteActivityChangeBroadcaster()
         )
         homeDashboardViewModel.loadTodayActivityRows()
-        // Captured once, exactly like a `NavigationLink(destination:)`
-        // row builder would have captured it — this is the OLD state on
-        // purpose, to prove resolving against it is genuinely different
-        // from resolving against the fresh one below.
-        let stateBeforeMutation = homeDashboardViewModel.todayActivityState
-
-        guard let rowBefore = HomeDashboardRowResolver.plannedRow(forId: rowId, in: stateBeforeMutation) else {
+        guard case .loaded(let rowsBeforeMutation) = homeDashboardViewModel.todayActivityState,
+              case .planned(let familyHomeRow) = rowsBeforeMutation.first else {
             Issue.record("Expected a .planned row before the mutation")
             return
         }
-        #expect(rowBefore.outcomeStatus == nil)
+        #expect(familyHomeRow.outcomeStatus == nil)
+
+        // Exactly what `NavigationLink(value:)` constructs when the row
+        // is tapped — this is the value that would already be pushed
+        // and on screen at the moment the mutation below happens.
+        let destination = HomeDashboardDestination.activity(familyHomeRow)
 
         // The mutation: Cancel Activity, through the exact same
         // canonical path ActivityDetailViewModel.cancelActivity() uses.
@@ -923,56 +924,76 @@ struct HomeDashboardViewModelTests {
             activityType: .individualTraining, title: activity.title, startedAt: .now,
             durationMinutes: 1, status: .cancelled
         )
-        // Mirrors HomeDashboardView's onActivityLogged reload exactly.
+        // Mirrors HomeDashboardView's onActivityLogged reload exactly —
+        // this is what used to blank the already-pushed destination.
         homeDashboardViewModel.loadTodaysTraining()
         homeDashboardViewModel.loadTodayActivityRows()
-        let stateAfterMutation = homeDashboardViewModel.todayActivityState
 
-        // Resolving the SAME rowId against the FRESH state must return
-        // the new outcome...
-        guard let rowAfter = HomeDashboardRowResolver.plannedRow(forId: rowId, in: stateAfterMutation) else {
+        // The parent's OWN state genuinely changed...
+        guard case .loaded(let rowsAfterMutation) = homeDashboardViewModel.todayActivityState,
+              case .planned(let refreshedRow) = rowsAfterMutation.first else {
             Issue.record("Expected a .planned row after the mutation")
             return
         }
-        #expect(rowAfter.outcomeStatus == .cancelled)
+        #expect(refreshedRow.outcomeStatus == .cancelled)
 
-        // ...while resolving against the OLD, already-captured state
-        // (exactly what a stale `NavigationLink(destination:)` capture
-        // would have done) still correctly reflects what THAT state
-        // actually held — proving the resolver has no hidden memoization
-        // of its own; the fix is that `.navigationDestination(for:)`
-        // always passes the CURRENT `viewModel.todayActivityState`, never
-        // a value captured once at row-render time.
-        guard let rowStillBefore = HomeDashboardRowResolver.plannedRow(forId: rowId, in: stateBeforeMutation) else {
-            Issue.record("Expected the old captured state to still resolve consistently")
+        // ...but the ALREADY-CAPTURED destination is completely
+        // unaffected by that reload — it never looks anything up in
+        // `todayActivityState` at all, so it still identifies the exact
+        // same `PlannedActivity`, regardless of what the parent's own
+        // state now says.
+        guard case .activity(let capturedRow) = destination else {
+            Issue.record("Expected .activity destination")
             return
         }
-        #expect(rowStillBefore.outcomeStatus == nil)
+        #expect(capturedRow.plannedActivity.plannedActivityId == activity.plannedActivityId)
+        #expect(capturedRow.athleteId == athleteId)
     }
 
-    /// Same proof for the recurring-occurrence resolution path — the
-    /// other case `HomeDashboardView`'s row navigation covers.
-    @Test("HomeDashboardRowResolver.recurringSuggestion resolves against whatever TodayActivityLoadState it is given, never a fixed snapshot")
-    func rowResolverForRecurringOccurrenceReadsGivenState() throws {
+    /// Same proof for the recurring-occurrence case — the other
+    /// destination `HomeDashboardView`'s row navigation covers. Also
+    /// proves sibling suggestions never cross-resolve: two distinct
+    /// destinations built in the same pass stay distinct.
+    @Test("A HomeDashboardDestination.recurringOccurrence carries its own suggestion directly and never cross-resolves with a sibling")
+    @MainActor
+    func recurringOccurrenceDestinationCarriesOwnSuggestion() throws {
         let athleteId = AthleteId()
+        let otherAthleteId = AthleteId()
         let suggestion = RecurringActivitySuggestion(
             id: "recurring-1", recurringPlannedActivityId: RecurringPlannedActivityId(),
             athleteId: athleteId, occurrenceDate: LocalDate(year: 2026, month: 1, day: 5),
             title: "Saturday run", activityType: .individualTraining, sportId: nil, categoryIds: [],
             startLocalTime: nil, plannedDurationMinutes: nil, timeZoneId: Self.oslo, location: nil
         )
-        let stateWithSuggestion: TodayActivityLoadState = .loaded([
-            .recurringOccurrence(athleteId: athleteId, athleteName: "Oliver", suggestion: suggestion),
-        ])
-        let emptyState: TodayActivityLoadState = .loaded([])
+        let siblingSuggestion = RecurringActivitySuggestion(
+            id: "recurring-2", recurringPlannedActivityId: RecurringPlannedActivityId(),
+            athleteId: otherAthleteId, occurrenceDate: LocalDate(year: 2026, month: 1, day: 5),
+            title: "Sunday swim", activityType: .individualTraining, sportId: nil, categoryIds: [],
+            startLocalTime: nil, plannedDurationMinutes: nil, timeZoneId: Self.oslo, location: nil
+        )
 
-        #expect(HomeDashboardRowResolver.recurringSuggestion(forId: suggestion.id, in: stateWithSuggestion)?.id == suggestion.id)
-        // The identical id resolves to nothing once the occurrence is no
-        // longer present in the state passed in (e.g. materialized into
-        // a real PlannedActivity by a Log Activity elsewhere) — proving
-        // resolution is driven entirely by the state argument, not by
-        // anything remembered from a previous call.
-        #expect(HomeDashboardRowResolver.recurringSuggestion(forId: suggestion.id, in: emptyState) == nil)
+        let destination = HomeDashboardDestination.recurringOccurrence(
+            athleteId: athleteId, athleteName: "Oliver", suggestion: suggestion
+        )
+        let siblingDestination = HomeDashboardDestination.recurringOccurrence(
+            athleteId: otherAthleteId, athleteName: "AthleteTwo", suggestion: siblingSuggestion
+        )
+
+        guard case .recurringOccurrence(let resolvedAthleteId, _, let resolvedSuggestion) = destination else {
+            Issue.record("Expected .recurringOccurrence destination")
+            return
+        }
+        #expect(resolvedAthleteId == athleteId)
+        #expect(resolvedSuggestion.id == suggestion.id)
+
+        guard case .recurringOccurrence(let siblingAthleteId, _, let siblingResolvedSuggestion) = siblingDestination else {
+            Issue.record("Expected .recurringOccurrence destination")
+            return
+        }
+        #expect(siblingAthleteId == otherAthleteId)
+        #expect(siblingResolvedSuggestion.id == siblingSuggestion.id)
+        // Never cross-resolve.
+        #expect(destination != siblingDestination)
     }
 
     // MARK: - Recurring reopen stale-Athlete-Home fix (architecture round)

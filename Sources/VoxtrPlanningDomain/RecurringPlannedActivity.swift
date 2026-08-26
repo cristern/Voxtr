@@ -184,7 +184,18 @@ public extension RecurringPlannedActivity {
 /// `id` is the same deterministic occurrence identity described above,
 /// which doubles as this suggestion's stable SwiftUI/ViewModel
 /// identity (used for session-only dismissal tracking).
-public struct RecurringActivitySuggestion: Identifiable, Sendable, Equatable {
+///
+/// White-screen-after-Save (stable navigation destination) fix:
+/// `Hashable` added (synthesized — every stored property below is
+/// already `Hashable`: `String`, `RecurringPlannedActivityId`,
+/// `AthleteId`, `LocalDate`, `ActivityType`, `SportId?`,
+/// `[ActivityCategoryId]`, `LocalTime?`, `Int?`, `TimeZoneId`) so this
+/// value can be carried DIRECTLY inside `FamilyHomeDestination`/
+/// `HomeDashboardDestination`'s own `.recurringOccurrence` case, the
+/// same reasoning `FamilyHomeRow`'s own new `Hashable` conformance
+/// documents — an already-pushed destination must not depend on a
+/// mutable, refreshable suggestions list continuing to contain it.
+public struct RecurringActivitySuggestion: Identifiable, Sendable, Hashable {
     public let id: String
     public let recurringPlannedActivityId: RecurringPlannedActivityId
     public let athleteId: AthleteId

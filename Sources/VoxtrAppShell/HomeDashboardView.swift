@@ -76,20 +76,52 @@ func homeDashboardDebugLog(_ message: @autoclosure () -> String) {}
 /// below), but the row's own already-rendered label did not reliably
 /// pick the fresh value back up purely by popping back to it. Switching
 /// to `NavigationLink(value:)` decouples the destination resolution
-/// from the row's rendering entirely: `.navigationDestination(for:)`
-/// resolves the CURRENT row fresh from `viewModel.todayActivityState`
-/// every time it runs, and the row's label is rebuilt from the current
-/// `ForEach` element on every body pass exactly like every other row in
-/// this app already does — the same mechanism already verified working
-/// for Family Home's identical navigation.
+/// from the row's rendering entirely: the row's label is rebuilt from
+/// the current `ForEach` element on every body pass exactly like every
+/// other row in this app already does — the same mechanism already
+/// verified working for Family Home's identical navigation. (This
+/// original fix's OWN description of how the destination itself got
+/// resolved — by searching `viewModel.todayActivityState` fresh on
+/// every `.navigationDestination(for:)` invocation — is superseded by
+/// the White-screen-after-Save fix immediately below; that search is
+/// exactly what caused THIS app's next regression on this same screen.)
 ///
-/// Mirrors `FamilyHomeDestination`'s own `.activity(rowId:)`/
-/// `.recurringOccurrence(id:)` cases exactly — resolved the same way,
-/// against this screen's own `viewModel.todayActivityState` instead of
-/// `FamilyHomeViewModel.rows`.
+/// White-screen-after-Save (stable navigation destination) fix:
+/// `HomeDashboardRowResolver` — the mechanism this type's own doc
+/// comment above previously described — is REMOVED. It resolved
+/// `.activity(rowId:)`/`.recurringOccurrence(id:)` by searching
+/// `viewModel.todayActivityState` fresh every time
+/// `.navigationDestination(for:)`'s closure ran, INCLUDING while the
+/// destination it already resolved is the visible pushed screen (that
+/// closure re-invokes on ordinary body re-evaluations, not just once
+/// per push — see `HomeDashboardViewModelCache`'s own doc comment in
+/// `FamilyHomeContentView.swift` for the first, differently-shaped bug
+/// this exact SwiftUI behavior already caused in this app). A
+/// successful Log Activity Save triggers exactly this: `onActivityLogged`
+/// below calls `loadTodayActivityRows()`, which sets
+/// `todayActivityState = .loading` BEFORE recomputing it — and
+/// `HomeDashboardRowResolver.plannedRow(forId:in:)` returns `nil` for
+/// any state that isn't `.loaded`, including that intermediate one, and
+/// even once `.loaded` again, offered no guarantee the id would still
+/// be found (the mutable-lookup problem this whole fix removes). Either
+/// way the destination closure produced a blank pushed screen.
+///
+/// Both `.activity`/`.recurringOccurrence` cases now carry the full,
+/// already-resolved value directly — captured once, at the moment
+/// `NavigationLink(value:)` is tapped, from whichever row was actually
+/// rendered — so `.navigationDestination(for:)` never performs a lookup
+/// against `viewModel.todayActivityState` to resolve an ALREADY-pushed
+/// destination; it only ever destructures the value the enum case
+/// itself already carries. A parent list refresh changes
+/// `todayActivityState` freely and independently — this destination's
+/// own identity is untouched by that, by construction. Mirrors
+/// `FamilyHomeDestination`'s identical fix and reasoning exactly — see
+/// `FamilyHomeRow`/`RecurringActivitySuggestion`'s own new `Hashable`
+/// conformance doc comments for why hashing/equality is by stable id
+/// alone, not a deep snapshot comparison.
 enum HomeDashboardDestination: Hashable {
-    case activity(rowId: String)
-    case recurringOccurrence(id: String)
+    case activity(FamilyHomeRow)
+    case recurringOccurrence(athleteId: AthleteId, athleteName: String, suggestion: RecurringActivitySuggestion)
     // Athlete Home "Now" restructure round (Part C, Sleep compaction):
     // `.sleepHistory` and its `sleepHistoryDestination` view were
     // removed together with the standalone "Sleep History" row that
@@ -106,41 +138,6 @@ enum HomeDashboardDestination: Hashable {
     // by `SleepHistoryView`'s own per-date rows (historical
     // correction/backfill), so nothing was removed from the app —
     // only this file's now-unreachable trigger for it.
-}
-
-/// Resolves a `HomeDashboardDestination` against a `TodayActivityLoadState`
-/// — extracted as a plain, `View`-independent function (not a method on
-/// `HomeDashboardView` itself) specifically so the exact mechanism this
-/// regression fix depends on is directly unit-testable without
-/// constructing or hosting any SwiftUI view: pass the SAME row id
-/// against a state captured BEFORE a mutation and again against a fresh
-/// state loaded AFTER one, and the second call must return the updated
-/// row — never a value frozen at some earlier point. This is what
-/// `.navigationDestination(for:)` calls on every invocation, always
-/// against `viewModel.todayActivityState` as it stands AT THAT MOMENT,
-/// never a `TodayActivityRow`/`FamilyHomeRow` captured earlier at
-/// row-render time (the legacy `NavigationLink(destination:)` pattern
-/// this fix replaces).
-enum HomeDashboardRowResolver {
-    static func plannedRow(forId rowId: String, in state: TodayActivityLoadState) -> FamilyHomeRow? {
-        guard case .loaded(let rows) = state else { return nil }
-        for row in rows {
-            if case .planned(let familyHomeRow) = row, familyHomeRow.id == rowId {
-                return familyHomeRow
-            }
-        }
-        return nil
-    }
-
-    static func recurringSuggestion(forId id: String, in state: TodayActivityLoadState) -> RecurringActivitySuggestion? {
-        guard case .loaded(let rows) = state else { return nil }
-        for row in rows {
-            if case .recurringOccurrence(_, _, let suggestion) = row, suggestion.id == id {
-                return suggestion
-            }
-        }
-        return nil
-    }
 }
 
 public struct HomeDashboardView: View {
@@ -298,38 +295,34 @@ public struct HomeDashboardView: View {
         }
         .navigationDestination(for: HomeDashboardDestination.self) { destination in
             switch destination {
-            case .activity(let rowId):
-                if let familyHomeRow = HomeDashboardRowResolver.plannedRow(forId: rowId, in: viewModel.todayActivityState) {
-                    ActivityDetailViewLoader(
-                        plannedActivity: familyHomeRow.plannedActivity,
-                        athleteId: athleteId,
-                        athleteDisplayName: athleteDisplayName,
-                        actorId: committedByActorId,
-                        planningService: planningService,
-                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                        onActivityLogged: {
-                            homeDashboardDebugLog("onActivityLogged fired for rowId=\(rowId)")
-                            viewModel.loadTodaysTraining()
-                            viewModel.loadTodayActivityRows()
-                        }
-                    )
-                }
-            case .recurringOccurrence(let id):
-                if let suggestion = HomeDashboardRowResolver.recurringSuggestion(forId: id, in: viewModel.todayActivityState) {
-                    RecurringOccurrencePreviewView(
-                        suggestion: suggestion,
-                        athleteDisplayName: athleteDisplayName,
-                        planningService: planningService,
-                        trainingService: trainingService,
-                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                        actorId: committedByActorId,
-                        onActivityLogged: {
-                            homeDashboardDebugLog("onActivityLogged fired for recurringOccurrence id=\(id)")
-                            viewModel.loadTodaysTraining()
-                            viewModel.loadTodayActivityRows()
-                        }
-                    )
-                }
+            case .activity(let familyHomeRow):
+                ActivityDetailViewLoader(
+                    plannedActivity: familyHomeRow.plannedActivity,
+                    athleteId: athleteId,
+                    athleteDisplayName: athleteDisplayName,
+                    actorId: committedByActorId,
+                    planningService: planningService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    onActivityLogged: {
+                        homeDashboardDebugLog("onActivityLogged fired for rowId=\(familyHomeRow.id)")
+                        viewModel.loadTodaysTraining()
+                        viewModel.loadTodayActivityRows()
+                    }
+                )
+            case .recurringOccurrence(_, _, let suggestion):
+                RecurringOccurrencePreviewView(
+                    suggestion: suggestion,
+                    athleteDisplayName: athleteDisplayName,
+                    planningService: planningService,
+                    trainingService: trainingService,
+                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    actorId: committedByActorId,
+                    onActivityLogged: {
+                        homeDashboardDebugLog("onActivityLogged fired for recurringOccurrence id=\(suggestion.id)")
+                        viewModel.loadTodaysTraining()
+                        viewModel.loadTodayActivityRows()
+                    }
+                )
             }
         }
         .onAppear {
@@ -555,7 +548,7 @@ public struct HomeDashboardView: View {
     private func todayActivityRow(_ row: TodayActivityRow) -> some View {
         switch row {
         case .planned(let familyHomeRow):
-            NavigationLink(value: HomeDashboardDestination.activity(rowId: familyHomeRow.id)) {
+            NavigationLink(value: HomeDashboardDestination.activity(familyHomeRow)) {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: familyHomeRow.plannedActivity))
@@ -587,8 +580,8 @@ public struct HomeDashboardView: View {
                 }
             }
             .accessibilityIdentifier("homeDashboard.todaysTraining.row.\(familyHomeRow.id)")
-        case .recurringOccurrence(_, _, let suggestion):
-            NavigationLink(value: HomeDashboardDestination.recurringOccurrence(id: suggestion.id)) {
+        case .recurringOccurrence(let athleteId, let athleteName, let suggestion):
+            NavigationLink(value: HomeDashboardDestination.recurringOccurrence(athleteId: athleteId, athleteName: athleteName, suggestion: suggestion)) {
                 HStack {
                     VStack(alignment: .leading) {
                         Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))

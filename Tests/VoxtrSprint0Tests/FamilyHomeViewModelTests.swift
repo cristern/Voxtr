@@ -222,7 +222,7 @@ struct FamilyHomeViewModelTests {
         _ = later
     }
 
-    @Test("Home's activity navigation target resolves to the correct planned activity by row id")
+    @Test("Home's activity navigation target resolves to the correct planned activity")
     @MainActor
     func homeActivityRowResolvesCorrectTarget() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -261,19 +261,157 @@ struct FamilyHomeViewModelTests {
         )
         viewModel.loadHome()
 
+        // `viewModel.rows` is `[TodayActivityRow]`, not `FamilyHomeRow`
+        // directly — the `.planned` case must be unwrapped first, the
+        // same as every other consumer of this collection.
         let row = try #require(viewModel.rows.first)
         #expect(row.id == created.id.uuidString)
-        let destination = FamilyHomeDestination.activity(rowId: row.id)
-        guard case .activity(let rowId) = destination else {
-            Issue.record("Expected .activity destination")
-            return
-        }
-        let resolved = viewModel.rows.first { $0.id == rowId }
-        guard let resolved, case .planned(let resolvedFamilyHomeRow) = resolved else {
+        guard case .planned(let familyHomeRow) = row else {
             Issue.record("Expected a .planned row")
             return
         }
+        // White-screen-after-Save (stable navigation destination) fix:
+        // `.activity` now carries the resolved `FamilyHomeRow` directly
+        // — see `FamilyHomeDestination`'s own doc comment — so building
+        // the destination and reading it back is the whole test; there
+        // is no separate row-id lookup step to prove correct anymore.
+        let destination = FamilyHomeDestination.activity(familyHomeRow)
+        guard case .activity(let resolvedFamilyHomeRow) = destination else {
+            Issue.record("Expected .activity destination")
+            return
+        }
         #expect(resolvedFamilyHomeRow.plannedActivity.plannedActivityId == created.plannedActivityId)
+        #expect(resolvedFamilyHomeRow.athleteId == athlete.athleteId)
+    }
+
+    /// White-screen-after-Save (stable navigation destination) fix: the
+    /// actual regression this round fixes — proves a `FamilyHomeDestination.activity`
+    /// captured for a `PlannedActivity` BEFORE it is logged still
+    /// correctly identifies that SAME activity after the log succeeds
+    /// AND the parent's own `rows`/`tomorrowRows` are refreshed through
+    /// it (exactly what `onActivityLogged` triggers). Before this fix,
+    /// the destination carried only a bare row id and had to be
+    /// re-resolved against `viewModel.rows`/`tomorrowRows` on every
+    /// `.navigationDestination(for:)` invocation — including while
+    /// already pushed — so it could blank if that lookup ever failed.
+    /// This test does not rely on a pre-mutation snapshot alone: it
+    /// captures the destination, performs the real mutation and a real
+    /// `refresh()`, and only THEN asserts the captured destination is
+    /// still correct — proving stability across, not merely before, the
+    /// exact refresh that used to break it.
+    @Test("A FamilyHomeDestination.activity captured before a log still identifies the same PlannedActivity after the log and a viewModel.refresh()")
+    @MainActor
+    func activityDestinationRemainsResolvableAfterLogAndRefresh() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let weeklyReflectionRepository = WeeklyReflectionRepository(modelContext: container.mainContext)
+        let weeklyReflectionService = WeeklyReflectionService(repository: weeklyReflectionRepository)
+
+        let today = TrainingPlanningCoordinationService.today()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let workspaceId = WorkspaceId()
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        // Persisted via the repository (not merely constructed in
+        // memory), matching `workspaceId` below — `viewModel.refresh()`
+        // later in this test calls `refreshActiveAthletes()`, which
+        // re-fetches `activeAthletes` from THIS repository/workspace;
+        // an unpersisted `AthleteProfile` would be silently dropped by
+        // that refetch, which would invalidate this test's own proof
+        // that the destination survives a REAL `onActivityLogged` reload.
+        let athlete = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let sibling = try athleteRepository.createAthlete(
+            workspaceId: workspaceId, givenName: "AthleteTwo",
+            birthDate: LocalDate(year: 2013, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athlete.athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let siblingWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: sibling.athleteId, weekStart: weekStart)
+        let siblingActivity = try planningService.addPlannedActivity(
+            toWeekPlan: siblingWeekPlan.weekPlanId, athleteId: sibling.athleteId, activityType: .individualTraining,
+            title: "Evening swim", localDate: today, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyHomeViewModel(
+            activeAthletes: [athlete, sibling],
+            workspaceId: workspaceId,
+            athleteRepository: athleteRepository,
+            planningService: planningService,
+            trainingService: trainingService,
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        viewModel.loadHome()
+
+        guard case .planned(let rowBefore) = viewModel.rows.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the target activity before logging")
+            return
+        }
+        guard case .planned(let siblingRowBefore) = viewModel.rows.first(where: { $0.id == siblingActivity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the sibling activity")
+            return
+        }
+        #expect(rowBefore.outcomeStatus == nil)
+
+        // Exactly what `NavigationLink(value:)` constructs when the row
+        // is tapped — this is the value that would already be pushed
+        // and on screen at the moment the log below succeeds.
+        let destination = FamilyHomeDestination.activity(rowBefore)
+        let siblingDestination = FamilyHomeDestination.activity(siblingRowBefore)
+
+        // The real mutation: log the activity, through the exact same
+        // canonical path LogActivityViewModel.save() uses.
+        _ = try trainingService.logActivity(
+            athleteId: athlete.athleteId, plannedActivityId: activity.plannedActivityId,
+            activityType: .individualTraining, title: activity.title, startedAt: .now,
+            durationMinutes: 30, status: .completed
+        )
+        // Mirrors onActivityLogged's reload exactly — this is what used
+        // to blank the already-pushed destination.
+        viewModel.refresh()
+
+        // The parent's OWN state genuinely changed...
+        guard case .planned(let refreshedRow) = viewModel.rows.first(where: { $0.id == activity.id.uuidString }) else {
+            Issue.record("Expected a .planned row for the target activity after logging")
+            return
+        }
+        #expect(refreshedRow.outcomeStatus == .completed)
+
+        // ...but the ALREADY-CAPTURED destination is completely
+        // unaffected by that refresh — it never looks anything up in
+        // `viewModel.rows`/`tomorrowRows` at all, so it still identifies
+        // the exact same `PlannedActivity`.
+        guard case .activity(let capturedRow) = destination else {
+            Issue.record("Expected .activity destination")
+            return
+        }
+        #expect(capturedRow.plannedActivity.plannedActivityId == activity.plannedActivityId)
+        #expect(capturedRow.athleteId == athlete.athleteId)
+
+        // The sibling activity/athlete's own destination — built in the
+        // same pass — never cross-resolves with the logged one.
+        guard case .activity(let capturedSiblingRow) = siblingDestination else {
+            Issue.record("Expected .activity destination")
+            return
+        }
+        #expect(capturedSiblingRow.plannedActivity.plannedActivityId == siblingActivity.plannedActivityId)
+        #expect(capturedSiblingRow.athleteId == sibling.athleteId)
+        #expect(capturedSiblingRow.plannedActivity.plannedActivityId != capturedRow.plannedActivity.plannedActivityId)
+        #expect(destination != siblingDestination)
     }
 
     @Test("An athlete added after the ViewModel was constructed appears once refreshActiveAthletes runs — the launch-time snapshot never goes permanently stale")
