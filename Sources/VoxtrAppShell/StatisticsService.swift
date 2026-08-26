@@ -95,11 +95,33 @@ public struct StatisticsWeekBucket: Equatable, Sendable {
     public let weekStart: LocalDate
     public let totalActualMinutes: Int
     public let performedActivityCount: Int
+    /// Statistics V1 UI round: same canonical source, join, and
+    /// filter-narrowing as the interval-level `StatisticsAthleteSummary.form`
+    /// above, scoped to just this week — a performed activity contributes
+    /// its `bodyFeeling` (if any) to the SAME week its minutes/count are
+    /// bucketed into. Missing excluded, never zero.
+    public let form: StatisticsAggregate
+    /// Statistics V1 UI round: same canonical source as
+    /// `StatisticsAthleteSummary.sleep` above, bucketed by
+    /// `DailyStatus.localDate.startOfWeek` — deliberately built from the
+    /// SAME unfiltered `dailyStatuses` read the interval-level aggregate
+    /// uses, never narrowed by `StatisticsFilter`. Sleep is the athlete's
+    /// own context for the period, not something a Sport/Activity Type
+    /// choice should be able to hide or fabricate away.
+    public let sleep: StatisticsAggregate
 
-    public init(weekStart: LocalDate, totalActualMinutes: Int, performedActivityCount: Int) {
+    public init(
+        weekStart: LocalDate,
+        totalActualMinutes: Int,
+        performedActivityCount: Int,
+        form: StatisticsAggregate,
+        sleep: StatisticsAggregate
+    ) {
         self.weekStart = weekStart
         self.totalActualMinutes = totalActualMinutes
         self.performedActivityCount = performedActivityCount
+        self.form = form
+        self.sleep = sleep
     }
 }
 
@@ -196,13 +218,6 @@ public final class StatisticsService {
 
         let totalActualMinutes = performed.reduce(0) { $0 + $1.durationMinutes }
 
-        let weeklyBuckets = Self.weeklyBuckets(
-            for: performed,
-            from: intervalStart,
-            through: intervalEnd,
-            calendar: calendar
-        )
-
         // Form: canonical source is `ActivityReflection.bodyFeeling`,
         // attributed to whichever performed activity it belongs to (so
         // Form aligns with the SAME training timeline this summary
@@ -241,6 +256,24 @@ public final class StatisticsService {
         let dailyStatuses = try reflectionService.fetchDailyStatuses(forAthlete: athleteId, from: intervalStart, to: intervalEnd)
         let sleepValues = dailyStatuses.compactMap(\.sleepQuality)
         let sleep = StatisticsAggregate.of(sleepValues)
+
+        // Weekly buckets: computed AFTER `reflectionByLoggedActivityId`/
+        // `dailyStatuses` above so each week's Form/Sleep can reuse those
+        // same already-fetched, already-joined values — never a second,
+        // independently-filtered read. `performed` (already narrowed by
+        // `filter`) supplies both training minutes/count and the Form
+        // join per week, so a Sport/Activity Type filter narrows weekly
+        // Form exactly the way it narrows the interval-level Form above;
+        // `dailyStatuses` is the SAME unfiltered read Sleep uses above,
+        // so weekly Sleep is never narrowed by `filter` either.
+        let weeklyBuckets = Self.weeklyBuckets(
+            for: performed,
+            reflectionByLoggedActivityId: reflectionByLoggedActivityId,
+            dailyStatuses: dailyStatuses,
+            from: intervalStart,
+            through: intervalEnd,
+            calendar: calendar
+        )
 
         return StatisticsAthleteSummary(
             athleteId: athleteId,
@@ -328,13 +361,25 @@ public final class StatisticsService {
         return starts
     }
 
+    /// `activities` must already be the FILTERED performed set (the same
+    /// `performed` this method's one caller computes) — `filter` is not
+    /// re-applied here, so training minutes/count AND the Form join
+    /// below both narrow together, exactly matching the interval-level
+    /// behavior above. `reflectionByLoggedActivityId` and
+    /// `dailyStatuses` are the SAME already-fetched values the caller
+    /// used for the interval-level Form/Sleep aggregates — passed in
+    /// rather than re-fetched, so weekly and interval-level Form/Sleep
+    /// can never disagree about what data they saw.
     private static func weeklyBuckets(
         for activities: [LoggedActivity],
+        reflectionByLoggedActivityId: [UUID: ActivityReflection],
+        dailyStatuses: [DailyStatus],
         from intervalStart: LocalDate,
         through intervalEnd: LocalDate,
         calendar: Calendar
     ) -> [StatisticsWeekBucket] {
         var totals: [LocalDate: (minutes: Int, count: Int)] = [:]
+        var formValuesByWeek: [LocalDate: [Int]] = [:]
         for activity in activities {
             let localDate = TrainingPlanningCoordinationService.today(referenceDate: activity.startedAt, calendar: calendar)
             let weekStart = localDate.startOfWeek
@@ -342,10 +387,31 @@ public final class StatisticsService {
             entry.minutes += activity.durationMinutes
             entry.count += 1
             totals[weekStart] = entry
+            if let bodyFeeling = reflectionByLoggedActivityId[activity.id]?.bodyFeeling {
+                formValuesByWeek[weekStart, default: []].append(bodyFeeling)
+            }
         }
+
+        // Sleep: bucketed by the DailyStatus's OWN local date, entirely
+        // independent of which/whether any LoggedActivity fell in that
+        // week — this is what keeps weekly Sleep un-narrowed by `filter`
+        // (this method never receives `filter` at all, only the already-
+        // filtered `activities`).
+        var sleepValuesByWeek: [LocalDate: [Int]] = [:]
+        for status in dailyStatuses {
+            guard let sleepQuality = status.sleepQuality else { continue }
+            sleepValuesByWeek[status.localDate.startOfWeek, default: []].append(sleepQuality)
+        }
+
         return weekStarts(from: intervalStart, through: intervalEnd).map { weekStart in
             let entry = totals[weekStart] ?? (0, 0)
-            return StatisticsWeekBucket(weekStart: weekStart, totalActualMinutes: entry.minutes, performedActivityCount: entry.count)
+            return StatisticsWeekBucket(
+                weekStart: weekStart,
+                totalActualMinutes: entry.minutes,
+                performedActivityCount: entry.count,
+                form: StatisticsAggregate.of(formValuesByWeek[weekStart] ?? []),
+                sleep: StatisticsAggregate.of(sleepValuesByWeek[weekStart] ?? [])
+            )
         }
     }
 }

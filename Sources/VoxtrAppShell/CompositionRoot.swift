@@ -207,6 +207,18 @@ public final class CompositionRoot {
         )
         container.register(SleepCoordinationService.self) { sleepCoordinationService }
 
+        // Statistics V1 UI round: same placement rationale as every
+        // other cross-domain coordinator above — Statistics composes
+        // TrainingService and ReflectionService (both already resolved)
+        // and owns no persisted state of its own, so it is constructed
+        // and registered here rather than inside either domain package.
+        // See `StatisticsService`'s own doc comment.
+        let statisticsService = StatisticsService(
+            trainingService: container.resolve(TrainingService.self),
+            reflectionService: container.resolve(ReflectionService.self)
+        )
+        container.register(StatisticsService.self) { statisticsService }
+
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 
