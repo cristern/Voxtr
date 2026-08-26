@@ -261,14 +261,21 @@ struct FamilyHomeViewModelTests {
         )
         viewModel.loadHome()
 
+        // `viewModel.rows` is `[TodayActivityRow]`, not `FamilyHomeRow`
+        // directly — the `.planned` case must be unwrapped first, the
+        // same as every other consumer of this collection.
         let row = try #require(viewModel.rows.first)
         #expect(row.id == created.id.uuidString)
+        guard case .planned(let familyHomeRow) = row else {
+            Issue.record("Expected a .planned row")
+            return
+        }
         // White-screen-after-Save (stable navigation destination) fix:
         // `.activity` now carries the resolved `FamilyHomeRow` directly
         // — see `FamilyHomeDestination`'s own doc comment — so building
         // the destination and reading it back is the whole test; there
         // is no separate row-id lookup step to prove correct anymore.
-        let destination = FamilyHomeDestination.activity(row)
+        let destination = FamilyHomeDestination.activity(familyHomeRow)
         guard case .activity(let resolvedFamilyHomeRow) = destination else {
             Issue.record("Expected .activity destination")
             return
