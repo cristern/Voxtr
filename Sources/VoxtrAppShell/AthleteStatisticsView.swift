@@ -10,6 +10,7 @@ public struct AthleteStatisticsView: View {
     private let sportRepository: SportRepository
 
     @State private var sports: [Sport] = []
+    @State private var isShowingFullscreenTimeline = false
 
     public init(viewModel: AthleteStatisticsViewModel, sportRepository: SportRepository) {
         _viewModel = State(initialValue: viewModel)
@@ -50,7 +51,11 @@ public struct AthleteStatisticsView: View {
                     .voxtrRowSurface()
 
                     Section {
-                        seriesToggles
+                        HStack {
+                            seriesToggles
+                            Spacer()
+                            expandTimelineButton
+                        }
                         DevelopmentTimelineChart(
                             points: points(from: summary),
                             isTrainingVisible: viewModel.isTrainingSeriesVisible,
@@ -76,6 +81,14 @@ public struct AthleteStatisticsView: View {
                     .voxtrRowSurface()
                 }
                 .voxtrScreenBackground()
+                .fullScreenCover(isPresented: $isShowingFullscreenTimeline) {
+                    DevelopmentTimelineFullscreenView(
+                        viewModel: viewModel,
+                        points: points(from: summary),
+                        intervalStart: summary.intervalStart,
+                        intervalEnd: summary.intervalEnd
+                    )
+                }
             }
         }
         .tint(VoxtrColor.accent)
@@ -243,6 +256,24 @@ public struct AthleteStatisticsView: View {
         .toggleStyle(.button)
         .font(VoxtrTypography.metadata)
         .accessibilityIdentifier("athleteStatistics.seriesToggles")
+    }
+
+    /// Statistics V1 UI (fullscreen Timeline round): the sole entry
+    /// point into the fullscreen Development Timeline presentation —
+    /// small, calm, and placed alongside the series toggles rather than
+    /// added to the shared `VoxtrSectionHeading` (used by every section
+    /// header in the app; adding a per-section accessory slot there
+    /// would be a wider change than this task's scope). Rotating the
+    /// device while still on this normal screen does NOT open
+    /// fullscreen — only this explicit action does.
+    private var expandTimelineButton: some View {
+        Button {
+            isShowingFullscreenTimeline = true
+        } label: {
+            Image(systemName: "arrow.up.left.and.arrow.down.right")
+        }
+        .accessibilityIdentifier("athleteStatistics.expandTimelineButton")
+        .accessibilityLabel("Expand Development Timeline")
     }
 
     private func loadSportsIfNeeded() {

@@ -90,6 +90,15 @@ public struct DevelopmentTimelineChart: View {
     /// DISPLAYED date — never to alter `points`/bucket data itself.
     public let intervalStart: LocalDate
     public let intervalEnd: LocalDate
+    /// Statistics V1 UI (fullscreen Timeline round): the chart's own
+    /// plotted height. Defaults to the original, unchanged `240` every
+    /// existing embedded-in-`List` call site already renders at — this
+    /// parameter exists ONLY so the fullscreen Development Timeline
+    /// presentation can request a taller chart from the SAME reusable
+    /// component (more available vertical space, especially in
+    /// landscape) without forking the bar/line/axis drawing logic into
+    /// a second, independently-maintained chart implementation.
+    public let chartHeight: CGFloat
 
     public init(
         points: [DevelopmentTimelinePoint],
@@ -97,7 +106,8 @@ public struct DevelopmentTimelineChart: View {
         isFormVisible: Bool,
         isSleepVisible: Bool,
         intervalStart: LocalDate,
-        intervalEnd: LocalDate
+        intervalEnd: LocalDate,
+        chartHeight: CGFloat = 240
     ) {
         self.points = points
         self.isTrainingVisible = isTrainingVisible
@@ -105,6 +115,7 @@ public struct DevelopmentTimelineChart: View {
         self.isSleepVisible = isSleepVisible
         self.intervalStart = intervalStart
         self.intervalEnd = intervalEnd
+        self.chartHeight = chartHeight
     }
 
     private static let scaleMin: Double = 1
@@ -281,7 +292,7 @@ public struct DevelopmentTimelineChart: View {
                 Text("No series selected")
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 240)
+                    .frame(maxWidth: .infinity, minHeight: chartHeight)
                     .accessibilityIdentifier("developmentTimeline.noSeriesSelected")
             }
 
@@ -393,7 +404,7 @@ public struct DevelopmentTimelineChart: View {
                 }
             }
         }
-        .frame(height: 240)
+        .frame(height: chartHeight)
         .padding(.trailing, 24)
         .accessibilityLabel("Development timeline")
         .accessibilityValue(accessibilitySummary)
