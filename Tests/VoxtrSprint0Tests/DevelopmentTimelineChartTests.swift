@@ -76,4 +76,86 @@ struct DevelopmentTimelineChartTests {
         #expect(runs.count == 3)
         #expect(runs.map { $0.count } == [1, 1, 1])
     }
+
+    // MARK: - Time-axis readability: year context
+
+    private static func timelinePoint(_ weekStart: LocalDate) -> DevelopmentTimelinePoint {
+        DevelopmentTimelinePoint(weekStart: weekStart, trainingMinutes: 0, formMean: nil, sleepMean: nil)
+    }
+
+    @Test("A period entirely within one calendar year shows just that year")
+    func yearContextSingleYear() {
+        let points = [
+            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 1)),
+            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 8)),
+            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 15)),
+        ]
+        #expect(DevelopmentTimelineChart.yearContextLabel(for: points) == "2026")
+    }
+
+    @Test("A period whose buckets span a year boundary shows both years, never just one")
+    func yearContextSpansYearBoundary() {
+        // A calendar-month period's own leading bucket can genuinely
+        // start in the prior year (e.g. February 2026's own leading
+        // canonical week starts 2026-01-26... but the classic case is a
+        // January period whose leading week starts in December).
+        let points = [
+            Self.timelinePoint(LocalDate(year: 2025, month: 12, day: 29)),
+            Self.timelinePoint(LocalDate(year: 2026, month: 1, day: 5)),
+            Self.timelinePoint(LocalDate(year: 2026, month: 1, day: 12)),
+        ]
+        #expect(DevelopmentTimelineChart.yearContextLabel(for: points) == "2025 – 2026")
+    }
+
+    @Test("An empty bucket set has no year context")
+    func yearContextEmptyPoints() {
+        #expect(DevelopmentTimelineChart.yearContextLabel(for: []) == nil)
+    }
+
+    // MARK: - Time-axis readability: label density
+
+    @Test("Last 4 Weeks (4 buckets) labels every bucket")
+    func labeledIndicesFourBucketsLabelsAll() {
+        #expect(DevelopmentTimelineChart.labeledIndices(bucketCount: 4) == [0, 1, 2, 3])
+    }
+
+    @Test("A calendar-month period with 5 buckets labels every bucket")
+    func labeledIndicesFiveBucketsLabelsAll() {
+        #expect(DevelopmentTimelineChart.labeledIndices(bucketCount: 5) == [0, 1, 2, 3, 4])
+    }
+
+    @Test("A calendar-month period with 6 buckets labels every bucket")
+    func labeledIndicesSixBucketsLabelsAll() {
+        #expect(DevelopmentTimelineChart.labeledIndices(bucketCount: 6) == [0, 1, 2, 3, 4, 5])
+    }
+
+    @Test("Last 13 Weeks uses a reduced, regular density and always includes the final bucket")
+    func labeledIndicesThirteenBucketsUsesReducedDensity() {
+        let indices = DevelopmentTimelineChart.labeledIndices(bucketCount: 13)
+        #expect(indices == [0, 2, 4, 6, 8, 10, 12])
+        #expect(indices.last == 12)
+        #expect(indices.count < 13)
+    }
+
+    @Test("Last 26 Weeks uses a further-reduced, regular density and always includes the final bucket")
+    func labeledIndicesTwentySixBucketsUsesFurtherReducedDensity() {
+        let indices = DevelopmentTimelineChart.labeledIndices(bucketCount: 26)
+        #expect(indices == [0, 4, 8, 12, 16, 20, 24, 25])
+        #expect(indices.last == 25)
+        #expect(indices.count < 13)
+    }
+
+    @Test("An empty bucket set has no labeled indices")
+    func labeledIndicesEmptyBucketCount() {
+        #expect(DevelopmentTimelineChart.labeledIndices(bucketCount: 0).isEmpty)
+    }
+
+    // MARK: - Time-axis readability: week-number label
+
+    @Test("weekNumberLabel reuses the canonical WeekIdentityFormatter week number, prefixed with W")
+    func weekNumberLabelMatchesCanonicalWeekNumber() {
+        let weekStart = LocalDate(year: 2026, month: 6, day: 1)
+        let expected = "W\(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart))"
+        #expect(DevelopmentTimelineChart.weekNumberLabel(for: weekStart) == expected)
+    }
 }

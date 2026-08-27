@@ -35,6 +35,21 @@ public enum WeekIdentityFormatter {
         return isoCalendar.component(.weekOfYear, from: date)
     }
 
+    /// "Jun 1" — a concise single calendar-date label (month + day, no
+    /// year, no zero-padding). Statistics V1 UI (Development Timeline
+    /// time-axis round): used for the Timeline's per-bucket date row,
+    /// where year context is already shown separately above the chart
+    /// so repeating it per-label would be redundant. Reuses the SAME
+    /// short-month-symbol technique `dateRangeLabel` below already
+    /// uses, rather than a second, independently-formatted date
+    /// string.
+    public static func shortDateLabel(for date: LocalDate) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        let month = formatter.shortMonthSymbols[date.month - 1]
+        return "\(month) \(date.day)"
+    }
+
     /// "10–16 Aug" (or "27 Jul–2 Aug" when the week spans two months,
     /// or "27 Dec–2 Jan" when it spans two years — the month/year is
     /// only shown where it's not already implied by the other end).

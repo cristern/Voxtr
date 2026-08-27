@@ -138,6 +138,68 @@ public struct DevelopmentTimelineChart: View {
     private var formRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.formMean) }
     private var sleepRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.sleepMean) }
 
+    // MARK: - Time-axis readability (year context + week/date rows)
+
+    /// "2026" for a single represented year, "2025 – 2026" when the
+    /// buckets actually plotted span a year boundary. Derived from the
+    /// buckets themselves (`points`), never from the nominal selected
+    /// period type — a calendar-month period's partial leading/
+    /// trailing bucket can genuinely fall in an adjacent year (e.g.
+    /// February's own leading bucket starts the preceding December),
+    /// and that must never be hidden behind a single, misleading year.
+    /// `internal`/`static` (not `private`), same testability reasoning
+    /// as `contiguousRuns` above.
+    static func yearContextLabel(for points: [DevelopmentTimelinePoint]) -> String? {
+        let years = points.map { $0.weekStart.year }
+        guard let minYear = years.min(), let maxYear = years.max() else { return nil }
+        return minYear == maxYear ? "\(minYear)" : "\(minYear) – \(maxYear)"
+    }
+
+    /// Which bucket INDICES (into `points`, in order) get an x-axis
+    /// label — a purely presentational readability choice, never a
+    /// second period/bucket calculation: `points` and their order are
+    /// taken exactly as already computed by `StatisticsService`/
+    /// `StatisticsPeriod`. Every calendar-month period spans 4, 5, or 6
+    /// canonical weeks (verified against every month/weekday-start
+    /// combination) and "Last 4 Weeks" is always exactly 4, so `<= 6`
+    /// safely covers both without needing to know which period type
+    /// produced `points` — only the fixed 13/26-week rolling windows
+    /// exceed that count, and use progressively reduced, regular
+    /// density (per the approved contract's own "approximately every
+    /// Nth bucket" wording — a readability target, not an exact
+    /// requirement). The final bucket is always included so the axis
+    /// never appears to end mid-timeline.
+    static func labeledIndices(bucketCount: Int) -> [Int] {
+        guard bucketCount > 0 else { return [] }
+        let labelStride: Int
+        switch bucketCount {
+        case ...6: labelStride = 1
+        case ...13: labelStride = 2
+        default: labelStride = 4
+        }
+        var indices = Swift.stride(from: 0, to: bucketCount, by: labelStride).map { $0 }
+        if indices.last != bucketCount - 1 {
+            indices.append(bucketCount - 1)
+        }
+        return indices
+    }
+
+    /// "W23" — reuses `WeekIdentityFormatter.weekNumber(forWeekStart:)`,
+    /// the one canonical, locale-independent week-numbering scheme
+    /// this app already establishes, never a second/competing one.
+    static func weekNumberLabel(for weekStart: LocalDate) -> String {
+        "W\(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart))"
+    }
+
+    private var labeledPoints: [DevelopmentTimelinePoint] {
+        let indices = Set(Self.labeledIndices(bucketCount: points.count))
+        return points.enumerated().compactMap { indices.contains($0.offset) ? $0.element : nil }
+    }
+
+    private var labeledPointsByIsoString: [String: DevelopmentTimelinePoint] {
+        Dictionary(uniqueKeysWithValues: labeledPoints.map { ($0.weekStart.isoString, $0) })
+    }
+
     /// Every `.foregroundStyle(by:)` series key this chart can draw,
     /// mapped to its metric's single color — built fresh from the
     /// CURRENT run counts (never a fixed-size table), so
@@ -164,6 +226,14 @@ public struct DevelopmentTimelineChart: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let yearLabel = Self.yearContextLabel(for: points) {
+                Text(yearLabel)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityIdentifier("developmentTimeline.yearContext")
+            }
+
             if hasAnyVisibleSeries {
                 chart
             } else {
@@ -172,7 +242,7 @@ public struct DevelopmentTimelineChart: View {
                 Text("No series selected")
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 220)
+                    .frame(maxWidth: .infinity, minHeight: 240)
                     .accessibilityIdentifier("developmentTimeline.noSeriesSelected")
             }
 
@@ -239,6 +309,31 @@ public struct DevelopmentTimelineChart: View {
                 AxisMarks(position: .leading)
             }
         }
+        .chartXAxis {
+            // Time-axis readability round: replaces Swift Charts'
+            // default single-line axis (raw ISO date strings, hard to
+            // scan) with a two-line "week number / calendar date"
+            // label at a density-selected subset of buckets
+            // (`labeledPoints`) — year context is shown separately
+            // above the chart (`yearContextLabel`), so it is
+            // deliberately NOT repeated here. Using the native
+            // `AxisMarks(values:)` mechanism (rather than a hand-built
+            // parallel row of Text views) guarantees these labels stay
+            // pixel-aligned to the actual bucket positions Swift
+            // Charts itself computes.
+            AxisMarks(values: labeledPoints.map { $0.weekStart.isoString }) { value in
+                AxisValueLabel {
+                    if let iso = value.as(String.self), let point = labeledPointsByIsoString[iso] {
+                        VStack(spacing: 2) {
+                            Text(Self.weekNumberLabel(for: point.weekStart))
+                            Text(WeekIdentityFormatter.shortDateLabel(for: point.weekStart))
+                        }
+                        .font(VoxtrTypography.caption)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                    }
+                }
+            }
+        }
         .chartOverlay { proxy in
             GeometryReader { geometry in
                 if isFormVisible || isSleepVisible {
@@ -258,7 +353,7 @@ public struct DevelopmentTimelineChart: View {
                 }
             }
         }
-        .frame(height: 220)
+        .frame(height: 240)
         .padding(.trailing, 24)
         .accessibilityLabel("Development timeline")
         .accessibilityValue(accessibilitySummary)
