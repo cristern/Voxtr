@@ -11,6 +11,12 @@ import VoxtrAppShell
 /// `CompositionRoot.build()` from either app target at all.
 @main
 struct ParentApp: App {
+    /// Bridges into UIKit's app-level `supportedInterfaceOrientationsFor`
+    /// query — see `VoxtrOrientationAppDelegate`'s own doc comment.
+    /// This is the ONLY place that hook is wired in; `AthleteApp` never
+    /// adds this adaptor, so its own orientation behavior is unchanged.
+    @UIApplicationDelegateAdaptor(VoxtrOrientationAppDelegate.self) private var appDelegate
+
     var body: some Scene {
         WindowGroup {
             CompositionRootLoaderView { root in

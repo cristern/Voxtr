@@ -19,6 +19,14 @@ import VoxtrCoreContracts
 /// the chart's height is derived from that available space, and the
 /// surrounding `ScrollView` is a plain safety net against clipping on
 /// short landscape heights, not a workaround for anything fragile.
+///
+/// Landscape is only reachable while THIS screen is on-screen: `.onAppear`
+/// widens `VoxtrOrientationPolicy.shared` to portrait + both landscapes,
+/// and `.onDisappear` restores it to ParentApp's own portrait-only
+/// default — standard, deterministic SwiftUI presentation lifecycle
+/// hooks tied 1:1 to this view's own appearance, never a timing hack.
+/// Normal Athlete Statistics (and every other ParentApp screen) never
+/// requests the wider mask, so rotating while still there does nothing.
 struct DevelopmentTimelineFullscreenView: View {
     let viewModel: AthleteStatisticsViewModel
     let points: [DevelopmentTimelinePoint]
@@ -59,6 +67,12 @@ struct DevelopmentTimelineFullscreenView: View {
         }
         .tint(VoxtrColor.accent)
         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.root")
+        .onAppear {
+            VoxtrOrientationPolicy.shared.setAllowedOrientations(VoxtrOrientationPolicy.portraitAndLandscape)
+        }
+        .onDisappear {
+            VoxtrOrientationPolicy.shared.setAllowedOrientations(VoxtrOrientationPolicy.portraitOnly)
+        }
     }
 
     /// The SAME Training/Form/Sleep toggles as the embedded Athlete
