@@ -1,6 +1,7 @@
 import SwiftUI
 import Charts
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 
 /// Training Breakdown round: one Training category's factual minutes
 /// within a single weekly bucket — a plain projection of
@@ -65,6 +66,53 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
         self.sleepMean = sleepMean
         self.trainingBySport = trainingBySport
         self.trainingByActivityType = trainingByActivityType
+    }
+
+    /// Fullscreen data-ownership round: the ONE projection from a
+    /// loaded `StatisticsAthleteSummary`'s weekly buckets into
+    /// chart-ready points — shared by portrait (`AthleteStatisticsView`)
+    /// and fullscreen (`DevelopmentTimelineFullscreenView`) so both
+    /// render identically from whatever the SAME
+    /// `AthleteStatisticsViewModel.loadState` currently holds, never
+    /// two independently-maintained projections that could silently
+    /// diverge. `sports` is the caller's already-loaded canonical Sport
+    /// reference-data list (`SportRepository.fetchAllSports()`) — this
+    /// function fetches nothing itself, only resolves a Sport segment's
+    /// display label from data already in hand.
+    static func points(from summary: StatisticsAthleteSummary, sports: [Sport]) -> [DevelopmentTimelinePoint] {
+        summary.weeklyBuckets.map { bucket in
+            DevelopmentTimelinePoint(
+                weekStart: bucket.weekStart,
+                trainingMinutes: bucket.totalActualMinutes,
+                formMean: bucket.form.mean,
+                sleepMean: bucket.sleep.mean,
+                trainingBySport: bucket.trainingBySport.map { segment in
+                    TrainingCategorySegment(
+                        id: segment.sportId?.rawValue.uuidString ?? TrainingCategorySegment.noSportKey,
+                        displayName: sportDisplayName(for: segment.sportId, sports: sports),
+                        minutes: segment.minutes
+                    )
+                },
+                trainingByActivityType: bucket.trainingByActivityType.map { segment in
+                    TrainingCategorySegment(
+                        id: segment.activityType.rawValue,
+                        displayName: segment.activityType.displayName,
+                        minutes: segment.minutes
+                    )
+                }
+            )
+        }
+    }
+
+    /// `sportId == nil` means the underlying activity genuinely has no
+    /// Sport (see `SportTrainingMinutes`'s own doc comment), a
+    /// legitimate case, not an error — "No sport" is calm, factual
+    /// presentation text. A non-nil `sportId` that fails to resolve
+    /// (deleted/unknown reference data) falls back to "Unknown" rather
+    /// than silently dropping the segment's factual minutes.
+    private static func sportDisplayName(for sportId: SportId?, sports: [Sport]) -> String {
+        guard let sportId else { return "No sport" }
+        return sports.first(where: { $0.sportId == sportId })?.displayName ?? "Unknown"
     }
 }
 

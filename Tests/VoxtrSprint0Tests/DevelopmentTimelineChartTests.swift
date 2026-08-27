@@ -1,6 +1,12 @@
 import Testing
+import Foundation
+import SwiftData
+import VoxtrCore
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 @testable import VoxtrAppShell
+import VoxtrTrainingDomain
+import VoxtrReflectionDomain
 
 /// Review follow-up (PR #24), item 2: pure, UI-independent tests for
 /// `DevelopmentTimelineChart.contiguousRuns(_:value:)` — the run-
@@ -211,5 +217,77 @@ struct DevelopmentTimelineChartTests {
         let weekStart = LocalDate(year: 2026, month: 6, day: 1)
         let expected = "W\(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart))"
         #expect(DevelopmentTimelineChart.weekNumberLabel(for: weekStart) == expected)
+    }
+}
+
+/// Fullscreen data-ownership round: focused coverage for
+/// `DevelopmentTimelinePoint.points(from:sports:)` — the ONE shared
+/// projection `AthleteStatisticsView` and `DevelopmentTimelineFullscreenView`
+/// both now call (extracted specifically so neither could duplicate or
+/// silently diverge from the other). Exercises it against a REAL
+/// `StatisticsAthleteSummary` produced by `StatisticsService` (the same
+/// fixture style `StatisticsServiceTests`/`StatisticsViewModelTests`
+/// already use), not a hand-rolled read-model literal.
+@Suite("DevelopmentTimelinePoint.points(from:sports:) shared projection")
+struct DevelopmentTimelinePointProjectionTests {
+    private static var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return calendar
+    }
+
+    private static func date(_ year: Int, _ month: Int, _ day: Int) -> Date {
+        Self.utcCalendar.date(from: DateComponents(year: year, month: month, day: day, hour: 12)) ?? .now
+    }
+
+    /// Proves the extraction preserved behavior: factual minutes/Form/
+    /// Sleep project through unchanged, and Sport segment display names
+    /// resolve correctly through BOTH fallback paths this shared
+    /// function owns — "No sport" for a genuinely Sport-less activity,
+    /// "Unknown" for a real `SportId` the caller's `sports` list can't
+    /// resolve (here, deliberately empty) — never a dropped segment.
+    @Test("Shared projection maps factual minutes and resolves Sport display-name fallbacks correctly")
+    @MainActor
+    func projectionMapsFactualDataAndResolvesSportFallbacks() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let football = SportId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        // Empty canonical Sport catalog — the football SportId above is
+        // real (has recorded history) but deliberately unresolvable
+        // here, proving the "Unknown" fallback rather than a dropped
+        // segment or a crash.
+        let points = DevelopmentTimelinePoint.points(from: summary, sports: [])
+        let point = try #require(points.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(point.trainingMinutes == 50)
+        #expect(point.formMean == summary.weeklyBuckets.first { $0.weekStart == point.weekStart }?.form.mean)
+        #expect(point.sleepMean == summary.weeklyBuckets.first { $0.weekStart == point.weekStart }?.sleep.mean)
+
+        #expect(point.trainingBySport.count == 2)
+        #expect(point.trainingBySport.first { $0.id == TrainingCategorySegment.noSportKey }?.displayName == "No sport")
+        #expect(point.trainingBySport.first { $0.id == football.rawValue.uuidString }?.displayName == "Unknown")
+
+        #expect(point.trainingByActivityType.count == 2)
+        #expect(point.trainingByActivityType.first { $0.id == ActivityType.teamTraining.rawValue }?.displayName == ActivityType.teamTraining.displayName)
+        #expect(point.trainingByActivityType.first { $0.id == ActivityType.other.rawValue }?.displayName == ActivityType.other.displayName)
     }
 }

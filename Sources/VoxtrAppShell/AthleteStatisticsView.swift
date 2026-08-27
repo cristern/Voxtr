@@ -83,13 +83,15 @@ public struct AthleteStatisticsView: View {
                 }
                 .voxtrScreenBackground()
                 .fullScreenCover(isPresented: $isShowingFullscreenTimeline) {
-                    DevelopmentTimelineFullscreenView(
-                        viewModel: viewModel,
-                        points: points(from: summary),
-                        intervalStart: summary.intervalStart,
-                        intervalEnd: summary.intervalEnd,
-                        sports: sports
-                    )
+                    // Fullscreen data-ownership round: no `points`/
+                    // `intervalStart`/`intervalEnd` snapshot passed in —
+                    // fullscreen derives those itself from `viewModel
+                    // .loadState`, the SAME live state this screen
+                    // reads, so a filter change made in fullscreen (or
+                    // here) is reflected in both places from the one
+                    // authoritative summary, never a stale capture from
+                    // whenever the cover happened to open.
+                    DevelopmentTimelineFullscreenView(viewModel: viewModel, sports: sports)
                 }
             }
         }
@@ -102,44 +104,12 @@ public struct AthleteStatisticsView: View {
         }
     }
 
+    /// Fullscreen data-ownership round: delegates to `DevelopmentTimelinePoint
+    /// .points(from:sports:)`, the ONE shared projection both this
+    /// screen and `DevelopmentTimelineFullscreenView` use — never a
+    /// second, independently-maintained projection that could diverge.
     private func points(from summary: StatisticsAthleteSummary) -> [DevelopmentTimelinePoint] {
-        summary.weeklyBuckets.map { bucket in
-            DevelopmentTimelinePoint(
-                weekStart: bucket.weekStart,
-                trainingMinutes: bucket.totalActualMinutes,
-                formMean: bucket.form.mean,
-                sleepMean: bucket.sleep.mean,
-                trainingBySport: bucket.trainingBySport.map { segment in
-                    TrainingCategorySegment(
-                        id: segment.sportId?.rawValue.uuidString ?? TrainingCategorySegment.noSportKey,
-                        displayName: sportDisplayName(for: segment.sportId),
-                        minutes: segment.minutes
-                    )
-                },
-                trainingByActivityType: bucket.trainingByActivityType.map { segment in
-                    TrainingCategorySegment(
-                        id: segment.activityType.rawValue,
-                        displayName: segment.activityType.displayName,
-                        minutes: segment.minutes
-                    )
-                }
-            )
-        }
-    }
-
-    /// Training Breakdown round: resolves a Sport segment's display
-    /// label from the SAME already-loaded `sports` list
-    /// `StatisticsFilterMenus` already uses — never a second
-    /// Sport-reference read. `sportId == nil` means the underlying
-    /// activity genuinely has no Sport (see `SportTrainingMinutes`'s
-    /// own doc comment), a
-    /// legitimate case, not an error — "No sport" is calm, factual
-    /// presentation text. A non-nil `sportId` that fails to resolve
-    /// (deleted/unknown reference data) falls back to "Unknown" rather
-    /// than silently dropping the segment's factual minutes.
-    private func sportDisplayName(for sportId: SportId?) -> String {
-        guard let sportId else { return "No sport" }
-        return sports.first(where: { $0.sportId == sportId })?.displayName ?? "Unknown"
+        DevelopmentTimelinePoint.points(from: summary, sports: sports)
     }
 
     /// "No training in period" (a factual zero state, not an error) and
