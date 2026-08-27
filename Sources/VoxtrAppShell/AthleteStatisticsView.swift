@@ -55,7 +55,9 @@ public struct AthleteStatisticsView: View {
                             points: points(from: summary),
                             isTrainingVisible: viewModel.isTrainingSeriesVisible,
                             isFormVisible: viewModel.isFormSeriesVisible,
-                            isSleepVisible: viewModel.isSleepSeriesVisible
+                            isSleepVisible: viewModel.isSleepSeriesVisible,
+                            intervalStart: summary.intervalStart,
+                            intervalEnd: summary.intervalEnd
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
                     } header: {

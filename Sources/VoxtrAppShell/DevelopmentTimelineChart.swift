@@ -78,12 +78,33 @@ public struct DevelopmentTimelineChart: View {
     public let isTrainingVisible: Bool
     public let isFormVisible: Bool
     public let isSleepVisible: Bool
+    /// Review follow-up (time-axis round 2): the SAME `StatisticsAthleteSummary
+    /// .intervalStart`/`.intervalEnd` the loaded summary already exposes —
+    /// the authoritative selected Statistics interval, per `StatisticsPeriod
+    /// .interval(today:)`. Passed straight through from
+    /// `AthleteStatisticsView` rather than re-derived here, so this chart
+    /// never becomes a second owner of period/interval truth (One Truth:
+    /// `StatisticsPeriod` proposes the interval, `StatisticsService`
+    /// returns it, this Timeline only presents it). Used only for the
+    /// year-context label and for clamping a partial leading bucket's
+    /// DISPLAYED date — never to alter `points`/bucket data itself.
+    public let intervalStart: LocalDate
+    public let intervalEnd: LocalDate
 
-    public init(points: [DevelopmentTimelinePoint], isTrainingVisible: Bool, isFormVisible: Bool, isSleepVisible: Bool) {
+    public init(
+        points: [DevelopmentTimelinePoint],
+        isTrainingVisible: Bool,
+        isFormVisible: Bool,
+        isSleepVisible: Bool,
+        intervalStart: LocalDate,
+        intervalEnd: LocalDate
+    ) {
         self.points = points
         self.isTrainingVisible = isTrainingVisible
         self.isFormVisible = isFormVisible
         self.isSleepVisible = isSleepVisible
+        self.intervalStart = intervalStart
+        self.intervalEnd = intervalEnd
     }
 
     private static let scaleMin: Double = 1
@@ -140,19 +161,35 @@ public struct DevelopmentTimelineChart: View {
 
     // MARK: - Time-axis readability (year context + week/date rows)
 
-    /// "2026" for a single represented year, "2025 – 2026" when the
-    /// buckets actually plotted span a year boundary. Derived from the
-    /// buckets themselves (`points`), never from the nominal selected
-    /// period type — a calendar-month period's partial leading/
-    /// trailing bucket can genuinely fall in an adjacent year (e.g.
-    /// February's own leading bucket starts the preceding December),
-    /// and that must never be hidden behind a single, misleading year.
-    /// `internal`/`static` (not `private`), same testability reasoning
-    /// as `contiguousRuns` above.
-    static func yearContextLabel(for points: [DevelopmentTimelinePoint]) -> String? {
-        let years = points.map { $0.weekStart.year }
-        guard let minYear = years.min(), let maxYear = years.max() else { return nil }
-        return minYear == maxYear ? "\(minYear)" : "\(minYear) – \(maxYear)"
+    /// "2026" for a selected interval entirely within one calendar
+    /// year, "2025 – 2026" when the SELECTED INTERVAL itself genuinely
+    /// spans a year boundary. Derived from `intervalStart`/`intervalEnd`
+    /// (the authoritative selected Statistics interval), never from a
+    /// bucket's own canonical `weekStart` — a calendar-month period's
+    /// partial leading bucket can start in the preceding month (and
+    /// occasionally the preceding year, e.g. January), but the
+    /// SELECTED PERIOD itself contains no dates from that adjacent
+    /// year, so the year context must not claim it does.
+    static func yearContextLabel(intervalStart: LocalDate, intervalEnd: LocalDate) -> String {
+        intervalStart.year == intervalEnd.year
+            ? "\(intervalStart.year)"
+            : "\(intervalStart.year) – \(intervalEnd.year)"
+    }
+
+    /// The DISPLAYED calendar date for a bucket's date label — the
+    /// first date of that bucket that actually falls within the
+    /// selected interval. Equal to `point.weekStart` for every normal,
+    /// fully-in-interval bucket (including every rolling-window
+    /// bucket, whose own `intervalStart` already IS the first bucket's
+    /// `weekStart`); only a calendar-month period's partial LEADING
+    /// bucket (whose canonical Monday precedes the selected month's
+    /// first day) is ever actually clamped forward. Never changes
+    /// `point.weekStart` itself or any other bucket data — presentation
+    /// only. The WEEK NUMBER label stays derived from the canonical,
+    /// unclamped `point.weekStart` (see `weekNumberLabel` below) — only
+    /// the calendar-date text is clamped.
+    static func displayDate(for point: DevelopmentTimelinePoint, intervalStart: LocalDate) -> LocalDate {
+        max(point.weekStart, intervalStart)
     }
 
     /// Which bucket INDICES (into `points`, in order) get an x-axis
@@ -167,8 +204,12 @@ public struct DevelopmentTimelineChart: View {
     /// exceed that count, and use progressively reduced, regular
     /// density (per the approved contract's own "approximately every
     /// Nth bucket" wording — a readability target, not an exact
-    /// requirement). The final bucket is always included so the axis
-    /// never appears to end mid-timeline.
+    /// requirement). Anchored on the FINAL bucket and walked backward
+    /// by the stride, then reversed into ascending order — this always
+    /// includes the final bucket as part of the SAME regular spacing
+    /// (never as a separately-appended extra label, which previously
+    /// produced two adjacent labels at the right edge for the 26-week
+    /// case).
     static func labeledIndices(bucketCount: Int) -> [Int] {
         guard bucketCount > 0 else { return [] }
         let labelStride: Int
@@ -177,16 +218,16 @@ public struct DevelopmentTimelineChart: View {
         case ...13: labelStride = 2
         default: labelStride = 4
         }
-        var indices = Swift.stride(from: 0, to: bucketCount, by: labelStride).map { $0 }
-        if indices.last != bucketCount - 1 {
-            indices.append(bucketCount - 1)
-        }
+        var indices = Swift.stride(from: bucketCount - 1, through: 0, by: -labelStride).map { $0 }
+        indices.reverse()
         return indices
     }
 
     /// "W23" — reuses `WeekIdentityFormatter.weekNumber(forWeekStart:)`,
     /// the one canonical, locale-independent week-numbering scheme
     /// this app already establishes, never a second/competing one.
+    /// Always derived from the canonical `weekStart`, never the
+    /// interval-clamped `displayDate(for:intervalStart:)`.
     static func weekNumberLabel(for weekStart: LocalDate) -> String {
         "W\(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart))"
     }
@@ -226,13 +267,11 @@ public struct DevelopmentTimelineChart: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let yearLabel = Self.yearContextLabel(for: points) {
-                Text(yearLabel)
-                    .font(VoxtrTypography.metadata)
-                    .foregroundStyle(VoxtrColor.textSecondary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .accessibilityIdentifier("developmentTimeline.yearContext")
-            }
+            Text(Self.yearContextLabel(intervalStart: intervalStart, intervalEnd: intervalEnd))
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .accessibilityIdentifier("developmentTimeline.yearContext")
 
             if hasAnyVisibleSeries {
                 chart
@@ -324,9 +363,10 @@ public struct DevelopmentTimelineChart: View {
             AxisMarks(values: labeledPoints.map { $0.weekStart.isoString }) { value in
                 AxisValueLabel {
                     if let iso = value.as(String.self), let point = labeledPointsByIsoString[iso] {
+                        let clampedDate = Self.displayDate(for: point, intervalStart: intervalStart)
                         VStack(spacing: 2) {
                             Text(Self.weekNumberLabel(for: point.weekStart))
-                            Text(WeekIdentityFormatter.shortDateLabel(for: point.weekStart))
+                            Text(WeekIdentityFormatter.shortDateLabel(for: clampedDate))
                         }
                         .font(VoxtrTypography.caption)
                         .foregroundStyle(VoxtrColor.textSecondary)

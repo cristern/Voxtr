@@ -77,39 +77,83 @@ struct DevelopmentTimelineChartTests {
         #expect(runs.map { $0.count } == [1, 1, 1])
     }
 
-    // MARK: - Time-axis readability: year context
+    // MARK: - Time-axis readability: year context (review follow-up round 2)
 
     private static func timelinePoint(_ weekStart: LocalDate) -> DevelopmentTimelinePoint {
         DevelopmentTimelinePoint(weekStart: weekStart, trainingMinutes: 0, formMean: nil, sleepMean: nil)
     }
 
+    /// Required test 1: a calendar-month January period whose first
+    /// canonical weekly bucket starts 2025-12-29 must still show ONLY
+    /// "2026" — the SELECTED INTERVAL (2026-01-01...2026-01-31)
+    /// contains no dates from 2025, even though a bucket's own
+    /// canonical `weekStart` does.
+    @Test("A January calendar-month period shows only 2026, even though its leading bucket starts in December 2025")
+    func yearContextJanuaryCalendarMonthShowsOnlySelectedYear() {
+        let label = DevelopmentTimelineChart.yearContextLabel(
+            intervalStart: LocalDate(year: 2026, month: 1, day: 1),
+            intervalEnd: LocalDate(year: 2026, month: 1, day: 31)
+        )
+        #expect(label == "2026")
+    }
+
     @Test("A period entirely within one calendar year shows just that year")
     func yearContextSingleYear() {
-        let points = [
-            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 1)),
-            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 8)),
-            Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 15)),
-        ]
-        #expect(DevelopmentTimelineChart.yearContextLabel(for: points) == "2026")
+        let label = DevelopmentTimelineChart.yearContextLabel(
+            intervalStart: LocalDate(year: 2026, month: 6, day: 1),
+            intervalEnd: LocalDate(year: 2026, month: 6, day: 30)
+        )
+        #expect(label == "2026")
     }
 
-    @Test("A period whose buckets span a year boundary shows both years, never just one")
-    func yearContextSpansYearBoundary() {
-        // A calendar-month period's own leading bucket can genuinely
-        // start in the prior year (e.g. February 2026's own leading
-        // canonical week starts 2026-01-26... but the classic case is a
-        // January period whose leading week starts in December).
-        let points = [
-            Self.timelinePoint(LocalDate(year: 2025, month: 12, day: 29)),
-            Self.timelinePoint(LocalDate(year: 2026, month: 1, day: 5)),
-            Self.timelinePoint(LocalDate(year: 2026, month: 1, day: 12)),
-        ]
-        #expect(DevelopmentTimelineChart.yearContextLabel(for: points) == "2025 – 2026")
+    /// Required test 4: a genuinely multi-year SELECTED INTERVAL (not
+    /// just a bucket's own canonical week start) must show both years.
+    @Test("An interval that itself genuinely spans two calendar years shows both years")
+    func yearContextTrueMultiYearInterval() {
+        let label = DevelopmentTimelineChart.yearContextLabel(
+            intervalStart: LocalDate(year: 2025, month: 12, day: 1),
+            intervalEnd: LocalDate(year: 2026, month: 1, day: 31)
+        )
+        #expect(label == "2025 – 2026")
     }
 
-    @Test("An empty bucket set has no year context")
-    func yearContextEmptyPoints() {
-        #expect(DevelopmentTimelineChart.yearContextLabel(for: []) == nil)
+    // MARK: - Time-axis readability: partial-bucket date-label clamping
+
+    /// Required test 2: the canonical week start (2025-12-29) is
+    /// outside the selected interval (starts 2026-01-01) — the
+    /// DISPLAYED date must clamp forward to the interval's own start,
+    /// never show a date the selected Statistics period doesn't
+    /// actually contain.
+    @Test("A partial leading bucket's displayed date clamps to the interval start, not the canonical week start")
+    func displayDateClampsJanuaryPartialLeadingBucket() {
+        let point = Self.timelinePoint(LocalDate(year: 2025, month: 12, day: 29))
+        let intervalStart = LocalDate(year: 2026, month: 1, day: 1)
+        let clamped = DevelopmentTimelineChart.displayDate(for: point, intervalStart: intervalStart)
+        #expect(clamped == intervalStart)
+        #expect(WeekIdentityFormatter.shortDateLabel(for: clamped) == "Jan 1")
+        // The week number must still derive from the CANONICAL week start.
+        #expect(DevelopmentTimelineChart.weekNumberLabel(for: point.weekStart) == "W1")
+    }
+
+    /// Required test 3: August 2026's own leading canonical week starts
+    /// 2026-07-27 (before the selected month begins); the displayed
+    /// date must clamp to 2026-08-01.
+    @Test("August 2026's partial leading bucket displays Aug 1, not the canonical July week start")
+    func displayDateClampsAugustPartialLeadingBucket() {
+        let point = Self.timelinePoint(LocalDate(year: 2026, month: 7, day: 27))
+        let intervalStart = LocalDate(year: 2026, month: 8, day: 1)
+        let clamped = DevelopmentTimelineChart.displayDate(for: point, intervalStart: intervalStart)
+        #expect(clamped == intervalStart)
+        #expect(WeekIdentityFormatter.shortDateLabel(for: clamped) == "Aug 1")
+        // The week number must still derive from the CANONICAL week start.
+        #expect(DevelopmentTimelineChart.weekNumberLabel(for: point.weekStart) == "W31")
+    }
+
+    @Test("A normal, fully-in-interval bucket's displayed date is unchanged — equal to its own week start")
+    func displayDateUnchangedForNormalBucket() {
+        let point = Self.timelinePoint(LocalDate(year: 2026, month: 6, day: 8))
+        let clamped = DevelopmentTimelineChart.displayDate(for: point, intervalStart: LocalDate(year: 2026, month: 6, day: 1))
+        #expect(clamped == point.weekStart)
     }
 
     // MARK: - Time-axis readability: label density
@@ -137,12 +181,22 @@ struct DevelopmentTimelineChartTests {
         #expect(indices.count < 13)
     }
 
-    @Test("Last 26 Weeks uses a further-reduced, regular density and always includes the final bucket")
-    func labeledIndicesTwentySixBucketsUsesFurtherReducedDensity() {
+    /// Review follow-up (round 2), required test 5: the previous
+    /// algorithm appended the final bucket (25) separately whenever it
+    /// wasn't already reached by the stride, producing adjacent labels
+    /// at indices 24 and 25 — undermining the whole point of reduced
+    /// density. Anchoring the stride ON the final bucket and walking
+    /// backward (see `labeledIndices`'s own doc comment) keeps the
+    /// final bucket as part of the SAME regular spacing instead.
+    @Test("Last 26 Weeks uses a further-reduced, regular density, includes the final bucket, and never clusters two adjacent labels")
+    func labeledIndicesTwentySixBucketsUsesFurtherReducedDensityWithNoAdjacentCluster() {
         let indices = DevelopmentTimelineChart.labeledIndices(bucketCount: 26)
-        #expect(indices == [0, 4, 8, 12, 16, 20, 24, 25])
+        #expect(indices == [1, 5, 9, 13, 17, 21, 25])
         #expect(indices.last == 25)
         #expect(indices.count < 13)
+        for (previous, next) in zip(indices, indices.dropFirst()) {
+            #expect(next - previous > 1)
+        }
     }
 
     @Test("An empty bucket set has no labeled indices")
