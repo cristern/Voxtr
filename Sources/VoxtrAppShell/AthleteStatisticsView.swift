@@ -155,13 +155,22 @@ public struct AthleteStatisticsView: View {
         }
     }
 
+    /// Review follow-up (PR #24): Month/Year options come from
+    /// `StatisticsPeriod`'s own selectable-range functions, never a
+    /// hardcoded window — the Year range is a deliberately broad UI
+    /// safety bound (see `StatisticsPeriod.selectableCalendarMonthYears`'s
+    /// own doc comment), and the Month range excludes any future month
+    /// within the current year. Changing the Year to one where the
+    /// current Month selection would now be in the future clamps the
+    /// Month down (`StatisticsPeriod.clampCalendarMonth`) rather than
+    /// leaving an invalid/future selection in place.
     private func monthYearPicker(year: Int, month: Int) -> some View {
         HStack {
             Picker("Month", selection: Binding(
                 get: { month },
                 set: { viewModel.setPeriod(.calendarMonth(year: year, month: $0)) }
             )) {
-                ForEach(1...12, id: \.self) { candidateMonth in
+                ForEach(StatisticsPeriod.selectableCalendarMonths(forYear: year, today: viewModel.today), id: \.self) { candidateMonth in
                     Text(StatisticsPeriod.monthName(candidateMonth)).tag(candidateMonth)
                 }
             }
@@ -169,22 +178,17 @@ public struct AthleteStatisticsView: View {
 
             Picker("Year", selection: Binding(
                 get: { year },
-                set: { viewModel.setPeriod(.calendarMonth(year: $0, month: month)) }
+                set: { newYear in
+                    let clampedMonth = StatisticsPeriod.clampCalendarMonth(month, forYear: newYear, today: viewModel.today)
+                    viewModel.setPeriod(.calendarMonth(year: newYear, month: clampedMonth))
+                }
             )) {
-                ForEach(calendarMonthYearRange, id: \.self) { candidateYear in
+                ForEach(StatisticsPeriod.selectableCalendarMonthYears(today: viewModel.today), id: \.self) { candidateYear in
                     Text(String(candidateYear)).tag(candidateYear)
                 }
             }
             .accessibilityIdentifier("athleteStatistics.yearPicker")
         }
-    }
-
-    /// A bounded, small range (not an arbitrary/unbounded year picker) —
-    /// two years back through the current year, relative to the SAME
-    /// `today` the ViewModel itself uses.
-    private var calendarMonthYearRange: ClosedRange<Int> {
-        let currentYear = viewModel.today.year
-        return (currentYear - 2)...currentYear
     }
 
     /// No "No sport" filter option in this V1 UI — `StatisticsFilter

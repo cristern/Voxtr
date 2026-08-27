@@ -93,6 +93,46 @@ public enum StatisticsPeriod: Hashable, Sendable {
         return monthNames[month - 1]
     }
 
+    /// Review follow-up (PR #24): how far back the calendar-month Year
+    /// picker offers, relative to `today`. This is a UI SAFETY BOUND
+    /// ONLY — deliberately broad (a quarter century), never a product/
+    /// history rule. No genuine "earliest recorded data" signal is
+    /// cheaply available from current Statistics inputs
+    /// (`StatisticsService`/`StatisticsAthleteSummary` expose no such
+    /// thing, and adding one would mean a new read capability — out of
+    /// scope for a UI picker bound); rather than hard-code a narrow
+    /// window that would silently make older, perfectly readable
+    /// canonical Statistics data unreachable from this screen, this
+    /// bound is generous enough that no realistic athlete/family
+    /// history could exceed it. Widening it further has no data-model
+    /// impact at all — it only changes how many Year options a picker
+    /// offers.
+    private static let calendarMonthYearLookback = 25
+
+    /// The calendar-month Year picker's valid range: from the UI safety
+    /// bound above through `today`'s own year — never a future year.
+    public static func selectableCalendarMonthYears(today: LocalDate) -> ClosedRange<Int> {
+        (today.year - calendarMonthYearLookback)...today.year
+    }
+
+    /// The calendar-month Month picker's valid range for `year`: the
+    /// full `1...12` for any past year, or `1...today.month` when
+    /// `year == today.year` — a future month within the current year is
+    /// never offered.
+    public static func selectableCalendarMonths(forYear year: Int, today: LocalDate) -> ClosedRange<Int> {
+        year == today.year ? 1...today.month : 1...12
+    }
+
+    /// Clamps `month` into `selectableCalendarMonths(forYear:today:)`
+    /// for `year` — used when the Year picker changes to a year where
+    /// the previously-selected month would now be in the future (e.g.
+    /// switching from a past year with month 11 selected to the
+    /// current year when `today.month` is 3).
+    public static func clampCalendarMonth(_ month: Int, forYear year: Int, today: LocalDate) -> Int {
+        let range = selectableCalendarMonths(forYear: year, today: today)
+        return min(max(month, range.lowerBound), range.upperBound)
+    }
+
     /// The rolling-window half of `StatisticsPeriod`. Locked V1
     /// contract — three trailing-week windows, deliberately never
     /// labelled or reasoned about as "months."

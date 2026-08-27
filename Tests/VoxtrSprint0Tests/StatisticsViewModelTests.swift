@@ -249,6 +249,80 @@ struct StatisticsViewModelTests {
         #expect(interval.upperBound == LocalDate(year: 2026, month: 2, day: 28))
     }
 
+    // MARK: - Review follow-up (PR #24): month history range
+
+    /// The Year picker's range must not hide genuinely readable
+    /// canonical Statistics data behind an arbitrary short history
+    /// limit — an athlete/family whose data goes back well beyond two
+    /// years must still be selectable and resolve correctly.
+    @Test("A historical month more than two years before today is selectable and resolves correctly")
+    @MainActor
+    func historicalMonthBeyondTwoYearsIsSelectableAndResolves() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let today = LocalDate(year: 2026, month: 8, day: 1)
+
+        // June 2019 — more than 2 years (in fact more than 5) before `today`.
+        let historicalMonth = StatisticsPeriod.calendarMonth(year: 2019, month: 6)
+        #expect(StatisticsPeriod.selectableCalendarMonthYears(today: today).contains(2019))
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Old training",
+            startedAt: Self.date(2019, 6, 15), durationMinutes: 45, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: historicalMonth, today: today
+        )
+        viewModel.load()
+
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(summary.intervalStart == LocalDate(year: 2019, month: 6, day: 1))
+        #expect(summary.intervalEnd == LocalDate(year: 2019, month: 6, day: 30))
+        #expect(summary.totalActualMinutes == 45)
+        #expect(summary.performedActivityCount == 1)
+    }
+
+    /// The Month picker's UI model must never offer a future month
+    /// within the current year — this is the pure range-generation
+    /// logic the View's Month picker is built from, tested without any
+    /// SwiftUI rendering.
+    @Test("A future month in the current year is not offered by the selectable-months UI model")
+    func futureMonthInCurrentYearIsNotSelectable() {
+        // today.month == 3 (March): only January-March should be offered.
+        let today = LocalDate(year: 2026, month: 3, day: 15)
+        let selectableMonths = StatisticsPeriod.selectableCalendarMonths(forYear: 2026, today: today)
+        #expect(selectableMonths == 1...3)
+        #expect(!selectableMonths.contains(4))
+        #expect(!selectableMonths.contains(12))
+
+        // A past year is entirely selectable, future months included —
+        // "future" only applies relative to `today`'s OWN year.
+        let pastYearMonths = StatisticsPeriod.selectableCalendarMonths(forYear: 2025, today: today)
+        #expect(pastYearMonths == 1...12)
+    }
+
+    @Test("Changing the Year to the current year clamps a future-month selection down to today's month")
+    func clampCalendarMonthPullsFutureMonthBackToToday() {
+        let today = LocalDate(year: 2026, month: 3, day: 15)
+        // Previously selected November while viewing a past year — now
+        // switching the Year to the current year, November is in the future.
+        let clamped = StatisticsPeriod.clampCalendarMonth(11, forYear: 2026, today: today)
+        #expect(clamped == 3)
+
+        // A month already within range is left untouched.
+        let unchanged = StatisticsPeriod.clampCalendarMonth(2, forYear: 2026, today: today)
+        #expect(unchanged == 2)
+    }
+
     /// Integration proof: February 2026 starts on a Sunday and ends on
     /// a Saturday, so its calendar-month interval genuinely straddles a
     /// partial FIRST canonical week (starting Monday 2026-01-26, mostly
