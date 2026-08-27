@@ -51,6 +51,7 @@ public struct AthleteStatisticsView: View {
                     .voxtrRowSurface()
 
                     Section {
+                        breakdownModePicker
                         HStack {
                             seriesToggles
                             Spacer()
@@ -62,7 +63,8 @@ public struct AthleteStatisticsView: View {
                             isFormVisible: viewModel.isFormSeriesVisible,
                             isSleepVisible: viewModel.isSleepSeriesVisible,
                             intervalStart: summary.intervalStart,
-                            intervalEnd: summary.intervalEnd
+                            intervalEnd: summary.intervalEnd,
+                            breakdownMode: viewModel.trainingBreakdownMode
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
                     } header: {
@@ -106,9 +108,37 @@ public struct AthleteStatisticsView: View {
                 weekStart: bucket.weekStart,
                 trainingMinutes: bucket.totalActualMinutes,
                 formMean: bucket.form.mean,
-                sleepMean: bucket.sleep.mean
+                sleepMean: bucket.sleep.mean,
+                trainingBySport: bucket.trainingBySport.map { segment in
+                    TrainingCategorySegment(
+                        id: segment.sportId?.rawValue.uuidString ?? TrainingCategorySegment.noSportKey,
+                        displayName: sportDisplayName(for: segment.sportId),
+                        minutes: segment.minutes
+                    )
+                },
+                trainingByActivityType: bucket.trainingByActivityType.map { segment in
+                    TrainingCategorySegment(
+                        id: segment.activityType.rawValue,
+                        displayName: segment.activityType.displayName,
+                        minutes: segment.minutes
+                    )
+                }
             )
         }
+    }
+
+    /// Training Breakdown round: resolves a Sport segment's display
+    /// label from the SAME already-loaded `sports` list `sportFilterMenu`/
+    /// `selectedSportName` already use — never a second Sport-reference
+    /// read. `sportId == nil` means the underlying activity genuinely
+    /// has no Sport (see `SportTrainingMinutes`'s own doc comment), a
+    /// legitimate case, not an error — "No sport" is calm, factual
+    /// presentation text. A non-nil `sportId` that fails to resolve
+    /// (deleted/unknown reference data) falls back to "Unknown" rather
+    /// than silently dropping the segment's factual minutes.
+    private func sportDisplayName(for sportId: SportId?) -> String {
+        guard let sportId else { return "No sport" }
+        return sports.first(where: { $0.sportId == sportId })?.displayName ?? "Unknown"
     }
 
     /// "No training in period" (a factual zero state, not an error) and
@@ -245,6 +275,23 @@ public struct AthleteStatisticsView: View {
             LabeledContent("Activity Type", value: viewModel.activityTypeFilter?.displayName ?? "All Types")
         }
         .accessibilityIdentifier("athleteStatistics.activityTypeFilter")
+    }
+
+    /// Training Breakdown round: "How should Training be visually broken
+    /// down?" — a presentation choice, deliberately distinct from the
+    /// Sport/Activity Type FILTERS above (`sportFilterMenu`/
+    /// `activityTypeFilterMenu`, which change what counts) and from
+    /// `seriesToggles` below (which series render at all). Bound
+    /// directly to `viewModel.trainingBreakdownMode`, the one shared
+    /// state `DevelopmentTimelineFullscreenView` also binds to.
+    private var breakdownModePicker: some View {
+        Picker("Training Breakdown", selection: $viewModel.trainingBreakdownMode) {
+            ForEach(TrainingBreakdownMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatistics.trainingBreakdownPicker")
     }
 
     private var seriesToggles: some View {

@@ -79,6 +79,40 @@ public struct StatisticsAggregate: Equatable, Sendable {
     }
 }
 
+// MARK: - Training breakdown
+
+/// Training Breakdown round: aggregated actual Training minutes for one
+/// Sport, scoped to one weekly bucket. `sportId == nil` represents
+/// genuinely sport-less performed activities — `LoggedActivity.sportId`
+/// is legitimately optional (an activity is valid with a non-blank
+/// title OR a Sport, not necessarily both; see `ActivityIdentity`) —
+/// never a fabricated Sport identity or a dropped segment. Stable-ID
+/// identity only; no display string is ever the identity here, matching
+/// `StatisticsFilter.sportId`'s own convention.
+public struct SportTrainingMinutes: Equatable, Sendable {
+    public let sportId: SportId?
+    public let minutes: Int
+
+    public init(sportId: SportId?, minutes: Int) {
+        self.sportId = sportId
+        self.minutes = minutes
+    }
+}
+
+/// Same shape as `SportTrainingMinutes`, keyed by the canonical
+/// `ActivityType` enum itself — already the one stable, closed identity
+/// this domain uses for Activity Type; no separate `ActivityTypeId`
+/// type exists, and none is introduced here.
+public struct ActivityTypeTrainingMinutes: Equatable, Sendable {
+    public let activityType: ActivityType
+    public let minutes: Int
+
+    public init(activityType: ActivityType, minutes: Int) {
+        self.activityType = activityType
+        self.minutes = minutes
+    }
+}
+
 // MARK: - Weekly bucket
 
 /// One Monday-start week overlapping a requested interval. Unlike
@@ -109,19 +143,40 @@ public struct StatisticsWeekBucket: Equatable, Sendable {
     /// own context for the period, not something a Sport/Activity Type
     /// choice should be able to hide or fabricate away.
     public let sleep: StatisticsAggregate
+    /// Training Breakdown round: `totalActualMinutes` broken down by
+    /// Sport — built from the SAME already-filtered `performed`
+    /// activities `totalActualMinutes` itself sums, so
+    /// `trainingBySport.map(\.minutes).reduce(0, +) == totalActualMinutes`
+    /// always holds (minute conservation — see this type's own tests).
+    /// Sorted deterministically by stable Sport identity (never by
+    /// insertion/dictionary-iteration order), with the "no Sport"
+    /// segment (`sportId == nil`) always last. Presentation-only default
+    /// `[]` preserves every existing call site/test that predates
+    /// Training Breakdown.
+    public let trainingBySport: [SportTrainingMinutes]
+    /// Same conservation guarantee as `trainingBySport`, keyed by
+    /// `ActivityType` instead — `trainingByActivityType.map(\.minutes)
+    /// .reduce(0, +) == totalActualMinutes` always holds. Sorted by
+    /// `ActivityType.allCases`'s own fixed declaration order — the one
+    /// canonical, deterministic ordering this enum already establishes.
+    public let trainingByActivityType: [ActivityTypeTrainingMinutes]
 
     public init(
         weekStart: LocalDate,
         totalActualMinutes: Int,
         performedActivityCount: Int,
         form: StatisticsAggregate,
-        sleep: StatisticsAggregate
+        sleep: StatisticsAggregate,
+        trainingBySport: [SportTrainingMinutes] = [],
+        trainingByActivityType: [ActivityTypeTrainingMinutes] = []
     ) {
         self.weekStart = weekStart
         self.totalActualMinutes = totalActualMinutes
         self.performedActivityCount = performedActivityCount
         self.form = form
         self.sleep = sleep
+        self.trainingBySport = trainingBySport
+        self.trainingByActivityType = trainingByActivityType
     }
 }
 
@@ -380,6 +435,13 @@ public final class StatisticsService {
     ) -> [StatisticsWeekBucket] {
         var totals: [LocalDate: (minutes: Int, count: Int)] = [:]
         var formValuesByWeek: [LocalDate: [Int]] = [:]
+        // Training Breakdown round: accumulated from the SAME per-activity
+        // loop that already computes `totals`/`formValuesByWeek` above —
+        // never a second, independently-filtered pass over `activities` —
+        // so a Sport/Activity Type breakdown can never disagree with the
+        // week's own `totalActualMinutes` about which activities counted.
+        var sportTotalsByWeek: [LocalDate: [SportId?: Int]] = [:]
+        var activityTypeTotalsByWeek: [LocalDate: [ActivityType: Int]] = [:]
         for activity in activities {
             let localDate = TrainingPlanningCoordinationService.today(referenceDate: activity.startedAt, calendar: calendar)
             let weekStart = localDate.startOfWeek
@@ -390,6 +452,9 @@ public final class StatisticsService {
             if let bodyFeeling = reflectionByLoggedActivityId[activity.id]?.bodyFeeling {
                 formValuesByWeek[weekStart, default: []].append(bodyFeeling)
             }
+            let sportId = activity.sportId.map(SportId.init(rawValue:))
+            sportTotalsByWeek[weekStart, default: [:]][sportId, default: 0] += activity.durationMinutes
+            activityTypeTotalsByWeek[weekStart, default: [:]][activity.activityType, default: 0] += activity.durationMinutes
         }
 
         // Sleep: bucketed by the DailyStatus's OWN local date, entirely
@@ -410,8 +475,40 @@ public final class StatisticsService {
                 totalActualMinutes: entry.minutes,
                 performedActivityCount: entry.count,
                 form: StatisticsAggregate.of(formValuesByWeek[weekStart] ?? []),
-                sleep: StatisticsAggregate.of(sleepValuesByWeek[weekStart] ?? [])
+                sleep: StatisticsAggregate.of(sleepValuesByWeek[weekStart] ?? []),
+                trainingBySport: sortedSportTotals(sportTotalsByWeek[weekStart] ?? [:]),
+                trainingByActivityType: sortedActivityTypeTotals(activityTypeTotalsByWeek[weekStart] ?? [:])
             )
+        }
+    }
+
+    /// Deterministic, stable-ID-driven order — never dictionary-iteration
+    /// order (`[SportId?: Int]` iteration order is not guaranteed stable
+    /// across runs). Sorted by the Sport's own UUID string ascending,
+    /// with the "no Sport" segment (`sportId == nil`) always sorted last
+    /// — a fixed, reproducible order for the SAME underlying data on
+    /// every call, regardless of which order activities were originally
+    /// encountered in.
+    private static func sortedSportTotals(_ totals: [SportId?: Int]) -> [SportTrainingMinutes] {
+        totals
+            .map { SportTrainingMinutes(sportId: $0.key, minutes: $0.value) }
+            .sorted { lhs, rhs in
+                switch (lhs.sportId, rhs.sportId) {
+                case (nil, nil): return false
+                case (nil, _): return false
+                case (_, nil): return true
+                case let (left?, right?): return left.rawValue.uuidString < right.rawValue.uuidString
+                }
+            }
+    }
+
+    /// Deterministic order matching `ActivityType.allCases`'s own fixed
+    /// declaration order — a stable, compile-time-fixed ordering, never
+    /// dictionary-iteration order.
+    private static func sortedActivityTypeTotals(_ totals: [ActivityType: Int]) -> [ActivityTypeTrainingMinutes] {
+        ActivityType.allCases.compactMap { activityType in
+            guard let minutes = totals[activityType] else { return nil }
+            return ActivityTypeTrainingMinutes(activityType: activityType, minutes: minutes)
         }
     }
 }

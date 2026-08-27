@@ -2,6 +2,35 @@ import SwiftUI
 import Charts
 import VoxtrCoreContracts
 
+/// Training Breakdown round: one Training category's factual minutes
+/// within a single weekly bucket — a plain projection of
+/// `SportTrainingMinutes`/`ActivityTypeTrainingMinutes`, already
+/// resolved to a display name (Sport/Activity Type reference-data
+/// lookup happens where that data is already loaded — `AthleteStatisticsView`
+/// — never inside this chart, which owns no repository access).
+/// `id` is the STABLE identity key `VoxtrCategoryColor.color(forStableKey:)`
+/// keys off — a `SportId`'s UUID string, an `ActivityType`'s raw
+/// string, or `TrainingCategorySegment.noSportKey` — never the display
+/// name, which is presentation-only and can repeat/localize.
+public struct TrainingCategorySegment: Identifiable, Hashable, Sendable {
+    public let id: String
+    public let displayName: String
+    public let minutes: Int
+
+    public init(id: String, displayName: String, minutes: Int) {
+        self.id = id
+        self.displayName = displayName
+        self.minutes = minutes
+    }
+
+    /// The stable key for a performed activity recorded with no Sport
+    /// (`LoggedActivity.sportId == nil`) — a legitimate, factual case
+    /// (see `SportTrainingMinutes`'s own doc comment), never a
+    /// fabricated Sport identity. Fixed and distinct from any real
+    /// `SportId`'s UUID-string form.
+    public static let noSportKey = "no-sport"
+}
+
 /// One week's plotted values for the Development Timeline — a plain
 /// projection of `StatisticsWeekBucket`, never a `@Model` reference.
 /// `formMean`/`sleepMean` stay `nil` exactly when that week had no
@@ -12,14 +41,30 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
     public let trainingMinutes: Int
     public let formMean: Double?
     public let sleepMean: Double?
+    /// Training Breakdown round: `trainingMinutes`, broken down by
+    /// Sport/Activity Type — `[]` on both by default, so every existing
+    /// caller/test predating Training Breakdown compiles unchanged and
+    /// renders exactly as before (`DevelopmentTimelineChart` only reads
+    /// these when its own `breakdownMode` is `.sport`/`.activityType`).
+    public let trainingBySport: [TrainingCategorySegment]
+    public let trainingByActivityType: [TrainingCategorySegment]
 
     public var id: LocalDate { weekStart }
 
-    public init(weekStart: LocalDate, trainingMinutes: Int, formMean: Double?, sleepMean: Double?) {
+    public init(
+        weekStart: LocalDate,
+        trainingMinutes: Int,
+        formMean: Double?,
+        sleepMean: Double?,
+        trainingBySport: [TrainingCategorySegment] = [],
+        trainingByActivityType: [TrainingCategorySegment] = []
+    ) {
         self.weekStart = weekStart
         self.trainingMinutes = trainingMinutes
         self.formMean = formMean
         self.sleepMean = sleepMean
+        self.trainingBySport = trainingBySport
+        self.trainingByActivityType = trainingByActivityType
     }
 }
 
@@ -99,6 +144,13 @@ public struct DevelopmentTimelineChart: View {
     /// landscape) without forking the bar/line/axis drawing logic into
     /// a second, independently-maintained chart implementation.
     public let chartHeight: CGFloat
+    /// Training Breakdown round: which lens Training's bars render
+    /// through. `.total` is byte-for-byte the original single-bar
+    /// rendering (untouched code path) — `.sport`/`.activityType` stack
+    /// each week's bar by `point.trainingBySport`/`.trainingByActivityType`
+    /// instead. Never affects Form/Sleep, the Y-scale, or any other
+    /// existing chart contract.
+    public let breakdownMode: TrainingBreakdownMode
 
     public init(
         points: [DevelopmentTimelinePoint],
@@ -107,7 +159,8 @@ public struct DevelopmentTimelineChart: View {
         isSleepVisible: Bool,
         intervalStart: LocalDate,
         intervalEnd: LocalDate,
-        chartHeight: CGFloat = 240
+        chartHeight: CGFloat = 240,
+        breakdownMode: TrainingBreakdownMode = .total
     ) {
         self.points = points
         self.isTrainingVisible = isTrainingVisible
@@ -116,6 +169,7 @@ public struct DevelopmentTimelineChart: View {
         self.intervalStart = intervalStart
         self.intervalEnd = intervalEnd
         self.chartHeight = chartHeight
+        self.breakdownMode = breakdownMode
     }
 
     private static let scaleMin: Double = 1
@@ -169,6 +223,44 @@ public struct DevelopmentTimelineChart: View {
 
     private var formRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.formMean) }
     private var sleepRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.sleepMean) }
+
+    // MARK: - Training Breakdown
+
+    /// The category segments for one point under the CURRENT
+    /// `breakdownMode` — `[]` for `.total` (that mode never stacks;
+    /// see the `chart` property below), `point.trainingBySport`/
+    /// `.trainingByActivityType` otherwise. Pure selection only, no
+    /// aggregation: both arrays already come fully computed from
+    /// `AthleteStatisticsView`'s projection of the Statistics read
+    /// model.
+    private func categorySegments(for point: DevelopmentTimelinePoint) -> [TrainingCategorySegment] {
+        switch breakdownMode {
+        case .total: return []
+        case .sport: return point.trainingBySport
+        case .activityType: return point.trainingByActivityType
+        }
+    }
+
+    /// Every category actually present anywhere in `points` under the
+    /// current `breakdownMode`, deduplicated by stable `id` and kept in
+    /// first-seen (chronological) order — never the full canonical
+    /// Sport/Activity Type catalog. Empty whenever `breakdownMode ==
+    /// .total` or Training has no minutes anywhere in the currently
+    /// displayed data, which is exactly when the category legend and
+    /// the training portion of `seriesColorScale` below both stay
+    /// empty too.
+    private var presentCategories: [TrainingCategorySegment] {
+        guard breakdownMode != .total else { return [] }
+        var seenIds = Set<String>()
+        var result: [TrainingCategorySegment] = []
+        for point in points {
+            for segment in categorySegments(for: point) where !seenIds.contains(segment.id) {
+                seenIds.insert(segment.id)
+                result.append(segment)
+            }
+        }
+        return result
+    }
 
     // MARK: - Time-axis readability (year context + week/date rows)
 
@@ -269,7 +361,27 @@ public struct DevelopmentTimelineChart: View {
             domain.append("sleep-\(index)")
             range.append(VoxtrColor.accentBright)
         }
+        // Training Breakdown round: only added when actually stacking —
+        // `.total` keeps using its own direct `.foregroundStyle(VoxtrColor
+        // .accent)` (see `chart` below), which is entirely independent of
+        // this categorical scale, exactly as before this round.
+        for category in presentCategories {
+            domain.append(Self.trainingSeriesKey(for: category.id))
+            range.append(VoxtrCategoryColor.color(forStableKey: category.id))
+        }
         return (domain, range)
+    }
+
+    /// Namespaces a Training category's stable ID into this chart's ONE
+    /// shared `foregroundStyle(by:)` series-key space, alongside the
+    /// pre-existing `"form-<n>"`/`"sleep-<n>"` keys — guarantees a
+    /// Training category's key can never collide with a Form/Sleep run
+    /// key. Purely an internal Swift Charts series-identity detail: the
+    /// deterministic COLOUR mapping itself (`VoxtrCategoryColor
+    /// .color(forStableKey:)`) always operates on the category's own
+    /// unprefixed `id`, never this namespaced form.
+    private static func trainingSeriesKey(for categoryId: String) -> String {
+        "training-\(categoryId)"
     }
 
     private var hasAnyVisibleSeries: Bool {
@@ -297,7 +409,7 @@ public struct DevelopmentTimelineChart: View {
             }
 
             HStack(spacing: 16) {
-                if isTrainingVisible {
+                if isTrainingVisible && breakdownMode == .total {
                     legendEntry(color: VoxtrColor.accent, label: "Training (minutes)")
                 }
                 if isFormVisible {
@@ -309,6 +421,25 @@ public struct DevelopmentTimelineChart: View {
             }
             .font(VoxtrTypography.caption)
             .foregroundStyle(VoxtrColor.textSecondary)
+
+            // Training Breakdown round: a SEPARATE legend for the
+            // Training category colours themselves — only relevant (and
+            // only shown) once Training is stacked by Sport/Activity
+            // Type, and only ever lists categories actually present in
+            // the currently displayed/filtered data, never the full
+            // canonical Sport/Activity Type catalog. Wraps to multiple
+            // lines rather than truncating or scrolling — the category
+            // count is data-dependent and unbounded in principle.
+            if isTrainingVisible, breakdownMode != .total, !presentCategories.isEmpty {
+                FlowLayout(spacing: 12) {
+                    ForEach(presentCategories) { category in
+                        legendEntry(color: VoxtrCategoryColor.color(forStableKey: category.id), label: category.displayName)
+                    }
+                }
+                .font(VoxtrTypography.caption)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .accessibilityIdentifier("developmentTimeline.categoryLegend")
+            }
         }
     }
 
@@ -316,12 +447,37 @@ public struct DevelopmentTimelineChart: View {
         let scale = seriesColorScale
         return Chart {
             if isTrainingVisible {
-                ForEach(points) { point in
-                    BarMark(
-                        x: .value("Week", point.weekStart.isoString),
-                        y: .value("Training minutes", point.trainingMinutes)
-                    )
-                    .foregroundStyle(VoxtrColor.accent)
+                if breakdownMode == .total {
+                    // Unchanged from before Training Breakdown existed —
+                    // the exact same single BarMark per week, direct
+                    // colour, no categorical scale involvement.
+                    ForEach(points) { point in
+                        BarMark(
+                            x: .value("Week", point.weekStart.isoString),
+                            y: .value("Training minutes", point.trainingMinutes)
+                        )
+                        .foregroundStyle(VoxtrColor.accent)
+                    }
+                } else {
+                    // Swift Charts stacks multiple BarMarks sharing the
+                    // same x natively — one mark per present category per
+                    // week, each segment's own height is its own factual
+                    // minutes, so the stack's total height equals the
+                    // SAME `point.trainingMinutes` Total mode draws
+                    // (minute conservation is guaranteed at the read-
+                    // model layer — see `StatisticsWeekBucket`'s own doc
+                    // comment — never re-summed or re-derived here).
+                    ForEach(points) { point in
+                        ForEach(categorySegments(for: point)) { segment in
+                            BarMark(
+                                x: .value("Week", point.weekStart.isoString),
+                                y: .value("Training minutes", segment.minutes)
+                            )
+                            .foregroundStyle(by: .value("Series", Self.trainingSeriesKey(for: segment.id)))
+                            .accessibilityLabel(segment.displayName)
+                            .accessibilityValue("\(segment.minutes) minutes")
+                        }
+                    }
                 }
             }
             if isFormVisible {
@@ -429,6 +585,11 @@ public struct DevelopmentTimelineChart: View {
         var parts: [String] = ["\(points.count) weeks"]
         if isTrainingVisible {
             parts.append("\(totalMinutes) total training minutes")
+            if breakdownMode != .total {
+                let categoryCount = presentCategories.count
+                let breakdownLabel = breakdownMode == .sport ? "Sport" : "Activity Type"
+                parts.append("broken down by \(breakdownLabel) into \(categoryCount) \(categoryCount == 1 ? "category" : "categories")")
+            }
         }
         if isFormVisible {
             parts.append(formValues.isEmpty ? "no Form data" : "Form recorded in \(formValues.count) weeks")
@@ -437,5 +598,53 @@ public struct DevelopmentTimelineChart: View {
             parts.append(sleepValues.isEmpty ? "no Sleep data" : "Sleep recorded in \(sleepValues.count) weeks")
         }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// Training Breakdown round: a minimal, presentation-only wrapping row
+/// — used only for the Training category legend, whose item count is
+/// data-dependent (as many Sport/Activity Type categories as are
+/// actually present) and can exceed one line's width. Standard SwiftUI
+/// `Layout` (iOS 16+, this app targets 17+), not a general-purpose
+/// layout library — the smallest correct tool for "wrap to the next
+/// line," avoiding both a truncating fixed `HStack` and unnecessary
+/// horizontal-scroll complexity.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var rowWidth: CGFloat = 0
+        var totalHeight: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if rowWidth > 0, rowWidth + spacing + size.width > maxWidth {
+                totalHeight += rowHeight + spacing
+                rowWidth = 0
+                rowHeight = 0
+            }
+            rowWidth += (rowWidth > 0 ? spacing : 0) + size.width
+            rowHeight = max(rowHeight, size.height)
+        }
+        totalHeight += rowHeight
+        return CGSize(width: maxWidth.isFinite ? maxWidth : rowWidth, height: totalHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
     }
 }

@@ -885,4 +885,192 @@ struct StatisticsServiceTests {
         #expect(week.sleep.sampleCount == 0)
         #expect(week.sleep.mean == nil)
     }
+
+    // MARK: - Training Breakdown round
+
+    /// Required test: Sport breakdown for one weekly bucket (Football
+    /// 120, Hockey 80, Running 40) produces exactly 3 segments, each
+    /// preserving its exact `SportId` and minutes, and the segments'
+    /// total exactly equals the week's own factual `totalActualMinutes`
+    /// — minute conservation, the core Training Breakdown contract.
+    @Test("Sport breakdown produces exact-ID segments whose minutes sum to the week's factual total")
+    @MainActor
+    func sportBreakdownProducesExactIdSegmentsSummingToFactualTotal() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+        let football = SportId()
+        let hockey = SportId()
+        let running = SportId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: running, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(week.totalActualMinutes == 240)
+        #expect(week.trainingBySport.count == 3)
+        #expect(week.trainingBySport.map(\.minutes).reduce(0, +) == 240)
+        #expect(week.trainingBySport.first { $0.sportId == football }?.minutes == 120)
+        #expect(week.trainingBySport.first { $0.sportId == hockey }?.minutes == 80)
+        #expect(week.trainingBySport.first { $0.sportId == running }?.minutes == 40)
+    }
+
+    /// Required test: the equivalent Activity Type breakdown — exact
+    /// minute conservation across every present `ActivityType`.
+    @Test("Activity Type breakdown produces exact segments whose minutes sum to the week's factual total")
+    @MainActor
+    func activityTypeBreakdownProducesExactSegmentsSummingToFactualTotal() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .strength, title: "Strength",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .recovery, title: "Recovery",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .strength, title: "Strength again",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(week.totalActualMinutes == 65)
+        #expect(week.trainingByActivityType.map(\.minutes).reduce(0, +) == 65)
+        #expect(week.trainingByActivityType.first { $0.activityType == .strength }?.minutes == 45)
+        #expect(week.trainingByActivityType.first { $0.activityType == .recovery }?.minutes == 20)
+    }
+
+    /// Required test: breakdown operates ONLY on already-filtered
+    /// included activities — a Sport filter that excludes Football
+    /// removes the Football segment entirely, and the remaining
+    /// stacked total equals the FILTERED factual total, never the
+    /// unfiltered one.
+    @Test("A Sport filter that excludes Football removes its segment; the remaining stacked total equals the filtered Total")
+    @MainActor
+    func sportFilterExcludesSegmentAndStackedTotalMatchesFilteredTotal() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+        let football = SportId()
+        let hockey = SportId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            filter: StatisticsFilter(sportId: hockey), calendar: Self.utcCalendar
+        )
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(week.totalActualMinutes == 80)
+        #expect(week.trainingBySport.count == 1)
+        #expect(week.trainingBySport.first?.sportId == hockey)
+        #expect(week.trainingBySport.first?.minutes == 80)
+        #expect(week.trainingBySport.contains { $0.sportId == football } == false)
+        #expect(week.trainingBySport.map(\.minutes).reduce(0, +) == week.totalActualMinutes)
+    }
+
+    /// Required test: a week with zero performed Training reports no
+    /// fabricated category segments at all — both breakdown arrays are
+    /// empty, matching the week's own factual zero total.
+    @Test("A week with zero performed Training has no fabricated Sport/Activity Type segments")
+    @MainActor
+    func zeroTrainingWeekHasNoFabricatedSegments() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(week.totalActualMinutes == 0)
+        #expect(week.trainingBySport.isEmpty)
+        #expect(week.trainingByActivityType.isEmpty)
+    }
+
+    /// Required scope test: an activity legitimately recorded with no
+    /// Sport (`sportId == nil` — a valid `LoggedActivity` needs a
+    /// non-blank title OR a Sport, not necessarily both, per
+    /// `ActivityIdentity`) contributes its factual minutes to Sport
+    /// breakdown under a `sportId == nil` segment rather than being
+    /// dropped or fabricating a Sport identity for it.
+    @Test("A Sport-less activity's minutes appear in Sport breakdown under a nil-Sport segment, never dropped")
+    @MainActor
+    func sportlessActivityAppearsUnderNilSportSegment() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+        let football = SportId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+
+        #expect(week.totalActualMinutes == 50)
+        #expect(week.trainingBySport.count == 2)
+        #expect(week.trainingBySport.map(\.minutes).reduce(0, +) == 50)
+        #expect(week.trainingBySport.first { $0.sportId == nil }?.minutes == 20)
+        #expect(week.trainingBySport.first { $0.sportId == football }?.minutes == 30)
+    }
 }

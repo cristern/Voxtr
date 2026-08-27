@@ -40,6 +40,7 @@ struct DevelopmentTimelineFullscreenView: View {
             GeometryReader { geometry in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        breakdownModePicker
                         seriesToggles
                         DevelopmentTimelineChart(
                             points: points,
@@ -48,7 +49,8 @@ struct DevelopmentTimelineFullscreenView: View {
                             isSleepVisible: viewModel.isSleepSeriesVisible,
                             intervalStart: intervalStart,
                             intervalEnd: intervalEnd,
-                            chartHeight: max(240, geometry.size.height - 120)
+                            chartHeight: max(240, geometry.size.height - 120),
+                            breakdownMode: viewModel.trainingBreakdownMode
                         )
                         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.developmentTimeline")
                     }
@@ -73,6 +75,23 @@ struct DevelopmentTimelineFullscreenView: View {
         .onDisappear {
             VoxtrOrientationPolicy.shared.setAllowedOrientations(VoxtrOrientationPolicy.portraitOnly)
         }
+    }
+
+    /// The SAME Training Breakdown control as Athlete Statistics, bound
+    /// to the SAME shared `viewModel.trainingBreakdownMode` — no second,
+    /// fullscreen-only breakdown state. Changing it here stays reflected
+    /// after returning to Athlete Statistics, and vice versa.
+    private var breakdownModePicker: some View {
+        Picker("Training Breakdown", selection: Binding(
+            get: { viewModel.trainingBreakdownMode },
+            set: { viewModel.trainingBreakdownMode = $0 }
+        )) {
+            ForEach(TrainingBreakdownMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.trainingBreakdownPicker")
     }
 
     /// The SAME Training/Form/Sleep toggles as the embedded Athlete

@@ -2,6 +2,25 @@ import Foundation
 import Observation
 import VoxtrCoreContracts
 
+/// Training Breakdown round: which lens the Development Timeline's
+/// Training bars are currently drawn through — a presentation choice
+/// only. Never changes which activities are included, totals, filters,
+/// period, buckets, or Form/Sleep; see `DevelopmentTimelineChart`'s own
+/// doc comment for how each mode renders.
+public enum TrainingBreakdownMode: String, CaseIterable, Identifiable, Sendable {
+    case total, sport, activityType
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .total: return "Total"
+        case .sport: return "Sport"
+        case .activityType: return "Activity Type"
+        }
+    }
+}
+
 /// Statistics V1 UI — backs the Athlete Statistics detail screen.
 /// Mirrors `WeeklyReviewLoadState`'s established shape (`.loading`/
 /// `.loaded(Result)`/`.failed`) — no separate "empty"/"no data" case,
@@ -37,6 +56,13 @@ public final class AthleteStatisticsViewModel {
     public var isTrainingSeriesVisible = true
     public var isFormSeriesVisible = true
     public var isSleepSeriesVisible = true
+
+    /// Training Breakdown round: same presentation-only contract as the
+    /// series-visibility toggles above — changing this never triggers
+    /// `load()` or alters `loadState`/the underlying
+    /// `StatisticsAthleteSummary` in any way. Default `.total` reproduces
+    /// the Development Timeline's pre-existing Training bar exactly.
+    public var trainingBreakdownMode: TrainingBreakdownMode = .total
 
     private let statisticsService: StatisticsService
     /// Fixed for this screen's lifetime once loaded — a period/filter

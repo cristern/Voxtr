@@ -230,6 +230,50 @@ public extension AthleteColor {
     }
 }
 
+// MARK: - VoxtrCategoryColor (Statistics Training Breakdown)
+
+/// Statistics V1 UI (Training Breakdown round): a small, deterministic,
+/// presentation-only colour mapping for Development Timeline Sport/
+/// Activity Type breakdown segments. Reuses `AthleteColor`'s existing
+/// eight-hue, identity-only palette (see that type's own doc comment:
+/// "IDENTITY ONLY, never performance/readiness/warning/completion/
+/// ranking") rather than inventing a second bounded palette — exactly
+/// the same non-semantic requirement this mapping also has: a fixed set
+/// of hues used purely to visually distinguish categories, never to
+/// imply good/bad (no red = bad, no green = good).
+///
+/// Deliberately NOT `AthleteColor` itself — a Sport or Activity Type is
+/// not an athlete identity, and Statistics must not own or persist any
+/// colour truth (see the approved contract's own "do not add colour
+/// fields to Sport/ActivityCategory" boundary). This is a pure mapping
+/// FUNCTION over a stable string key, reusing only the already-approved
+/// `Color` values `AthleteColor.color` renders.
+public enum VoxtrCategoryColor {
+    /// `stableKey` must be a value that never changes for the same
+    /// logical category across launches — a `SportId`'s UUID string, an
+    /// `ActivityType`'s own raw string, or an explicit sentinel for a
+    /// "no category" bucket. Never a display name: a localized/derived
+    /// string is not a stable identity, and two categories can share a
+    /// display name (e.g. across locales) without sharing identity.
+    ///
+    /// Determinism: like `AthleteColor.forAthleteId(_:)`, this sums the
+    /// UTF-8 bytes of `stableKey` modulo the palette size — deliberately
+    /// NOT Swift's own `String.hashValue`/`Hashable.hash(into:)`, which
+    /// is randomly seeded per process specifically for hash-flooding
+    /// resistance, so the exact same key could hash differently between
+    /// two launches. This sum is a plain, fixed function of the key's
+    /// own bytes: the same key always produces the same colour, on
+    /// every launch, regardless of how many categories exist, what
+    /// order they were encountered in, or which array position they
+    /// occupy.
+    public static func color(forStableKey stableKey: String) -> Color {
+        let palette = AthleteColor.allCases
+        let sum = stableKey.utf8.reduce(0) { $0 + Int($1) }
+        let index = ((sum % palette.count) + palette.count) % palette.count
+        return palette[index].color
+    }
+}
+
 // MARK: - VoxtrTypography
 
 /// Semantic type roles, built entirely on the system font and native
