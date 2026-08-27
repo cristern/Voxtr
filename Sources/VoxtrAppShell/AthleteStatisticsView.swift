@@ -36,8 +36,7 @@ public struct AthleteStatisticsView: View {
                 List {
                     Section {
                         periodPicker
-                        sportFilterMenu
-                        activityTypeFilterMenu
+                        StatisticsFilterMenus(viewModel: viewModel, sports: sports, identifierPrefix: "athleteStatistics")
                     } header: {
                         VoxtrSectionHeading("Filters")
                     }
@@ -88,7 +87,8 @@ public struct AthleteStatisticsView: View {
                         viewModel: viewModel,
                         points: points(from: summary),
                         intervalStart: summary.intervalStart,
-                        intervalEnd: summary.intervalEnd
+                        intervalEnd: summary.intervalEnd,
+                        sports: sports
                     )
                 }
             }
@@ -128,10 +128,11 @@ public struct AthleteStatisticsView: View {
     }
 
     /// Training Breakdown round: resolves a Sport segment's display
-    /// label from the SAME already-loaded `sports` list `sportFilterMenu`/
-    /// `selectedSportName` already use — never a second Sport-reference
-    /// read. `sportId == nil` means the underlying activity genuinely
-    /// has no Sport (see `SportTrainingMinutes`'s own doc comment), a
+    /// label from the SAME already-loaded `sports` list
+    /// `StatisticsFilterMenus` already uses — never a second
+    /// Sport-reference read. `sportId == nil` means the underlying
+    /// activity genuinely has no Sport (see `SportTrainingMinutes`'s
+    /// own doc comment), a
     /// legitimate case, not an error — "No sport" is calm, factual
     /// presentation text. A non-nil `sportId` that fails to resolve
     /// (deleted/unknown reference data) falls back to "Unknown" rather
@@ -236,52 +237,11 @@ public struct AthleteStatisticsView: View {
         }
     }
 
-    /// No "No sport" filter option in this V1 UI — `StatisticsFilter
-    /// .sportId == nil` already means "no constraint" (every activity
-    /// matches, per that type's own doc comment), so it cannot also
-    /// mean "only activities with no Sport" without a fragile
-    /// workaround. "All Sports" here maps to that same `nil`; a
-    /// concrete Sport is the only other option, sourced from the
-    /// canonical `SportRepository.fetchAllSports()` list (the same
-    /// source/ordering `ActivityIdentityInputView` already uses).
-    private var sportFilterMenu: some View {
-        Menu {
-            Button("All Sports") { viewModel.setSportFilter(nil) }
-            if !sports.isEmpty {
-                Divider()
-                ForEach(sports) { sport in
-                    Button(sport.displayName) { viewModel.setSportFilter(sport.sportId) }
-                }
-            }
-        } label: {
-            LabeledContent("Sport", value: selectedSportName)
-        }
-        .accessibilityIdentifier("athleteStatistics.sportFilter")
-    }
-
-    private var selectedSportName: String {
-        guard let sportId = viewModel.sportFilter else { return "All Sports" }
-        return sports.first(where: { $0.sportId == sportId })?.displayName ?? "All Sports"
-    }
-
-    private var activityTypeFilterMenu: some View {
-        Menu {
-            Button("All Types") { viewModel.setActivityTypeFilter(nil) }
-            Divider()
-            ForEach(ActivityType.selectableCases, id: \.self) { type in
-                Button(type.displayName) { viewModel.setActivityTypeFilter(type) }
-            }
-        } label: {
-            LabeledContent("Activity Type", value: viewModel.activityTypeFilter?.displayName ?? "All Types")
-        }
-        .accessibilityIdentifier("athleteStatistics.activityTypeFilter")
-    }
-
     /// Training Breakdown round: "How should Training be visually broken
     /// down?" — a presentation choice, deliberately distinct from the
-    /// Sport/Activity Type FILTERS above (`sportFilterMenu`/
-    /// `activityTypeFilterMenu`, which change what counts) and from
-    /// `seriesToggles` below (which series render at all). Bound
+    /// Sport/Activity Type FILTERS above (`StatisticsFilterMenus`,
+    /// which changes what counts) and from `seriesToggles` below
+    /// (which series render at all). Bound
     /// directly to `viewModel.trainingBreakdownMode`, the one shared
     /// state `DevelopmentTimelineFullscreenView` also binds to.
     private var breakdownModePicker: some View {

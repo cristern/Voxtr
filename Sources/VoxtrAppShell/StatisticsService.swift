@@ -343,6 +343,30 @@ public final class StatisticsService {
         )
     }
 
+    /// Sport filter catalog refinement round: the stable `SportId`s this
+    /// athlete has EVER recorded performed training against — a Sport
+    /// filter catalog-AVAILABILITY question, never a chart/summary
+    /// computation, and deliberately independent of any currently
+    /// selected Statistics period/filter: `fetchLoggedActivities(forAthlete:)`
+    /// (unbounded, this athlete's entire recorded history) is filtered
+    /// through the SAME canonical `isPerformed(_:)` rule `athleteSummary`
+    /// itself uses, so "does this Sport have recorded Statistics
+    /// history" always means the same thing here as it does everywhere
+    /// else in Statistics — planned-only/missed/cancelled activities
+    /// never contribute a Sport to this catalog. Deduplicates by stable
+    /// `SportId`; a performed activity with no Sport (`sportId == nil`)
+    /// contributes nothing here — "no Sport" is not itself a selectable
+    /// Sport filter option (see the approved "No sport only" backlog
+    /// boundary, still out of scope). One unbounded read, never
+    /// per-Sport probing; nothing here is persisted.
+    public func availableSportIds(forAthlete athleteId: AthleteId) throws -> Set<SportId> {
+        let activities = try trainingService.fetchLoggedActivities(forAthlete: athleteId)
+        let sportIds = activities
+            .filter { Self.isPerformed($0.status) }
+            .compactMap { $0.sportId.map(SportId.init(rawValue:)) }
+        return Set(sportIds)
+    }
+
     /// "Actual training" — genuinely happened, per the SAME canonical
     /// rule `TrainingValidator.requiresActualDuration(for:)`/
     /// `requiresForm(for:)` and `PlannedActivityCompletion.isGenuinelyCompleted`

@@ -45,6 +45,16 @@ public final class AthleteStatisticsViewModel {
     public private(set) var sportFilter: SportId?
     public private(set) var activityTypeFilter: ActivityType?
 
+    /// Sport filter catalog refinement round: which Sports this athlete
+    /// has actually recorded performed Statistics history against —
+    /// refreshed on every `load()`, independent of the currently
+    /// selected period/filter (see `StatisticsService
+    /// .availableSportIds(forAthlete:)`'s own doc comment). The View
+    /// intersects this against the canonical Sport reference-data list
+    /// to build the Sport filter's options — never the full canonical
+    /// catalog, and never a second, View-owned availability read.
+    public private(set) var availableSportIds: Set<SportId> = []
+
     /// Development Timeline series-toggle state. Deliberately plain,
     /// side-effect-free `public var`s — toggling which series render is
     /// a presentation-only concern and must never trigger a reload or
@@ -96,8 +106,24 @@ public final class AthleteStatisticsViewModel {
 
     public func load() {
         loadState = .loading
-        let interval = period.interval(today: today)
         do {
+            // Sport filter catalog refinement round: refreshed BEFORE the
+            // filter used to fetch `summary` is built (`currentFilter`
+            // reads `sportFilter` below), so a reset here is already
+            // reflected in the SAME load — never a stale filter fetching
+            // against Sport history that no longer exists.
+            let available = try statisticsService.availableSportIds(forAthlete: athleteId)
+            availableSportIds = available
+            // Filter validity: a previously selected Sport that no
+            // longer has recorded history must not be held as a silent,
+            // invalid filter — reset to "All Sports" rather than a
+            // selection that would otherwise just return an unexplained
+            // empty result. Never silently substitutes a DIFFERENT
+            // Sport.
+            if let sportFilter, !available.contains(sportFilter) {
+                self.sportFilter = nil
+            }
+            let interval = period.interval(today: today)
             let summary = try statisticsService.athleteSummary(
                 forAthlete: athleteId,
                 from: interval.lowerBound,

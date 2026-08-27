@@ -388,6 +388,16 @@ struct StatisticsViewModelTests {
         let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
         let athleteId = AthleteId()
         let football = SportId()
+        // Sport filter catalog refinement round: `football` must have
+        // genuine recorded/performed history, or the ViewModel's own
+        // invalid-selected-Sport reset (see `load()`) would immediately
+        // revert the selection below back to "All Sports" — this
+        // fixture makes `football` a legitimately SELECTABLE Sport,
+        // matching how the Sport filter Menu is actually populated.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+        )
 
         let viewModel = AthleteStatisticsViewModel(
             statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
@@ -411,6 +421,83 @@ struct StatisticsViewModelTests {
             return
         }
         #expect(afterBoth.filter == StatisticsFilter(sportId: football, activityType: .teamTraining))
+    }
+
+    /// Symmetric to the required test above: setting Activity Type
+    /// FIRST, then Sport, must retain BOTH — changing Sport must not
+    /// reset an already-set Activity Type, regardless of which was set
+    /// first.
+    @Test("Setting Sport after Activity Type preserves both filters")
+    @MainActor
+    func settingSportAfterActivityTypePreservesBoth() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let football = SportId()
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+
+        viewModel.setActivityTypeFilter(.teamTraining)
+        #expect(viewModel.currentFilter == StatisticsFilter(activityType: .teamTraining))
+
+        viewModel.setSportFilter(football)
+        #expect(viewModel.currentFilter == StatisticsFilter(sportId: football, activityType: .teamTraining))
+    }
+
+    // MARK: - Sport filter catalog refinement round: filter validity
+
+    /// Required test: a previously selected Sport that is no longer
+    /// available (its recorded history is gone, or it never had any to
+    /// begin with by the time availability refreshes) is reset to "All
+    /// Sports" — never silently substituted for a different Sport, and
+    /// never left as a stale, invisible filter.
+    @Test("An invalid selected Sport resets to All Sports when availability refreshes")
+    @MainActor
+    func invalidSelectedSportResetsToAllSports() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let football = SportId()
+        let neverRecorded = SportId()
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+        #expect(viewModel.availableSportIds == Set([football]))
+
+        // Select a genuinely available Sport first — must be honored.
+        viewModel.setSportFilter(football)
+        #expect(viewModel.sportFilter == football)
+
+        // Now select a Sport with no recorded history at all. Since
+        // `setSportFilter` itself calls `load()`, which refreshes
+        // `availableSportIds` and validates the JUST-set selection in
+        // the same pass, the invalid selection must never be observed
+        // as "currently selected" — it resets to nil (All Sports)
+        // within the same call, never a different Sport.
+        viewModel.setSportFilter(neverRecorded)
+        #expect(viewModel.sportFilter == nil)
+        #expect(viewModel.currentFilter == StatisticsFilter.none)
     }
 
     // MARK: - Required ViewModel test 10: series toggles never mutate Statistics data

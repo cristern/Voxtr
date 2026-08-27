@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrCoreReferenceData
 
 /// Statistics V1 UI (fullscreen Timeline round): a dedicated, larger
 /// presentation of the SAME Development Timeline chart and Statistics
@@ -12,6 +13,15 @@ import VoxtrCoreContracts
 /// passed straight through rather than reloaded or recomputed here.
 /// Reuses `DevelopmentTimelineChart` directly (via its `chartHeight`
 /// parameter) rather than forking a second chart implementation.
+///
+/// Fullscreen filters round: `sports` is the SAME canonical Sport
+/// catalog `AthleteStatisticsView` already loads via
+/// `SportRepository.fetchAllSports()`, passed straight through — this
+/// view never fetches Sport reference data itself. The Sport/Activity
+/// Type filter Menus (`StatisticsFilterMenus`) mutate the SAME shared
+/// `viewModel.setSportFilter`/`setActivityTypeFilter`, which trigger
+/// the SAME `load()` path Athlete Statistics already uses — there is
+/// no second filter owner and no fullscreen-local chart filtering.
 ///
 /// No orientation-detection code: a `GeometryReader` simply reads
 /// `geometry.size`, which SwiftUI already re-reports on every layout
@@ -32,6 +42,7 @@ struct DevelopmentTimelineFullscreenView: View {
     let points: [DevelopmentTimelinePoint]
     let intervalStart: LocalDate
     let intervalEnd: LocalDate
+    let sports: [Sport]
 
     @Environment(\.dismiss) private var dismiss
 
@@ -40,6 +51,11 @@ struct DevelopmentTimelineFullscreenView: View {
             GeometryReader { geometry in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 12) {
+                        StatisticsFilterMenus(
+                            viewModel: viewModel,
+                            sports: sports,
+                            identifierPrefix: "athleteStatisticsTimelineFullscreen"
+                        )
                         breakdownModePicker
                         seriesToggles
                         DevelopmentTimelineChart(

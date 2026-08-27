@@ -1073,4 +1073,136 @@ struct StatisticsServiceTests {
         #expect(week.trainingBySport.first { $0.sportId == nil }?.minutes == 20)
         #expect(week.trainingBySport.first { $0.sportId == football }?.minutes == 30)
     }
+
+    // MARK: - Sport filter catalog refinement round: availableSportIds
+
+    /// Required test: only Sports with genuinely recorded/performed
+    /// training appear — a planned-only Sport and a Missed Sport must
+    /// both be excluded, matching the SAME canonical "performed" rule
+    /// (`isPerformed`) `athleteSummary` itself uses.
+    @Test("availableSportIds includes only Sports with performed training, excluding planned-only and Missed Sports")
+    @MainActor
+    func availableSportIdsIncludesOnlyPerformedSports() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let football = SportId()
+        let running = SportId()
+        let swimming = SportId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed
+        )
+        // Planned-only: a PlannedActivity for Running with no corresponding
+        // LoggedActivity at all — never reaches Statistics truth.
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: running, plannedDurationMinutes: 45
+        )
+        // Missed: a genuine LoggedActivity exists for Swimming, but with
+        // a non-performed status — excluded from availability too.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 8), durationMinutes: 1, status: .missed
+        )
+
+        let available = try statisticsService.availableSportIds(forAthlete: athleteId)
+
+        #expect(available == Set([hockey, football]))
+        #expect(!available.contains(running))
+        #expect(!available.contains(swimming))
+    }
+
+    /// Required test: multiple performed activities for the SAME Sport
+    /// still yield that Sport exactly once.
+    @Test("availableSportIds deduplicates multiple performed activities for the same Sport")
+    @MainActor
+    func availableSportIdsDeduplicatesSameSport() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let hockey = SportId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 12), durationMinutes: 30, status: .partiallyCompleted
+        )
+
+        let available = try statisticsService.availableSportIds(forAthlete: athleteId)
+
+        #expect(available == Set([hockey]))
+    }
+
+    /// Required test: a performed activity with no Sport does not
+    /// create a fake filter option.
+    @Test("availableSportIds never includes a fake option for Sport-less performed activities")
+    @MainActor
+    func availableSportIdsExcludesSportlessActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed
+        )
+
+        let available = try statisticsService.availableSportIds(forAthlete: athleteId)
+
+        #expect(available.isEmpty)
+    }
+
+    /// Required test: availability reflects the athlete's ENTIRE
+    /// recorded history, never merely the currently selected period —
+    /// a Sport that exists only in old history (well outside any
+    /// rolling window) still appears.
+    @Test("availableSportIds reflects the athlete's entire history, independent of any Statistics period")
+    @MainActor
+    func availableSportIdsIsIndependentOfSelectedPeriod() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let football = SportId()
+
+        // Hockey: old history, well over a year before "today" below.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2023, 1, 10), durationMinutes: 30, status: .completed
+        )
+        // Football: recent.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+        )
+
+        let available = try statisticsService.availableSportIds(forAthlete: athleteId)
+
+        #expect(available == Set([hockey, football]))
+    }
 }
