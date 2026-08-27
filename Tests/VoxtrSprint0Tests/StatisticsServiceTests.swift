@@ -620,4 +620,269 @@ struct StatisticsServiceTests {
         #expect(summary.form.sampleCount == 0)
         #expect(summary.form.mean == nil)
     }
+
+    // MARK: - Statistics V1 UI round: weekly Form/Sleep aggregate extension
+
+    /// Required foundation test 1: multiple performed activities in the
+    /// SAME week contribute their `bodyFeeling` values to that week's
+    /// Form aggregate; a third performed activity in the same week with
+    /// no reflection at all is excluded from both the mean and the
+    /// sample count, never treated as a zero.
+    @Test("Weekly Form aggregates multiple activities in the same week and excludes missing reflections")
+    @MainActor
+    func weeklyFormAggregatesSameWeekAndExcludesMissing() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        // 2026-03-02 is a Monday — all three fixtures below fall in the
+        // SAME canonical week (Mar 2-8).
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        let logged1 = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run 1",
+            startedAt: Self.date(2026, 3, 2), durationMinutes: 30, status: .completed
+        )
+        let logged2 = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run 2",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+        )
+        // Third performed activity in the SAME week deliberately gets no reflection.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run 3",
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged1.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 3
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged2.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 5
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        #expect(week.performedActivityCount == 3)
+        #expect(week.form.sampleCount == 2)
+        #expect(week.form.mean == 4.0)
+    }
+
+    /// Required foundation test 2: a Sport/Activity Type filter narrows
+    /// weekly Form to only the reflections attached to performed
+    /// activities that themselves match the filter — exactly mirroring
+    /// how the same filter already narrows the interval-level Form.
+    @Test("Sport filter narrows weekly Form to reflections on matching performed activities")
+    @MainActor
+    func weeklyFormFilterNarrowsToMatchingActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+        let football = SportId()
+
+        let matching = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        let nonMatching = try trainingService.logActivity(
+            athleteId: athleteId, sportId: SportId(), activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: matching.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 5
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: nonMatching.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 1
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            filter: StatisticsFilter(sportId: football), calendar: Self.utcCalendar
+        )
+
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        #expect(week.performedActivityCount == 1)
+        #expect(week.form.sampleCount == 1)
+        #expect(week.form.mean == 5.0)
+    }
+
+    /// Required foundation test 3: `DailyStatus.sleepQuality` values
+    /// bucket into their OWN canonical week (by `localDate.startOfWeek`,
+    /// entirely independent of training); a day with no recorded
+    /// `DailyStatus` at all is excluded from that week's sample count.
+    @Test("Weekly Sleep buckets DailyStatus values into the correct canonical week and excludes missing days")
+    @MainActor
+    func weeklySleepBucketsIntoCorrectWeekAndExcludesMissing() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        // Spans two canonical weeks: Mar 2-8 and Mar 9-15.
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 15)
+
+        // Week 1 (Mar 2-8): two recorded nights, one missing (Mar 4 — no row at all).
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 2),
+            sleepQuality: 3, today: LocalDate(year: 2026, month: 3, day: 15)
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 5, today: LocalDate(year: 2026, month: 3, day: 15)
+        )
+        // Week 2 (Mar 9-15): one recorded night.
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 10),
+            sleepQuality: 2, today: LocalDate(year: 2026, month: 3, day: 15)
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        let week1 = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        let week2 = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 9) })
+        #expect(week1.sleep.sampleCount == 2)
+        #expect(week1.sleep.mean == 4.0)
+        #expect(week2.sleep.sampleCount == 1)
+        #expect(week2.sleep.mean == 2.0)
+    }
+
+    /// Required foundation test 4: weekly Sleep is period context, not
+    /// Sport-owned — applying a Sport/Activity Type filter that
+    /// excludes every training activity in a week must NOT change that
+    /// week's Sleep aggregate at all.
+    @Test("A Sport/Activity Type filter that excludes all training in a week leaves weekly Sleep unchanged")
+    @MainActor
+    func weeklySleepUnaffectedBySportOrActivityTypeFilter() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+        let swimming = SportId()
+        let football = SportId()
+
+        // Only swimming activity exists — a football filter matches nothing.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 4, today: LocalDate(year: 2026, month: 3, day: 8)
+        )
+
+        let unfiltered = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+        let filtered = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            filter: StatisticsFilter(sportId: football), calendar: Self.utcCalendar
+        )
+
+        let unfilteredWeek = try #require(unfiltered.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        let filteredWeek = try #require(filtered.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        #expect(filteredWeek.performedActivityCount == 0)
+        #expect(filteredWeek.sleep.sampleCount == unfilteredWeek.sleep.sampleCount)
+        #expect(filteredWeek.sleep.mean == unfilteredWeek.sleep.mean)
+        #expect(filteredWeek.sleep.sampleCount == 1)
+        #expect(filteredWeek.sleep.mean == 4.0)
+    }
+
+    /// Required foundation test 5: weekly Form/Sleep never leak from a
+    /// sibling athlete — same isolation guarantee
+    /// `athleteSummaryNeverLeaksSiblingData` already proves at the
+    /// interval level, proven here at the weekly-bucket level.
+    @Test("Weekly Form and Sleep never leak a sibling athlete's data")
+    @MainActor
+    func weeklyFormAndSleepNeverLeakSiblingData() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let siblingId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "My run",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 4
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 4, today: LocalDate(year: 2026, month: 3, day: 8)
+        )
+
+        let siblingLogged = try trainingService.logActivity(
+            athleteId: siblingId, activityType: .teamTraining, title: "Sibling match",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: siblingId, loggedActivityId: siblingLogged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 1
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: siblingId, localDate: LocalDate(year: 2026, month: 3, day: 4),
+            sleepQuality: 1, today: LocalDate(year: 2026, month: 3, day: 8)
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        #expect(week.performedActivityCount == 1)
+        #expect(week.form.sampleCount == 1)
+        #expect(week.form.mean == 4.0)
+        #expect(week.sleep.sampleCount == 1)
+        #expect(week.sleep.mean == 4.0)
+    }
+
+    /// Required foundation test 6: a week with genuinely no data at all
+    /// reports factual zeroes/nils across the board — training 0, Form
+    /// nil mean with 0 samples, Sleep nil mean with 0 samples — never a
+    /// fabricated value.
+    @Test("A week with no data reports zero training and nil/zero-sample Form and Sleep")
+    @MainActor
+    func emptyWeekReportsFactualZeroesAndNilAggregates() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+        )
+
+        let week = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        #expect(week.totalActualMinutes == 0)
+        #expect(week.performedActivityCount == 0)
+        #expect(week.form.sampleCount == 0)
+        #expect(week.form.mean == nil)
+        #expect(week.sleep.sampleCount == 0)
+        #expect(week.sleep.mean == nil)
+    }
 }

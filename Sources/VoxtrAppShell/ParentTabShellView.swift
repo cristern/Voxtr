@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// Bottom Navigation / Information Architecture Foundation package:
 /// the Parent shell's five approved primary destinations — Home | Plan
@@ -58,6 +59,11 @@ public struct ParentTabShellView: View {
     /// coordination service/broadcaster pair.
     public let sleepCoordinationService: SleepCoordinationService
     public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Statistics V1 UI round: threaded the same way every other cross-
+    /// domain service above is — resolved once in `CompositionRoot`,
+    /// passed down through `RootView`.
+    public let statisticsService: StatisticsService
+    public let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -72,7 +78,9 @@ public struct ParentTabShellView: View {
         athleteFamilyManagementService: AthleteFamilyManagementService,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        statisticsService: StatisticsService,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -87,6 +95,8 @@ public struct ParentTabShellView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.statisticsService = statisticsService
+        self.sportRepository = sportRepository
     }
 
     public var body: some View {
@@ -161,12 +171,22 @@ public struct ParentTabShellView: View {
             .tabItem { Label("Training", systemImage: "figure.run") }
             .accessibilityIdentifier("parentTabs.training")
 
-            // Statistics: approved destination, feature explicitly out
-            // of scope for this package. Minimum maintainable
-            // placeholder only — no charts, no aggregation, no
-            // repository, no schema.
+            // Statistics: Statistics V1 UI round — a family overview
+            // (one card per active athlete) with per-athlete detail
+            // navigated by stable `AthleteId`, same as Plan/Training
+            // above. `StatisticsRootView` owns its own `onAppear`-
+            // triggered load; wrapped in exactly one new
+            // `NavigationStack` since it has none of its own.
             NavigationStack {
-                StatisticsPlaceholderView()
+                StatisticsRootView(
+                    viewModel: StatisticsRootViewModel(
+                        statisticsService: statisticsService,
+                        athleteRepository: athleteRepository,
+                        workspaceId: WorkspaceId(rawValue: family.workspace.id)
+                    ),
+                    statisticsService: statisticsService,
+                    sportRepository: sportRepository
+                )
             }
             .tabItem { Label("Statistics", systemImage: "chart.bar") }
             .accessibilityIdentifier("parentTabs.statistics")
@@ -581,23 +601,5 @@ private struct ParentTrainingTabView: View {
     /// its own rows).
     private func resolvedColor(for athleteId: AthleteId) -> AthleteColor {
         athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
-    }
-}
-
-/// Statistics tab root: an approved primary destination whose actual
-/// feature is explicitly out of scope for this package. Exists only so
-/// the tab is real and navigable in TestFlight — no charts, no
-/// aggregation, no invented repository, no schema. Future direction
-/// (Sport -> ActivityType -> optional Title/Focus) is documented here
-/// only as a pointer for whoever implements it next, not acted on.
-private struct StatisticsPlaceholderView: View {
-    var body: some View {
-        ContentUnavailableView(
-            "Statistics",
-            systemImage: "chart.bar",
-            description: Text("Training and development statistics are coming soon.")
-        )
-        .navigationTitle("Statistics")
-        .accessibilityIdentifier("parentStatistics.placeholder")
     }
 }

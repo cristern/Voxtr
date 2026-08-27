@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// S1.4 requirement 1: `FamilyRestorationState` is the ONLY thing this
 /// view switches on — there is no separate "just finished onboarding"
@@ -42,7 +43,9 @@ public struct RootView: View {
                 athleteFamilyManagementService: root.container.resolve(AthleteFamilyManagementService.self),
                 activityChangeBroadcaster: root.container.resolve(AthleteActivityChangeBroadcaster.self),
                 sleepCoordinationService: root.container.resolve(SleepCoordinationService.self),
-                sleepChangeBroadcaster: root.container.resolve(AthleteSleepChangeBroadcaster.self)
+                sleepChangeBroadcaster: root.container.resolve(AthleteSleepChangeBroadcaster.self),
+                statisticsService: root.container.resolve(StatisticsService.self),
+                sportRepository: root.container.resolve(SportRepository.self)
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)
