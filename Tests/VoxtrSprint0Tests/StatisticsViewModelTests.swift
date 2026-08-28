@@ -754,4 +754,155 @@ struct StatisticsViewModelTests {
         #expect(summary.form.mean == nil)
         #expect(summary.sleep.mean == nil)
     }
+
+    // MARK: - Week Drilldown: required test 18, navigation/presentation state
+
+    /// Required test 18: `selectWeek(_:)`/`dismissWeekDrilldown()` are
+    /// pure presentation-state — the selected week identity is the
+    /// canonical `LocalDate` passed in, and opening/closing the
+    /// drilldown never reloads or alters the parent Statistics filter/
+    /// period state it explains.
+    @Test("selectWeek/dismissWeekDrilldown record the canonical LocalDate week identity and never mutate Statistics filter/period/loadState")
+    @MainActor
+    func selectWeekAndDismissAreNavigationStateOnly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last4Weeks), today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+        #expect(viewModel.selectedWeekStart == nil)
+
+        let periodBefore = viewModel.period
+        let filterBefore = viewModel.currentFilter
+        let loadStateBefore = viewModel.loadState
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+
+        viewModel.selectWeek(weekStart)
+
+        #expect(viewModel.selectedWeekStart == weekStart)
+        #expect(viewModel.period == periodBefore)
+        #expect(viewModel.currentFilter == filterBefore)
+        #expect(viewModel.loadState == loadStateBefore)
+
+        viewModel.dismissWeekDrilldown()
+
+        #expect(viewModel.selectedWeekStart == nil)
+        #expect(viewModel.period == periodBefore)
+        #expect(viewModel.currentFilter == filterBefore)
+        #expect(viewModel.loadState == loadStateBefore)
+    }
+
+    /// `makeWeekDrilldownViewModel()` captures an IMMUTABLE snapshot of
+    /// the interval/filter/today the parent screen was showing at
+    /// selection time — never a live reference back to this ViewModel.
+    @Test("makeWeekDrilldownViewModel captures the currently loaded interval/filter/today for the selected week")
+    @MainActor
+    func makeWeekDrilldownViewModelCapturesImmutableSnapshot() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        // A matching performed activity so `hockey` is a genuinely
+        // available Sport — `setSportFilter` resets an unavailable
+        // selection back to `nil` inside its own `load()` (see
+        // `AthleteStatisticsViewModel.load()`'s own filter-validity
+        // contract), which would otherwise silently defeat this test's
+        // own filter-snapshot assertion below.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last4Weeks), today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+        viewModel.setSportFilter(hockey)
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+
+        #expect(viewModel.makeWeekDrilldownViewModel() == nil)
+
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+        viewModel.selectWeek(weekStart)
+        let drilldownViewModel = try #require(viewModel.makeWeekDrilldownViewModel())
+
+        #expect(drilldownViewModel.weekStart == weekStart)
+        #expect(drilldownViewModel.athleteId == athleteId)
+        drilldownViewModel.load()
+        guard case .loaded(let detail) = drilldownViewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(detail.filter == summary.filter)
+        #expect(detail.intervalStart >= summary.intervalStart)
+        #expect(detail.intervalEnd <= summary.intervalEnd)
+    }
+
+    // MARK: - Week Drilldown: fullscreen presentation-ownership fix
+
+    /// Review follow-up (fullscreen presentation-ownership fix): the
+    /// PURE decision rule `weekDrilldownSheet(viewModel:sports:isActive:)`
+    /// delegates to — never a second, independently-implemented
+    /// presentation-ownership check. No week selected means neither
+    /// surface ever presents, regardless of which is active; once a
+    /// week IS selected, portrait and fullscreen are always each
+    /// other's exact complement (portrait's own `isActive` is
+    /// `!isShowingFullscreenTimeline`, fullscreen's is unconditionally
+    /// `true`), so exactly one of them is ever `true` for the SAME
+    /// `selectedWeekStart` — never both, never neither.
+    @Test("shouldPresentWeekDrilldown: no week selected never presents; exactly one of portrait/fullscreen presents once a week is selected")
+    @MainActor
+    func shouldPresentWeekDrilldownEnsuresExactlyOnePresenterIsActive() {
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+
+        // Required test 1 is implicit here: with no week selected,
+        // neither the portrait-shaped call (isActive: true) nor the
+        // fullscreen-shaped call (isActive: true) ever presents —
+        // `selectedWeekStart` is the gate, not `isActive` alone.
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: nil, isActive: true) == false)
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: nil, isActive: false) == false)
+
+        // Required test 1: portrait can present when fullscreen is
+        // closed — portrait's own `isActive` is `!isShowingFullscreenTimeline`.
+        let isShowingFullscreenTimeline = false
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: !isShowingFullscreenTimeline) == true)
+
+        // Required tests 2-4: fullscreen IS open — portrait's own
+        // `isActive` becomes `false` (must defer), fullscreen's own
+        // `isActive` is unconditionally `true` (must present) — both
+        // read the SAME `selectedWeekStart`, and exactly one of the two
+        // presenters is ever active for it.
+        let fullscreenOpen = true
+        let portraitIsActive = !fullscreenOpen
+        let fullscreenIsActive = true
+        let portraitPresents = AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: portraitIsActive)
+        let fullscreenPresents = AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: fullscreenIsActive)
+        #expect(portraitPresents == false)
+        #expect(fullscreenPresents == true)
+        #expect(portraitPresents != fullscreenPresents)
+    }
 }

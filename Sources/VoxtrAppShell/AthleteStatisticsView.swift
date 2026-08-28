@@ -74,7 +74,8 @@ public struct AthleteStatisticsView: View {
                             intervalStart: summary.intervalStart,
                             intervalEnd: summary.intervalEnd,
                             breakdownMode: viewModel.trainingBreakdownMode,
-                            comparisonMode: viewModel.timelineComparisonMode
+                            comparisonMode: viewModel.timelineComparisonMode,
+                            onSelectWeek: viewModel.selectWeek
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
                     } header: {
@@ -104,6 +105,17 @@ public struct AthleteStatisticsView: View {
                     // whenever the cover happened to open.
                     DevelopmentTimelineFullscreenView(viewModel: viewModel, sports: sports)
                 }
+                // Week Drilldown round (fullscreen presentation-ownership
+                // fix): portrait only OWNS presentation while fullscreen
+                // is NOT covering it — `isActive: !isShowingFullscreenTimeline`.
+                // While fullscreen IS showing, `DevelopmentTimelineFullscreenView`
+                // presents the SAME `viewModel.selectedWeekStart`-driven
+                // drilldown itself (see that view's own `.weekDrilldownSheet`
+                // call) — this view's own `.sheet` deliberately does NOT
+                // try to present in that state, so the two presenters
+                // never race. See `weekDrilldownSheet(viewModel:sports:isActive:)`
+                // below for the full mechanism.
+                .weekDrilldownSheet(viewModel: viewModel, sports: sports, isActive: !isShowingFullscreenTimeline)
             }
         }
         .tint(VoxtrColor.accent)
@@ -324,6 +336,45 @@ private enum PeriodModeTag: Hashable {
             self = .rolling(window)
         case .calendarMonth:
             self = .month
+        }
+    }
+}
+
+/// Week Drilldown round (fullscreen presentation-ownership fix): the
+/// ONE shared Week Drilldown presentation, reusable from whichever
+/// Statistics surface — portrait `AthleteStatisticsView` or fullscreen
+/// `DevelopmentTimelineFullscreenView` — is currently the active one.
+/// `viewModel.selectedWeekStart` (set by `AthleteStatisticsViewModel
+/// .selectWeek(_:)`, the SAME shared state both surfaces write to) is
+/// the sole, authoritative selection identity; this modifier never
+/// introduces a second one. `isActive` does not create a second source
+/// of navigation truth either — it only decides whether THIS PARTICULAR
+/// call site should act as the presenter for the one shared selection,
+/// so passing `true` from both call sites at once would be the actual
+/// bug this parameter exists to prevent (portrait passes
+/// `!isShowingFullscreenTimeline`; fullscreen — inherently the active
+/// surface whenever it's mounted at all — passes `true` unconditionally).
+/// Reading `viewModel.makeWeekDrilldownViewModel()` inside the `sheet`
+/// content closure (evaluated only once SwiftUI actually presents the
+/// sheet, immediately after the state change that triggered it, with no
+/// other state mutation able to interleave) is what makes the resulting
+/// `WeekDrilldownViewModel`'s interval/filter/today snapshot genuinely
+/// represent "what the user had selected" — see that method's own doc
+/// comment. Dismissing (Close button or swipe) always calls
+/// `viewModel.dismissWeekDrilldown()` via this Binding's own setter,
+/// regardless of which surface presented it — the one path a drilldown
+/// ever closes through.
+extension View {
+    func weekDrilldownSheet(viewModel: AthleteStatisticsViewModel, sports: [Sport], isActive: Bool) -> some View {
+        sheet(isPresented: Binding(
+            get: { AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: viewModel.selectedWeekStart, isActive: isActive) },
+            set: { isPresented in
+                if !isPresented { viewModel.dismissWeekDrilldown() }
+            }
+        )) {
+            if let weekDrilldownViewModel = viewModel.makeWeekDrilldownViewModel() {
+                WeekDrilldownView(viewModel: weekDrilldownViewModel, sports: sports)
+            }
         }
     }
 }

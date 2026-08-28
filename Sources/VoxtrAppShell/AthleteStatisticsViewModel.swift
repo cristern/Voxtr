@@ -127,6 +127,21 @@ public final class AthleteStatisticsViewModel {
     /// (`DevelopmentTimelineFullscreenView`) — never persisted.
     public var timelineComparisonMode: TimelineComparisonMode = .actual
 
+    /// Week Drilldown round: which canonical week's drilldown is
+    /// currently open, if any — presentation/navigation state only,
+    /// never persisted, never Statistics domain truth. `nil` means no
+    /// drilldown is open. Shared identically by portrait
+    /// (`AthleteStatisticsView`, which owns the actual `.sheet`
+    /// presentation) and fullscreen (`DevelopmentTimelineFullscreenView`,
+    /// which can set it via the same `selectWeek(_:)` call) — selecting
+    /// a week from EITHER surface opens the SAME drilldown, chained on
+    /// top of whichever surface is currently on screen, never two
+    /// independent presentation-state owners. Reading/writing this
+    /// property never triggers `load()` or alters `loadState` — opening
+    /// or closing the drilldown must never mutate the parent Statistics
+    /// filter/period state it explains.
+    public private(set) var selectedWeekStart: LocalDate?
+
     private let statisticsService: StatisticsService
     /// Fixed for this screen's lifetime once loaded — a period/filter
     /// change recomputes the interval from the SAME reference date
@@ -221,5 +236,69 @@ public final class AthleteStatisticsViewModel {
         guard activityType != activityTypeFilter else { return }
         activityTypeFilter = activityType
         load()
+    }
+
+    /// Week Drilldown round: opens the drilldown for `weekStart` — pure
+    /// presentation state, never a reload. The canonical `LocalDate`
+    /// week-start identity is the ONLY thing recorded here; the actual
+    /// bounded query context (interval/filter/today) a drilldown needs
+    /// is captured separately, at the moment `AthleteStatisticsView`
+    /// constructs its `WeekDrilldownViewModel` from THIS ViewModel's
+    /// current `loadState`/`currentFilter`/`today` — an explicit,
+    /// immutable snapshot of what the user had selected, not a live
+    /// reference back to this ViewModel (see `WeekDrilldownViewModel`'s
+    /// own doc comment).
+    public func selectWeek(_ weekStart: LocalDate) {
+        selectedWeekStart = weekStart
+    }
+
+    /// Closes the drilldown. Also invoked by the `.sheet(isPresented:)`
+    /// binding's own setter on a swipe-to-dismiss, so this is the ONE
+    /// path a drilldown ever closes through, regardless of how.
+    public func dismissWeekDrilldown() {
+        selectedWeekStart = nil
+    }
+
+    /// Week Drilldown round: constructs the immutable query-context
+    /// snapshot a just-opened drilldown needs, from THIS ViewModel's
+    /// own current `loadState`/`currentFilter`/`today` — the View never
+    /// touches `statisticsService` directly, matching this ViewModel's
+    /// own established "the service stays private here" boundary
+    /// (`AthleteStatisticsView` already never sees `statisticsService`
+    /// itself, only `sportRepository`, passed in separately). Returns
+    /// `nil` only if no week is currently selected or `loadState` isn't
+    /// `.loaded` — the selector affordance that calls `selectWeek(_:)`
+    /// only ever renders from an already-loaded chart, so this is
+    /// defensive, not an expected path.
+    public func makeWeekDrilldownViewModel() -> WeekDrilldownViewModel? {
+        guard let selectedWeekStart, case .loaded(let summary) = loadState else { return nil }
+        return WeekDrilldownViewModel(
+            statisticsService: statisticsService,
+            athleteId: athleteId,
+            athleteDisplayName: athleteDisplayName,
+            weekStart: selectedWeekStart,
+            intervalStart: summary.intervalStart,
+            intervalEnd: summary.intervalEnd,
+            filter: currentFilter,
+            today: today
+        )
+    }
+
+    /// Week Drilldown round (fullscreen presentation-ownership fix): the
+    /// PURE decision rule `weekDrilldownSheet(viewModel:sports:isActive:)`
+    /// uses for "should THIS presenter show the drilldown sheet right
+    /// now" — extracted out of that View extension's `Binding` closure
+    /// so the rule itself is directly testable without SwiftUI
+    /// rendering. `selectedWeekStart` remains the sole selection
+    /// identity (never a second one); `isActive` only decides which
+    /// already-mounted presenter is the one currently allowed to act on
+    /// it — portrait passes `!isShowingFullscreenTimeline`, fullscreen
+    /// passes `true` unconditionally (it IS the active surface whenever
+    /// it's mounted at all). For any given moment, at most one of the
+    /// two calls this function is capable of returning `true` for the
+    /// SAME `selectedWeekStart`, since portrait's and fullscreen's own
+    /// `isActive` values are always each other's exact complement.
+    public static func shouldPresentWeekDrilldown(selectedWeekStart: LocalDate?, isActive: Bool) -> Bool {
+        isActive && selectedWeekStart != nil
     }
 }
