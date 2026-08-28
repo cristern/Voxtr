@@ -861,4 +861,48 @@ struct StatisticsViewModelTests {
         #expect(detail.intervalStart >= summary.intervalStart)
         #expect(detail.intervalEnd <= summary.intervalEnd)
     }
+
+    // MARK: - Week Drilldown: fullscreen presentation-ownership fix
+
+    /// Review follow-up (fullscreen presentation-ownership fix): the
+    /// PURE decision rule `weekDrilldownSheet(viewModel:sports:isActive:)`
+    /// delegates to — never a second, independently-implemented
+    /// presentation-ownership check. No week selected means neither
+    /// surface ever presents, regardless of which is active; once a
+    /// week IS selected, portrait and fullscreen are always each
+    /// other's exact complement (portrait's own `isActive` is
+    /// `!isShowingFullscreenTimeline`, fullscreen's is unconditionally
+    /// `true`), so exactly one of them is ever `true` for the SAME
+    /// `selectedWeekStart` — never both, never neither.
+    @Test("shouldPresentWeekDrilldown: no week selected never presents; exactly one of portrait/fullscreen presents once a week is selected")
+    @MainActor
+    func shouldPresentWeekDrilldownEnsuresExactlyOnePresenterIsActive() {
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+
+        // Required test 1 is implicit here: with no week selected,
+        // neither the portrait-shaped call (isActive: true) nor the
+        // fullscreen-shaped call (isActive: true) ever presents —
+        // `selectedWeekStart` is the gate, not `isActive` alone.
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: nil, isActive: true) == false)
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: nil, isActive: false) == false)
+
+        // Required test 1: portrait can present when fullscreen is
+        // closed — portrait's own `isActive` is `!isShowingFullscreenTimeline`.
+        let isShowingFullscreenTimeline = false
+        #expect(AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: !isShowingFullscreenTimeline) == true)
+
+        // Required tests 2-4: fullscreen IS open — portrait's own
+        // `isActive` becomes `false` (must defer), fullscreen's own
+        // `isActive` is unconditionally `true` (must present) — both
+        // read the SAME `selectedWeekStart`, and exactly one of the two
+        // presenters is ever active for it.
+        let fullscreenOpen = true
+        let portraitIsActive = !fullscreenOpen
+        let fullscreenIsActive = true
+        let portraitPresents = AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: portraitIsActive)
+        let fullscreenPresents = AthleteStatisticsViewModel.shouldPresentWeekDrilldown(selectedWeekStart: weekStart, isActive: fullscreenIsActive)
+        #expect(portraitPresents == false)
+        #expect(fullscreenPresents == true)
+        #expect(portraitPresents != fullscreenPresents)
+    }
 }

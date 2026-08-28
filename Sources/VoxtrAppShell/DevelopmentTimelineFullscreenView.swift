@@ -65,6 +65,17 @@ struct DevelopmentTimelineFullscreenView: View {
         }
         .tint(VoxtrColor.accent)
         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.root")
+        // Week Drilldown round (fullscreen presentation-ownership fix):
+        // fullscreen is inherently the ACTIVE Statistics surface
+        // whenever it is mounted at all (there is no further "is
+        // something covering fullscreen" state to check, unlike
+        // portrait, which must defer to fullscreen while it's showing)
+        // — so `isActive: true` unconditionally. Binds to the SAME
+        // shared `viewModel.selectedWeekStart`/`makeWeekDrilldownViewModel()`
+        // portrait uses; see `weekDrilldownSheet(viewModel:sports:isActive:)`'s
+        // own doc comment for the full mechanism that keeps portrait's
+        // own sheet from also trying to present at the same time.
+        .weekDrilldownSheet(viewModel: viewModel, sports: sports, isActive: true)
         .onAppear {
             VoxtrOrientationPolicy.shared.setAllowedOrientations(VoxtrOrientationPolicy.portraitAndLandscape)
         }

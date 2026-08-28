@@ -283,4 +283,22 @@ public final class AthleteStatisticsViewModel {
             today: today
         )
     }
+
+    /// Week Drilldown round (fullscreen presentation-ownership fix): the
+    /// PURE decision rule `weekDrilldownSheet(viewModel:sports:isActive:)`
+    /// uses for "should THIS presenter show the drilldown sheet right
+    /// now" — extracted out of that View extension's `Binding` closure
+    /// so the rule itself is directly testable without SwiftUI
+    /// rendering. `selectedWeekStart` remains the sole selection
+    /// identity (never a second one); `isActive` only decides which
+    /// already-mounted presenter is the one currently allowed to act on
+    /// it — portrait passes `!isShowingFullscreenTimeline`, fullscreen
+    /// passes `true` unconditionally (it IS the active surface whenever
+    /// it's mounted at all). For any given moment, at most one of the
+    /// two calls this function is capable of returning `true` for the
+    /// SAME `selectedWeekStart`, since portrait's and fullscreen's own
+    /// `isActive` values are always each other's exact complement.
+    public static func shouldPresentWeekDrilldown(selectedWeekStart: LocalDate?, isActive: Bool) -> Bool {
+        isActive && selectedWeekStart != nil
+    }
 }
