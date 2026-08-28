@@ -1925,3 +1925,589 @@ struct StatisticsServiceTests {
         #expect(summary.plannedMinutes == 135)
     }
 }
+
+// NOTE: like `StatisticsServiceTests` above, these exercise @Model
+// types and require the Xcode/macOS SwiftData runtime — written but not
+// executed in this sandbox. Following the S1.1 lesson: no shared
+// private helper methods for container construction — every test
+// builds its own inline.
+@Suite("StatisticsService.weekDetail (Week Drilldown)", .serialized)
+struct StatisticsWeekDetailTests {
+    private static var utcCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
+        return calendar
+    }
+
+    private static func date(_ year: Int, _ month: Int, _ day: Int, hour: Int = 12) -> Date {
+        Self.utcCalendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour)) ?? .now
+    }
+
+    /// Required test 1: a calendar-month period whose canonical leading
+    /// week begins in the PREVIOUS month only returns rows inside the
+    /// selected period — August 2026's own first canonical week starts
+    /// Monday 27 July 2026 and ends Sunday 2 August 2026, but the
+    /// SELECTED interval is `[Aug 1, Aug 31]`, so the drilldown's
+    /// effective interval must be `[Aug 1, Aug 2]` only. A planned and a
+    /// performed activity dated in late July must not leak in.
+    @Test("weekDetail: a calendar-month period's leading edge week only returns rows inside the selected period")
+    @MainActor
+    func effectiveIntervalExcludesPortionOutsideSelectedPeriod() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 7, day: 27)
+        let intervalStart = LocalDate(year: 2026, month: 8, day: 1)
+        let intervalEnd = LocalDate(year: 2026, month: 8, day: 31)
+
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Late July, outside selected month", localDate: LocalDate(year: 2026, month: 7, day: 28),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 50
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Inside selected month", localDate: LocalDate(year: 2026, month: 8, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Late July run",
+            startedAt: Self.date(2026, 7, 29), durationMinutes: 25, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "August run",
+            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: intervalStart, through: intervalEnd,
+            today: LocalDate(year: 2026, month: 9, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.intervalStart == LocalDate(year: 2026, month: 8, day: 1))
+        #expect(detail.intervalEnd == LocalDate(year: 2026, month: 8, day: 2))
+        #expect(detail.plannedActivityCount == 1)
+        #expect(detail.plannedMinutes == 40)
+        #expect(detail.plannedActivities.compactMap(\.title) == ["Inside selected month"])
+        #expect(detail.performedActivityCount == 1)
+        #expect(detail.totalActualMinutes == 35)
+        #expect(detail.performedActivities.compactMap(\.title) == ["August run"])
+    }
+
+    /// Required test 2 + 3: planned count/minutes match canonical
+    /// `PlannedActivity` rows, and a planned activity with no recorded
+    /// duration still counts toward the activity count without
+    /// fabricating minutes.
+    @Test("weekDetail: planned count/minutes match canonical PlannedActivity rows; a missing duration contributes no fabricated minutes")
+    @MainActor
+    func plannedSemanticsMatchCanonicalRowsAndNeverFabricateMissingDuration() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Timed session", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 60
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "No duration set", localDate: LocalDate(year: 2026, month: 3, day: 4),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivityCount == 2)
+        #expect(detail.plannedMinutes == 60)
+        let undated = try #require(detail.plannedActivities.first { $0.title == "No duration set" })
+        #expect(undated.plannedDurationMinutes == nil)
+    }
+
+    /// Required test 4: `.completed`/`.partiallyCompleted` contribute to
+    /// the Actual list/count/minutes; `.missed`/`.cancelled` never do.
+    @Test("weekDetail: Completed/PartiallyCompleted are included in Actual; Missed/Cancelled are excluded")
+    @MainActor
+    func performedSemanticsIncludeOnlyCompletedAndPartiallyCompleted() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Completed",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Partial",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .partiallyCompleted
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Missed",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 1, status: .missed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Cancelled",
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 1, status: .cancelled
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.performedActivityCount == 2)
+        #expect(detail.totalActualMinutes == 50)
+        #expect(Set(detail.performedActivities.compactMap(\.title)) == Set(["Completed", "Partial"]))
+    }
+
+    /// Required tests 5-7: Sport and Activity Type filters apply the
+    /// exact same AND semantics to BOTH the Planned and Performed row
+    /// lists.
+    @Test("weekDetail: Sport and Activity Type filters apply identical AND semantics to both Planned and Performed lists")
+    @MainActor
+    func sportAndActivityTypeFiltersApplyToBothLists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let swimming = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: hockey, plannedDurationMinutes: 60
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 4),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: swimming, plannedDurationMinutes: 60
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: hockey, plannedDurationMinutes: 60
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .teamTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(sportId: hockey, activityType: .teamTraining),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivities.count == 1)
+        #expect(detail.plannedActivities.first?.sportId == hockey)
+        #expect(detail.plannedActivities.first?.activityType == .teamTraining)
+        #expect(detail.performedActivities.count == 1)
+        #expect(detail.performedActivities.first?.title == "Match")
+    }
+
+    /// Required test 8: Form uses ONLY the `bodyFeeling` of performed
+    /// activities that themselves match the current filter — a
+    /// reflection belonging to a filtered-out activity never
+    /// contributes.
+    @Test("weekDetail: Form aggregates only matching performed activities' bodyFeeling")
+    @MainActor
+    func formAggregatesOnlyMatchingPerformedActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let swimming = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let hockeyActivity = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+        )
+        let swimActivity = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: hockeyActivity.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 4
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: swimActivity.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 2
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(sportId: hockey),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.form.sampleCount == 1)
+        #expect(detail.form.mean == 4)
+    }
+
+    /// Required test 9: Sleep remains unfiltered by Sport/Activity Type
+    /// — a filter that excludes every performed activity must not
+    /// affect the Sleep aggregate.
+    @Test("weekDetail: Sleep remains unfiltered by Sport/Activity Type")
+    @MainActor
+    func sleepRemainsUnfilteredBySportOrActivityType() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let swimming = SportId()
+        let excludedFilterSport = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 4, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 4),
+            sleepQuality: 2, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(sportId: excludedFilterSport),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.performedActivities.isEmpty)
+        #expect(detail.sleep.sampleCount == 2)
+        #expect(detail.sleep.mean == 3)
+    }
+
+    /// Required test 10 (critical): a planned activity dated after
+    /// `today` inside the current week must not contribute to the
+    /// historical Plan list/count/minutes.
+    @Test("weekDetail: a future planned activity within the current week does not contribute")
+    @MainActor
+    func futurePlannedActivityWithinCurrentWeekDoesNotContribute() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let today = LocalDate(year: 2026, month: 3, day: 4)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Already happened", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Future plan later this week", localDate: LocalDate(year: 2026, month: 3, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 90
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: today, calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivityCount == 1)
+        #expect(detail.plannedMinutes == 30)
+        #expect(detail.plannedActivities.compactMap(\.title) == ["Already happened"])
+    }
+
+    /// Required test 11: a genuinely historical week (`today` is well
+    /// after it) is never clamped — every planned activity in that past
+    /// week counts, including one dated on the week's own last day.
+    @Test("weekDetail: a historical week is not clamped")
+    @MainActor
+    func historicalWeekIsNotClamped() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Last day of a past week", localDate: LocalDate(year: 2026, month: 3, day: 8),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 8, day: 28), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivityCount == 1)
+        #expect(detail.plannedMinutes == 30)
+    }
+
+    /// Required test 12 + 17: deterministic chronological ordering for
+    /// both lists, with stable canonical IDs — a planned row with no
+    /// recorded start time sorts after timed ones; performed rows sort
+    /// by `startedAt`.
+    @Test("weekDetail: Planned and Performed rows use deterministic chronological ordering with stable IDs")
+    @MainActor
+    func deterministicOrderingWithStableIds() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        // Deliberately inserted out of chronological order.
+        let noTime = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "No time", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let morning = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Morning", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), startLocalTime: LocalTime(hour: 7, minute: 0)
+        )
+        let evening = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Evening, earlier day", localDate: LocalDate(year: 2026, month: 3, day: 2),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let later = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Later",
+            startedAt: Self.date(2026, 3, 4, hour: 18), durationMinutes: 20, status: .completed
+        )
+        let earlier = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Earlier",
+            startedAt: Self.date(2026, 3, 4, hour: 7), durationMinutes: 20, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivities.map(\.plannedActivityId) == [
+            evening.plannedActivityId, morning.plannedActivityId, noTime.plannedActivityId,
+        ])
+        #expect(detail.performedActivities.map(\.loggedActivityId) == [
+            earlier.loggedActivityId, later.loggedActivityId,
+        ])
+    }
+
+    /// Required tests 13-15: zero/missing cases — a plan-less week, an
+    /// actual-less week, and a week with neither all report factual
+    /// zero/empty results, never a failure.
+    @Test("weekDetail: empty Plan, empty Actual, and both-empty all report factual zero/empty results, not a failure")
+    @MainActor
+    func zeroAndMissingCasesReportFactualEmptyResults() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let today = LocalDate(year: 2026, month: 4, day: 1)
+
+        // Case: plan exists, no actual.
+        let athleteA = AthleteId()
+        let weekStartA = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlanA = try planningService.getOrCreateWeekPlan(athleteId: athleteA, weekStart: weekStartA)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlanA.weekPlanId, athleteId: athleteA, activityType: .individualTraining,
+            title: "Planned only", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+        let detailA = try statisticsService.weekDetail(
+            forAthlete: athleteA, weekStart: weekStartA, within: weekStartA, through: weekStartA.adding(days: 6),
+            today: today, calendar: Self.utcCalendar
+        )
+        #expect(detailA.plannedActivityCount == 1)
+        #expect(detailA.performedActivityCount == 0)
+        #expect(detailA.performedActivities.isEmpty)
+
+        // Case: no plan, actual exists.
+        let athleteB = AthleteId()
+        let weekStartB = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteB, activityType: .individualTraining, title: "Actual only",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+        )
+        let detailB = try statisticsService.weekDetail(
+            forAthlete: athleteB, weekStart: weekStartB, within: weekStartB, through: weekStartB.adding(days: 6),
+            today: today, calendar: Self.utcCalendar
+        )
+        #expect(detailB.plannedActivityCount == 0)
+        #expect(detailB.plannedActivities.isEmpty)
+        #expect(detailB.performedActivityCount == 1)
+
+        // Case: neither plan nor actual.
+        let athleteC = AthleteId()
+        let weekStartC = LocalDate(year: 2026, month: 3, day: 2)
+        let detailC = try statisticsService.weekDetail(
+            forAthlete: athleteC, weekStart: weekStartC, within: weekStartC, through: weekStartC.adding(days: 6),
+            today: today, calendar: Self.utcCalendar
+        )
+        #expect(detailC.plannedActivityCount == 0)
+        #expect(detailC.performedActivityCount == 0)
+        #expect(detailC.plannedActivities.isEmpty)
+        #expect(detailC.performedActivities.isEmpty)
+        #expect(detailC.form.mean == nil)
+        #expect(detailC.sleep.mean == nil)
+    }
+
+    /// Required test 16 (high value): `weekDetail`'s summary totals for
+    /// one week must exactly match the `StatisticsWeekBucket`
+    /// `athleteSummary` produces for that SAME athlete/week/interval/
+    /// filter/today — one aggregation path, never two that could
+    /// silently disagree.
+    @Test("weekDetail: parity with the corresponding StatisticsWeekBucket from athleteSummary")
+    @MainActor
+    func parityWithAthleteSummaryWeekBucket() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 22)
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Plan A", localDate: LocalDate(year: 2026, month: 3, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 45
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Plan B", localDate: LocalDate(year: 2026, month: 3, day: 12),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 11), durationMinutes: 35, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 5
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 11),
+            sleepQuality: 3, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+        let today = LocalDate(year: 2026, month: 4, day: 1)
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd, today: today, calendar: Self.utcCalendar
+        )
+        let bucket = try #require(summary.weeklyBuckets.first { $0.weekStart == weekStart })
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: intervalStart, through: intervalEnd,
+            today: today, calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivityCount == bucket.plannedActivityCount)
+        #expect(detail.plannedMinutes == bucket.plannedMinutes)
+        #expect(detail.performedActivityCount == bucket.performedActivityCount)
+        #expect(detail.totalActualMinutes == bucket.totalActualMinutes)
+        #expect(detail.form.mean == bucket.form.mean)
+        #expect(detail.form.sampleCount == bucket.form.sampleCount)
+        #expect(detail.sleep.mean == bucket.sleep.mean)
+        #expect(detail.sleep.sampleCount == bucket.sleep.sampleCount)
+        // Sanity: this test's own fixture actually exercises non-trivial
+        // values on every field being compared above, not a vacuous
+        // all-zero parity.
+        #expect(bucket.plannedActivityCount == 2)
+        #expect(bucket.plannedMinutes == 45)
+        #expect(bucket.performedActivityCount == 1)
+        #expect(bucket.totalActualMinutes == 35)
+    }
+}

@@ -223,6 +223,26 @@ public struct DevelopmentTimelineChart: View {
     /// bar"). Never affects Form/Sleep or any other existing chart
     /// contract.
     public let comparisonMode: TimelineComparisonMode
+    /// Week Drilldown round: the sole entry point from Development
+    /// Timeline into Week Drilldown — a calm, explicit per-week tap
+    /// affordance rather than direct chart-mark selection. Direct mark
+    /// selection was deliberately avoided: this chart already draws
+    /// multiple overlapping mark kinds per week (Total/stacked-breakdown/
+    /// grouped-Plan-vs-Actual bars, plus Form/Sleep lines sharing the
+    /// same plot), and a week with no visible Training bar (Training
+    /// toggled off, or a genuinely zero-training week) must still be
+    /// selectable — a per-week affordance guarantees every week in
+    /// `points` is selectable identically, regardless of which series
+    /// are currently visible or which breakdown/comparison mode is
+    /// active, with no chart-selection-API ambiguity to resolve. `nil`
+    /// (the default) renders no selector at all — this chart remains
+    /// fully usable with no selection behavior for any caller that
+    /// doesn't need it. Non-`nil` for every real Development Timeline
+    /// caller (`AthleteStatisticsView`/`DevelopmentTimelineFullscreenView`,
+    /// both passing the SAME shared `AthleteStatisticsViewModel
+    /// .selectWeek(_:)`), so both surfaces get identical selection
+    /// behavior for free, never two separate implementations.
+    public let onSelectWeek: ((LocalDate) -> Void)?
 
     public init(
         points: [DevelopmentTimelinePoint],
@@ -233,7 +253,8 @@ public struct DevelopmentTimelineChart: View {
         intervalEnd: LocalDate,
         chartHeight: CGFloat = 240,
         breakdownMode: TrainingBreakdownMode = .total,
-        comparisonMode: TimelineComparisonMode = .actual
+        comparisonMode: TimelineComparisonMode = .actual,
+        onSelectWeek: ((LocalDate) -> Void)? = nil
     ) {
         self.points = points
         self.isTrainingVisible = isTrainingVisible
@@ -244,6 +265,7 @@ public struct DevelopmentTimelineChart: View {
         self.chartHeight = chartHeight
         self.breakdownMode = breakdownMode
         self.comparisonMode = comparisonMode
+        self.onSelectWeek = onSelectWeek
     }
 
     private static let scaleMin: Double = 1
@@ -512,6 +534,17 @@ public struct DevelopmentTimelineChart: View {
                     .accessibilityIdentifier("developmentTimeline.noSeriesSelected")
             }
 
+            // Week Drilldown round: deliberately OUTSIDE the
+            // `hasAnyVisibleSeries` branch above — a week stays
+            // selectable even with every series toggled off, and even
+            // when it has zero Training minutes, since Form/Sleep alone
+            // can still make a week worth explaining. See `onSelectWeek`'s
+            // own doc comment for why this is a per-week tap affordance
+            // rather than direct chart-mark selection.
+            if let onSelectWeek, !points.isEmpty {
+                weekSelector(onSelectWeek: onSelectWeek)
+            }
+
             HStack(spacing: 16) {
                 if isTrainingVisible {
                     if comparisonMode == .planVsActual {
@@ -715,6 +748,43 @@ public struct DevelopmentTimelineChart: View {
             Circle().fill(color).frame(width: 8, height: 8)
             Text(label)
         }
+    }
+
+    /// Week Drilldown round: one tappable chip PER `points` entry — the
+    /// SAME canonical `weekStart` set the chart itself plots, so every
+    /// week the chart could ever show is selectable here, with no
+    /// dependency on which series/breakdown/comparison mode currently
+    /// happens to be visible. Horizontally scrollable rather than
+    /// wrapped, since a 13/26-week period would otherwise take
+    /// significant vertical space; `showsIndicators: false` keeps it
+    /// visually calm. Reuses the SAME `weekNumberLabel`/`displayDate`/
+    /// `WeekIdentityFormatter.shortDateLabel` helpers the x-axis labels
+    /// above already use, for a consistent "W35 / Aug 24" identity
+    /// style throughout this chart.
+    private func weekSelector(onSelectWeek: @escaping (LocalDate) -> Void) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(points) { point in
+                    Button {
+                        onSelectWeek(point.weekStart)
+                    } label: {
+                        VStack(spacing: 2) {
+                            Text(Self.weekNumberLabel(for: point.weekStart))
+                            Text(WeekIdentityFormatter.shortDateLabel(for: Self.displayDate(for: point, intervalStart: intervalStart)))
+                        }
+                        .font(VoxtrTypography.caption)
+                        .foregroundStyle(VoxtrColor.textPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(VoxtrColor.accentSoft, in: RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("developmentTimeline.weekSelector.\(point.weekStart.isoString)")
+                    .accessibilityLabel("Open Week Drilldown for \(WeekIdentityFormatter.stableIdentityLabel(forWeekStart: point.weekStart))")
+                }
+            }
+        }
+        .accessibilityIdentifier("developmentTimeline.weekSelector")
     }
 
     /// A single textual summary for VoiceOver — every week's exact

@@ -295,6 +295,162 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
     }
 }
 
+// MARK: - Week Drilldown
+
+/// Week Drilldown round: the smallest useful factual identity for one
+/// canonical `PlannedActivity` row inside a `StatisticsWeekDetail` — a
+/// plain projection, never a `@Model` reference, matching the same
+/// "Statistics carries no model references" architecture
+/// `StatisticsAthleteSummary` already established. `plannedActivityId`
+/// is the stable canonical identity; `title`/`sportId` are never fused
+/// into one display string here — that's a presentation concern for
+/// whatever renders this row (see `ActivityLabelResolver`, already
+/// established for exactly this title-or-Sport fallback rule).
+public struct StatisticsPlannedActivityRow: Identifiable, Equatable, Sendable {
+    public let plannedActivityId: PlannedActivityId
+    public let localDate: LocalDate
+    public let startLocalTime: LocalTime?
+    public let sportId: SportId?
+    public let activityType: ActivityType
+    public let title: String?
+    /// Never fabricated when the canonical `PlannedActivity` itself has
+    /// no recorded planned duration — `nil` here means exactly that,
+    /// the same "missing, not zero" contract `plannedMinutes` already
+    /// establishes at the aggregate level.
+    public let plannedDurationMinutes: Int?
+
+    public var id: PlannedActivityId { plannedActivityId }
+
+    public init(
+        plannedActivityId: PlannedActivityId,
+        localDate: LocalDate,
+        startLocalTime: LocalTime?,
+        sportId: SportId?,
+        activityType: ActivityType,
+        title: String?,
+        plannedDurationMinutes: Int?
+    ) {
+        self.plannedActivityId = plannedActivityId
+        self.localDate = localDate
+        self.startLocalTime = startLocalTime
+        self.sportId = sportId
+        self.activityType = activityType
+        self.title = title
+        self.plannedDurationMinutes = plannedDurationMinutes
+    }
+}
+
+/// Week Drilldown round: the exact same "smallest useful factual
+/// identity" shape as `StatisticsPlannedActivityRow` above, projected
+/// from a canonical, genuinely PERFORMED `LoggedActivity` instead —
+/// every row here already satisfies `StatisticsService`'s own
+/// `isPerformed(_:)` rule (`.completed`/`.partiallyCompleted` only),
+/// the caller never needs to re-check `status` to know whether a row
+/// belongs on the Actual side. `status` itself is still carried
+/// (`.completed` vs `.partiallyCompleted` remain factually distinct),
+/// never used to imply a score.
+public struct StatisticsPerformedActivityRow: Identifiable, Equatable, Sendable {
+    public let loggedActivityId: LoggedActivityId
+    public let startedAt: Date
+    public let sportId: SportId?
+    public let activityType: ActivityType
+    public let title: String?
+    public let durationMinutes: Int
+    public let status: ActivityStatus
+
+    public var id: LoggedActivityId { loggedActivityId }
+
+    public init(
+        loggedActivityId: LoggedActivityId,
+        startedAt: Date,
+        sportId: SportId?,
+        activityType: ActivityType,
+        title: String?,
+        durationMinutes: Int,
+        status: ActivityStatus
+    ) {
+        self.loggedActivityId = loggedActivityId
+        self.startedAt = startedAt
+        self.sportId = sportId
+        self.activityType = activityType
+        self.title = title
+        self.durationMinutes = durationMinutes
+        self.status = status
+    }
+}
+
+/// Week Drilldown round: the factual explanation of ONE canonical
+/// Monday-start Statistics week — everything `WeekDrilldownView` needs
+/// to render "what happened in this week" without querying
+/// `PlanningRepository`/`TrainingRepository` itself. Carries no
+/// `@Model` references, matching `StatisticsAthleteSummary`'s own
+/// established architecture. `plannedActivityCount`/`plannedMinutes`/
+/// `performedActivityCount`/`totalActualMinutes` here are computed by
+/// the EXACT SAME semantics `athleteSummary`'s own weekly buckets use
+/// (see `weekDetail(forAthlete:weekStart:within:through:filter:today:calendar:)`'s
+/// own doc comment) — a `StatisticsWeekDetail` for the same
+/// athlete/week/interval/filter/today as an `athleteSummary` call
+/// always agrees with that call's own `StatisticsWeekBucket` for that
+/// week (see this type's own parity tests).
+public struct StatisticsWeekDetail: Equatable, Sendable {
+    public let athleteId: AthleteId
+    /// The canonical Monday `weekStart` this drilldown represents —
+    /// stable identity, never a display string/index. See this type's
+    /// own doc comment.
+    public let weekStart: LocalDate
+    /// The SELECTED Statistics interval this drilldown was opened
+    /// from — NOT necessarily `[weekStart, weekStart+6]`: a calendar-
+    /// month period's partial edge week only contributes the portion
+    /// that actually falls inside `[intervalStart, intervalEnd]`. See
+    /// `weekDetail`'s own doc comment for the exact effective-interval
+    /// computation.
+    public let intervalStart: LocalDate
+    public let intervalEnd: LocalDate
+    public let filter: StatisticsFilter
+    public let plannedActivityCount: Int
+    public let plannedMinutes: Int
+    public let performedActivityCount: Int
+    public let totalActualMinutes: Int
+    /// Chronological by `localDate`/`startLocalTime` (no-time rows
+    /// last), then stable `plannedActivityId` — never repository/
+    /// dictionary iteration order. See `weekDetail`'s own doc comment.
+    public let plannedActivities: [StatisticsPlannedActivityRow]
+    /// Chronological by `startedAt`, then stable `loggedActivityId`.
+    public let performedActivities: [StatisticsPerformedActivityRow]
+    public let form: StatisticsAggregate
+    public let sleep: StatisticsAggregate
+
+    public init(
+        athleteId: AthleteId,
+        weekStart: LocalDate,
+        intervalStart: LocalDate,
+        intervalEnd: LocalDate,
+        filter: StatisticsFilter,
+        plannedActivityCount: Int,
+        plannedMinutes: Int,
+        performedActivityCount: Int,
+        totalActualMinutes: Int,
+        plannedActivities: [StatisticsPlannedActivityRow],
+        performedActivities: [StatisticsPerformedActivityRow],
+        form: StatisticsAggregate,
+        sleep: StatisticsAggregate
+    ) {
+        self.athleteId = athleteId
+        self.weekStart = weekStart
+        self.intervalStart = intervalStart
+        self.intervalEnd = intervalEnd
+        self.filter = filter
+        self.plannedActivityCount = plannedActivityCount
+        self.plannedMinutes = plannedMinutes
+        self.performedActivityCount = performedActivityCount
+        self.totalActualMinutes = totalActualMinutes
+        self.plannedActivities = plannedActivities
+        self.performedActivities = performedActivities
+        self.form = form
+        self.sleep = sleep
+    }
+}
+
 // MARK: - Service
 
 @MainActor
@@ -462,6 +618,179 @@ public final class StatisticsService {
             sleep: sleep,
             plannedActivityCount: plannedActivityCount,
             plannedMinutes: plannedMinutes
+        )
+    }
+
+    /// Week Drilldown round: the factual explanation of ONE canonical
+    /// Statistics week — "what actually happened in this week," never
+    /// why. Reuses the EXACT SAME `isPerformed(_:)`/`StatisticsFilter
+    /// .matches`/`dateBounds(from:through:calendar:)`/planned-fetch
+    /// helpers `athleteSummary` itself uses (never a second,
+    /// independently-implemented filtering path), so a `StatisticsWeekDetail`
+    /// produced here for the same athlete/week/interval/filter/today an
+    /// `athleteSummary` call already covered always agrees with that
+    /// call's own `StatisticsWeekBucket` for that week — see this
+    /// method's own parity tests.
+    ///
+    /// EFFECTIVE INTERVAL: `[max(intervalStart, weekStart), min(intervalEnd,
+    /// weekStart.adding(days: 6))]`. `weekStart`/`intervalStart`/
+    /// `intervalEnd` are three independent facts — a calendar-month
+    /// period's partial edge week can start before/end after the
+    /// selected month, and this drilldown must show ONLY the portion
+    /// that genuinely falls inside the caller's own selected interval,
+    /// never the canonical week's full 7 days just because that's what
+    /// `weekStart` alone would imply.
+    ///
+    /// FUTURE-DATE CLAMP: identical rule to `athleteSummary`'s own —
+    /// Planned is further clamped to `min(effectiveEnd, today)` (a
+    /// current, still-in-progress week must not show later-in-the-week
+    /// planning as historical evidence); Actual is never clamped (a
+    /// `LoggedActivity` cannot exist for a future date, so no clamp is
+    /// needed there — same reasoning `athleteSummary` already
+    /// documents).
+    public func weekDetail(
+        forAthlete athleteId: AthleteId,
+        weekStart: LocalDate,
+        within intervalStart: LocalDate,
+        through intervalEnd: LocalDate,
+        filter: StatisticsFilter = .none,
+        today: LocalDate = TrainingPlanningCoordinationService.today(),
+        calendar: Calendar = .current
+    ) throws -> StatisticsWeekDetail {
+        let weekEnd = weekStart.adding(days: 6)
+        let effectiveStart = max(intervalStart, weekStart)
+        let effectiveEnd = min(intervalEnd, weekEnd)
+
+        // Defensive only: every real caller passes a `weekStart` that
+        // came from `athleteSummary`'s own `weeklyBuckets`, which by
+        // construction only ever includes weeks that overlap
+        // `[intervalStart, intervalEnd]` — this branch should be
+        // unreachable in normal use, but a genuinely non-overlapping
+        // week must still report a factual empty result rather than
+        // fetching against an inverted date range.
+        guard effectiveStart <= effectiveEnd else {
+            return StatisticsWeekDetail(
+                athleteId: athleteId,
+                weekStart: weekStart,
+                intervalStart: effectiveStart,
+                intervalEnd: effectiveStart,
+                filter: filter,
+                plannedActivityCount: 0,
+                plannedMinutes: 0,
+                performedActivityCount: 0,
+                totalActualMinutes: 0,
+                plannedActivities: [],
+                performedActivities: [],
+                form: StatisticsAggregate(mean: nil, sampleCount: 0),
+                sleep: StatisticsAggregate(mean: nil, sampleCount: 0)
+            )
+        }
+
+        let (startDate, endExclusive) = Self.dateBounds(from: effectiveStart, through: effectiveEnd, calendar: calendar)
+        let loggedActivities = try trainingService
+            .fetchLoggedActivities(forAthlete: athleteId, from: startDate, to: endExclusive)
+            .filter { $0.startedAt < endExclusive }
+        let performed = loggedActivities.filter { Self.isPerformed($0.status) && filter.matches($0) }
+        let totalActualMinutes = performed.reduce(0) { $0 + $1.durationMinutes }
+
+        // Ordering: chronological by `startedAt`, then stable
+        // `LoggedActivity.id` as a deterministic tiebreaker — never
+        // repository/dictionary iteration order.
+        let performedActivities = performed
+            .sorted { lhs, rhs in
+                if lhs.startedAt != rhs.startedAt { return lhs.startedAt < rhs.startedAt }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+            .map { activity in
+                StatisticsPerformedActivityRow(
+                    loggedActivityId: activity.loggedActivityId,
+                    startedAt: activity.startedAt,
+                    sportId: activity.sportId.map(SportId.init(rawValue:)),
+                    activityType: activity.activityType,
+                    title: activity.title,
+                    durationMinutes: activity.durationMinutes,
+                    status: activity.status
+                )
+            }
+
+        // Form: the SAME canonical join `athleteSummary` uses, scoped
+        // to the performed activities actually in `effectiveInterval`.
+        var reflectionByLoggedActivityId: [UUID: ActivityReflection] = [:]
+        for reflection in try reflectionService.fetchActivityReflections(forAthlete: athleteId) {
+            reflectionByLoggedActivityId[reflection.loggedActivityId] = reflection
+        }
+        let formValues = performed.compactMap { reflectionByLoggedActivityId[$0.id]?.bodyFeeling }
+        let form = StatisticsAggregate.of(formValues)
+
+        // Sleep: unfiltered by `filter`, exactly like `athleteSummary`'s
+        // own weekly Sleep — the athlete's own context for the week,
+        // never narrowed by a Sport/Activity Type choice.
+        let dailyStatuses = try reflectionService.fetchDailyStatuses(forAthlete: athleteId, from: effectiveStart, to: effectiveEnd)
+        let sleepValues = dailyStatuses.compactMap(\.sleepQuality)
+        let sleep = StatisticsAggregate.of(sleepValues)
+
+        // Planned: read-only via `PlanningService.fetchWeekPlan(forAthlete:weekStart:)`
+        // (never creates a `WeekPlan`), scoped to just the ONE canonical
+        // week this drilldown represents — no need to walk multiple
+        // `weekStarts` the way `athleteSummary` does across a whole
+        // period.
+        let plannedEffectiveEnd = min(effectiveEnd, today)
+        var plannedActivities: [StatisticsPlannedActivityRow] = []
+        if effectiveStart <= plannedEffectiveEnd {
+            let fetchedPlannedActivities = try Self.fetchPlannedActivities(
+                planningService: planningService,
+                forAthlete: athleteId,
+                weekStarts: [weekStart]
+            )
+            .filter { $0.localDate >= effectiveStart && $0.localDate <= plannedEffectiveEnd && filter.matches($0) }
+
+            // Ordering: chronological by `localDate`/`startLocalTime` —
+            // a planned activity with no recorded start time sorts
+            // AFTER timed ones, matching the same convention
+            // `TodayActivityComposer.startLocalTimeSortKey` already
+            // establishes — then stable `PlannedActivity.id` as the
+            // final deterministic tiebreaker.
+            plannedActivities = fetchedPlannedActivities
+                .sorted { lhs, rhs in
+                    if lhs.localDate != rhs.localDate { return lhs.localDate < rhs.localDate }
+                    switch (lhs.startLocalTime, rhs.startLocalTime) {
+                    case (nil, nil): return lhs.id.uuidString < rhs.id.uuidString
+                    case (nil, _): return false
+                    case (_, nil): return true
+                    case let (left?, right?):
+                        if left != right { return left < right }
+                        return lhs.id.uuidString < rhs.id.uuidString
+                    }
+                }
+                .map { activity in
+                    StatisticsPlannedActivityRow(
+                        plannedActivityId: activity.plannedActivityId,
+                        localDate: activity.localDate,
+                        startLocalTime: activity.startLocalTime,
+                        sportId: activity.sportId.map(SportId.init(rawValue:)),
+                        activityType: activity.activityType,
+                        title: activity.title,
+                        plannedDurationMinutes: activity.plannedDurationMinutes
+                    )
+                }
+        }
+        let plannedActivityCount = plannedActivities.count
+        let plannedMinutes = plannedActivities.compactMap(\.plannedDurationMinutes).reduce(0, +)
+
+        return StatisticsWeekDetail(
+            athleteId: athleteId,
+            weekStart: weekStart,
+            intervalStart: effectiveStart,
+            intervalEnd: effectiveEnd,
+            filter: filter,
+            plannedActivityCount: plannedActivityCount,
+            plannedMinutes: plannedMinutes,
+            performedActivityCount: performed.count,
+            totalActualMinutes: totalActualMinutes,
+            plannedActivities: plannedActivities,
+            performedActivities: performedActivities,
+            form: form,
+            sleep: sleep
         )
     }
 

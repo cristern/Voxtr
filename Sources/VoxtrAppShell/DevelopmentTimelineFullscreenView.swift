@@ -118,7 +118,8 @@ struct DevelopmentTimelineFullscreenView: View {
                             intervalEnd: summary.intervalEnd,
                             chartHeight: max(240, geometry.size.height - 120),
                             breakdownMode: viewModel.trainingBreakdownMode,
-                            comparisonMode: viewModel.timelineComparisonMode
+                            comparisonMode: viewModel.timelineComparisonMode,
+                            onSelectWeek: viewModel.selectWeek
                         )
                         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.developmentTimeline")
                     }

@@ -754,4 +754,111 @@ struct StatisticsViewModelTests {
         #expect(summary.form.mean == nil)
         #expect(summary.sleep.mean == nil)
     }
+
+    // MARK: - Week Drilldown: required test 18, navigation/presentation state
+
+    /// Required test 18: `selectWeek(_:)`/`dismissWeekDrilldown()` are
+    /// pure presentation-state — the selected week identity is the
+    /// canonical `LocalDate` passed in, and opening/closing the
+    /// drilldown never reloads or alters the parent Statistics filter/
+    /// period state it explains.
+    @Test("selectWeek/dismissWeekDrilldown record the canonical LocalDate week identity and never mutate Statistics filter/period/loadState")
+    @MainActor
+    func selectWeekAndDismissAreNavigationStateOnly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last4Weeks), today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+        #expect(viewModel.selectedWeekStart == nil)
+
+        let periodBefore = viewModel.period
+        let filterBefore = viewModel.currentFilter
+        let loadStateBefore = viewModel.loadState
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+
+        viewModel.selectWeek(weekStart)
+
+        #expect(viewModel.selectedWeekStart == weekStart)
+        #expect(viewModel.period == periodBefore)
+        #expect(viewModel.currentFilter == filterBefore)
+        #expect(viewModel.loadState == loadStateBefore)
+
+        viewModel.dismissWeekDrilldown()
+
+        #expect(viewModel.selectedWeekStart == nil)
+        #expect(viewModel.period == periodBefore)
+        #expect(viewModel.currentFilter == filterBefore)
+        #expect(viewModel.loadState == loadStateBefore)
+    }
+
+    /// `makeWeekDrilldownViewModel()` captures an IMMUTABLE snapshot of
+    /// the interval/filter/today the parent screen was showing at
+    /// selection time — never a live reference back to this ViewModel.
+    @Test("makeWeekDrilldownViewModel captures the currently loaded interval/filter/today for the selected week")
+    @MainActor
+    func makeWeekDrilldownViewModelCapturesImmutableSnapshot() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        // A matching performed activity so `hockey` is a genuinely
+        // available Sport — `setSportFilter` resets an unavailable
+        // selection back to `nil` inside its own `load()` (see
+        // `AthleteStatisticsViewModel.load()`'s own filter-validity
+        // contract), which would otherwise silently defeat this test's
+        // own filter-snapshot assertion below.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            period: .rolling(.last4Weeks), today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        viewModel.load()
+        viewModel.setSportFilter(hockey)
+        guard case .loaded(let summary) = viewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+
+        #expect(viewModel.makeWeekDrilldownViewModel() == nil)
+
+        let weekStart = LocalDate(year: 2026, month: 3, day: 9)
+        viewModel.selectWeek(weekStart)
+        let drilldownViewModel = try #require(viewModel.makeWeekDrilldownViewModel())
+
+        #expect(drilldownViewModel.weekStart == weekStart)
+        #expect(drilldownViewModel.athleteId == athleteId)
+        drilldownViewModel.load()
+        guard case .loaded(let detail) = drilldownViewModel.loadState else {
+            Issue.record("Expected .loaded")
+            return
+        }
+        #expect(detail.filter == summary.filter)
+        #expect(detail.intervalStart >= summary.intervalStart)
+        #expect(detail.intervalEnd <= summary.intervalEnd)
+    }
 }

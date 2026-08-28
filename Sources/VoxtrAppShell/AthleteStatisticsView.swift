@@ -74,7 +74,8 @@ public struct AthleteStatisticsView: View {
                             intervalStart: summary.intervalStart,
                             intervalEnd: summary.intervalEnd,
                             breakdownMode: viewModel.trainingBreakdownMode,
-                            comparisonMode: viewModel.timelineComparisonMode
+                            comparisonMode: viewModel.timelineComparisonMode,
+                            onSelectWeek: viewModel.selectWeek
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
                     } header: {
@@ -103,6 +104,28 @@ public struct AthleteStatisticsView: View {
                     // authoritative summary, never a stale capture from
                     // whenever the cover happened to open.
                     DevelopmentTimelineFullscreenView(viewModel: viewModel, sports: sports)
+                }
+                // Week Drilldown round: attached alongside the
+                // `fullScreenCover` above, on the SAME `List` node — a
+                // week selected while fullscreen is showing (via the
+                // SAME shared `viewModel.selectWeek(_:)`) presents this
+                // sheet chained on top of the fullscreen cover, so both
+                // surfaces reach the identical drilldown with no second
+                // implementation and no nested-presentation hack.
+                // `viewModel.selectedWeekStart` is the ONE shared
+                // presentation-state owner; dismissing this sheet
+                // (Close button OR swipe) always routes back through
+                // `dismissWeekDrilldown()` via this binding's own
+                // setter.
+                .sheet(isPresented: Binding(
+                    get: { viewModel.selectedWeekStart != nil },
+                    set: { isPresented in
+                        if !isPresented { viewModel.dismissWeekDrilldown() }
+                    }
+                )) {
+                    if let weekDrilldownViewModel = viewModel.makeWeekDrilldownViewModel() {
+                        WeekDrilldownView(viewModel: weekDrilldownViewModel, sports: sports)
+                    }
                 }
             }
         }
