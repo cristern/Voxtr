@@ -44,10 +44,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -81,10 +83,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -123,10 +127,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -154,10 +160,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -192,10 +200,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -228,10 +238,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -274,10 +286,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -320,10 +334,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday; this spans exactly 3 canonical weeks:
@@ -369,10 +385,12 @@ struct StatisticsServiceTests {
         let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
         let reflectionService = ReflectionService(repository: reflectionRepository)
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -420,10 +438,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -459,10 +479,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let siblingId = AthleteId()
@@ -539,10 +561,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let intervalStart = LocalDate(year: 2026, month: 3, day: 1)
@@ -586,10 +610,12 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -629,10 +655,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday; this spans exactly 2 canonical weeks.
@@ -669,10 +697,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -710,10 +740,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday — all three fixtures below fall in the
@@ -764,10 +796,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -813,10 +847,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // Spans two canonical weeks: Mar 2-8 and Mar 9-15.
@@ -861,10 +897,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -910,10 +948,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let siblingId = AthleteId()
@@ -969,10 +1009,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1005,10 +1047,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1052,10 +1096,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1097,10 +1143,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1141,10 +1189,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1173,10 +1223,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -1217,10 +1269,12 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -1268,10 +1322,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -1300,10 +1356,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -1329,10 +1387,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -1368,10 +1428,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -1409,10 +1471,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -1442,10 +1506,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -1476,10 +1542,12 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -1509,10 +1577,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -1545,10 +1615,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -1579,10 +1651,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -1624,10 +1698,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // Two canonical Monday-start weeks: Mar 2 and Mar 9, 2026.
@@ -1675,10 +1751,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -1734,10 +1812,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -1768,10 +1848,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -1805,10 +1887,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // The full current calendar month, March 2026 — `today` (Mar 15)
@@ -1856,10 +1940,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         // A fully past month, viewed well after it ended — `today`
@@ -1894,10 +1980,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 22)
@@ -1958,10 +2046,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 7, day: 27)
@@ -2015,10 +2105,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2055,10 +2147,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2100,10 +2194,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -2159,10 +2255,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -2206,10 +2304,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let swimming = SportId()
@@ -2250,10 +2350,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2291,10 +2393,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2326,10 +2430,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2383,10 +2489,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let today = LocalDate(year: 2026, month: 4, day: 1)
 
@@ -2450,10 +2558,12 @@ struct StatisticsWeekDetailTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -2509,5 +2619,415 @@ struct StatisticsWeekDetailTests {
         #expect(bucket.plannedMinutes == 45)
         #expect(bucket.performedActivityCount == 1)
         #expect(bucket.totalActualMinutes == 35)
+    }
+
+    // MARK: - Weekly Reflection Context
+
+    /// Required test 1: a `WeeklyReflection` whose `visibility` is
+    /// `.sharedWithGuardians` — the ordinary, most common case — is
+    /// surfaced in full, with every field preserved exactly as recorded.
+    @Test("weekDetail: a sharedWithGuardians reflection is included with every field preserved exactly")
+    @MainActor
+    func sharedWithGuardiansReflectionIsIncluded() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 4, loadFelt: 3,
+            whatWorked: "Consistent mornings", whatWasDifficult: "Tuesday recovery",
+            learning: "Needed more sleep before hard days", nextWeekConsideration: "Add a rest day",
+            visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        let reflection = try #require(detail.weeklyReflection)
+        #expect(reflection.weekStart == weekStart)
+        #expect(reflection.overallSatisfaction == 4)
+        #expect(reflection.loadFelt == 3)
+        #expect(reflection.whatWorked == "Consistent mornings")
+        #expect(reflection.whatWasDifficult == "Tuesday recovery")
+        #expect(reflection.learning == "Needed more sleep before hard days")
+        #expect(reflection.nextWeekConsideration == "Add a rest day")
+    }
+
+    /// Required test 1 (variant): `.summaryOnly` is visible in full too —
+    /// the canonical rule established elsewhere in this codebase
+    /// (`WeeklyHistoryViewModel.reflectionAccessState`,
+    /// `FamilyHomeViewModel.loadFocusThisWeek()`) is `visibility !=
+    /// .privateToAthlete`, not an allow-list of just `.sharedWithGuardians`
+    /// — Statistics must not invent a stricter or a degraded "summary"
+    /// rendering the domain model itself does not define.
+    @Test("weekDetail: a summaryOnly reflection is also included in full, matching the existing canonical visibility rule")
+    @MainActor
+    func summaryOnlyReflectionIsIncluded() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 5, visibility: .summaryOnly
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.weeklyReflection?.overallSatisfaction == 5)
+    }
+
+    /// Required test 3 (BLOCKER-level): a `.privateToAthlete` reflection
+    /// must never reach Parent Statistics — neither its content nor its
+    /// existence. `weeklyReflection` is `nil`, indistinguishable from
+    /// "no reflection recorded at all" — never a redacted placeholder.
+    @Test("weekDetail: a privateToAthlete reflection is never surfaced — content and existence both hidden")
+    @MainActor
+    func privateToAthleteReflectionIsNeverSurfaced() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 2, whatWasDifficult: "Private struggle, not for parents",
+            visibility: .privateToAthlete
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.weeklyReflection == nil)
+    }
+
+    /// Required test 2: no `WeeklyReflection` recorded for the athlete/
+    /// week at all reports `nil` — the same shape as "recorded but
+    /// private," which is the intended, non-leaking ambiguity.
+    @Test("weekDetail: no reflection recorded for the athlete/week reports nil")
+    @MainActor
+    func noReflectionRecordedReportsNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.weeklyReflection == nil)
+    }
+
+    /// Required test 4 (week identity isolation): a reflection recorded
+    /// for a different canonical week must never surface under this
+    /// week's drilldown — direct `athleteId` + `weekStart` lookup only,
+    /// never a nearest-match or date-range heuristic.
+    @Test("weekDetail: a reflection recorded for a different week is never returned")
+    @MainActor
+    func reflectionFromDifferentWeekIsNeverReturned() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let otherWeekStart = LocalDate(year: 2026, month: 3, day: 9)
+        let requestedWeekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: otherWeekStart, authorId: ActorId(),
+            overallSatisfaction: 5, visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: requestedWeekStart, within: requestedWeekStart, through: requestedWeekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.weeklyReflection == nil)
+    }
+
+    /// Required test 5 (athlete identity isolation): a sibling athlete's
+    /// reflection for the SAME `weekStart` must never leak into this
+    /// athlete's drilldown.
+    @Test("weekDetail: a sibling athlete's reflection for the same week never leaks")
+    @MainActor
+    func siblingAthleteReflectionNeverLeaks() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let sibling = AthleteId()
+        let requestedAthlete = AthleteId()
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: sibling, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 5, visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: requestedAthlete, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.weeklyReflection == nil)
+    }
+
+    /// Required tests 6-8: numeric fields are preserved exactly, an
+    /// optional field genuinely never recorded stays `nil` (never a
+    /// fabricated value like `0` or `""`), and recorded text fields are
+    /// reproduced verbatim — no truncation, no rewriting.
+    @Test("weekDetail: numeric values are preserved exactly and un-recorded optional fields stay nil")
+    @MainActor
+    func numericValuesPreservedAndMissingFieldsStayNil() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        // Only overallSatisfaction/whatWorked recorded — every other
+        // optional field left genuinely unset.
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 1, whatWorked: "Verbatim text, exactly as written — no rewriting.",
+            visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        let reflection = try #require(detail.weeklyReflection)
+        #expect(reflection.overallSatisfaction == 1)
+        #expect(reflection.whatWorked == "Verbatim text, exactly as written — no rewriting.")
+        #expect(reflection.loadFelt == nil)
+        #expect(reflection.whatWasDifficult == nil)
+        #expect(reflection.learning == nil)
+        #expect(reflection.nextWeekConsideration == nil)
+    }
+
+    /// Required test 9 (filter independence, explicit): `WeeklyReflection`
+    /// is week-level, not activity-level — a Sport/Activity Type filter
+    /// that excludes every performed activity in the week (so Planned/
+    /// Performed/Form are empty) must NOT also hide the week's
+    /// Reflection. Mirrors the SAME filter-independence precedent
+    /// `weekDetail`'s own Sleep aggregate already establishes (see
+    /// `sleepRemainsUnfilteredBySportOrActivityType` above) — Sleep
+    /// remains visibly unaffected here too, confirming this filter genuinely
+    /// narrowed only Plan/Actual/Form.
+    @Test("weekDetail: WeeklyReflection is never filtered by Sport/Activity Type, unlike Planned/Actual/Form")
+    @MainActor
+    func weeklyReflectionIsNeverFilteredBySportOrActivityType() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let swimming = SportId()
+        let excludedFilterSport = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let logged = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+        )
+        _ = try reflectionService.recordActivityReflection(
+            athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
+            visibility: .sharedWithGuardians, bodyFeeling: 4
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 4, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 5, nextWeekConsideration: "Neutral wording, not scoped to Swimming",
+            visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(sportId: excludedFilterSport),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        // The filter genuinely narrowed Planned/Performed/Form to empty —
+        // this is a real filter, not a vacuous one.
+        #expect(detail.performedActivities.isEmpty)
+        #expect(detail.form.sampleCount == 0)
+        // ...but Sleep and WeeklyReflection are both unaffected by it.
+        #expect(detail.sleep.sampleCount == 1)
+        #expect(detail.weeklyReflection?.overallSatisfaction == 5)
+        #expect(detail.weeklyReflection?.nextWeekConsideration == "Neutral wording, not scoped to Swimming")
+    }
+
+    /// Required test 12 (partial-period edge, high value): a
+    /// calendar-month period whose leading edge week only contributes a
+    /// PARTIAL slice of factual Plan/Actual/Form/Sleep (per the existing
+    /// effective-interval contract — see `weekDetail`'s own doc comment)
+    /// must still surface the reflection for the FULL canonical week —
+    /// the reflection's own visibility never depends on how much of the
+    /// week the caller's selected Statistics period happens to cover.
+    @Test("weekDetail: WeeklyReflection surfaces for the full week even when the selected period only covers a partial slice of it")
+    @MainActor
+    func reflectionSurfacesDespitePartialCalendarMonthInterval() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        // Reuses the SAME verified leading-edge-week fixture as
+        // `effectiveIntervalExcludesPortionOutsideSelectedPeriod` above:
+        // the canonical week starting Monday 2026-07-27 straddles the
+        // July/August boundary — a selected "August" calendar-month
+        // period only covers August 1 of this week (`effectiveEnd ==
+        // weekStart.adding(days: 6)`, `effectiveStart == intervalStart`),
+        // not the full Monday-Sunday span.
+        let weekStart = LocalDate(year: 2026, month: 7, day: 27)
+        let augustIntervalStart = LocalDate(year: 2026, month: 8, day: 1)
+        let augustIntervalEnd = LocalDate(year: 2026, month: 8, day: 31)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 3, nextWeekConsideration: "Full-week reflection despite partial period",
+            visibility: .sharedWithGuardians
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: augustIntervalStart, through: augustIntervalEnd,
+            today: LocalDate(year: 2026, month: 9, day: 1), calendar: Self.utcCalendar
+        )
+
+        // Sanity: this really is the partial-slice case, not a vacuous
+        // full-week interval.
+        #expect(detail.intervalStart == augustIntervalStart)
+        #expect(detail.intervalEnd == weekStart.adding(days: 6))
+        #expect(detail.weeklyReflection?.overallSatisfaction == 3)
+        #expect(detail.weeklyReflection?.weekStart == weekStart)
+    }
+
+    /// Required test 13: reading a `WeeklyReflection` through `weekDetail`
+    /// is a pure read — it must never create, duplicate, or otherwise
+    /// mutate the underlying persisted `WeeklyReflection`, even across
+    /// repeated reads.
+    @Test("weekDetail: reading a WeeklyReflection never mutates persisted state")
+    @MainActor
+    func readingWeeklyReflectionNeverMutatesPersistedState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try weeklyReflectionService.recordWeeklyReflection(
+            athleteId: athleteId, weekStart: weekStart, authorId: ActorId(),
+            overallSatisfaction: 4, visibility: .sharedWithGuardians
+        )
+
+        _ = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+        _ = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(try weeklyReflectionService.fetchWeeklyReflections(forAthlete: athleteId).count == 1)
     }
 }

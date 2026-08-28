@@ -419,6 +419,14 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
     public let performedActivities: [StatisticsPerformedActivityRow]
     public let form: StatisticsAggregate
     public let sleep: StatisticsAggregate
+    /// Weekly Reflection Context round: the athlete's own canonical
+    /// `WeeklyReflection` for this FULL week — `nil` for "none recorded
+    /// yet" and for "recorded but not visible to Parent Statistics"
+    /// (see `StatisticsService.isVisibleToParentStatistics`'s own doc
+    /// comment; the two are indistinguishable here by design). Never
+    /// narrowed by `filter` — see `StatisticsService.weeklyReflection`'s
+    /// own doc comment.
+    public let weeklyReflection: StatisticsWeeklyReflection?
 
     public init(
         athleteId: AthleteId,
@@ -433,7 +441,8 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
         plannedActivities: [StatisticsPlannedActivityRow],
         performedActivities: [StatisticsPerformedActivityRow],
         form: StatisticsAggregate,
-        sleep: StatisticsAggregate
+        sleep: StatisticsAggregate,
+        weeklyReflection: StatisticsWeeklyReflection?
     ) {
         self.athleteId = athleteId
         self.weekStart = weekStart
@@ -448,6 +457,51 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
         self.performedActivities = performedActivities
         self.form = form
         self.sleep = sleep
+        self.weeklyReflection = weeklyReflection
+    }
+}
+
+/// Weekly Reflection Context round: the smallest plain-value projection
+/// of a canonical `WeeklyReflection` this foundation exposes — READ-ONLY
+/// Statistics context, never a second reflection model. Carries no
+/// `@Model` reference, no `authorId`/`visibility`/timestamps, and no
+/// stable ID: it is always accessed through the ONE `StatisticsWeekDetail`
+/// it belongs to (itself already keyed by `athleteId` + `weekStart`),
+/// so a separate identity here would just duplicate that existing key.
+/// Only ever constructed by `StatisticsService.weekDetail`'s own
+/// centralized privacy gate (see that method's doc comment) — a View
+/// must never be able to construct one itself. Text fields are shown
+/// verbatim; numeric fields are shown factually ("X / 5") — this type
+/// itself does no formatting.
+public struct StatisticsWeeklyReflection: Equatable, Sendable {
+    /// The canonical week this reflection belongs to — always the FULL
+    /// week (`WeeklyReflection.weekStart`), even when the enclosing
+    /// `StatisticsWeekDetail.intervalStart`/`intervalEnd` only cover a
+    /// partial slice of that week (a calendar-month period's edge week).
+    public let weekStart: LocalDate
+    public let overallSatisfaction: Int?
+    public let loadFelt: Int?
+    public let whatWorked: String?
+    public let whatWasDifficult: String?
+    public let learning: String?
+    public let nextWeekConsideration: String?
+
+    public init(
+        weekStart: LocalDate,
+        overallSatisfaction: Int?,
+        loadFelt: Int?,
+        whatWorked: String?,
+        whatWasDifficult: String?,
+        learning: String?,
+        nextWeekConsideration: String?
+    ) {
+        self.weekStart = weekStart
+        self.overallSatisfaction = overallSatisfaction
+        self.loadFelt = loadFelt
+        self.whatWorked = whatWorked
+        self.whatWasDifficult = whatWasDifficult
+        self.learning = learning
+        self.nextWeekConsideration = nextWeekConsideration
     }
 }
 
@@ -466,11 +520,82 @@ public final class StatisticsService {
     /// `fetchWeekPlan(forAthlete:weekStart:)`/`fetchPlannedActivities(forWeekPlan:)`
     /// passthroughs are ever called.
     private let planningService: PlanningService
+    /// Weekly Reflection Context round: a fourth composed domain
+    /// service, distinct from `reflectionService` above —
+    /// `ReflectionService` owns `ActivityReflection`/`DailyStatus`,
+    /// `WeeklyReflectionService` owns `WeeklyReflection` — genuinely
+    /// separate domain-service entry points (see
+    /// `WeeklyReflectionService`'s own doc comment), never folded
+    /// together just to avoid a fourth dependency. Only the read-only
+    /// `fetchWeeklyReflection(forAthlete:weekStart:)` passthrough is
+    /// ever called; Statistics never records or edits a
+    /// `WeeklyReflection`.
+    private let weeklyReflectionService: WeeklyReflectionService
 
-    public init(trainingService: TrainingService, reflectionService: ReflectionService, planningService: PlanningService) {
+    public init(
+        trainingService: TrainingService,
+        reflectionService: ReflectionService,
+        planningService: PlanningService,
+        weeklyReflectionService: WeeklyReflectionService
+    ) {
         self.trainingService = trainingService
         self.reflectionService = reflectionService
         self.planningService = planningService
+        self.weeklyReflectionService = weeklyReflectionService
+    }
+
+    /// THE canonical, single "may Parent Statistics see this
+    /// WeeklyReflection?" rule — mirrors, does not duplicate the
+    /// PRODUCT MEANING of, the SAME `visibility != .privateToAthlete`
+    /// check already established at every other parent-facing
+    /// `WeeklyReflection` read site in this codebase
+    /// (`WeeklyHistoryViewModel.reflectionAccessState`/
+    /// `focusNextWeekIfPermitted`, `FamilyHomeViewModel.loadFocusThisWeek()`)
+    /// — `.sharedWithGuardians` and `.summaryOnly` are both visible in
+    /// full (Statistics never introduces a second, degraded "summary"
+    /// rendering the domain model itself does not define); only
+    /// `.privateToAthlete` is hidden. This is the ONE place Statistics
+    /// itself makes this decision — `weekDetail` below is the only
+    /// caller, and it is the only path by which a `StatisticsWeeklyReflection`
+    /// can ever be constructed, so a View can never see a private
+    /// reflection's content by construction. Existence is also hidden
+    /// when private: a filtered-out reflection produces `nil`, never a
+    /// redacted placeholder — Statistics has no approved contract for
+    /// disclosing that private metadata.
+    private static func isVisibleToParentStatistics(_ reflection: WeeklyReflection) -> Bool {
+        reflection.visibility != .privateToAthlete
+    }
+
+    /// Week Drilldown round: the ONLY read path into `WeeklyReflection`
+    /// this service exposes. Looked up directly by `athleteId` +
+    /// `weekStart` — the SAME stable-identity pair
+    /// `WeeklyReflectionRepository.fetchWeeklyReflection` already keys
+    /// on, never a heuristic title/date match. Deliberately takes no
+    /// `filter`/`intervalStart`/`intervalEnd` parameter: a
+    /// `WeeklyReflection` is week-level, not activity-level, so it is
+    /// never narrowed by Sport/Activity Type (the same filter-independence
+    /// precedent `athleteSummary`/`weekDetail`'s own Sleep aggregate
+    /// already establishes — see those methods' doc comments) and is
+    /// always looked up for the FULL canonical week, independent of
+    /// whatever partial interval the caller's Statistics period happens
+    /// to select. Returns `nil` for "no reflection recorded yet" and for
+    /// "a reflection exists but is not visible to Parent Statistics" —
+    /// both are indistinguishable to the caller by design (see
+    /// `isVisibleToParentStatistics`'s own doc comment).
+    private func weeklyReflectionProjection(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> StatisticsWeeklyReflection? {
+        guard let reflection = try weeklyReflectionService.fetchWeeklyReflection(forAthlete: athleteId, weekStart: weekStart),
+              Self.isVisibleToParentStatistics(reflection) else {
+            return nil
+        }
+        return StatisticsWeeklyReflection(
+            weekStart: reflection.weekStart,
+            overallSatisfaction: reflection.overallSatisfaction,
+            loadFelt: reflection.loadFelt,
+            whatWorked: reflection.whatWorked,
+            whatWasDifficult: reflection.whatWasDifficult,
+            learning: reflection.learning,
+            nextWeekConsideration: reflection.nextWeekConsideration
+        )
     }
 
     /// The one entry point this foundation exposes: everything a later
@@ -661,6 +786,15 @@ public final class StatisticsService {
         let effectiveStart = max(intervalStart, weekStart)
         let effectiveEnd = min(intervalEnd, weekEnd)
 
+        // Looked up once, ahead of the effective-interval computation
+        // below, since a WeeklyReflection's visibility to Parent
+        // Statistics depends only on `athleteId` + the canonical
+        // `weekStart` — never on `intervalStart`/`intervalEnd` — so it
+        // applies identically to both the defensive empty-result branch
+        // and the normal return below. See `weeklyReflectionProjection(forAthlete:weekStart:)`'s
+        // own doc comment.
+        let weeklyReflection = try weeklyReflectionProjection(forAthlete: athleteId, weekStart: weekStart)
+
         // Defensive only: every real caller passes a `weekStart` that
         // came from `athleteSummary`'s own `weeklyBuckets`, which by
         // construction only ever includes weeks that overlap
@@ -682,7 +816,8 @@ public final class StatisticsService {
                 plannedActivities: [],
                 performedActivities: [],
                 form: StatisticsAggregate(mean: nil, sampleCount: 0),
-                sleep: StatisticsAggregate(mean: nil, sampleCount: 0)
+                sleep: StatisticsAggregate(mean: nil, sampleCount: 0),
+                weeklyReflection: weeklyReflection
             )
         }
 
@@ -790,7 +925,8 @@ public final class StatisticsService {
             plannedActivities: plannedActivities,
             performedActivities: performedActivities,
             form: form,
-            sleep: sleep
+            sleep: sleep,
+            weeklyReflection: weeklyReflection
         )
     }
 

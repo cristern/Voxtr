@@ -209,14 +209,16 @@ public final class CompositionRoot {
 
         // Statistics V1 UI round: same placement rationale as every
         // other cross-domain coordinator above — Statistics composes
-        // TrainingService and ReflectionService (both already resolved)
-        // and owns no persisted state of its own, so it is constructed
-        // and registered here rather than inside either domain package.
-        // See `StatisticsService`'s own doc comment.
+        // TrainingService, ReflectionService, PlanningService, and (Weekly
+        // Reflection Context round) WeeklyReflectionService (all already
+        // resolved) and owns no persisted state of its own, so it is
+        // constructed and registered here rather than inside either
+        // domain package. See `StatisticsService`'s own doc comment.
         let statisticsService = StatisticsService(
             trainingService: container.resolve(TrainingService.self),
             reflectionService: container.resolve(ReflectionService.self),
-            planningService: container.resolve(PlanningService.self)
+            planningService: container.resolve(PlanningService.self),
+            weeklyReflectionService: container.resolve(WeeklyReflectionService.self)
         )
         container.register(StatisticsService.self) { statisticsService }
 

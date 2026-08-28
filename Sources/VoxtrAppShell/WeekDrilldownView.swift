@@ -127,6 +127,62 @@ public struct WeekDrilldownView: View {
                     VoxtrSectionHeading("Form & Sleep")
                 }
                 .voxtrRowSurface()
+
+                // Weekly Reflection Context round: the section is omitted
+                // entirely — not shown with an empty state — when
+                // `weeklyReflection` is nil. That covers BOTH "nothing
+                // recorded yet" and "recorded but not visible to Parent
+                // Statistics" identically (see `StatisticsService
+                // .isVisibleToParentStatistics`'s own doc comment) —
+                // Statistics never prompts the athlete to reflect, and
+                // never discloses that a private reflection exists.
+                if let reflection = detail.weeklyReflection {
+                    Section {
+                        if let overallSatisfaction = reflection.overallSatisfaction {
+                            LabeledContent("Overall satisfaction", value: "\(overallSatisfaction) / 5")
+                                .accessibilityLabel("Overall satisfaction, \(overallSatisfaction) out of 5")
+                                .accessibilityIdentifier("weekDrilldown.reflection.overallSatisfaction")
+                        }
+                        if let loadFelt = reflection.loadFelt {
+                            LabeledContent("Load felt", value: "\(loadFelt) / 5")
+                                .accessibilityLabel("Load felt, \(loadFelt) out of 5")
+                                .accessibilityIdentifier("weekDrilldown.reflection.loadFelt")
+                        }
+                        if let whatWorked = reflection.whatWorked, !whatWorked.isEmpty {
+                            reflectionTextRow(title: "What worked", text: whatWorked)
+                                .accessibilityIdentifier("weekDrilldown.reflection.whatWorked")
+                        }
+                        if let whatWasDifficult = reflection.whatWasDifficult, !whatWasDifficult.isEmpty {
+                            reflectionTextRow(title: "What was difficult", text: whatWasDifficult)
+                                .accessibilityIdentifier("weekDrilldown.reflection.whatWasDifficult")
+                        }
+                        if let learning = reflection.learning, !learning.isEmpty {
+                            reflectionTextRow(title: "Learning", text: learning)
+                                .accessibilityIdentifier("weekDrilldown.reflection.learning")
+                        }
+                        if let nextWeekConsideration = reflection.nextWeekConsideration, !nextWeekConsideration.isEmpty {
+                            reflectionTextRow(title: "Next week", text: nextWeekConsideration)
+                                .accessibilityIdentifier("weekDrilldown.reflection.nextWeekConsideration")
+                        }
+                    } header: {
+                        // Deliberately neutral — "Weekly Reflection," never
+                        // a Sport-scoped label — a `WeeklyReflection` is
+                        // week-level and is never filtered by the Sport/
+                        // Activity Type filter this drilldown inherited
+                        // (see `StatisticsService.weekDetail`'s own doc
+                        // comment for the same rule already established
+                        // for the Sleep aggregate).
+                        VoxtrSectionHeading("Weekly Reflection")
+                    } footer: {
+                        if isPartialReflectionWeek(detail) {
+                            Text("Reflects the full week, even though this view covers only part of it.")
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
+                                .accessibilityIdentifier("weekDrilldown.reflection.partialWeekNote")
+                        }
+                    }
+                    .voxtrRowSurface()
+                }
             }
             .voxtrScreenBackground()
         }
@@ -207,5 +263,32 @@ public struct WeekDrilldownView: View {
         guard let mean = aggregate.mean else { return "No data" }
         let unitLabel = aggregate.sampleCount == 1 ? unit : pluralUnit
         return "\(StatisticsFormatting.average(mean)) · \(aggregate.sampleCount) \(unitLabel)"
+    }
+
+    /// One free-text Reflection field: the label, then the athlete's own
+    /// text shown verbatim — no truncation, no summarization, no
+    /// sentiment/keyword analysis. Only ever called for an already
+    /// non-empty string (see each call site's own `if let ..., !isEmpty`
+    /// guard).
+    private func reflectionTextRow(title: String, text: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+            Text(text)
+                .font(VoxtrTypography.cardTitle)
+                .foregroundStyle(VoxtrColor.textPrimary)
+        }
+    }
+
+    /// True when this drilldown's selected Statistics period only covers
+    /// part of the Reflection's own full canonical week (a calendar-month
+    /// period's leading/trailing edge week — see `StatisticsService
+    /// .weekDetail`'s own EFFECTIVE INTERVAL doc comment). Drives a
+    /// single, calm footer note so the distinction is clear without
+    /// over-explaining it — never a warning, never a second Plan/Actual/
+    /// Form-style interval label.
+    private func isPartialReflectionWeek(_ detail: StatisticsWeekDetail) -> Bool {
+        detail.intervalStart != detail.weekStart || detail.intervalEnd != detail.weekStart.adding(days: 6)
     }
 }

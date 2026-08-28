@@ -255,10 +255,12 @@ struct DevelopmentTimelinePointProjectionTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let football = SportId()

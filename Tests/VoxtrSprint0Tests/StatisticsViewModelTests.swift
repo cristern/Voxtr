@@ -65,10 +65,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let viewModel = StatisticsRootViewModel(
             statisticsService: statisticsService, athleteRepository: athleteRepository, workspaceId: staged.workspace.workspaceId
@@ -132,10 +134,12 @@ struct StatisticsViewModelTests {
 
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let viewModel = StatisticsRootViewModel(
             statisticsService: statisticsService, athleteRepository: athleteRepository, workspaceId: staged.workspace.workspaceId
@@ -167,10 +171,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
@@ -198,10 +204,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
@@ -229,10 +237,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
@@ -289,10 +299,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 8, day: 1)
@@ -371,10 +383,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -422,10 +436,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let football = SportId()
@@ -476,10 +492,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let football = SportId()
@@ -516,10 +534,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let football = SportId()
@@ -566,10 +586,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let football = SportId()
@@ -614,10 +636,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
@@ -657,10 +681,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         _ = try trainingService.logActivity(
@@ -698,10 +724,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         _ = try trainingService.logActivity(
@@ -732,10 +760,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -770,10 +800,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
 
@@ -815,10 +847,12 @@ struct StatisticsViewModelTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
         let statisticsService = StatisticsService(
             trainingService: trainingService,
             reflectionService: reflectionService,
-            planningService: planningService
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
         )
         let athleteId = AthleteId()
         let hockey = SportId()
