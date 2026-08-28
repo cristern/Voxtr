@@ -5,6 +5,7 @@ import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
 @testable import VoxtrAppShell
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -253,7 +254,12 @@ struct DevelopmentTimelinePointProjectionTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let football = SportId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -266,9 +272,16 @@ struct DevelopmentTimelinePointProjectionTests {
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
             startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
         )
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Planned session", localDate: LocalDate(year: 2026, month: 3, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
+        )
 
         let summary = try statisticsService.athleteSummary(
-            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, calendar: Self.utcCalendar
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
         )
 
         // Empty canonical Sport catalog — the football SportId above is
@@ -289,5 +302,12 @@ struct DevelopmentTimelinePointProjectionTests {
         #expect(point.trainingByActivityType.count == 2)
         #expect(point.trainingByActivityType.first { $0.id == ActivityType.teamTraining.rawValue }?.displayName == ActivityType.teamTraining.displayName)
         #expect(point.trainingByActivityType.first { $0.id == ActivityType.other.rawValue }?.displayName == ActivityType.other.displayName)
+
+        // Plan vs Actual round: `plannedMinutes` projects straight
+        // through from the SAME weekly bucket `trainingMinutes` above
+        // already came from — no independent recomputation in the
+        // shared projection.
+        #expect(point.plannedMinutes == 40)
+        #expect(point.plannedMinutes == summary.weeklyBuckets.first { $0.weekStart == point.weekStart }?.plannedMinutes)
     }
 }

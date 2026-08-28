@@ -273,6 +273,18 @@ public final class PlanningService {
         try repository.fetchWeekPlan(byId: weekPlanId)
     }
 
+    /// Statistics — Plan vs Actual round: a thin, read-only passthrough
+    /// (same "reuse PlanningService" boundary as every other fetch
+    /// above) so a read-only caller — `StatisticsService` — can look up
+    /// whichever `WeekPlan` already exists for an athlete/week WITHOUT
+    /// ever creating one. Deliberately distinct from `getOrCreateWeekPlan`:
+    /// Statistics must never materialize a `WeekPlan` as a side effect of
+    /// being viewed (a week nobody has ever opened in Weekly Plan simply
+    /// has no `WeekPlan` yet, and reading it here must not change that).
+    public func fetchWeekPlan(forAthlete athleteId: AthleteId, weekStart: LocalDate) throws -> WeekPlan? {
+        try repository.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart)
+    }
+
     /// Sprint 1.1 closeout, Item 2: a thin passthrough, matching this
     /// service's own established "reuse PlanningService" boundary —
     /// needed so an unmaterialized recurring occurrence's preview can

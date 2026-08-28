@@ -49,6 +49,16 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
     /// these when its own `breakdownMode` is `.sport`/`.activityType`).
     public let trainingBySport: [TrainingCategorySegment]
     public let trainingByActivityType: [TrainingCategorySegment]
+    /// Statistics — Plan vs Actual round: this week's factual planned
+    /// training minutes — a plain projection of
+    /// `StatisticsWeekBucket.plannedMinutes`, never independently
+    /// recomputed here (see `points(from:sports:)` below). Only read by
+    /// this chart while `TimelineComparisonMode == .planVsActual`;
+    /// default `0` preserves every existing caller/test predating this
+    /// round. Never additively combined with `trainingMinutes` — Planned
+    /// and Actual are two independent factual series, not stacked parts
+    /// of one total (see `DevelopmentTimelineChart`'s own doc comment).
+    public let plannedMinutes: Int
 
     public var id: LocalDate { weekStart }
 
@@ -58,7 +68,8 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
         formMean: Double?,
         sleepMean: Double?,
         trainingBySport: [TrainingCategorySegment] = [],
-        trainingByActivityType: [TrainingCategorySegment] = []
+        trainingByActivityType: [TrainingCategorySegment] = [],
+        plannedMinutes: Int = 0
     ) {
         self.weekStart = weekStart
         self.trainingMinutes = trainingMinutes
@@ -66,6 +77,7 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
         self.sleepMean = sleepMean
         self.trainingBySport = trainingBySport
         self.trainingByActivityType = trainingByActivityType
+        self.plannedMinutes = plannedMinutes
     }
 
     /// Fullscreen data-ownership round: the ONE projection from a
@@ -99,7 +111,8 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
                         displayName: segment.activityType.displayName,
                         minutes: segment.minutes
                     )
-                }
+                },
+                plannedMinutes: bucket.plannedMinutes
             )
         }
     }
@@ -199,6 +212,17 @@ public struct DevelopmentTimelineChart: View {
     /// instead. Never affects Form/Sleep, the Y-scale, or any other
     /// existing chart contract.
     public let breakdownMode: TrainingBreakdownMode
+    /// Statistics — Plan vs Actual round: which factual question
+    /// Training's bars currently answer. `.actual` is byte-for-byte the
+    /// original rendering (`breakdownMode` still applies exactly as
+    /// before); `.planVsActual` draws two independent, GROUPED bars per
+    /// week — Actual and Planned, side by side, never stacked (Planned
+    /// and Actual are not additive parts of one total) — and ignores
+    /// `breakdownMode` entirely, per the approved V1 contract ("Plan vs
+    /// Actual does NOT need Sport/ActivityType breakdown of the planned
+    /// bar"). Never affects Form/Sleep or any other existing chart
+    /// contract.
+    public let comparisonMode: TimelineComparisonMode
 
     public init(
         points: [DevelopmentTimelinePoint],
@@ -208,7 +232,8 @@ public struct DevelopmentTimelineChart: View {
         intervalStart: LocalDate,
         intervalEnd: LocalDate,
         chartHeight: CGFloat = 240,
-        breakdownMode: TrainingBreakdownMode = .total
+        breakdownMode: TrainingBreakdownMode = .total,
+        comparisonMode: TimelineComparisonMode = .actual
     ) {
         self.points = points
         self.isTrainingVisible = isTrainingVisible
@@ -218,6 +243,7 @@ public struct DevelopmentTimelineChart: View {
         self.intervalEnd = intervalEnd
         self.chartHeight = chartHeight
         self.breakdownMode = breakdownMode
+        self.comparisonMode = comparisonMode
     }
 
     private static let scaleMin: Double = 1
@@ -226,8 +252,15 @@ public struct DevelopmentTimelineChart: View {
     /// Never degenerate (a chart with a 0-height training axis when
     /// every visible week is genuinely zero would also collapse the
     /// Form/Sleep transform below to zero) — floored to a calm minimum.
+    /// Plan vs Actual round: while `comparisonMode == .planVsActual`,
+    /// also considers `plannedMinutes` — a week planned well above what
+    /// was actually trained must still fit on screen, exactly the same
+    /// "never clip real data" guarantee `trainingMinutes` alone already
+    /// had.
     private var trainingAxisMax: Double {
-        Double(max(points.map(\.trainingMinutes).max() ?? 0, 60))
+        let actualMax = points.map(\.trainingMinutes).max() ?? 0
+        let plannedMax = comparisonMode == .planVsActual ? (points.map(\.plannedMinutes).max() ?? 0) : 0
+        return Double(max(actualMax, plannedMax, 60))
     }
 
     private func transformed(_ value: Double) -> Double {
@@ -298,7 +331,12 @@ public struct DevelopmentTimelineChart: View {
     /// the training portion of `seriesColorScale` below both stay
     /// empty too.
     private var presentCategories: [TrainingCategorySegment] {
-        guard breakdownMode != .total else { return [] }
+        // Plan vs Actual round: `breakdownMode` never applies while
+        // `comparisonMode == .planVsActual` (see `comparisonMode`'s own
+        // doc comment) — this keeps the category legend below from
+        // showing stale Sport/Activity Type entries for a breakdown that
+        // isn't actually being drawn.
+        guard comparisonMode == .actual, breakdownMode != .total else { return [] }
         var seenIds = Set<String>()
         var result: [TrainingCategorySegment] = []
         for point in points {
@@ -417,8 +455,26 @@ public struct DevelopmentTimelineChart: View {
             domain.append(Self.trainingSeriesKey(for: category.id))
             range.append(VoxtrCategoryColor.color(forStableKey: category.id))
         }
+        // Plan vs Actual round: the grouped Actual/Planned bars use
+        // `.foregroundStyle(by:)` (paired with `.position(by:)`, the
+        // standard Swift Charts grouped-bar technique) rather than a
+        // direct color — so both series keys need an entry here, exactly
+        // like every other `.foregroundStyle(by:)` series above.
+        if comparisonMode == .planVsActual {
+            domain.append(Self.actualSeriesKey)
+            range.append(VoxtrColor.accent)
+            domain.append(Self.plannedSeriesKey)
+            range.append(VoxtrColor.textSecondary)
+        }
         return (domain, range)
     }
+
+    /// Plan vs Actual round: fixed, non-derived series keys for the
+    /// grouped Actual/Planned bars — unlike `trainingSeriesKey(for:)`
+    /// (one key per Sport/Activity Type category), there are always
+    /// exactly these two, so no per-instance derivation is needed.
+    private static let actualSeriesKey = "actual"
+    private static let plannedSeriesKey = "planned"
 
     /// Namespaces a Training category's stable ID into this chart's ONE
     /// shared `foregroundStyle(by:)` series-key space, alongside the
@@ -457,8 +513,20 @@ public struct DevelopmentTimelineChart: View {
             }
 
             HStack(spacing: 16) {
-                if isTrainingVisible && breakdownMode == .total {
-                    legendEntry(color: VoxtrColor.accent, label: "Training (minutes)")
+                if isTrainingVisible {
+                    if comparisonMode == .planVsActual {
+                        // Plan vs Actual round: two calm, non-evaluative
+                        // factual labels — deliberately never "success"/
+                        // "adherence"/"completion" wording or red/green
+                        // colouring (see this round's own approved
+                        // contract). Series distinguished by more than
+                        // color alone via the accessibility label/value
+                        // on each bar mark above.
+                        legendEntry(color: VoxtrColor.accent, label: "Actual (minutes)")
+                        legendEntry(color: VoxtrColor.textSecondary, label: "Planned (minutes)")
+                    } else if breakdownMode == .total {
+                        legendEntry(color: VoxtrColor.accent, label: "Training (minutes)")
+                    }
                 }
                 if isFormVisible {
                     legendEntry(color: VoxtrColor.navy, label: "Form (1–5)")
@@ -495,7 +563,35 @@ public struct DevelopmentTimelineChart: View {
         let scale = seriesColorScale
         return Chart {
             if isTrainingVisible {
-                if breakdownMode == .total {
+                if comparisonMode == .planVsActual {
+                    // Plan vs Actual round: two independent, GROUPED bars
+                    // per week (`.position(by:)` alongside
+                    // `.foregroundStyle(by:)` — Swift Charts' standard
+                    // dodged/grouped-bar technique), never stacked:
+                    // Planned and Actual are two separate factual
+                    // quantities, not additive parts of one total.
+                    // `breakdownMode` never applies here (see
+                    // `comparisonMode`'s own doc comment).
+                    ForEach(points) { point in
+                        BarMark(
+                            x: .value("Week", point.weekStart.isoString),
+                            y: .value("Minutes", point.trainingMinutes)
+                        )
+                        .position(by: .value("Series", Self.actualSeriesKey))
+                        .foregroundStyle(by: .value("Series", Self.actualSeriesKey))
+                        .accessibilityLabel("Actual")
+                        .accessibilityValue("\(point.trainingMinutes) minutes")
+
+                        BarMark(
+                            x: .value("Week", point.weekStart.isoString),
+                            y: .value("Minutes", point.plannedMinutes)
+                        )
+                        .position(by: .value("Series", Self.plannedSeriesKey))
+                        .foregroundStyle(by: .value("Series", Self.plannedSeriesKey))
+                        .accessibilityLabel("Planned")
+                        .accessibilityValue("\(point.plannedMinutes) minutes")
+                    }
+                } else if breakdownMode == .total {
                     // Unchanged from before Training Breakdown existed —
                     // the exact same single BarMark per week, direct
                     // colour, no categorical scale involvement.
@@ -632,11 +728,16 @@ public struct DevelopmentTimelineChart: View {
         let sleepValues = points.compactMap(\.sleepMean)
         var parts: [String] = ["\(points.count) weeks"]
         if isTrainingVisible {
-            parts.append("\(totalMinutes) total training minutes")
-            if breakdownMode != .total {
-                let categoryCount = presentCategories.count
-                let breakdownLabel = breakdownMode == .sport ? "Sport" : "Activity Type"
-                parts.append("broken down by \(breakdownLabel) into \(categoryCount) \(categoryCount == 1 ? "category" : "categories")")
+            if comparisonMode == .planVsActual {
+                let totalPlannedMinutes = points.reduce(0) { $0 + $1.plannedMinutes }
+                parts.append("\(totalMinutes) actual training minutes, \(totalPlannedMinutes) planned training minutes")
+            } else {
+                parts.append("\(totalMinutes) total training minutes")
+                if breakdownMode != .total {
+                    let categoryCount = presentCategories.count
+                    let breakdownLabel = breakdownMode == .sport ? "Sport" : "Activity Type"
+                    parts.append("broken down by \(breakdownLabel) into \(categoryCount) \(categoryCount == 1 ? "category" : "categories")")
+                }
             }
         }
         if isFormVisible {

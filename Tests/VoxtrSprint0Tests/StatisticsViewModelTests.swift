@@ -6,6 +6,7 @@ import VoxtrCoreContracts
 @testable import VoxtrAppShell
 import VoxtrAthleteDomain
 import VoxtrParentDomain
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -63,7 +64,12 @@ struct StatisticsViewModelTests {
 
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let viewModel = StatisticsRootViewModel(
             statisticsService: statisticsService, athleteRepository: athleteRepository, workspaceId: staged.workspace.workspaceId
         )
@@ -125,7 +131,12 @@ struct StatisticsViewModelTests {
         )
 
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let viewModel = StatisticsRootViewModel(
             statisticsService: statisticsService, athleteRepository: athleteRepository, workspaceId: staged.workspace.workspaceId
         )
@@ -155,7 +166,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
 
@@ -181,7 +197,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
 
@@ -207,7 +228,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 3, day: 31)
 
@@ -262,7 +288,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let today = LocalDate(year: 2026, month: 8, day: 1)
 
@@ -339,7 +370,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         // Just outside the month on both sides — must not contribute.
@@ -385,7 +421,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let football = SportId()
         // Sport filter catalog refinement round: `football` must have
@@ -434,7 +475,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let football = SportId()
         _ = try trainingService.logActivity(
@@ -469,7 +515,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let football = SportId()
         let neverRecorded = SportId()
@@ -514,7 +565,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let football = SportId()
         _ = try trainingService.logActivity(
@@ -557,7 +613,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let hockey = SportId()
         let football = SportId()
@@ -595,7 +656,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
@@ -616,6 +682,46 @@ struct StatisticsViewModelTests {
         #expect(viewModel.loadState == loadStateBefore)
     }
 
+    // MARK: - Required ViewModel test 14: Plan vs Actual presentation-mode state
+
+    /// Required test 14: `timelineComparisonMode` defaults to the calm/
+    /// default `.actual` mode and, like every other presentation-only
+    /// toggle above, changing it never reloads or alters the underlying
+    /// `StatisticsAthleteSummary` — the same shared, non-persisted,
+    /// side-effect-free `AthleteStatisticsViewModel` state portrait and
+    /// fullscreen both bind to.
+    @Test("timelineComparisonMode defaults to .actual and changing it never reloads or alters the underlying Statistics data")
+    @MainActor
+    func timelineComparisonModeDefaultsToActualAndNeverMutatesUnderlyingData() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        #expect(viewModel.timelineComparisonMode == .actual)
+        viewModel.load()
+        let loadStateBefore = viewModel.loadState
+
+        viewModel.timelineComparisonMode = .planVsActual
+
+        #expect(viewModel.loadState == loadStateBefore)
+    }
+
     // MARK: - Required ViewModel test 11: no-data is distinct from error
 
     @Test("An athlete with no data in the period loads as .loaded with factual zeroes, never .failed")
@@ -625,7 +731,12 @@ struct StatisticsViewModelTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         let viewModel = AthleteStatisticsViewModel(

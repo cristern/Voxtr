@@ -43,7 +43,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -75,7 +80,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -112,7 +122,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -138,7 +153,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
         let football = SportId()
@@ -171,7 +191,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -202,7 +227,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
         let football = SportId()
@@ -243,7 +273,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
         let football = SportId()
@@ -284,7 +319,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday; this spans exactly 3 canonical weeks:
         // Mar 2-8, Mar 9-15, Mar 16-22.
@@ -328,7 +368,12 @@ struct StatisticsServiceTests {
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
         let reflectionService = ReflectionService(repository: reflectionRepository)
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -374,7 +419,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -408,7 +458,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let siblingId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
@@ -483,7 +538,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let intervalStart = LocalDate(year: 2026, month: 3, day: 1)
         let intervalEnd = LocalDate(year: 2026, month: 3, day: 31)
@@ -526,7 +586,11 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -564,7 +628,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday; this spans exactly 2 canonical weeks.
         let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
@@ -599,7 +668,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
 
@@ -635,7 +709,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         // 2026-03-02 is a Monday — all three fixtures below fall in the
         // SAME canonical week (Mar 2-8).
@@ -684,7 +763,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
         let football = SportId()
@@ -728,7 +812,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         // Spans two canonical weeks: Mar 2-8 and Mar 9-15.
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 15)
@@ -771,7 +860,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
         let swimming = SportId()
@@ -815,7 +909,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let siblingId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
@@ -869,7 +968,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
 
@@ -900,7 +1004,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
         let football = SportId()
@@ -942,7 +1051,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
 
@@ -982,7 +1096,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
         let football = SportId()
@@ -1021,7 +1140,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
 
@@ -1048,7 +1172,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 8)
         let football = SportId()
@@ -1088,7 +1217,11 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let hockey = SportId()
         let football = SportId()
@@ -1134,7 +1267,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let hockey = SportId()
 
@@ -1161,7 +1299,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         _ = try trainingService.logActivity(
@@ -1185,7 +1328,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
         let hockey = SportId()
         let football = SportId()
@@ -1219,7 +1367,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         _ = try trainingService.logActivity(
@@ -1255,7 +1408,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         _ = try trainingService.logActivity(
@@ -1283,7 +1441,12 @@ struct StatisticsServiceTests {
         let container = try controller.makeModelContainer()
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         // Team Training: old history, well over a year before "today".
@@ -1313,7 +1476,11 @@ struct StatisticsServiceTests {
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
         let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
-        let statisticsService = StatisticsService(trainingService: trainingService, reflectionService: reflectionService)
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
         let athleteId = AthleteId()
 
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
@@ -1327,5 +1494,434 @@ struct StatisticsServiceTests {
 
         #expect(available.isEmpty)
         #expect(!available.contains(.individualTraining))
+    }
+
+    // MARK: - Plan vs Actual
+
+    /// Required test 1: planned count/minutes aggregation — several
+    /// planned activities in the interval, all with a recorded planned
+    /// duration, produce the correct count and minute sum.
+    @Test("Plan vs Actual: planned activity count and minutes aggregate correctly")
+    @MainActor
+    func plannedActivityCountAndMinutesAggregateCorrectly() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        for (day, duration) in [(3, 60), (5, 30), (7, 45)] {
+            _ = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Session", localDate: LocalDate(year: 2026, month: 3, day: day),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: duration
+            )
+        }
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 3)
+        #expect(summary.plannedMinutes == 135)
+    }
+
+    /// Required test 2: a planned activity with no recorded planned
+    /// duration still counts as one planned activity, but never
+    /// fabricates a minutes contribution.
+    @Test("Plan vs Actual: a planned activity with no duration counts toward planned count but not planned minutes")
+    @MainActor
+    func plannedActivityWithoutDurationCountsButContributesNoMinutes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Session, no duration set", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 0)
+    }
+
+    /// Required test 4: Plan and Actual are two independent factual
+    /// series — a divergence between them is reported exactly, never
+    /// collapsed into a synthetic difference/percentage.
+    @Test("Plan vs Actual: Planned and Actual report their exact, independent factual values")
+    @MainActor
+    func plannedAndActualReportExactIndependentValues() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        for (day, duration) in [(3, 50), (5, 50), (7, 50)] {
+            _ = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Planned session", localDate: LocalDate(year: 2026, month: 3, day: day),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: duration
+            )
+        }
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 50, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 50, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 3)
+        #expect(summary.plannedMinutes == 150)
+        #expect(summary.performedActivityCount == 2)
+        #expect(summary.totalActualMinutes == 100)
+    }
+
+    /// Required test 5: Plan and Actual land in their correct canonical
+    /// Monday-start weekly buckets, independently of each other.
+    @Test("Plan vs Actual: Planned and Actual land in the correct canonical weekly buckets")
+    @MainActor
+    func plannedAndActualLandInCorrectWeeklyBuckets() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        // Two canonical Monday-start weeks: Mar 2 and Mar 9, 2026.
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 15)
+        let week1 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        let week2 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 9))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: week1.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Week 1 plan", localDate: LocalDate(year: 2026, month: 3, day: 4),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: week2.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Week 2 plan", localDate: LocalDate(year: 2026, month: 3, day: 11),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 70
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 25, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        let week1Bucket = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 2) })
+        let week2Bucket = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 9) })
+        #expect(week1Bucket.plannedActivityCount == 1)
+        #expect(week1Bucket.plannedMinutes == 40)
+        #expect(week1Bucket.totalActualMinutes == 0)
+        #expect(week2Bucket.plannedActivityCount == 1)
+        #expect(week2Bucket.plannedMinutes == 70)
+        #expect(week2Bucket.totalActualMinutes == 25)
+    }
+
+    /// Required tests 6-8: Sport and Activity Type filters apply AND
+    /// semantics identically to Planned and Actual — only matching
+    /// planned+actual data contributes when a filter is selected.
+    @Test("Plan vs Actual: Sport and Activity Type filters apply identical AND semantics to Planned and Actual")
+    @MainActor
+    func sportAndActivityTypeFiltersApplyIdenticallyToPlannedAndActual() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let swimming = SportId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        // Matching: Hockey + Team Training.
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: hockey, plannedDurationMinutes: 60
+        )
+        // Non-matching: Swimming + Team Training.
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 4),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: swimming, plannedDurationMinutes: 60
+        )
+        // Non-matching: Hockey + Individual Training (wrong Activity Type).
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: nil, localDate: LocalDate(year: 2026, month: 3, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: hockey, plannedDurationMinutes: 60
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .teamTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed
+        )
+
+        let filter = StatisticsFilter(sportId: hockey, activityType: .teamTraining)
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound, filter: filter,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 60)
+        #expect(summary.performedActivityCount == 1)
+        #expect(summary.totalActualMinutes == 55)
+    }
+
+    /// Required test 9: a week with no plan still reports Actual
+    /// factually, with Planned reporting a genuine zero.
+    @Test("Plan vs Actual: a plan-less week reports Actual factually and Planned as zero")
+    @MainActor
+    func planLessWeekReportsFactualActualAndZeroPlanned() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        // No WeekPlan is ever created for this athlete/week.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 0)
+        #expect(summary.plannedMinutes == 0)
+        #expect(summary.performedActivityCount == 1)
+        #expect(summary.totalActualMinutes == 40)
+    }
+
+    /// Required test 10: a week with a plan but nothing performed
+    /// reports Planned factually, with Actual reporting a genuine zero.
+    @Test("Plan vs Actual: an actual-less week reports Planned factually and Actual as zero")
+    @MainActor
+    func actualLessWeekReportsFactualPlannedAndZeroActual() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Planned but never logged", localDate: LocalDate(year: 2026, month: 3, day: 4),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 45
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 45)
+        #expect(summary.performedActivityCount == 0)
+        #expect(summary.totalActualMinutes == 0)
+    }
+
+    /// Required test 11 (critical): a planned activity dated after
+    /// `today`, inside an otherwise-selected current-month interval,
+    /// must not contribute to historical Plan vs Actual — Statistics
+    /// never lets future planning distort "what already happened."
+    @Test("Plan vs Actual: a future planned activity within the current period does not contribute")
+    @MainActor
+    func futurePlannedActivityWithinCurrentPeriodDoesNotContribute() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        // The full current calendar month, March 2026 — `today` (Mar 15)
+        // falls in the middle of it, exactly the "still in progress"
+        // shape this clamp exists for.
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let today = LocalDate(year: 2026, month: 3, day: 15)
+        let week1 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        let week4 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 30))
+        // Past/today-relative plan: must count.
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: week1.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Already happened window", localDate: LocalDate(year: 2026, month: 3, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
+        )
+        // Future plan (after `today`, later in the same selected month):
+        // must NOT count.
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: week4.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Future plan", localDate: LocalDate(year: 2026, month: 3, day: 30),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 90
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: today, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 40)
+        let futureWeekBucket = try #require(summary.weeklyBuckets.first { $0.weekStart == LocalDate(year: 2026, month: 3, day: 30) })
+        #expect(futureWeekBucket.plannedActivityCount == 0)
+        #expect(futureWeekBucket.plannedMinutes == 0)
+    }
+
+    /// Required test 12: a genuinely historical, already-completed
+    /// calendar month is never incorrectly clamped to "today's"
+    /// day-of-month — every planned activity in that past month counts,
+    /// including ones dated late in the month.
+    @Test("Plan vs Actual: a historical calendar month is not clamped to today's day-of-month")
+    @MainActor
+    func historicalCalendarMonthIsNotClampedToTodaysDayOfMonth() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        // A fully past month, viewed well after it ended — `today`
+        // (Aug 28) has a day-of-month (28) that must have no bearing on
+        // which March days count.
+        let interval = LocalDate(year: 2026, month: 3, day: 1)...LocalDate(year: 2026, month: 3, day: 31)
+        let today = LocalDate(year: 2026, month: 8, day: 28)
+        let lastWeek = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 30))
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: lastWeek.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Last day of a past month", localDate: LocalDate(year: 2026, month: 3, day: 31),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 30
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: today, calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 30)
+    }
+
+    /// Required test 13: sum of weekly planned counts/minutes equals the
+    /// summary-level planned count/minutes — one aggregation path, never
+    /// two disagreeing totals.
+    @Test("Plan vs Actual: weekly planned totals sum to the summary-level planned totals")
+    @MainActor
+    func weeklyPlannedTotalsSumToSummaryPlannedTotals() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService
+        )
+        let athleteId = AthleteId()
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 22)
+        let week1 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        let week2 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 9))
+        let week3 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 16))
+        for (weekPlan, day, duration) in [(week1, 3, 30), (week2, 10, 45), (week3, 18, 60)] {
+            _ = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Session", localDate: LocalDate(year: 2026, month: 3, day: day),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: duration
+            )
+        }
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        let weeklyPlannedCount = summary.weeklyBuckets.reduce(0) { $0 + $1.plannedActivityCount }
+        let weeklyPlannedMinutes = summary.weeklyBuckets.reduce(0) { $0 + $1.plannedMinutes }
+        #expect(weeklyPlannedCount == summary.plannedActivityCount)
+        #expect(weeklyPlannedMinutes == summary.plannedMinutes)
+        #expect(summary.plannedActivityCount == 3)
+        #expect(summary.plannedMinutes == 135)
     }
 }

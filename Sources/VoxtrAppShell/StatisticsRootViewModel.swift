@@ -70,7 +70,8 @@ public final class StatisticsRootViewModel {
                 let summary = try statisticsService.athleteSummary(
                     forAthlete: athlete.athleteId,
                     from: interval.lowerBound,
-                    through: interval.upperBound
+                    through: interval.upperBound,
+                    today: today
                 )
                 return AthleteCard(athleteId: athlete.athleteId, displayName: athlete.givenName, summary: summary)
             }

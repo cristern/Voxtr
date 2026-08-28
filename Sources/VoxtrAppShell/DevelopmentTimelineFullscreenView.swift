@@ -104,7 +104,10 @@ struct DevelopmentTimelineFullscreenView: View {
                             sports: sports,
                             identifierPrefix: "athleteStatisticsTimelineFullscreen"
                         )
-                        breakdownModePicker
+                        comparisonModePicker
+                        if viewModel.timelineComparisonMode == .actual {
+                            breakdownModePicker
+                        }
                         seriesToggles
                         DevelopmentTimelineChart(
                             points: DevelopmentTimelinePoint.points(from: summary, sports: sports),
@@ -114,7 +117,8 @@ struct DevelopmentTimelineFullscreenView: View {
                             intervalStart: summary.intervalStart,
                             intervalEnd: summary.intervalEnd,
                             chartHeight: max(240, geometry.size.height - 120),
-                            breakdownMode: viewModel.trainingBreakdownMode
+                            breakdownMode: viewModel.trainingBreakdownMode,
+                            comparisonMode: viewModel.timelineComparisonMode
                         )
                         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.developmentTimeline")
                     }
@@ -140,6 +144,23 @@ struct DevelopmentTimelineFullscreenView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.trainingBreakdownPicker")
+    }
+
+    /// The SAME Plan vs Actual comparison control as Athlete Statistics,
+    /// bound to the SAME shared `viewModel.timelineComparisonMode` — no
+    /// second, fullscreen-only comparison state. Changing it here stays
+    /// reflected after returning to Athlete Statistics, and vice versa.
+    private var comparisonModePicker: some View {
+        Picker("Training View", selection: Binding(
+            get: { viewModel.timelineComparisonMode },
+            set: { viewModel.timelineComparisonMode = $0 }
+        )) {
+            ForEach(TimelineComparisonMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.timelineComparisonPicker")
     }
 
     /// The SAME Training/Form/Sleep toggles as the embedded Athlete

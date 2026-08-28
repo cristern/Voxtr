@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCoreContracts
+import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 
@@ -44,6 +45,24 @@ public struct StatisticsFilter: Hashable, Sendable {
     public static let none = StatisticsFilter()
 
     fileprivate func matches(_ activity: LoggedActivity) -> Bool {
+        if let sportId, activity.sportId != sportId.rawValue {
+            return false
+        }
+        if let activityType, activity.activityType != activityType {
+            return false
+        }
+        return true
+    }
+
+    /// Plan vs Actual round: the exact same AND-of-independent-fields
+    /// matching rule as `matches(_ activity: LoggedActivity)` above,
+    /// applied to Planning's own `PlannedActivity` instead — the same
+    /// selected Sport/Activity Type filter narrows both the Plan side
+    /// and the Actual side identically (never a filtered Actual compared
+    /// against an unfiltered Plan). `PlannedActivity.sportId` is a raw
+    /// `UUID?`, matching `LoggedActivity.sportId`'s own storage — the
+    /// same "nil means no Sport" convention applies on both sides.
+    fileprivate func matches(_ activity: PlannedActivity) -> Bool {
         if let sportId, activity.sportId != sportId.rawValue {
             return false
         }
@@ -160,6 +179,24 @@ public struct StatisticsWeekBucket: Equatable, Sendable {
     /// `ActivityType.allCases`'s own fixed declaration order — the one
     /// canonical, deterministic ordering this enum already establishes.
     public let trainingByActivityType: [ActivityTypeTrainingMinutes]
+    /// Plan vs Actual round: how many `PlannedActivity` rows genuinely
+    /// existed (canonical Planning truth, never reconstructed from
+    /// Training) with `localDate` inside this week AND inside the
+    /// requested interval — independent of whether they were ever
+    /// performed. A planned activity later Missed/Cancelled on the
+    /// Actual side still counts here; this field never subtracts for
+    /// that. See `StatisticsAthleteSummary.plannedActivityCount`'s own
+    /// doc comment for the full future-date clamp/filter contract this
+    /// shares. Default `0` preserves every call site/test predating
+    /// Plan vs Actual.
+    public let plannedActivityCount: Int
+    /// Sum of `PlannedActivity.plannedDurationMinutes` across the SAME
+    /// planned activities `plannedActivityCount` counts — a planned
+    /// activity with no recorded planned duration (a legitimately
+    /// optional field) contributes to the count above but never a
+    /// fabricated/inferred/default minutes value here. Default `0`
+    /// preserves every call site/test predating Plan vs Actual.
+    public let plannedMinutes: Int
 
     public init(
         weekStart: LocalDate,
@@ -168,7 +205,9 @@ public struct StatisticsWeekBucket: Equatable, Sendable {
         form: StatisticsAggregate,
         sleep: StatisticsAggregate,
         trainingBySport: [SportTrainingMinutes] = [],
-        trainingByActivityType: [ActivityTypeTrainingMinutes] = []
+        trainingByActivityType: [ActivityTypeTrainingMinutes] = [],
+        plannedActivityCount: Int = 0,
+        plannedMinutes: Int = 0
     ) {
         self.weekStart = weekStart
         self.totalActualMinutes = totalActualMinutes
@@ -177,6 +216,8 @@ public struct StatisticsWeekBucket: Equatable, Sendable {
         self.sleep = sleep
         self.trainingBySport = trainingBySport
         self.trainingByActivityType = trainingByActivityType
+        self.plannedActivityCount = plannedActivityCount
+        self.plannedMinutes = plannedMinutes
     }
 }
 
@@ -203,6 +244,29 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
     public let weeklyBuckets: [StatisticsWeekBucket]
     public let form: StatisticsAggregate
     public let sleep: StatisticsAggregate
+    /// Plan vs Actual round: how many canonical `PlannedActivity` rows
+    /// (Planning's own truth — never reconstructed from Training/
+    /// `LoggedActivity`) exist with `localDate` inside
+    /// `[intervalStart, min(intervalEnd, today)]` and matching `filter`
+    /// — independent of whether performed; a planned activity later
+    /// Missed/Cancelled on the Actual side still counts here. The
+    /// `min(intervalEnd, today)` clamp is deliberate: Statistics is
+    /// "understand what already happened," so a rolling/calendar-month
+    /// period that extends into the future (a current, still-in-progress
+    /// calendar month) must never let planning done for those not-yet-
+    /// arrived days distort a historical comparison — see
+    /// `athleteSummary(today:)`'s own doc comment for the exact rule.
+    /// `.rolling` periods already end exactly at `today` (see
+    /// `StatisticsPeriod.interval(today:)`), so this clamp only ever
+    /// changes anything for `.calendarMonth`.
+    public let plannedActivityCount: Int
+    /// Sum of `PlannedActivity.plannedDurationMinutes` across the SAME
+    /// planned activities `plannedActivityCount` counts — never
+    /// fabricated/inferred for a planned activity with no recorded
+    /// planned duration (a legitimately optional field); such an
+    /// activity still contributes to `plannedActivityCount` above, just
+    /// not to this sum.
+    public let plannedMinutes: Int
 
     public init(
         athleteId: AthleteId,
@@ -213,7 +277,9 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
         performedActivityCount: Int,
         weeklyBuckets: [StatisticsWeekBucket],
         form: StatisticsAggregate,
-        sleep: StatisticsAggregate
+        sleep: StatisticsAggregate,
+        plannedActivityCount: Int = 0,
+        plannedMinutes: Int = 0
     ) {
         self.athleteId = athleteId
         self.intervalStart = intervalStart
@@ -224,6 +290,8 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
         self.weeklyBuckets = weeklyBuckets
         self.form = form
         self.sleep = sleep
+        self.plannedActivityCount = plannedActivityCount
+        self.plannedMinutes = plannedMinutes
     }
 }
 
@@ -233,10 +301,20 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
 public final class StatisticsService {
     private let trainingService: TrainingService
     private let reflectionService: ReflectionService
+    /// Plan vs Actual round: Planning is the authoritative owner of
+    /// planned-activity truth (see `athleteSummary`'s own doc comment) —
+    /// added as a third composed domain service, the same "smallest
+    /// maintainable dependency" role `trainingService`/`reflectionService`
+    /// already fill. Statistics still owns no persisted state of its own
+    /// and never mutates through this dependency — only the read-only
+    /// `fetchWeekPlan(forAthlete:weekStart:)`/`fetchPlannedActivities(forWeekPlan:)`
+    /// passthroughs are ever called.
+    private let planningService: PlanningService
 
-    public init(trainingService: TrainingService, reflectionService: ReflectionService) {
+    public init(trainingService: TrainingService, reflectionService: ReflectionService, planningService: PlanningService) {
         self.trainingService = trainingService
         self.reflectionService = reflectionService
+        self.planningService = planningService
     }
 
     /// The one entry point this foundation exposes: everything a later
@@ -248,11 +326,20 @@ public final class StatisticsService {
     /// `FamilyHomeViewModel`/`AthleteFamilyManagementViewModel` today),
     /// and duplicating "who is active" here would be exactly the kind
     /// of second, competing read this foundation must not introduce.
+    /// Plan vs Actual round: `today` is the caller's own already-computed
+    /// "current day" (`AthleteStatisticsViewModel.today`, the SAME
+    /// reference date `period.interval(today:)` was built from) — never
+    /// re-derived here from `Date.now`, so the Planned side's future-date
+    /// clamp (see below) can never disagree with the interval the caller
+    /// actually requested. Defaults to a fresh `TrainingPlanningCoordinationService
+    /// .today()` only for callers (and tests) that don't need to inject a
+    /// deterministic reference date.
     public func athleteSummary(
         forAthlete athleteId: AthleteId,
         from intervalStart: LocalDate,
         through intervalEnd: LocalDate,
         filter: StatisticsFilter = .none,
+        today: LocalDate = TrainingPlanningCoordinationService.today(),
         calendar: Calendar = .current
     ) throws -> StatisticsAthleteSummary {
         let (startDate, endExclusive) = Self.dateBounds(from: intervalStart, through: intervalEnd, calendar: calendar)
@@ -312,6 +399,35 @@ public final class StatisticsService {
         let sleepValues = dailyStatuses.compactMap(\.sleepQuality)
         let sleep = StatisticsAggregate.of(sleepValues)
 
+        // Plan vs Actual round: Planning is the sole authoritative owner
+        // of planned-activity truth — every planned count/minute here
+        // comes from canonical `PlannedActivity` rows fetched through
+        // `planningService`, never reconstructed from `LoggedActivity`
+        // metadata. `plannedIntervalEnd` is the future-date clamp: a
+        // `.rolling` period's own `intervalEnd` already IS `today` (see
+        // `StatisticsPeriod.interval(today:)`), so this only ever
+        // narrows a `.calendarMonth` period that includes still-upcoming
+        // days in the current month — those days' existing plans must
+        // not be counted as "what happened" in a screen whose whole
+        // purpose is understanding the past. `intervalStart > plannedIntervalEnd`
+        // (an entirely-future selected period) yields an empty planned
+        // set rather than walking any weeks at all.
+        let plannedIntervalEnd = min(intervalEnd, today)
+        let plannedActivities: [PlannedActivity]
+        if intervalStart <= plannedIntervalEnd {
+            let plannedWeekStarts = Self.weekStarts(from: intervalStart, through: plannedIntervalEnd)
+            plannedActivities = try Self.fetchPlannedActivities(
+                planningService: planningService,
+                forAthlete: athleteId,
+                weekStarts: plannedWeekStarts
+            )
+            .filter { $0.localDate >= intervalStart && $0.localDate <= plannedIntervalEnd && filter.matches($0) }
+        } else {
+            plannedActivities = []
+        }
+        let plannedActivityCount = plannedActivities.count
+        let plannedMinutes = plannedActivities.compactMap(\.plannedDurationMinutes).reduce(0, +)
+
         // Weekly buckets: computed AFTER `reflectionByLoggedActivityId`/
         // `dailyStatuses` above so each week's Form/Sleep can reuse those
         // same already-fetched, already-joined values — never a second,
@@ -321,10 +437,14 @@ public final class StatisticsService {
         // Form exactly the way it narrows the interval-level Form above;
         // `dailyStatuses` is the SAME unfiltered read Sleep uses above,
         // so weekly Sleep is never narrowed by `filter` either.
+        // `plannedActivities` is the SAME already-filtered/clamped set
+        // `plannedActivityCount`/`plannedMinutes` above are computed
+        // from — one aggregation path, never a second planned read.
         let weeklyBuckets = Self.weeklyBuckets(
             for: performed,
             reflectionByLoggedActivityId: reflectionByLoggedActivityId,
             dailyStatuses: dailyStatuses,
+            plannedActivities: plannedActivities,
             from: intervalStart,
             through: intervalEnd,
             calendar: calendar
@@ -339,8 +459,34 @@ public final class StatisticsService {
             performedActivityCount: performed.count,
             weeklyBuckets: weeklyBuckets,
             form: form,
-            sleep: sleep
+            sleep: sleep,
+            plannedActivityCount: plannedActivityCount,
+            plannedMinutes: plannedMinutes
         )
+    }
+
+    /// Plan vs Actual round: every canonical `PlannedActivity` row that
+    /// could possibly fall inside `weekStarts` — walks each week's own
+    /// `WeekPlan` (fetched READ-ONLY via `PlanningService.fetchWeekPlan(forAthlete:weekStart:)`,
+    /// which never creates one — a week nobody has ever opened in Weekly
+    /// Plan simply contributes nothing here, exactly as it should) and
+    /// collects its `PlannedActivity` rows. The caller is responsible for
+    /// the final interval/future-date/filter narrowing (see
+    /// `athleteSummary` above) — this helper only ever fetches, it never
+    /// filters, matching every other raw-fetch step in this service.
+    private static func fetchPlannedActivities(
+        planningService: PlanningService,
+        forAthlete athleteId: AthleteId,
+        weekStarts: [LocalDate]
+    ) throws -> [PlannedActivity] {
+        var result: [PlannedActivity] = []
+        for weekStart in weekStarts {
+            guard let weekPlan = try planningService.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else {
+                continue
+            }
+            result.append(contentsOf: try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId))
+        }
+        return result
     }
 
     /// Sport filter catalog refinement round: the stable `SportId`s this
@@ -467,10 +613,19 @@ public final class StatisticsService {
     /// used for the interval-level Form/Sleep aggregates — passed in
     /// rather than re-fetched, so weekly and interval-level Form/Sleep
     /// can never disagree about what data they saw.
+    /// Plan vs Actual round: `plannedActivities` must already be the
+    /// SAME fully interval/future-clamped/filter-narrowed set
+    /// `athleteSummary`'s own `plannedActivityCount`/`plannedMinutes`
+    /// are computed from — never re-filtered here, so weekly and
+    /// interval-level planned totals can never disagree about which
+    /// activities counted (the same "passed in, not re-derived"
+    /// contract `reflectionByLoggedActivityId`/`dailyStatuses` already
+    /// establish above).
     private static func weeklyBuckets(
         for activities: [LoggedActivity],
         reflectionByLoggedActivityId: [UUID: ActivityReflection],
         dailyStatuses: [DailyStatus],
+        plannedActivities: [PlannedActivity],
         from intervalStart: LocalDate,
         through intervalEnd: LocalDate,
         calendar: Calendar
@@ -510,8 +665,23 @@ public final class StatisticsService {
             sleepValuesByWeek[status.localDate.startOfWeek, default: []].append(sleepQuality)
         }
 
+        // Plan vs Actual round: bucketed by the SAME canonical
+        // `LocalDate.startOfWeek` boundary every other series above
+        // uses — `plannedActivities` is already fully narrowed by the
+        // caller (interval, future-date clamp, `filter`), so this is a
+        // pure bucketing pass, never a second filtering decision.
+        var plannedTotalsByWeek: [LocalDate: (minutes: Int, count: Int)] = [:]
+        for activity in plannedActivities {
+            let weekStart = activity.localDate.startOfWeek
+            var entry = plannedTotalsByWeek[weekStart] ?? (0, 0)
+            entry.minutes += activity.plannedDurationMinutes ?? 0
+            entry.count += 1
+            plannedTotalsByWeek[weekStart] = entry
+        }
+
         return weekStarts(from: intervalStart, through: intervalEnd).map { weekStart in
             let entry = totals[weekStart] ?? (0, 0)
+            let plannedEntry = plannedTotalsByWeek[weekStart] ?? (0, 0)
             return StatisticsWeekBucket(
                 weekStart: weekStart,
                 totalActualMinutes: entry.minutes,
@@ -519,7 +689,9 @@ public final class StatisticsService {
                 form: StatisticsAggregate.of(formValuesByWeek[weekStart] ?? []),
                 sleep: StatisticsAggregate.of(sleepValuesByWeek[weekStart] ?? []),
                 trainingBySport: sortedSportTotals(sportTotalsByWeek[weekStart] ?? [:]),
-                trainingByActivityType: sortedActivityTypeTotals(activityTypeTotalsByWeek[weekStart] ?? [:])
+                trainingByActivityType: sortedActivityTypeTotals(activityTypeTotalsByWeek[weekStart] ?? [:]),
+                plannedActivityCount: plannedEntry.count,
+                plannedMinutes: plannedEntry.minutes
             )
         }
     }

@@ -50,7 +50,17 @@ public struct AthleteStatisticsView: View {
                     .voxtrRowSurface()
 
                     Section {
-                        breakdownModePicker
+                        planVsActualContent(summary)
+                    } header: {
+                        VoxtrSectionHeading("Plan vs Actual")
+                    }
+                    .voxtrRowSurface()
+
+                    Section {
+                        comparisonModePicker
+                        if viewModel.timelineComparisonMode == .actual {
+                            breakdownModePicker
+                        }
                         HStack {
                             seriesToggles
                             Spacer()
@@ -63,7 +73,8 @@ public struct AthleteStatisticsView: View {
                             isSleepVisible: viewModel.isSleepSeriesVisible,
                             intervalStart: summary.intervalStart,
                             intervalEnd: summary.intervalEnd,
-                            breakdownMode: viewModel.trainingBreakdownMode
+                            breakdownMode: viewModel.trainingBreakdownMode,
+                            comparisonMode: viewModel.timelineComparisonMode
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
                     } header: {
@@ -131,6 +142,28 @@ public struct AthleteStatisticsView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                     .accessibilityIdentifier("athleteStatistics.noTrainingNote")
             }
+        }
+    }
+
+    /// Statistics — Plan vs Actual round: a compact, purely factual
+    /// summary — planned duration/count and actual duration/count for
+    /// the selected athlete + period + filters. Deliberately plain
+    /// "Planned"/"Actual" labels, never "adherence"/"completion rate"/
+    /// "target achievement" wording, and no red/green or other
+    /// evaluative coloring — this section states what was planned and
+    /// what happened, and leaves any judgement to the reader. Always
+    /// shown regardless of `viewModel.timelineComparisonMode` (that mode
+    /// only changes how the Development Timeline CHART presents this
+    /// same already-loaded data — see this round's own approved
+    /// contract: "Add Plan vs Actual Statistics presentation," a
+    /// standalone requirement distinct from the Timeline's own).
+    private func planVsActualContent(_ summary: StatisticsAthleteSummary) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            LabeledContent("Planned", value: "\(StatisticsFormatting.minutes(summary.plannedMinutes)) · \(summary.plannedActivityCount) activities")
+                .accessibilityIdentifier("athleteStatistics.planVsActual.planned")
+
+            LabeledContent("Actual", value: "\(StatisticsFormatting.minutes(summary.totalActualMinutes)) · \(summary.performedActivityCount) activities")
+                .accessibilityIdentifier("athleteStatistics.planVsActual.actual")
         }
     }
 
@@ -222,6 +255,22 @@ public struct AthleteStatisticsView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("athleteStatistics.trainingBreakdownPicker")
+    }
+
+    /// Statistics — Plan vs Actual round: "How did reality compare with
+    /// plan?" — a presentation choice, deliberately distinct from
+    /// `breakdownModePicker` above (see `TimelineComparisonMode`'s own
+    /// doc comment). Bound directly to `viewModel.timelineComparisonMode`,
+    /// the one shared state `DevelopmentTimelineFullscreenView` also
+    /// binds to.
+    private var comparisonModePicker: some View {
+        Picker("Training View", selection: $viewModel.timelineComparisonMode) {
+            ForEach(TimelineComparisonMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatistics.timelineComparisonPicker")
     }
 
     private var seriesToggles: some View {

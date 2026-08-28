@@ -215,7 +215,8 @@ public final class CompositionRoot {
         // See `StatisticsService`'s own doc comment.
         let statisticsService = StatisticsService(
             trainingService: container.resolve(TrainingService.self),
-            reflectionService: container.resolve(ReflectionService.self)
+            reflectionService: container.resolve(ReflectionService.self),
+            planningService: container.resolve(PlanningService.self)
         )
         container.register(StatisticsService.self) { statisticsService }
 

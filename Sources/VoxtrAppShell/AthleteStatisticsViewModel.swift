@@ -21,6 +21,36 @@ public enum TrainingBreakdownMode: String, CaseIterable, Identifiable, Sendable 
     }
 }
 
+/// Statistics — Plan vs Actual round: which factual question the
+/// Development Timeline's Training series is currently answering — a
+/// presentation choice only, deliberately separate from
+/// `TrainingBreakdownMode` above rather than folded into it, since the
+/// two ask genuinely different questions: `TrainingBreakdownMode`
+/// answers "what did actual training consist of?" (Total/Sport/Activity
+/// Type, always Actual-only); `TimelineComparisonMode` answers "how did
+/// reality compare with plan?" (`.actual`, the original single-series
+/// Training bar this screen always showed; `.planVsActual`, a second,
+/// factual Planned series drawn alongside it — see
+/// `DevelopmentTimelineChart`'s own doc comment for how the two bars
+/// render). `.planVsActual` never breaks Training down by Sport/Activity
+/// Type — combining both would overload the chart, per the approved V1
+/// contract — so `TrainingBreakdownMode` stays relevant only while
+/// `timelineComparisonMode == .actual`. Default `.actual` reproduces the
+/// Development Timeline exactly as it rendered before this round.
+public enum TimelineComparisonMode: String, CaseIterable, Identifiable, Sendable {
+    case actual
+    case planVsActual
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .actual: return "Actual"
+        case .planVsActual: return "Plan vs Actual"
+        }
+    }
+}
+
 /// Statistics V1 UI — backs the Athlete Statistics detail screen.
 /// Mirrors `WeeklyReviewLoadState`'s established shape (`.loading`/
 /// `.loaded(Result)`/`.failed`) — no separate "empty"/"no data" case,
@@ -84,6 +114,19 @@ public final class AthleteStatisticsViewModel {
     /// the Development Timeline's pre-existing Training bar exactly.
     public var trainingBreakdownMode: TrainingBreakdownMode = .total
 
+    /// Statistics — Plan vs Actual round: same presentation-only
+    /// contract as `trainingBreakdownMode`/the series-visibility toggles
+    /// above — changing this never triggers `load()` or alters
+    /// `loadState`/the underlying `StatisticsAthleteSummary` in any way
+    /// (`StatisticsAthleteSummary.plannedActivityCount`/`.plannedMinutes`
+    /// are already present on every loaded summary regardless of this
+    /// mode; this only changes how the Development Timeline presents
+    /// them). Default `.actual` reproduces the Development Timeline's
+    /// pre-existing Training bar exactly. A plain `public var`, shared
+    /// identically by portrait (`AthleteStatisticsView`) and fullscreen
+    /// (`DevelopmentTimelineFullscreenView`) — never persisted.
+    public var timelineComparisonMode: TimelineComparisonMode = .actual
+
     private let statisticsService: StatisticsService
     /// Fixed for this screen's lifetime once loaded — a period/filter
     /// change recomputes the interval from the SAME reference date
@@ -144,11 +187,17 @@ public final class AthleteStatisticsViewModel {
                 self.activityTypeFilter = nil
             }
             let interval = period.interval(today: today)
+            // Plan vs Actual round: `today` is the SAME reference date
+            // `interval` was just computed from — never re-derived — so
+            // the Planned side's future-date clamp inside `athleteSummary`
+            // can never disagree with the interval this ViewModel itself
+            // requested.
             let summary = try statisticsService.athleteSummary(
                 forAthlete: athleteId,
                 from: interval.lowerBound,
                 through: interval.upperBound,
-                filter: currentFilter
+                filter: currentFilter,
+                today: today
             )
             loadState = .loaded(summary)
         } catch {
