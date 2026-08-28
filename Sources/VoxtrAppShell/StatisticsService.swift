@@ -367,6 +367,24 @@ public final class StatisticsService {
         return Set(sportIds)
     }
 
+    /// Activity Type filter catalog refinement round: the exact same
+    /// availability shape as `availableSportIds(forAthlete:)` above,
+    /// keyed by the canonical `ActivityType` enum instead of `SportId`
+    /// — which Activity Types this athlete has EVER recorded performed
+    /// training as, independent of any currently selected Statistics
+    /// period/filter/Sport. `ActivityType` is never optional on
+    /// `LoggedActivity` (unlike `sportId`), so unlike Sport there is no
+    /// "no Activity Type" case to exclude — every performed activity
+    /// contributes exactly one type. One unbounded read, never
+    /// per-type probing; nothing here is persisted.
+    public func availableActivityTypes(forAthlete athleteId: AthleteId) throws -> Set<ActivityType> {
+        let activities = try trainingService.fetchLoggedActivities(forAthlete: athleteId)
+        let activityTypes = activities
+            .filter { Self.isPerformed($0.status) }
+            .map(\.activityType)
+        return Set(activityTypes)
+    }
+
     /// "Actual training" — genuinely happened, per the SAME canonical
     /// rule `TrainingValidator.requiresActualDuration(for:)`/
     /// `requiresForm(for:)` and `PlannedActivityCompletion.isGenuinelyCompleted`

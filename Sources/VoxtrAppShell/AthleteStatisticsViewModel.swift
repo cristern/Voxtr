@@ -55,6 +55,16 @@ public final class AthleteStatisticsViewModel {
     /// catalog, and never a second, View-owned availability read.
     public private(set) var availableSportIds: Set<SportId> = []
 
+    /// Activity Type filter catalog refinement round: the exact same
+    /// availability contract as `availableSportIds` above, keyed by
+    /// `ActivityType` — refreshed on every `load()`, independent of the
+    /// currently selected period/Sport/Activity Type filter (see
+    /// `StatisticsService.availableActivityTypes(forAthlete:)`'s own
+    /// doc comment). The View intersects this against
+    /// `ActivityType.selectableCases` to build the Activity Type
+    /// filter's options, preserving that canonical ordering.
+    public private(set) var availableActivityTypes: Set<ActivityType> = []
+
     /// Development Timeline series-toggle state. Deliberately plain,
     /// side-effect-free `public var`s — toggling which series render is
     /// a presentation-only concern and must never trigger a reload or
@@ -122,6 +132,16 @@ public final class AthleteStatisticsViewModel {
             // Sport.
             if let sportFilter, !available.contains(sportFilter) {
                 self.sportFilter = nil
+            }
+            // Activity Type filter catalog refinement round: same
+            // refresh-then-validate ordering as Sport immediately
+            // above, entirely independent of it — an invalid Sport
+            // resetting never touches `activityTypeFilter`, and vice
+            // versa (Sport + Activity Type stay independently ANDed).
+            let availableTypes = try statisticsService.availableActivityTypes(forAthlete: athleteId)
+            availableActivityTypes = availableTypes
+            if let activityTypeFilter, !availableTypes.contains(activityTypeFilter) {
+                self.activityTypeFilter = nil
             }
             let interval = period.interval(today: today)
             let summary = try statisticsService.athleteSummary(

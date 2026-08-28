@@ -67,12 +67,28 @@ struct StatisticsFilterMenus: View {
         return sports.first(where: { $0.sportId == sportId })?.displayName ?? "All Sports"
     }
 
+    /// Activity Type filter catalog refinement round: narrowed to the
+    /// Activity Types this athlete has actually recorded performed
+    /// Statistics history against (`viewModel.availableActivityTypes`,
+    /// refreshed by the ViewModel's own `load()`) — never the full
+    /// canonical `ActivityType.selectableCases` catalog. Filtering
+    /// (not re-sorting) `selectableCases` preserves its existing
+    /// canonical order for free — this is global athlete-history
+    /// availability, never narrowed further by the currently selected
+    /// Sport (see this round's own approved contract: the catalog is
+    /// NOT contextual/cascading).
+    private var availableActivityTypes: [ActivityType] {
+        ActivityType.selectableCases.filter { viewModel.availableActivityTypes.contains($0) }
+    }
+
     private var activityTypeFilterMenu: some View {
         Menu {
             Button("All Types") { viewModel.setActivityTypeFilter(nil) }
-            Divider()
-            ForEach(ActivityType.selectableCases, id: \.self) { type in
-                Button(type.displayName) { viewModel.setActivityTypeFilter(type) }
+            if !availableActivityTypes.isEmpty {
+                Divider()
+                ForEach(availableActivityTypes, id: \.self) { type in
+                    Button(type.displayName) { viewModel.setActivityTypeFilter(type) }
+                }
             }
         } label: {
             LabeledContent("Activity Type", value: viewModel.activityTypeFilter?.displayName ?? "All Types")
