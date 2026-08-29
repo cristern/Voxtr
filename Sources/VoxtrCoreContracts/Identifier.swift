@@ -51,6 +51,17 @@ public typealias GoalId = Identifier<GoalTag>
 public enum RecommendationTag {}
 public typealias RecommendationId = Identifier<RecommendationTag>
 
+/// Notifications V1 Activity Reminder Foundation: identifies one
+/// persisted `ActivityReminder` — the reminder intent for a single
+/// concrete `PlannedActivity` — the same stable-typed-ID pattern every
+/// other cross-domain-referenceable entity above already follows. Not
+/// in the v1.3 Domain & Data Model's own typed-ID list (that document
+/// predates this concept), but follows this file's own established
+/// convention for any entity another domain needs to address by stable
+/// identity rather than title/date matching.
+public enum ActivityReminderTag {}
+public typealias ActivityReminderId = Identifier<ActivityReminderTag>
+
 /// v1.3 Section 3: "String wrapper. Opaque platform account identifier;
 /// never used as email." Deliberately NOT built on the UUID-based
 /// `Identifier<Tag>` generic — its representation is genuinely different.

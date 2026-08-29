@@ -117,6 +117,7 @@ let package = Package(
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData", "VoxtrAppShell",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain",
+                "VoxtrNotificationsDomain",
             ]
         ),
     ]

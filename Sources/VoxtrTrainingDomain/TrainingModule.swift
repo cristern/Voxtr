@@ -22,7 +22,7 @@ public struct TrainingModule: VoxtrModule {
         let repository = TrainingRepository(modelContext: modelContainer.mainContext)
         container.register(TrainingRepository.self) { repository }
 
-        let service = TrainingService(repository: repository)
+        let service = TrainingService(repository: repository, eventBus: eventBus)
         container.register(TrainingService.self) { service }
     }
 }

@@ -153,6 +153,66 @@ public struct TimeZoneId: Hashable, Codable, Sendable, RawRepresentable {
     public var timeZone: TimeZone? { TimeZone(identifier: rawValue) }
 }
 
+/// Notifications V1 Activity Reminder Foundation: thrown by
+/// `LocalDate.absoluteDate(at:in:)` when the supplied `TimeZoneId` or the
+/// requested local date/time cannot be resolved to a real instant.
+/// Mirrors `ActivityIdentityError`'s own shape (`Error, Sendable,
+/// Equatable`, a small closed enum) — the same catchable-failure
+/// convention this file's neighboring contracts already establish,
+/// rather than a crash or a silent fallback to the device's current
+/// time zone.
+public enum LocalDateTimeConversionError: Error, Sendable, Equatable {
+    /// `timeZoneId.rawValue` is not a timezone identifier `Foundation`
+    /// recognizes (`TimeZone(identifier:)` returned `nil`).
+    case invalidTimeZoneIdentifier(String)
+    /// The timezone identifier was valid, but the given (date, time)
+    /// combination could not be resolved to an instant in it. In
+    /// practice `Calendar.date(from:)` is effectively total for valid
+    /// Gregorian components, so this is a defensive case, not one this
+    /// function's own tests expect to exercise via any real input.
+    case unresolvableLocalDateTime
+}
+
+public extension LocalDate {
+    /// The ONE canonical way to combine a calendar day, a time of day,
+    /// and an explicit IANA time zone into an absolute `Date` instant —
+    /// v1.3 Section 3's own description of `LocalTime` ("combined with
+    /// time zone at scheduling boundary") names exactly this operation,
+    /// which did not previously exist anywhere in this codebase (the
+    /// Notifications V1 Repository Audit's own finding). Every call site
+    /// that needs "when does this local date/time actually happen" —
+    /// starting with Activity Reminder scheduling — must go through this,
+    /// never hand-roll `Calendar.current`-based arithmetic of its own.
+    ///
+    /// Deterministic by construction: `timeZone` is set explicitly from
+    /// the supplied `TimeZoneId` before any component math runs, so the
+    /// result never depends on `TimeZone.current`/`Calendar.current` or
+    /// the machine's own local settings — the same "no locale-dependent
+    /// week identity" principle this file's `LocalDate.startOfWeek`
+    /// already applies to calendar-day arithmetic, extended here to
+    /// time-of-day + time zone resolution. DST is handled correctly as a
+    /// consequence of using `Foundation`'s own `Calendar`/`TimeZone`
+    /// resolution for the supplied zone, not by any special-casing here.
+    func absoluteDate(at time: LocalTime, in timeZoneId: TimeZoneId) throws -> Date {
+        guard let timeZone = timeZoneId.timeZone else {
+            throw LocalDateTimeConversionError.invalidTimeZoneIdentifier(timeZoneId.rawValue)
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = time.hour
+        components.minute = time.minute
+        components.second = 0
+        guard let date = calendar.date(from: components) else {
+            throw LocalDateTimeConversionError.unresolvableLocalDateTime
+        }
+        return date
+    }
+}
+
 /// v1.3 Section 3: "Int. Starts at 1 and increments on accepted
 /// authoritative mutation." Individual entity field tables (e.g.
 /// WeekPlan.revision) specify plain `Int` for their own revision field —

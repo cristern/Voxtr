@@ -2,129 +2,76 @@ import Foundation
 import SwiftData
 import VoxtrCoreContracts
 
-// MARK: - NotificationRule (v1.3 Section 13.1)
+// MARK: - ActivityReminder
 
+/// Notifications V1 Activity Reminder Foundation.
+///
+/// Review of the prior scaffold (`NotificationRule`/`ScheduledReminder`/
+/// `DeliveryRecord`, v1.3 Section 13): none of the three was ever
+/// registered in `AppSchema.modelTypes` (confirmed by the Notifications
+/// V1 Repository Audit), so nothing in the running app has ever
+/// persisted or read one — they were schema-only scaffolding, not an
+/// approved, activated product decision. Their shapes also do not fit
+/// the approved V1 concept: `NotificationRule` models a general,
+/// recurring time-of-day rule (`ruleType`, `localTime`) with no field
+/// tying it to one concrete `PlannedActivity`; `ScheduledReminder`
+/// persists rendering content (`titleKey`/`bodyKey`/`bodyArguments`) and
+/// delivery `state`, which the approved V1 contract explicitly says not
+/// to persist (content is resolved fresh from canonical Planning truth
+/// at scheduling time; delivery history is explicitly out of scope);
+/// `DeliveryRecord` IS the delivery-history model V1 is told not to add.
+/// Reusing any of the three would have meant either misusing their
+/// shape or immediately stripping most of their fields — replacing them
+/// outright with the smallest model that matches the approved concept
+/// is the cleaner, more maintainable outcome, and avoids leaving three
+/// misleading, never-activated parallel models sitting beside the real
+/// one. `ReminderDeliveryState` (their shared backing enum, declared in
+/// `VoxtrCoreContracts/SharedEnums.swift`) is removed alongside them —
+/// nothing else in this codebase ever referenced it.
+///
+/// `ActivityReminder` is the ONE persistent concept this slice needs:
+/// "the user wants a reminder for this specific planned activity, with
+/// this lead time." It references `PlannedActivity` by stable typed ID
+/// only — Planning remains the sole owner of the activity's own title,
+/// date, start time, sport, and activity type; none of that is copied
+/// here (see this task's own explicit "do not persist copied Planning
+/// truth" instruction). The row's mere existence for a given
+/// `plannedActivityId` IS the "reminder is active" state — there is no
+/// separate enabled/disabled flag, because this slice has no lifecycle
+/// that needs one: creating a reminder inserts this row: the activity
+/// being deleted, or its linked training being logged early, removes it
+/// (see `ActivityReminderService` / `NotificationsPlanningCoordinationService`
+/// in `VoxtrAppShell`) rather than merely flagging it inactive. No
+/// delivery-history model exists alongside it, per the approved
+/// contract.
 @Model
-public final class NotificationRule {
+public final class ActivityReminder {
     @Attribute(.unique) public var id: UUID
-    public var workspaceId: UUID
-    public var athleteId: UUID?
-    public var ruleType: String // morningBrief, eveningCheckOut, weeklyReview, doubleSessionNutrition, postHighLoadRecovery, other
-    public var enabled: Bool
-    public var localTime: LocalTime?
-    public var leadTimeMinutes: Int?
-    public var timeZoneId: TimeZoneId
-    public var createdBy: UUID
+    public var athleteId: UUID
+    public var plannedActivityId: UUID
+    public var leadTimeMinutes: Int
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
 
     public init(
-        id: UUID = UUID(),
-        workspaceId: WorkspaceId,
-        athleteId: AthleteId? = nil,
-        ruleType: String,
-        enabled: Bool = true,
-        localTime: LocalTime? = nil,
-        leadTimeMinutes: Int? = nil,
-        timeZoneId: TimeZoneId,
-        createdBy: ActorId,
+        id: ActivityReminderId = ActivityReminderId(),
+        athleteId: AthleteId,
+        plannedActivityId: PlannedActivityId,
+        leadTimeMinutes: Int,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
     ) {
-        if let lead = leadTimeMinutes { precondition((0...10080).contains(lead), "leadTimeMinutes must be 0-10080 (v1.3 Section 13.1)") }
-        self.id = id
-        self.workspaceId = workspaceId.rawValue
-        self.athleteId = athleteId?.rawValue
-        self.ruleType = ruleType
-        self.enabled = enabled
-        self.localTime = localTime
+        precondition((0...10080).contains(leadTimeMinutes), "leadTimeMinutes must be 0-10080 (0 minutes to 7 days)")
+        self.id = id.rawValue
+        self.athleteId = athleteId.rawValue
+        self.plannedActivityId = plannedActivityId.rawValue
         self.leadTimeMinutes = leadTimeMinutes
-        self.timeZoneId = timeZoneId
-        self.createdBy = createdBy.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion
     }
-}
 
-// MARK: - ScheduledReminder (v1.3 Section 13.2)
-
-@Model
-public final class ScheduledReminder {
-    @Attribute(.unique) public var id: UUID
-    public var ruleId: UUID?
-    public var athleteId: UUID?
-    public var recipientParticipantId: UUID
-    public var titleKey: String
-    public var bodyKey: String
-    public var bodyArguments: [String]
-    public var scheduledFor: Date
-    public var state: ReminderDeliveryState
-    public var deduplicationKey: String
-    public var createdAt: Date
-    public var updatedAt: Date
-    public var schemaVersion: Int
-
-    public init(
-        id: UUID = UUID(),
-        ruleId: UUID? = nil,
-        athleteId: AthleteId? = nil,
-        recipientParticipantId: UUID,
-        titleKey: String,
-        bodyKey: String,
-        bodyArguments: [String] = [],
-        scheduledFor: Date,
-        state: ReminderDeliveryState = .scheduled,
-        deduplicationKey: String,
-        createdAt: Date = .now,
-        updatedAt: Date = .now,
-        schemaVersion: Int = 1
-    ) {
-        self.id = id
-        self.ruleId = ruleId
-        self.athleteId = athleteId?.rawValue
-        self.recipientParticipantId = recipientParticipantId
-        self.titleKey = titleKey
-        self.bodyKey = bodyKey
-        self.bodyArguments = bodyArguments
-        self.scheduledFor = scheduledFor
-        self.state = state
-        self.deduplicationKey = deduplicationKey
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
-        self.schemaVersion = schemaVersion
-    }
-}
-
-// MARK: - DeliveryRecord (v1.3 Section 13.3)
-
-@Model
-public final class DeliveryRecord {
-    @Attribute(.unique) public var id: UUID
-    public var scheduledReminderId: UUID
-    public var attemptedAt: Date
-    public var state: ReminderDeliveryState // delivered, failed, suppressed
-    public var failureCode: String?
-    public var deviceIdHash: String?
-    public var schemaVersion: Int
-
-    public init(
-        id: UUID = UUID(),
-        scheduledReminderId: UUID,
-        attemptedAt: Date = .now,
-        state: ReminderDeliveryState,
-        failureCode: String? = nil,
-        deviceIdHash: String? = nil,
-        schemaVersion: Int = 1
-    ) {
-        self.id = id
-        self.scheduledReminderId = scheduledReminderId
-        self.attemptedAt = attemptedAt
-        self.state = state
-        self.failureCode = failureCode
-        self.deviceIdHash = deviceIdHash
-        self.schemaVersion = schemaVersion
-    }
+    public var activityReminderId: ActivityReminderId { ActivityReminderId(rawValue: id) }
 }

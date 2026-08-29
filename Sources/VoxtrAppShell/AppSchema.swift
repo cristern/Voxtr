@@ -7,6 +7,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrNotificationsDomain
 
 /// The set of `@Model` types the running app persists locally.
 ///
@@ -76,6 +77,14 @@ import VoxtrCoreReferenceData
 /// new frozen `VersionedSchema` + migration stage, would silently
 /// change what the CURRENT (latest) versioned schema resolves to, but
 /// would not correctly version the change.
+///
+/// Notifications V1 Activity Reminder Foundation adds `ActivityReminder.self`
+/// (`VoxtrNotificationsDomain`) — the first Notifications model type ever
+/// registered here (this file's own prior doc comment explicitly said
+/// not to, "until a sprint that actually creates them" — this is that
+/// sprint). This is a genuine model-type addition (`AppSchemaV5`, see
+/// `AppSchemaVersioning.swift`), purely additive: no existing entity or
+/// property is renamed, removed, or changed in place.
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -97,6 +106,7 @@ public enum AppSchema {
             DailyStatus.self,
             AthleteSettings.self,
             Sport.self,
+            ActivityReminder.self,
         ]
     }
 }

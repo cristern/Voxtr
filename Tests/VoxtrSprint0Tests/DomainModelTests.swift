@@ -29,6 +29,77 @@ struct IdentifierTests {
         #expect(date.isoString == "2026-03-05")
         #expect(LocalDate(isoString: "2026-03-05") == date)
     }
+
+    // MARK: - Notifications V1 Activity Reminder Foundation: LocalDate + LocalTime + TimeZoneId -> Date
+
+    @Test("absoluteDate(at:in:) resolves a normal (non-DST-transition) local date/time against an explicit IANA time zone, never the device's own current time zone")
+    func absoluteDateResolvesNormalDateInExplicitTimeZone() throws {
+        // 2026-01-05 is deep winter in the Northern Hemisphere — Europe/Oslo
+        // is CET (UTC+1) with no DST in effect, so this is the simplest
+        // possible case: one fixed, well-known offset.
+        let localDate = LocalDate(year: 2026, month: 1, day: 5)
+        let localTime = LocalTime(hour: 18, minute: 0)
+        let timeZoneId = TimeZoneId(rawValue: "Europe/Oslo")
+
+        let resolved = try localDate.absoluteDate(at: localTime, in: timeZoneId)
+
+        // Computed independently, via a UTC-anchored calendar, rather than
+        // by calling the function under test a second time — 18:00 CET
+        // (UTC+1) is 17:00 UTC.
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        let expected = utcCalendar.date(from: DateComponents(year: 2026, month: 1, day: 5, hour: 17, minute: 0))!
+        #expect(resolved == expected)
+    }
+
+    @Test("absoluteDate(at:in:) is deterministic regardless of the host's own current time zone — never falls back to TimeZone.current")
+    func absoluteDateIsDeterministicAcrossCalendarInstances() throws {
+        let localDate = LocalDate(year: 2026, month: 6, day: 15)
+        let localTime = LocalTime(hour: 7, minute: 30)
+        let timeZoneId = TimeZoneId(rawValue: "Pacific/Auckland")
+
+        let first = try localDate.absoluteDate(at: localTime, in: timeZoneId)
+        let second = try localDate.absoluteDate(at: localTime, in: timeZoneId)
+        #expect(first == second)
+
+        // Independent cross-check via a UTC-anchored calendar: 2026-06-15
+        // is Southern Hemisphere winter — Pacific/Auckland has no DST in
+        // effect in June (NZDT only runs late Sept-early Apr), a fixed
+        // NZST (UTC+12) offset. 07:30 NZST is 19:30 UTC on 2026-06-14.
+        var utcCalendar = Calendar(identifier: .gregorian)
+        utcCalendar.timeZone = TimeZone(identifier: "UTC")!
+        let expected = utcCalendar.date(from: DateComponents(year: 2026, month: 6, day: 14, hour: 19, minute: 30))!
+        #expect(first == expected)
+    }
+
+    @Test("absoluteDate(at:in:) correctly reflects a DST spring-forward transition, not naive +24h arithmetic")
+    func absoluteDateReflectsDSTSpringForwardTransition() throws {
+        // Europe's 2026 DST spring-forward is 2026-03-29 at 01:00 UTC
+        // (02:00 CET -> 03:00 CEST). The SAME local wall-clock time
+        // (10:00) on the day before vs. the day of the transition is
+        // therefore only 23 real hours apart, not 24 — proving this
+        // function resolves through the zone's actual DST rules rather
+        // than a fixed UTC offset.
+        let timeZoneId = TimeZoneId(rawValue: "Europe/Oslo")
+        let localTime = LocalTime(hour: 10, minute: 0)
+
+        let beforeTransition = try LocalDate(year: 2026, month: 3, day: 28).absoluteDate(at: localTime, in: timeZoneId)
+        let afterTransition = try LocalDate(year: 2026, month: 3, day: 29).absoluteDate(at: localTime, in: timeZoneId)
+
+        let elapsed = afterTransition.timeIntervalSince(beforeTransition)
+        #expect(elapsed == 23 * 60 * 60)
+    }
+
+    @Test("absoluteDate(at:in:) throws .invalidTimeZoneIdentifier for a TimeZoneId Foundation does not recognize, rather than silently falling back to any default")
+    func absoluteDateThrowsForInvalidTimeZoneIdentifier() {
+        let localDate = LocalDate(year: 2026, month: 6, day: 1)
+        let localTime = LocalTime(hour: 9, minute: 0)
+        let invalidTimeZoneId = TimeZoneId(rawValue: "Not/AZone")
+
+        #expect(throws: LocalDateTimeConversionError.invalidTimeZoneIdentifier("Not/AZone")) {
+            try localDate.absoluteDate(at: localTime, in: invalidTimeZoneId)
+        }
+    }
 }
 
 @Suite("Planning domain model (v1.3)")
