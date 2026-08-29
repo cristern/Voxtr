@@ -3030,4 +3030,523 @@ struct StatisticsWeekDetailTests {
 
         #expect(try weeklyReflectionService.fetchWeeklyReflections(forAthlete: athleteId).count == 1)
     }
+
+    // MARK: - Week Drilldown UX Refinement: Sport Summary
+
+    /// Required test 12: one Sport, two performed activities — totals
+    /// and count aggregate correctly.
+    @Test("weekDetail Sport Summary: one Sport aggregates minutes and count across its activities")
+    @MainActor
+    func sportSummaryOneSportAggregatesMinutesAndCount() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Practice",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Game",
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        let hockeySummary = try #require(detail.sportSummary.first)
+        #expect(hockeySummary.sportId == hockey)
+        #expect(hockeySummary.totalActualMinutes == 75)
+        #expect(hockeySummary.performedActivityCount == 2)
+    }
+
+    /// Required test 13: multiple Sports produce correct, independent
+    /// totals and counts — never blended together.
+    @Test("weekDetail Sport Summary: multiple Sports produce independent totals and counts")
+    @MainActor
+    func sportSummaryMultipleSportsAreIndependent() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let football = SportId()
+        let strength = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 240, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: strength, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 3)
+        #expect(detail.sportSummary.first { $0.sportId == hockey }?.totalActualMinutes == 240)
+        #expect(detail.sportSummary.first { $0.sportId == football }?.totalActualMinutes == 90)
+        #expect(detail.sportSummary.first { $0.sportId == strength }?.totalActualMinutes == 45)
+        #expect(detail.sportSummary.allSatisfy { $0.performedActivityCount == 1 })
+    }
+
+    /// Required test 14: a performed activity with no Sport at all
+    /// (`sportId == nil`) is bucketed into the "no Sport" identity —
+    /// never dropped.
+    @Test("weekDetail Sport Summary: a Sport-less performed activity appears in the no-Sport bucket")
+    @MainActor
+    func sportSummaryNoSportBucketIncludesSportlessActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.sportId == nil)
+        #expect(detail.sportSummary.first?.totalActualMinutes == 20)
+        #expect(detail.sportSummary.first?.performedActivityCount == 1)
+    }
+
+    /// Required tests 15 + 16 (BLOCKER-level conservation): the sum of
+    /// Sport Summary minutes/counts must exactly equal
+    /// `totalActualMinutes`/`performedActivityCount` — every activity in
+    /// exactly one bucket, never duplicated, omitted, or split.
+    @Test("weekDetail Sport Summary: minutes and count sums conserve the week's totals exactly")
+    @MainActor
+    func sportSummaryConservesWeekTotals() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let football = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .partiallyCompleted
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.map(\.totalActualMinutes).reduce(0, +) == detail.totalActualMinutes)
+        #expect(detail.sportSummary.map(\.performedActivityCount).reduce(0, +) == detail.performedActivityCount)
+        #expect(detail.totalActualMinutes == 85)
+        #expect(detail.performedActivityCount == 3)
+    }
+
+    /// Required test 17: a Sport excluded by the active Sport filter
+    /// never appears in Sport Summary — the summary reflects the SAME
+    /// already-filtered `performedActivities`, never unfiltered history.
+    @Test("weekDetail Sport Summary: a Sport excluded by the active filter does not appear")
+    @MainActor
+    func sportSummaryRespectsActiveSportFilter() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let football = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(sportId: hockey),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.sportId == hockey)
+        #expect(detail.sportSummary.map(\.totalActualMinutes).reduce(0, +) == detail.totalActualMinutes)
+    }
+
+    /// Required test 18: an Activity Type filter that removes some
+    /// activities of a Sport must also remove them from that Sport's
+    /// Summary bucket — never aggregated from unfiltered history.
+    @Test("weekDetail Sport Summary: an Activity Type filter narrows the included activities within a Sport")
+    @MainActor
+    func sportSummaryRespectsActivityTypeFilter() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 60, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            filter: StatisticsFilter(activityType: .teamTraining),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.totalActualMinutes == 60)
+        #expect(detail.sportSummary.first?.performedActivityCount == 1)
+    }
+
+    /// Required test 19: only genuinely performed statuses
+    /// (Completed/PartiallyCompleted) contribute — Missed/Cancelled are
+    /// excluded exactly as `totalActualMinutes`/`performedActivities`
+    /// already are.
+    @Test("weekDetail Sport Summary: Missed/Cancelled activities never contribute")
+    @MainActor
+    func sportSummaryExcludesMissedAndCancelled() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 999, status: .missed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 999, status: .cancelled
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.totalActualMinutes == 30)
+        #expect(detail.sportSummary.first?.performedActivityCount == 1)
+    }
+
+    /// Required test 20 (partial calendar-month edge week): Sport
+    /// Summary uses the SAME effective interval as the rest of
+    /// `weekDetail` — an activity outside the selected period's
+    /// effective slice of the canonical week must not contribute, even
+    /// though it falls in the same canonical week.
+    @Test("weekDetail Sport Summary: only activities inside the effective interval contribute on a partial calendar-month edge week")
+    @MainActor
+    func sportSummaryRespectsPartialCalendarMonthEffectiveInterval() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        // Same leading-edge-week fixture already verified elsewhere in
+        // this file: the canonical week starting 2026-07-27 straddles
+        // the July/August boundary; a selected "August" calendar-month
+        // period's effective interval for this week is only Aug 1-2.
+        let weekStart = LocalDate(year: 2026, month: 7, day: 27)
+        let augustIntervalStart = LocalDate(year: 2026, month: 8, day: 1)
+        let augustIntervalEnd = LocalDate(year: 2026, month: 8, day: 31)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Late July, outside effective interval",
+            startedAt: Self.date(2026, 7, 28), durationMinutes: 50, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Inside effective interval",
+            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: augustIntervalStart, through: augustIntervalEnd,
+            today: LocalDate(year: 2026, month: 9, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.totalActualMinutes == 35)
+        #expect(detail.sportSummary.first?.performedActivityCount == 1)
+    }
+
+    /// Required test 21: a `SportId` with no corresponding canonical
+    /// Sport reference-data entry (an "unknown" Sport, from this
+    /// service's perspective) still produces a fully factual read-model
+    /// row — `StatisticsService` never queries Sport reference data
+    /// itself, so this is inherent: it aggregates purely by the stable
+    /// `SportId`, regardless of whether that ID resolves anywhere.
+    /// ("Unknown" display-name resolution is a presentation concern —
+    /// see `WeekDrilldownView.sportSummaryDisplayName(for:)`.)
+    @Test("weekDetail Sport Summary: a SportId unresolvable in reference data still conserves its factual totals")
+    @MainActor
+    func sportSummaryUnknownSportIdStillConserves() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        // Never seeded into any Sport reference-data catalog — this
+        // service has no dependency on that catalog at all, so this is
+        // indistinguishable from any other real SportId to it.
+        let unresolvableSportId = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: unresolvableSportId, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.count == 1)
+        #expect(detail.sportSummary.first?.sportId == unresolvableSportId)
+        #expect(detail.sportSummary.first?.totalActualMinutes == 55)
+        #expect(detail.sportSummary.first?.performedActivityCount == 1)
+    }
+
+    /// Required test 22: deterministic sort order — descending
+    /// `totalActualMinutes` first (the largest factual contributor to
+    /// the week first), then ascending stable Sport-ID string as a
+    /// tie-break, with the "no Sport" bucket always last.
+    @Test("weekDetail Sport Summary: sorted by descending minutes, then stable Sport identity, no-Sport last")
+    @MainActor
+    func sportSummaryDeterministicSortOrder() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        // Deliberately created and logged out of both minutes order and
+        // UUID-string order, to prove the final order is genuinely
+        // derived from the sort rule, not insertion order.
+        let sportA = SportId()
+        let sportB = SportId()
+        let tieSportLower = min(sportA, sportB, by: { $0.rawValue.uuidString < $1.rawValue.uuidString })
+        let tieSportHigher = tieSportLower == sportA ? sportB : sportA
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        // Two Sports tied at 20 minutes each — the lower UUID string
+        // must sort first between them.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: tieSportHigher, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+        )
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: tieSportLower, activityType: .individualTraining, title: nil,
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+        )
+        // No-Sport bucket also has 20 minutes — must still sort AFTER
+        // both real Sports despite the tie.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: nil, activityType: .other, title: nil,
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed
+        )
+        // The clear largest contributor — must sort first overall.
+        let biggestSport = SportId()
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: biggestSport, activityType: .teamTraining, title: nil,
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 100, status: .completed
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.map(\.sportId) == [biggestSport, tieSportLower, tieSportHigher, nil])
+    }
+
+    /// Required test 23: an empty performed set produces an empty Sport
+    /// Summary — never a fabricated "No sport" placeholder for zero
+    /// activity.
+    @Test("weekDetail Sport Summary: an empty performed set produces an empty summary")
+    @MainActor
+    func sportSummaryEmptyForEmptyPerformedSet() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.sportSummary.isEmpty)
+    }
+
+    /// Required test 24: a planned-only activity (never performed) must
+    /// never contribute to Sport Summary — this is strictly an Actual-
+    /// side composition summary, never Plan.
+    @Test("weekDetail Sport Summary: a planned-only activity never contributes")
+    @MainActor
+    func sportSummaryExcludesPlannedOnlyActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let hockey = SportId()
+        let weekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Planned only", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), sportId: hockey, plannedDurationMinutes: 60
+        )
+
+        let detail = try statisticsService.weekDetail(
+            forAthlete: athleteId, weekStart: weekStart, within: weekStart, through: weekStart.adding(days: 6),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(detail.plannedActivityCount == 1)
+        #expect(detail.sportSummary.isEmpty)
+    }
 }

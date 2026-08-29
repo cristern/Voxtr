@@ -180,6 +180,17 @@ public struct DevelopmentTimelinePoint: Identifiable, Hashable, Sendable {
 /// noisy entry per run) is hidden — the legend below this chart is the
 /// only one shown.
 public struct DevelopmentTimelineChart: View {
+    /// Week Drilldown UX Refinement round: the chart's own transient,
+    /// view-local selection driving `.chartXSelection` below — purely a
+    /// SwiftUI gesture-recognition detail (which x-band the user's
+    /// finger currently resolves to), never persisted, never read
+    /// anywhere outside `chart`'s own modifier chain, and never a
+    /// second "which week is selected" source of truth. The ONE
+    /// navigation truth remains `AthleteStatisticsViewModel
+    /// .selectedWeekStart`, reached only by calling `onSelectWeek`
+    /// below (see that property's own doc comment).
+    @State private var chartXSelectionIsoString: String?
+
     public let points: [DevelopmentTimelinePoint]
     public let isTrainingVisible: Bool
     public let isFormVisible: Bool
@@ -237,24 +248,24 @@ public struct DevelopmentTimelineChart: View {
     /// this mode.
     public let trendMode: TimelineTrendMode
     /// Week Drilldown round: the sole entry point from Development
-    /// Timeline into Week Drilldown — a calm, explicit per-week tap
-    /// affordance rather than direct chart-mark selection. Direct mark
-    /// selection was deliberately avoided: this chart already draws
-    /// multiple overlapping mark kinds per week (Total/stacked-breakdown/
-    /// grouped-Plan-vs-Actual bars, plus Form/Sleep lines sharing the
-    /// same plot), and a week with no visible Training bar (Training
-    /// toggled off, or a genuinely zero-training week) must still be
-    /// selectable — a per-week affordance guarantees every week in
-    /// `points` is selectable identically, regardless of which series
-    /// are currently visible or which breakdown/comparison mode is
-    /// active, with no chart-selection-API ambiguity to resolve. `nil`
-    /// (the default) renders no selector at all — this chart remains
-    /// fully usable with no selection behavior for any caller that
-    /// doesn't need it. Non-`nil` for every real Development Timeline
-    /// caller (`AthleteStatisticsView`/`DevelopmentTimelineFullscreenView`,
-    /// both passing the SAME shared `AthleteStatisticsViewModel
-    /// .selectWeek(_:)`), so both surfaces get identical selection
-    /// behavior for free, never two separate implementations.
+    /// Timeline into Week Drilldown. Week Drilldown UX Refinement
+    /// round: now reached TWO ways, both converging on this ONE
+    /// closure — direct chart-bar tapping (`.chartXSelection` in
+    /// `chart`, resolving by X POSITION, never by bar ID/plotted-pixel
+    /// position/index — see `resolveWeekStart(forSelectedIsoString:points:)`)
+    /// as the primary interaction whenever it can be relied upon, and
+    /// the week chip row (`weekSelector`) as the deterministic,
+    /// accessible fallback otherwise — see `showsWeekChipRow`'s own doc
+    /// comment for exactly when each applies. Neither path is a second
+    /// selection source: both simply call this SAME closure with the
+    /// SAME canonical `weekStart`. `nil` (the default) disables both —
+    /// this chart remains fully usable with no selection behavior for
+    /// any caller that doesn't need it. Non-`nil` for every real
+    /// Development Timeline caller (`AthleteStatisticsView`/
+    /// `DevelopmentTimelineFullscreenView`, both passing the SAME
+    /// shared `AthleteStatisticsViewModel.selectWeek(_:)`), so both
+    /// surfaces get identical selection behavior for free, never two
+    /// separate implementations.
     public let onSelectWeek: ((LocalDate) -> Void)?
 
     public init(
@@ -413,6 +424,52 @@ public struct DevelopmentTimelineChart: View {
     /// factual weekly value").
     private func trendAccessibilityLabel(for weekStart: LocalDate, metric: String) -> String {
         "Week \(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart)), \(metric) trend"
+    }
+
+    // MARK: - Week Drilldown UX Refinement: direct chart selection
+
+    /// THE single, pure "which canonical `weekStart` does this selected
+    /// X-band resolve to" rule — `static` and `internal` (not
+    /// `private`), the same testability pattern `isTrendEffective`/
+    /// `contiguousRuns` above already establish. Resolves purely by
+    /// matching the SAME `weekStart.isoString` every mark in this chart
+    /// already plots on the x-axis (never a bar ID, plotted-pixel
+    /// position, or array index) back to its canonical `LocalDate` — so
+    /// a tap on ANY mark sharing that x position (a stacked Sport
+    /// segment, either side of a grouped Plan-vs-Actual pair, a Trend
+    /// line point) resolves to the exact same week identity. `nil` for
+    /// "no selection," or for an iso string that (defensively) doesn't
+    /// match any currently plotted point — never falls back to an
+    /// unrelated week.
+    static func resolveWeekStart(forSelectedIsoString isoString: String?, points: [DevelopmentTimelinePoint]) -> LocalDate? {
+        guard let isoString else { return nil }
+        return points.first { $0.weekStart.isoString == isoString }?.weekStart
+    }
+
+    /// Week Drilldown UX Refinement round: the week chip row becomes a
+    /// FALLBACK, shown only when direct chart-bar tapping cannot be
+    /// relied upon as the primary interaction — Trend mode (no factual
+    /// Training bars to tap; see this chart's own Trend View doc
+    /// comments) and "Training series hidden" (no Training marks drawn
+    /// at all, so a week with no Form/Sleep value that week may have no
+    /// mark anywhere on the x-axis). In ordinary Weekly-with-visible-
+    /// Training-bars usage, direct chart selection (`.chartXSelection`
+    /// below, resolved across the FULL fixed x-domain via `.chartXScale`
+    /// — see `chart`'s own doc comment) is primary and the chip row is
+    /// hidden, per the approved contract's own "simpler acceptable V1
+    /// rule." A zero-training week still has its own BarMark (height
+    /// zero) in `.total`/`.planVsActual` modes, and the fixed x-domain
+    /// guarantees it remains selectable even in stacked-breakdown modes
+    /// where a zero-training week draws no segment at all. `static` and
+    /// `internal` (not `private`), the same testability pattern
+    /// `isTrendEffective`/`resolveWeekStart(forSelectedIsoString:points:)`
+    /// above already establish.
+    static func showsWeekChipRow(trendMode: TimelineTrendMode, comparisonMode: TimelineComparisonMode, isTrainingVisible: Bool) -> Bool {
+        isTrendEffective(trendMode: trendMode, comparisonMode: comparisonMode) || !isTrainingVisible
+    }
+
+    private var showsWeekChipRow: Bool {
+        Self.showsWeekChipRow(trendMode: trendMode, comparisonMode: comparisonMode, isTrainingVisible: isTrainingVisible)
     }
 
     // MARK: - Training Breakdown
@@ -648,14 +705,17 @@ public struct DevelopmentTimelineChart: View {
                     .accessibilityIdentifier("developmentTimeline.noSeriesSelected")
             }
 
-            // Week Drilldown round: deliberately OUTSIDE the
-            // `hasAnyVisibleSeries` branch above — a week stays
-            // selectable even with every series toggled off, and even
-            // when it has zero Training minutes, since Form/Sleep alone
-            // can still make a week worth explaining. See `onSelectWeek`'s
-            // own doc comment for why this is a per-week tap affordance
-            // rather than direct chart-mark selection.
-            if let onSelectWeek, !points.isEmpty {
+            // Week Drilldown UX Refinement round: deliberately OUTSIDE
+            // the `hasAnyVisibleSeries` branch above — a week stays
+            // selectable even with every series toggled off (direct
+            // chart tapping has nothing to tap on in that state; the
+            // chip row is exactly the FALLBACK `showsWeekChipRow`
+            // exists for — see that property's own doc comment). Direct
+            // chart-bar tapping (`.chartXSelection` in `chart` below) is
+            // now the PRIMARY interaction whenever it can be relied
+            // upon; this row is shown only as the deterministic,
+            // accessible fallback otherwise.
+            if let onSelectWeek, !points.isEmpty, showsWeekChipRow {
                 weekSelector(onSelectWeek: onSelectWeek)
             }
 
@@ -869,6 +929,37 @@ public struct DevelopmentTimelineChart: View {
         }
         .chartForegroundStyleScale(domain: scale.domain, range: scale.range)
         .chartLegend(.hidden)
+        // Week Drilldown UX Refinement round: fixes the x-axis domain
+        // to EVERY plotted week, in order — never left to be inferred
+        // from whichever marks happen to be drawn. Without this, a
+        // genuinely zero-training week in a STACKED breakdown mode
+        // draws no BarMark segment at all (`categorySegments(for:)`
+        // returns `[]`), so nothing would register that week's x
+        // position at all, making it unselectable via `.chartXSelection`
+        // below. This one line is what makes "tap anywhere in a week's
+        // column" work for every week, in every mode, regardless of
+        // which marks are actually visible there.
+        .chartXScale(domain: points.map { $0.weekStart.isoString })
+        // Week Drilldown UX Refinement round: THE direct chart-selection
+        // mechanism — standard Swift Charts (iOS 17+) tap/drag-to-select
+        // gesture, resolving to the nearest plotted x band regardless of
+        // which mark(s) share that x position (stacked Sport segments,
+        // grouped Actual/Planned bars, a Trend line point all resolve
+        // identically — see `resolveWeekStart(forSelectedIsoString:points:)`'s
+        // own doc comment). `chartXSelectionIsoString` is purely local,
+        // transient UI-gesture state (see its own doc comment); the
+        // resolved `LocalDate` is handed to `onSelectWeek` immediately,
+        // which is this chart's ONE existing path into
+        // `AthleteStatisticsViewModel.selectWeek(_:)` — no second
+        // selection state, no reload, no persistence.
+        .chartXSelection(value: Binding(
+            get: { chartXSelectionIsoString },
+            set: { newValue in
+                chartXSelectionIsoString = newValue
+                guard let onSelectWeek, let weekStart = Self.resolveWeekStart(forSelectedIsoString: newValue, points: points) else { return }
+                onSelectWeek(weekStart)
+            }
+        ))
         .chartYScale(domain: 0...trainingAxisMax)
         .chartYAxis {
             if isTrainingVisible {
@@ -944,6 +1035,13 @@ public struct DevelopmentTimelineChart: View {
     /// `WeekIdentityFormatter.shortDateLabel` helpers the x-axis labels
     /// above already use, for a consistent "W35 / Aug 24" identity
     /// style throughout this chart.
+    ///
+    /// Week Drilldown UX Refinement round: only ever RENDERED while
+    /// `showsWeekChipRow` is true (see that property's own doc comment)
+    /// — direct chart-bar tapping is primary now; this remains the
+    /// deterministic fallback for Trend mode, "Training hidden," and,
+    /// implicitly, VoiceOver users (each chip is an ordinary, individually
+    /// accessible `Button`, unlike a chart gesture).
     private func weekSelector(onSelectWeek: @escaping (LocalDate) -> Void) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {

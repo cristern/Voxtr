@@ -84,6 +84,24 @@ public struct WeekDrilldownView: View {
                 }
                 .voxtrRowSurface()
 
+                // Week Drilldown UX Refinement round: omitted entirely
+                // when there is nothing performed this week (mirrors the
+                // Weekly Reflection section's own "omit, never a
+                // manipulative empty state" pattern below) — `sportSummary`
+                // is empty exactly when `performedActivityCount == 0`,
+                // by construction (see `StatisticsService.sportSummary(for:)`).
+                if !detail.sportSummary.isEmpty {
+                    Section {
+                        ForEach(detail.sportSummary) { summary in
+                            sportSummaryRow(summary)
+                                .accessibilityIdentifier("weekDrilldown.sportSummary.\(summary.id)")
+                        }
+                    } header: {
+                        VoxtrSectionHeading("Sport Summary")
+                    }
+                    .voxtrRowSurface()
+                }
+
                 Section {
                     if detail.plannedActivities.isEmpty {
                         Text("No planned training in this week.")
@@ -250,6 +268,29 @@ public struct WeekDrilldownView: View {
                 .font(VoxtrTypography.cardTitle)
                 .foregroundStyle(VoxtrColor.textPrimary)
             Text("\(metadataLabel(title: row.title, sportId: row.sportId, activityType: row.activityType)) · \(StatisticsFormatting.minutes(row.durationMinutes))")
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+        }
+    }
+
+    /// Week Drilldown UX Refinement round: the SAME "No sport"/"Unknown"
+    /// display convention `DevelopmentTimelinePoint.sportDisplayName(for:sports:)`
+    /// already establishes for the identical concept in Training
+    /// Breakdown — reimplemented locally (rather than shared) because
+    /// `StatisticsWeekSportSummary`/this View must not depend on that
+    /// chart-layer type, matching the same "no cross-layer coupling"
+    /// rule `StatisticsWeekSportSummary`'s own doc comment states.
+    private func sportSummaryDisplayName(for sportId: SportId?) -> String {
+        guard let sportId else { return "No sport" }
+        return sports.first(where: { $0.sportId == sportId })?.displayName ?? "Unknown"
+    }
+
+    private func sportSummaryRow(_ summary: StatisticsWeekSportSummary) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(sportSummaryDisplayName(for: summary.sportId))
+                .font(VoxtrTypography.cardTitle)
+                .foregroundStyle(VoxtrColor.textPrimary)
+            Text("\(StatisticsFormatting.minutes(summary.totalActualMinutes)) · \(summary.performedActivityCount) \(summary.performedActivityCount == 1 ? "activity" : "activities")")
                 .font(VoxtrTypography.metadata)
                 .foregroundStyle(VoxtrColor.textSecondary)
         }

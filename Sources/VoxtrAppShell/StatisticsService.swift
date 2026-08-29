@@ -427,6 +427,18 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
     /// narrowed by `filter` — see `StatisticsService.weeklyReflection`'s
     /// own doc comment.
     public let weeklyReflection: StatisticsWeeklyReflection?
+    /// Week Drilldown UX Refinement round: a factual per-Sport
+    /// composition of THIS week's `performedActivities` — see
+    /// `StatisticsWeekSportSummary`'s own doc comment. Derived from the
+    /// EXACT SAME already-filtered `performedActivities` array above,
+    /// never a second, independently-filtered read — so
+    /// `sportSummary.map(\.totalActualMinutes).reduce(0, +) ==
+    /// totalActualMinutes` and `sportSummary.map(\.performedActivityCount)
+    /// .reduce(0, +) == performedActivityCount` always hold (see this
+    /// type's own conservation tests). Sorted by descending minutes,
+    /// then stable Sport identity — see
+    /// `StatisticsService.sportSummary(for:)`'s own doc comment.
+    public let sportSummary: [StatisticsWeekSportSummary]
 
     public init(
         athleteId: AthleteId,
@@ -442,7 +454,8 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
         performedActivities: [StatisticsPerformedActivityRow],
         form: StatisticsAggregate,
         sleep: StatisticsAggregate,
-        weeklyReflection: StatisticsWeeklyReflection?
+        weeklyReflection: StatisticsWeeklyReflection?,
+        sportSummary: [StatisticsWeekSportSummary]
     ) {
         self.athleteId = athleteId
         self.weekStart = weekStart
@@ -458,6 +471,41 @@ public struct StatisticsWeekDetail: Equatable, Sendable {
         self.form = form
         self.sleep = sleep
         self.weeklyReflection = weeklyReflection
+        self.sportSummary = sportSummary
+    }
+}
+
+/// Week Drilldown UX Refinement round: the smallest plain-value
+/// projection of ONE Sport's (or "no Sport"'s) factual contribution to
+/// a single `StatisticsWeekDetail`'s already-filtered `performedActivities`
+/// — answers "what made up this week?", never "how did this Sport
+/// perform?". Carries no Sport `@Model`/reference object, no display
+/// name, no color, no ranking score, no percentage, no Plan-side
+/// figures — display names are resolved separately, in presentation,
+/// from the SAME canonical Sport reference-data list `WeekDrilldownView`
+/// already receives (never re-queried here). `sportId == nil` is a
+/// legitimate, factual "no Sport" bucket (see `SportTrainingMinutes`'s
+/// own doc comment for the same established convention) — never
+/// dropped, never fabricated.
+public struct StatisticsWeekSportSummary: Identifiable, Equatable, Sendable {
+    public let sportId: SportId?
+    public let totalActualMinutes: Int
+    public let performedActivityCount: Int
+
+    /// The stable key for the "no Sport" bucket — the same VALUE
+    /// `TrainingCategorySegment.noSportKey` (a chart presentation type)
+    /// happens to use for the identical factual concept, but defined
+    /// independently here: `StatisticsWeekSportSummary` is a Statistics
+    /// service-layer read model and must never depend on a chart
+    /// presentation type (see this type's own doc comment).
+    public static let noSportKey = "no-sport"
+
+    public var id: String { sportId?.rawValue.uuidString ?? Self.noSportKey }
+
+    public init(sportId: SportId?, totalActualMinutes: Int, performedActivityCount: Int) {
+        self.sportId = sportId
+        self.totalActualMinutes = totalActualMinutes
+        self.performedActivityCount = performedActivityCount
     }
 }
 
@@ -817,7 +865,8 @@ public final class StatisticsService {
                 performedActivities: [],
                 form: StatisticsAggregate(mean: nil, sampleCount: 0),
                 sleep: StatisticsAggregate(mean: nil, sampleCount: 0),
-                weeklyReflection: weeklyReflection
+                weeklyReflection: weeklyReflection,
+                sportSummary: []
             )
         }
 
@@ -926,8 +975,53 @@ public final class StatisticsService {
             performedActivities: performedActivities,
             form: form,
             sleep: sleep,
-            weeklyReflection: weeklyReflection
+            weeklyReflection: weeklyReflection,
+            sportSummary: Self.sportSummary(for: performedActivities)
         )
+    }
+
+    /// Week Drilldown UX Refinement round: aggregates the EXACT SAME
+    /// `performedActivities` array `weekDetail` already built (never a
+    /// second, independently-filtered read) into one factual bucket per
+    /// Sport (`sportId == nil` bucketed as "no Sport," matching
+    /// `StatisticsWeekSportSummary`'s own doc comment). Every activity
+    /// contributes to EXACTLY one bucket — never duplicated, dropped, or
+    /// split — which is what makes the conservation invariant
+    /// (`sportSummary` minutes/counts summing to `totalActualMinutes`/
+    /// `performedActivityCount`) hold by construction, not by
+    /// coincidence (see this method's own tests).
+    ///
+    /// SORT ORDER: descending `totalActualMinutes` (the largest factual
+    /// contributor to the week first — composition, not ranking of
+    /// athletes or performance), then ascending Sport UUID string as a
+    /// deterministic tie-break, with the "no Sport" bucket always last —
+    /// the SAME tie-break convention `sortedSportTotals(_:)` already
+    /// establishes for Training Breakdown, reused for consistency (not
+    /// for the PRIMARY order, which intentionally differs — see this
+    /// type's own doc comment for why Sport Summary orders by
+    /// contribution size rather than Training Breakdown's own
+    /// stable-ID order).
+    private static func sportSummary(for performedActivities: [StatisticsPerformedActivityRow]) -> [StatisticsWeekSportSummary] {
+        var totals: [SportId?: (minutes: Int, count: Int)] = [:]
+        for activity in performedActivities {
+            var entry = totals[activity.sportId] ?? (0, 0)
+            entry.minutes += activity.durationMinutes
+            entry.count += 1
+            totals[activity.sportId] = entry
+        }
+        return totals
+            .map { StatisticsWeekSportSummary(sportId: $0.key, totalActualMinutes: $0.value.minutes, performedActivityCount: $0.value.count) }
+            .sorted { lhs, rhs in
+                if lhs.totalActualMinutes != rhs.totalActualMinutes {
+                    return lhs.totalActualMinutes > rhs.totalActualMinutes
+                }
+                switch (lhs.sportId, rhs.sportId) {
+                case (nil, nil): return false
+                case (nil, _): return false
+                case (_, nil): return true
+                case let (left?, right?): return left.rawValue.uuidString < right.rawValue.uuidString
+                }
+            }
     }
 
     /// Plan vs Actual round: every canonical `PlannedActivity` row that

@@ -233,6 +233,99 @@ struct DevelopmentTimelineChartTests {
         #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .weekly, comparisonMode: .actual) == false)
         #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .weekly, comparisonMode: .planVsActual) == false)
     }
+
+    // MARK: - Week Drilldown UX Refinement: direct chart selection
+
+    private static func selectionPoint(_ day: Int, minutes: Int) -> DevelopmentTimelinePoint {
+        DevelopmentTimelinePoint(weekStart: LocalDate(year: 2026, month: 3, day: day), trainingMinutes: minutes, formMean: nil, sleepMean: nil)
+    }
+
+    /// Required test 1: a selected x band resolves to the EXACT
+    /// canonical `weekStart` of the point sharing that iso string —
+    /// never a bar ID, plotted-pixel position, or array index.
+    @Test("resolveWeekStart: a selected iso string resolves to its point's exact canonical weekStart")
+    func resolveWeekStartMatchesCanonicalWeekStart() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 0), Self.selectionPoint(16, minutes: 80)]
+        let resolved = DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: points[2].weekStart.isoString, points: points)
+        #expect(resolved == LocalDate(year: 2026, month: 3, day: 16))
+    }
+
+    @Test("resolveWeekStart: a nil selection resolves to nil")
+    func resolveWeekStartNilSelectionResolvesToNil() {
+        let points = [Self.selectionPoint(2, minutes: 40)]
+        #expect(DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: nil, points: points) == nil)
+    }
+
+    /// Required tests 2-4: the SAME resolver is used regardless of
+    /// which mark(s) a mode draws at a given x position — Actual/Total,
+    /// stacked Sport/Activity Type breakdown, and grouped Plan-vs-Actual
+    /// bars all plot the SAME `point.weekStart.isoString` for a given
+    /// week, so all three resolve to the identical canonical week
+    /// identity through this ONE function, with no per-mode branching
+    /// required.
+    @Test("resolveWeekStart: resolves identically regardless of which chart mode drew the mark at that x position")
+    func resolveWeekStartIsModeAgnostic() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 60)]
+        let isoString = points[1].weekStart.isoString
+        // The resolver takes no comparisonMode/breakdownMode/trendMode
+        // parameter at all — proving by construction that Actual/Total,
+        // stacked breakdown, and Plan vs Actual all resolve identically.
+        let resolved = DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: isoString, points: points)
+        #expect(resolved == points[1].weekStart)
+    }
+
+    /// Required test 5: a genuinely zero-training week is still present
+    /// in `points` (Statistics never omits a week's bucket for being
+    /// zero), so it resolves exactly like any other week — the fixed
+    /// `.chartXScale(domain:)` in `chart` (see that property's own doc
+    /// comment) is what guarantees it has an x position to select even
+    /// in a stacked-breakdown mode that draws no visible mark there.
+    @Test("resolveWeekStart: a zero-training week resolves exactly like any other week")
+    func resolveWeekStartZeroTrainingWeekStillResolves() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 0)]
+        let resolved = DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: points[1].weekStart.isoString, points: points)
+        #expect(resolved == points[1].weekStart)
+    }
+
+    /// Required test 10: an iso string that matches no currently
+    /// plotted point resolves to `nil` — never crashes, never falls
+    /// back to an unrelated week.
+    @Test("resolveWeekStart: an unmatched iso string resolves to nil, never an unrelated week")
+    func resolveWeekStartUnmatchedIsoStringResolvesToNilNeverUnrelatedWeek() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 60)]
+        let resolved = DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: "not-a-real-week", points: points)
+        #expect(resolved == nil)
+    }
+
+    @Test("resolveWeekStart: an empty points array never crashes and always resolves to nil")
+    func resolveWeekStartEmptyPointsNeverCrashes() {
+        #expect(DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: "2026-03-02", points: []) == nil)
+    }
+
+    /// Required test 6 (Trend fallback) + required test 7 (Training-
+    /// hidden fallback): the week chip row — the deterministic,
+    /// accessible fallback — is shown in both states, and hidden
+    /// otherwise (ordinary Weekly usage with Training visible).
+    @Test("showsWeekChipRow: shown in Trend mode and when Training is hidden; hidden for ordinary Weekly usage with Training visible")
+    func showsWeekChipRowFallbackRule() {
+        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .trend, comparisonMode: .actual, isTrainingVisible: true) == true)
+        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .weekly, comparisonMode: .actual, isTrainingVisible: false) == true)
+        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .weekly, comparisonMode: .actual, isTrainingVisible: true) == false)
+        // Trend selected but not effective (Plan vs Actual active) — the
+        // chart itself renders the unchanged Weekly Plan vs Actual bars
+        // in that state, so the ordinary Training-visible rule applies:
+        // the chip row stays hidden, exactly as if Trend were never
+        // selected at all.
+        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .trend, comparisonMode: .planVsActual, isTrainingVisible: true) == false)
+    }
+
+    // Required test 9 (no second selected-week state introduced):
+    // `resolveWeekStart`/`showsWeekChipRow` are pure functions with no
+    // stored state; the chart's only local state, `chartXSelectionIsoString`,
+    // is `private` and unobservable from outside this type, so there is
+    // nothing for a runtime test to assert on here — this is verified
+    // by architecture/code review instead (see the delivery report's
+    // own architecture audit), not a vacuous always-true test.
 }
 
 /// Fullscreen data-ownership round: focused coverage for
