@@ -117,7 +117,10 @@ struct DevelopmentTimelineFullscreenView: View {
                         )
                         comparisonModePicker
                         if viewModel.timelineComparisonMode == .actual {
-                            breakdownModePicker
+                            trendModePicker
+                            if viewModel.timelineTrendMode == .weekly {
+                                breakdownModePicker
+                            }
                         }
                         seriesToggles
                         DevelopmentTimelineChart(
@@ -130,6 +133,7 @@ struct DevelopmentTimelineFullscreenView: View {
                             chartHeight: max(240, geometry.size.height - 120),
                             breakdownMode: viewModel.trainingBreakdownMode,
                             comparisonMode: viewModel.timelineComparisonMode,
+                            trendMode: viewModel.timelineTrendMode,
                             onSelectWeek: viewModel.selectWeek
                         )
                         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.developmentTimeline")
@@ -173,6 +177,27 @@ struct DevelopmentTimelineFullscreenView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.timelineComparisonPicker")
+    }
+
+    /// Statistics — Trend View round: the SAME Weekly/Trend control as
+    /// Athlete Statistics, bound to the SAME shared `viewModel
+    /// .timelineTrendMode` — no second, fullscreen-only trend state.
+    /// Changing it here stays reflected after returning to Athlete
+    /// Statistics, and vice versa. Only ever shown while `viewModel
+    /// .timelineComparisonMode == .actual` (see this view's own call
+    /// site), matching the same compatibility rule
+    /// `AthleteStatisticsView.trendModePicker` establishes.
+    private var trendModePicker: some View {
+        Picker("Timeline", selection: Binding(
+            get: { viewModel.timelineTrendMode },
+            set: { viewModel.timelineTrendMode = $0 }
+        )) {
+            ForEach(TimelineTrendMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatisticsTimelineFullscreen.trendModePicker")
     }
 
     /// The SAME Training/Form/Sleep toggles as the embedded Athlete

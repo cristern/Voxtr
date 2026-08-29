@@ -750,6 +750,58 @@ struct StatisticsViewModelTests {
         #expect(viewModel.loadState == loadStateBefore)
     }
 
+    // MARK: - Statistics — Trend View: presentation-only state
+
+    /// Required test 12: `timelineTrendMode` defaults to the calm/
+    /// default `.weekly` mode and, like every other presentation-only
+    /// toggle above, changing it never reloads Statistics and never
+    /// mutates `period`/the current Sport or Activity Type filter/
+    /// `loadState`/`selectedWeekStart` — a Trend selection is pure
+    /// presentation state, never a second source of Statistics truth.
+    @Test("timelineTrendMode defaults to .weekly and changing it never reloads or mutates period/filter/loadState/selectedWeekStart")
+    @MainActor
+    func timelineTrendModeDefaultsToWeeklyAndNeverMutatesUnderlyingState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let sportId = SportId()
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: sportId, activityType: .individualTraining, title: "Run",
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+        )
+
+        let viewModel = AthleteStatisticsViewModel(
+            statisticsService: statisticsService, athleteId: athleteId, athleteDisplayName: "Jonas",
+            today: LocalDate(year: 2026, month: 3, day: 31)
+        )
+        #expect(viewModel.timelineTrendMode == .weekly)
+        viewModel.setSportFilter(sportId)
+        viewModel.selectWeek(LocalDate(year: 2026, month: 3, day: 16))
+        let periodBefore = viewModel.period
+        let sportFilterBefore = viewModel.sportFilter
+        let activityTypeFilterBefore = viewModel.activityTypeFilter
+        let selectedWeekStartBefore = viewModel.selectedWeekStart
+        let loadStateBefore = viewModel.loadState
+
+        viewModel.timelineTrendMode = .trend
+
+        #expect(viewModel.period == periodBefore)
+        #expect(viewModel.sportFilter == sportFilterBefore)
+        #expect(viewModel.activityTypeFilter == activityTypeFilterBefore)
+        #expect(viewModel.selectedWeekStart == selectedWeekStartBefore)
+        #expect(viewModel.loadState == loadStateBefore)
+    }
+
     // MARK: - Required ViewModel test 11: no-data is distinct from error
 
     @Test("An athlete with no data in the period loads as .loaded with factual zeroes, never .failed")

@@ -59,7 +59,10 @@ public struct AthleteStatisticsView: View {
                     Section {
                         comparisonModePicker
                         if viewModel.timelineComparisonMode == .actual {
-                            breakdownModePicker
+                            trendModePicker
+                            if viewModel.timelineTrendMode == .weekly {
+                                breakdownModePicker
+                            }
                         }
                         HStack {
                             seriesToggles
@@ -75,6 +78,7 @@ public struct AthleteStatisticsView: View {
                             intervalEnd: summary.intervalEnd,
                             breakdownMode: viewModel.trainingBreakdownMode,
                             comparisonMode: viewModel.timelineComparisonMode,
+                            trendMode: viewModel.timelineTrendMode,
                             onSelectWeek: viewModel.selectWeek
                         )
                         .accessibilityIdentifier("athleteStatistics.developmentTimeline")
@@ -283,6 +287,25 @@ public struct AthleteStatisticsView: View {
         }
         .pickerStyle(.segmented)
         .accessibilityIdentifier("athleteStatistics.timelineComparisonPicker")
+    }
+
+    /// Statistics — Trend View round: "Weekly, factual per-week data" vs
+    /// "Trend, a smoothed 4-week rolling average of that SAME data" — a
+    /// presentation choice, deliberately distinct from both
+    /// `breakdownModePicker` and `comparisonModePicker` above. Bound
+    /// directly to `viewModel.timelineTrendMode`, the one shared state
+    /// `DevelopmentTimelineFullscreenView` also binds to. Only ever
+    /// shown while `viewModel.timelineComparisonMode == .actual` (see
+    /// this view's own call site) — Trend never applies to the Plan vs
+    /// Actual comparison, per the approved V1 contract.
+    private var trendModePicker: some View {
+        Picker("Timeline", selection: $viewModel.timelineTrendMode) {
+            ForEach(TimelineTrendMode.allCases) { mode in
+                Text(mode.displayName).tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityIdentifier("athleteStatistics.trendModePicker")
     }
 
     private var seriesToggles: some View {

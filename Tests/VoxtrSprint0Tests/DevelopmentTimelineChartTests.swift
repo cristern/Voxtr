@@ -219,6 +219,20 @@ struct DevelopmentTimelineChartTests {
         let expected = "W\(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart))"
         #expect(DevelopmentTimelineChart.weekNumberLabel(for: weekStart) == expected)
     }
+
+    // MARK: - Trend View: Plan vs Actual compatibility rule
+
+    /// Required test 14 (Plan vs Actual compatibility): Trend is only
+    /// ever effective while `comparisonMode == .actual` — selecting
+    /// Trend while Plan vs Actual is active must never smooth a
+    /// planned-vs-actual comparison.
+    @Test("Trend is effective only while comparisonMode == .actual — never while Plan vs Actual is active")
+    func trendIsEffectiveOnlyForActualComparisonMode() {
+        #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .trend, comparisonMode: .actual) == true)
+        #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .trend, comparisonMode: .planVsActual) == false)
+        #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .weekly, comparisonMode: .actual) == false)
+        #expect(DevelopmentTimelineChart.isTrendEffective(trendMode: .weekly, comparisonMode: .planVsActual) == false)
+    }
 }
 
 /// Fullscreen data-ownership round: focused coverage for
@@ -311,5 +325,77 @@ struct DevelopmentTimelinePointProjectionTests {
         // shared projection.
         #expect(point.plannedMinutes == 40)
         #expect(point.plannedMinutes == summary.weeklyBuckets.first { $0.weekStart == point.weekStart }?.plannedMinutes)
+    }
+
+    /// Required tests 7 + 8 (Sleep filter independence + filter-
+    /// preserving Training): the Trend projector never re-fetches or
+    /// re-filters anything — it only ever sees whatever
+    /// `DevelopmentTimelinePoint.points(from:sports:)` already produced
+    /// from a REAL, filtered `StatisticsAthleteSummary`. A Sport filter
+    /// that excludes every performed activity therefore also excludes
+    /// them from the Training TREND (filtered totals, never raw
+    /// activities), while Sleep's trend — built from the SAME already-
+    /// unfiltered `sleepMean` field `StatisticsWeekBucket` already
+    /// establishes — remains completely unaffected.
+    @Test("Training trend reflects the filtered totals; Sleep trend remains unfiltered by the same Sport filter")
+    @MainActor
+    func trainingTrendIsFilteredSleepTrendIsNot() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let swimming = SportId()
+        let excludedFilterSport = SportId()
+        // Two canonical weeks, so the Trend projector's own minimum-
+        // sample rule (>= 2 available WEEKLY values inside the rolling
+        // window) can genuinely be exercised — a single-week interval
+        // could never produce more than one weekly sample regardless of
+        // how many daily Sleep entries feed into that one week's own
+        // mean.
+        let interval = LocalDate(year: 2026, month: 3, day: 2)...LocalDate(year: 2026, month: 3, day: 15)
+
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 45, status: .completed
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
+            sleepQuality: 4, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+        _ = try reflectionService.recordSleep(
+            athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 10),
+            sleepQuality: 2, today: LocalDate(year: 2026, month: 4, day: 1)
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: interval.lowerBound, through: interval.upperBound,
+            filter: StatisticsFilter(sportId: excludedFilterSport),
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        let points = DevelopmentTimelinePoint.points(from: summary, sports: [])
+        let trend = DevelopmentTimelineTrendProjector.points(from: points)
+        #expect(trend.count == 2)
+
+        // The filter genuinely excluded the Swim activity in every week
+        // — this is a real filter, not a vacuous one.
+        #expect(trend.map(\.trainingTrendMinutes) == [0, 0])
+        // Week 1's trend has only one available weekly Sleep value so
+        // far — not yet a trend (same minimum-sample rule Form/Sleep
+        // always apply).
+        #expect(trend[0].sleepTrendMean == nil)
+        // Week 2's trend now has two available weekly Sleep values in
+        // its window — entirely unaffected by the Sport filter that DID
+        // zero out Training.
+        #expect(trend[1].sleepTrendMean == 3)
     }
 }

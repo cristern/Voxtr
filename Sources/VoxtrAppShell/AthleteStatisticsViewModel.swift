@@ -51,6 +51,33 @@ public enum TimelineComparisonMode: String, CaseIterable, Identifiable, Sendable
     }
 }
 
+/// Statistics — Trend View round: which presentation the Development
+/// Timeline's Training/Form/Sleep series currently render as — a
+/// presentation choice only, exactly like `TrainingBreakdownMode`/
+/// `TimelineComparisonMode` above. `.weekly` is the original, factual
+/// per-week presentation (bars/points, unchanged); `.trend` is a
+/// deterministic 4-week rolling-average smoothing of the SAME factual
+/// weekly buckets (see `DevelopmentTimelineTrendProjector`'s own doc
+/// comment) — never a new Statistics read, never persisted truth.
+/// Trend is only ever effectively applied while `TimelineComparisonMode
+/// == .actual` (see `DevelopmentTimelineChart`'s own compatibility
+/// rule) — this enum itself carries no awareness of that rule, matching
+/// how `TrainingBreakdownMode`/`TimelineComparisonMode` are likewise
+/// unaware of each other's compatibility constraints.
+public enum TimelineTrendMode: String, CaseIterable, Identifiable, Sendable {
+    case weekly
+    case trend
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .weekly: return "Weekly"
+        case .trend: return "Trend"
+        }
+    }
+}
+
 /// Statistics V1 UI — backs the Athlete Statistics detail screen.
 /// Mirrors `WeeklyReviewLoadState`'s established shape (`.loading`/
 /// `.loaded(Result)`/`.failed`) — no separate "empty"/"no data" case,
@@ -126,6 +153,20 @@ public final class AthleteStatisticsViewModel {
     /// identically by portrait (`AthleteStatisticsView`) and fullscreen
     /// (`DevelopmentTimelineFullscreenView`) — never persisted.
     public var timelineComparisonMode: TimelineComparisonMode = .actual
+
+    /// Statistics — Trend View round: same presentation-only contract
+    /// as `trainingBreakdownMode`/`timelineComparisonMode` above —
+    /// changing this never triggers `load()` or alters `loadState`/the
+    /// underlying `StatisticsAthleteSummary` in any way; it only
+    /// changes how the Development Timeline chart PRESENTS the SAME
+    /// already-loaded weekly buckets (see
+    /// `DevelopmentTimelineTrendProjector`'s own doc comment for the
+    /// pure rolling-average projection this drives). Default `.weekly`
+    /// reproduces the Development Timeline's pre-existing chart exactly.
+    /// A plain `public var`, shared identically by portrait
+    /// (`AthleteStatisticsView`) and fullscreen
+    /// (`DevelopmentTimelineFullscreenView`) — never persisted.
+    public var timelineTrendMode: TimelineTrendMode = .weekly
 
     /// Week Drilldown round: which canonical week's drilldown is
     /// currently open, if any — presentation/navigation state only,

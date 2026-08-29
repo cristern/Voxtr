@@ -223,6 +223,19 @@ public struct DevelopmentTimelineChart: View {
     /// bar"). Never affects Form/Sleep or any other existing chart
     /// contract.
     public let comparisonMode: TimelineComparisonMode
+    /// Statistics — Trend View round: which presentation Training/Form/
+    /// Sleep currently render as. `.weekly` is byte-for-byte the
+    /// original rendering (every existing branch below is untouched);
+    /// `.trend` draws a smoothed rolling-average line per visible
+    /// series instead (see `DevelopmentTimelineTrendProjector`). Only
+    /// EFFECTIVELY applied while `comparisonMode == .actual` — see
+    /// `isTrendEffective`'s own doc comment for why Trend never applies
+    /// to the Plan vs Actual comparison, and `presentCategories`'s own
+    /// doc comment for why Training Breakdown never applies to Trend.
+    /// Never affects the week selector or Week Drilldown, which always
+    /// operate on the SAME canonical `points`/`weekStart`s regardless of
+    /// this mode.
+    public let trendMode: TimelineTrendMode
     /// Week Drilldown round: the sole entry point from Development
     /// Timeline into Week Drilldown — a calm, explicit per-week tap
     /// affordance rather than direct chart-mark selection. Direct mark
@@ -254,6 +267,7 @@ public struct DevelopmentTimelineChart: View {
         chartHeight: CGFloat = 240,
         breakdownMode: TrainingBreakdownMode = .total,
         comparisonMode: TimelineComparisonMode = .actual,
+        trendMode: TimelineTrendMode = .weekly,
         onSelectWeek: ((LocalDate) -> Void)? = nil
     ) {
         self.points = points
@@ -265,6 +279,7 @@ public struct DevelopmentTimelineChart: View {
         self.chartHeight = chartHeight
         self.breakdownMode = breakdownMode
         self.comparisonMode = comparisonMode
+        self.trendMode = trendMode
         self.onSelectWeek = onSelectWeek
     }
 
@@ -327,6 +342,79 @@ public struct DevelopmentTimelineChart: View {
     private var formRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.formMean) }
     private var sleepRuns: [[RunPoint]] { Self.contiguousRuns(points, value: \.sleepMean) }
 
+    // MARK: - Trend View
+
+    /// Statistics — Trend View round: THE single, pure "is Trend
+    /// actually applied right now" rule — Trend is only ever EFFECTIVE
+    /// while `comparisonMode == .actual` — the approved V1 compatibility
+    /// rule ("Trend mode is available only for the existing 'Actual'
+    /// Timeline presentation... do not invent 'smoothed plan
+    /// adherence'... do not smooth planned and actual into a comparison
+    /// score"). `trendMode` itself is never mutated as a result of this
+    /// rule — a caller that leaves `.trend` selected while switching to
+    /// `.planVsActual` simply renders the unchanged Weekly Plan vs
+    /// Actual chart, and Trend reappears automatically on switching
+    /// back, matching the same "hide the incompatible control, never
+    /// reset the underlying state" convention `AthleteStatisticsView`/
+    /// `DevelopmentTimelineFullscreenView` already establish for
+    /// `breakdownModePicker`. `static` and `internal` (not `private`),
+    /// the same testability pattern `AthleteStatisticsViewModel
+    /// .shouldPresentWeekDrilldown` already establishes — directly
+    /// testable with no View instantiation/rendering required.
+    static func isTrendEffective(trendMode: TimelineTrendMode, comparisonMode: TimelineComparisonMode) -> Bool {
+        trendMode == .trend && comparisonMode == .actual
+    }
+
+    private var isTrendEffective: Bool {
+        Self.isTrendEffective(trendMode: trendMode, comparisonMode: comparisonMode)
+    }
+
+    /// Statistics — Trend View round: the ONE trend projection this
+    /// chart ever computes, built fresh from `points` (never a second,
+    /// independently-maintained smoothing) — see
+    /// `DevelopmentTimelineTrendProjector`'s own doc comment.
+    private var trendPoints: [DevelopmentTimelineTrendPoint] {
+        DevelopmentTimelineTrendProjector.points(from: points)
+    }
+
+    /// Mirrors `contiguousRuns(_:value:)` above exactly, over
+    /// `DevelopmentTimelineTrendPoint` instead of `DevelopmentTimelinePoint`
+    /// — a missing trend point (fewer than `DevelopmentTimelineTrendProjector
+    /// .minimumSampleCount` available weekly values in that point's
+    /// window) breaks the Trend line exactly the same way a missing
+    /// weekly value already breaks the Weekly line, never interpolated.
+    static func contiguousRuns(
+        _ points: [DevelopmentTimelineTrendPoint],
+        value valueForPoint: (DevelopmentTimelineTrendPoint) -> Double?
+    ) -> [[RunPoint]] {
+        var result: [[RunPoint]] = []
+        var current: [RunPoint] = []
+        for point in points {
+            if let value = valueForPoint(point) {
+                current.append(RunPoint(weekStart: point.weekStart, value: value))
+            } else if !current.isEmpty {
+                result.append(current)
+                current = []
+            }
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+
+    private var formTrendRuns: [[RunPoint]] { Self.contiguousRuns(trendPoints, value: \.formTrendMean) }
+    private var sleepTrendRuns: [[RunPoint]] { Self.contiguousRuns(trendPoints, value: \.sleepTrendMean) }
+
+    private static let trainingTrendSeriesKey = "training-trend"
+
+    /// "Week 35, Training trend" — the shared VoiceOver label prefix for
+    /// every trend mark, so a Trend line is never announced as if it
+    /// were the plain factual weekly value (see this chart's own
+    /// approved contract: "Do not label a rolling average simply as
+    /// factual weekly value").
+    private func trendAccessibilityLabel(for weekStart: LocalDate, metric: String) -> String {
+        "Week \(WeekIdentityFormatter.weekNumber(forWeekStart: weekStart)), \(metric) trend"
+    }
+
     // MARK: - Training Breakdown
 
     /// The category segments for one point under the CURRENT
@@ -358,7 +446,14 @@ public struct DevelopmentTimelineChart: View {
         // doc comment) — this keeps the category legend below from
         // showing stale Sport/Activity Type entries for a breakdown that
         // isn't actually being drawn.
-        guard comparisonMode == .actual, breakdownMode != .total else { return [] }
+        //
+        // Trend View round: `breakdownMode` likewise never applies while
+        // Trend is effectively active — Trend V1 operates only on TOTAL
+        // factual Training minutes, never a per-Sport/per-Activity-Type
+        // rolling line (see the approved contract's own "Training
+        // Breakdown compatibility" rule) — so the category legend must
+        // stay empty here too, exactly as if `breakdownMode == .total`.
+        guard !isTrendEffective, comparisonMode == .actual, breakdownMode != .total else { return [] }
         var seenIds = Set<String>()
         var result: [TrainingCategorySegment] = []
         for point in points {
@@ -461,6 +556,25 @@ public struct DevelopmentTimelineChart: View {
     private var seriesColorScale: (domain: [String], range: [Color]) {
         var domain: [String] = []
         var range: [Color] = []
+
+        // Trend View round: an entirely separate, early-returned scale
+        // while Trend is effectively active — Weekly's own scale below
+        // (runs/categories/Plan-vs-Actual keys) is left completely
+        // untouched, since Trend never draws any of those marks.
+        if isTrendEffective {
+            domain.append(Self.trainingTrendSeriesKey)
+            range.append(VoxtrColor.accent)
+            for index in formTrendRuns.indices {
+                domain.append("form-trend-\(index)")
+                range.append(VoxtrColor.navy)
+            }
+            for index in sleepTrendRuns.indices {
+                domain.append("sleep-trend-\(index)")
+                range.append(VoxtrColor.accentBright)
+            }
+            return (domain, range)
+        }
+
         for index in formRuns.indices {
             domain.append("form-\(index)")
             range.append(VoxtrColor.navy)
@@ -547,7 +661,12 @@ public struct DevelopmentTimelineChart: View {
 
             HStack(spacing: 16) {
                 if isTrainingVisible {
-                    if comparisonMode == .planVsActual {
+                    // Trend View round: a Trend line is never labeled as
+                    // if it were the plain factual weekly value — see
+                    // this chart's own approved contract.
+                    if isTrendEffective {
+                        legendEntry(color: VoxtrColor.accent, label: "Training trend (minutes)")
+                    } else if comparisonMode == .planVsActual {
                         // Plan vs Actual round: two calm, non-evaluative
                         // factual labels — deliberately never "success"/
                         // "adherence"/"completion" wording or red/green
@@ -562,10 +681,10 @@ public struct DevelopmentTimelineChart: View {
                     }
                 }
                 if isFormVisible {
-                    legendEntry(color: VoxtrColor.navy, label: "Form (1–5)")
+                    legendEntry(color: VoxtrColor.navy, label: isTrendEffective ? "Form trend (1–5)" : "Form (1–5)")
                 }
                 if isSleepVisible {
-                    legendEntry(color: VoxtrColor.accentBright, label: "Sleep (1–5)")
+                    legendEntry(color: VoxtrColor.accentBright, label: isTrendEffective ? "Sleep trend (1–5)" : "Sleep (1–5)")
                 }
             }
             .font(VoxtrTypography.caption)
@@ -579,7 +698,7 @@ public struct DevelopmentTimelineChart: View {
             // canonical Sport/Activity Type catalog. Wraps to multiple
             // lines rather than truncating or scrolling — the category
             // count is data-dependent and unbounded in principle.
-            if isTrainingVisible, breakdownMode != .total, !presentCategories.isEmpty {
+            if isTrainingVisible, !isTrendEffective, breakdownMode != .total, !presentCategories.isEmpty {
                 FlowLayout(spacing: 12) {
                     ForEach(presentCategories) { category in
                         legendEntry(color: VoxtrCategoryColor.color(forStableKey: category.id), label: category.displayName)
@@ -596,7 +715,31 @@ public struct DevelopmentTimelineChart: View {
         let scale = seriesColorScale
         return Chart {
             if isTrainingVisible {
-                if comparisonMode == .planVsActual {
+                if isTrendEffective {
+                    // Trend View round: a single smoothed line, on the
+                    // SAME training-minutes axis Weekly's bars already
+                    // use (a rolling average of `trainingMinutes` can
+                    // never exceed the max already driving `trainingAxisMax`
+                    // below) — never bars, so "what happened this week"
+                    // (Weekly) and "the broader pattern" (Trend) are
+                    // never visually blurred together (see the approved
+                    // contract's own "Recommendation for Training trend
+                    // visual"). Continuous, unlike Form/Sleep below —
+                    // every bucket has a factual Training value,
+                    // including zero, so a Training trend point is never
+                    // missing and the line never needs gap segmentation.
+                    ForEach(trendPoints) { point in
+                        LineMark(
+                            x: .value("Week", point.weekStart.isoString),
+                            y: .value("Training trend", point.trainingTrendMinutes)
+                        )
+                        .foregroundStyle(by: .value("Series", Self.trainingTrendSeriesKey))
+                        .symbol(.circle)
+                        .interpolationMethod(.linear)
+                        .accessibilityLabel(trendAccessibilityLabel(for: point.weekStart, metric: "Training"))
+                        .accessibilityValue("\(Int(point.trainingTrendMinutes.rounded())) minutes")
+                    }
+                } else if comparisonMode == .planVsActual {
                     // Plan vs Actual round: two independent, GROUPED bars
                     // per week (`.position(by:)` alongside
                     // `.foregroundStyle(by:)` — Swift Charts' standard
@@ -658,28 +801,68 @@ public struct DevelopmentTimelineChart: View {
                 }
             }
             if isFormVisible {
-                ForEach(Array(formRuns.enumerated()), id: \.offset) { runIndex, run in
-                    ForEach(run) { entry in
-                        LineMark(
-                            x: .value("Week", entry.weekStart.isoString),
-                            y: .value("Form", transformed(entry.value))
-                        )
-                        .foregroundStyle(by: .value("Series", "form-\(runIndex)"))
-                        .symbol(.circle)
-                        .interpolationMethod(.linear)
+                if isTrendEffective {
+                    // Trend View round: mirrors Weekly's own gap-run
+                    // technique exactly (see this chart's own top-level
+                    // doc comment on missing-value line gaps), but over
+                    // `formTrendRuns` — a missing TREND point (fewer than
+                    // `DevelopmentTimelineTrendProjector.minimumSampleCount`
+                    // available weekly values in that window) breaks the
+                    // line exactly the same way a missing WEEKLY value
+                    // already does; never interpolated, never zero.
+                    ForEach(Array(formTrendRuns.enumerated()), id: \.offset) { runIndex, run in
+                        ForEach(run) { entry in
+                            LineMark(
+                                x: .value("Week", entry.weekStart.isoString),
+                                y: .value("Form trend", transformed(entry.value))
+                            )
+                            .foregroundStyle(by: .value("Series", "form-trend-\(runIndex)"))
+                            .symbol(.circle)
+                            .interpolationMethod(.linear)
+                            .accessibilityLabel(trendAccessibilityLabel(for: entry.weekStart, metric: "Form"))
+                            .accessibilityValue(StatisticsFormatting.average(entry.value))
+                        }
+                    }
+                } else {
+                    ForEach(Array(formRuns.enumerated()), id: \.offset) { runIndex, run in
+                        ForEach(run) { entry in
+                            LineMark(
+                                x: .value("Week", entry.weekStart.isoString),
+                                y: .value("Form", transformed(entry.value))
+                            )
+                            .foregroundStyle(by: .value("Series", "form-\(runIndex)"))
+                            .symbol(.circle)
+                            .interpolationMethod(.linear)
+                        }
                     }
                 }
             }
             if isSleepVisible {
-                ForEach(Array(sleepRuns.enumerated()), id: \.offset) { runIndex, run in
-                    ForEach(run) { entry in
-                        LineMark(
-                            x: .value("Week", entry.weekStart.isoString),
-                            y: .value("Sleep", transformed(entry.value))
-                        )
-                        .foregroundStyle(by: .value("Series", "sleep-\(runIndex)"))
-                        .symbol(.square)
-                        .interpolationMethod(.linear)
+                if isTrendEffective {
+                    ForEach(Array(sleepTrendRuns.enumerated()), id: \.offset) { runIndex, run in
+                        ForEach(run) { entry in
+                            LineMark(
+                                x: .value("Week", entry.weekStart.isoString),
+                                y: .value("Sleep trend", transformed(entry.value))
+                            )
+                            .foregroundStyle(by: .value("Series", "sleep-trend-\(runIndex)"))
+                            .symbol(.square)
+                            .interpolationMethod(.linear)
+                            .accessibilityLabel(trendAccessibilityLabel(for: entry.weekStart, metric: "Sleep"))
+                            .accessibilityValue(StatisticsFormatting.average(entry.value))
+                        }
+                    }
+                } else {
+                    ForEach(Array(sleepRuns.enumerated()), id: \.offset) { runIndex, run in
+                        ForEach(run) { entry in
+                            LineMark(
+                                x: .value("Week", entry.weekStart.isoString),
+                                y: .value("Sleep", transformed(entry.value))
+                            )
+                            .foregroundStyle(by: .value("Series", "sleep-\(runIndex)"))
+                            .symbol(.square)
+                            .interpolationMethod(.linear)
+                        }
                     }
                 }
             }
@@ -793,6 +976,27 @@ public struct DevelopmentTimelineChart: View {
     /// is a calm, at-a-glance description of the chart itself, not a
     /// substitute for per-point navigation.
     private var accessibilitySummary: String {
+        // Trend View round: an entirely separate summary while Trend is
+        // effectively active — describes trend availability, never a
+        // weekly total, and never reuses the Weekly wording verbatim
+        // (see this chart's own approved contract: "Do not label a
+        // rolling average simply as factual weekly value").
+        if isTrendEffective {
+            var parts: [String] = ["\(points.count) weeks", "4-week rolling trend"]
+            if isTrainingVisible {
+                parts.append("Training trend across \(trendPoints.count) weeks")
+            }
+            if isFormVisible {
+                let count = trendPoints.compactMap(\.formTrendMean).count
+                parts.append(count == 0 ? "no Form trend" : "Form trend available in \(count) weeks")
+            }
+            if isSleepVisible {
+                let count = trendPoints.compactMap(\.sleepTrendMean).count
+                parts.append(count == 0 ? "no Sleep trend" : "Sleep trend available in \(count) weeks")
+            }
+            return parts.joined(separator: ", ")
+        }
+
         let totalMinutes = points.reduce(0) { $0 + $1.trainingMinutes }
         let formValues = points.compactMap(\.formMean)
         let sleepValues = points.compactMap(\.sleepMean)
