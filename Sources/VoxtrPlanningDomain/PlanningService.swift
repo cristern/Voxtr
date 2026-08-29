@@ -222,27 +222,30 @@ public final class PlanningService {
 
         try repository.save()
 
-        // Notifications V1 Activity Reminder Foundation: the authoritative
-        // mutation boundary for "a PlannedActivity changed" — published
-        // only after the save above has actually succeeded. `changeType`
-        // is a fixed constant, not a diff of which fields changed:
-        // `NotificationsPlanningCoordinationService` always re-reads the
-        // current canonical activity to recompute a reminder's fire
-        // instant rather than trusting anything about what changed from
-        // the event payload, so no finer-grained signal is needed here.
-        // EventBus is an actor; this fire-and-forget `Task` is the same
-        // pattern this project's own `EventBusTests.swift` already uses
-        // for actor-hop event delivery, kept here rather than making this
-        // method `async` (which would ripple into every ViewModel call
-        // site) — the mutation itself has already fully committed by this
-        // point regardless of when the publish is actually observed.
+        // Notifications V1 Activity Reminder Foundation (PR #36
+        // follow-up: deterministic delivery): the authoritative mutation
+        // boundary for "a PlannedActivity changed" — published only
+        // after the save above has actually succeeded, synchronously,
+        // directly (no `Task`) — `EventBus.publish` is `@MainActor`, and
+        // this method already runs on `@MainActor` (this whole class
+        // is), so this is a plain same-actor call: by the time this
+        // method returns, every subscriber (Notifications' reminder
+        // reconciliation included) has fully finished reacting to this
+        // exact mutation, in order, before the next mutation on this
+        // service can begin — see `EventBus`'s own doc comment for the
+        // full reasoning. `changeType` is a fixed constant, not a diff
+        // of which fields changed: `NotificationsPlanningCoordinationService`
+        // always re-reads the current canonical activity to recompute a
+        // reminder's fire instant rather than trusting anything about
+        // what changed from the event payload, so no finer-grained
+        // signal is needed here.
         let changedEvent = PlannedActivityChanged(
             plannedActivityId: activity.plannedActivityId,
             athleteId: AthleteId(rawValue: activity.athleteId),
             weekPlanId: weekPlanId,
             changeType: "edited"
         )
-        Task { [eventBus] in await eventBus.publish(changedEvent) }
+        eventBus.publish(changedEvent)
 
         return activity
     }
@@ -440,14 +443,13 @@ public final class PlanningService {
         let deletedAthleteId = AthleteId(rawValue: activity.athleteId)
         try repository.deletePlannedActivity(activity, deletedBy: deletedBy)
 
-        // Notifications V1 Activity Reminder Foundation: identity
-        // captured BEFORE the delete above, not read from `activity`
-        // afterward — same reasoning as `changedEvent` in
-        // `editPlannedActivity`, see that call site's own comment for why
-        // this uses a fire-and-forget `Task` rather than making this
-        // method `async`.
+        // Notifications V1 Activity Reminder Foundation (PR #36
+        // follow-up: deterministic delivery): identity captured BEFORE
+        // the delete above, not read from `activity` afterward. Same
+        // synchronous, same-actor `publish` call as `editPlannedActivity`
+        // above — see `EventBus`'s own doc comment.
         let deletedEvent = PlannedActivityDeleted(plannedActivityId: deletedPlannedActivityId, athleteId: deletedAthleteId)
-        Task { [eventBus] in await eventBus.publish(deletedEvent) }
+        eventBus.publish(deletedEvent)
     }
 
     /// Notifications V1 Activity Reminder Foundation: a thin passthrough,

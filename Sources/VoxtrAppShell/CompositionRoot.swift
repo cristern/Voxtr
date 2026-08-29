@@ -240,12 +240,12 @@ public final class CompositionRoot {
             planningService: container.resolve(PlanningService.self)
         )
         container.register(NotificationsPlanningCoordinationService.self) { notificationsPlanningCoordinationService }
-        await notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
+        notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
 
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
 
-        await eventBus.publish(AppDidFinishLaunchingEvent())
+        eventBus.publish(AppDidFinishLaunchingEvent())
 
         return CompositionRoot(
             container: container,

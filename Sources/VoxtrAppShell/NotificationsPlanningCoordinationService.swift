@@ -17,13 +17,13 @@ import VoxtrNotificationsDomain
 /// Owns the EventBus subscriptions for the three business events this
 /// V1 lifecycle needs (`PlannedActivityChanged`, `PlannedActivityDeleted`,
 /// `ActivityLogged`) and the actual "recompute fire instant from current
-/// canonical Planning truth" logic. `handle...` methods below are `internal`
-/// (not `private`) precisely so tests can call them directly with a
-/// constructed event and assert the resulting scheduler/repository state
-/// deterministically, independent of the live, actor-hop-based EventBus
-/// delivery `subscribeToEvents(_:)` wires in production — see that
-/// method's own doc comment for why the live path itself is not
-/// synchronously deterministic.
+/// canonical Planning truth" logic. PR #36 follow-up: the live
+/// `subscribeToEvents(_:)` production wiring is now fully synchronous
+/// and deterministic (see that method's own doc comment and `EventBus`'s)
+/// — `handle...` methods below stay `internal` (not `private`) so tests
+/// can ALSO call them directly with a constructed event to assert
+/// decision logic in isolation, but production tests exercising the
+/// full pipeline no longer need to bypass anything to get determinism.
 @MainActor
 public final class NotificationsPlanningCoordinationService {
     /// Thrown by `createReminder` — the one entry point a later UI task
@@ -48,34 +48,36 @@ public final class NotificationsPlanningCoordinationService {
     }
 
     /// Registers this service's reaction to every business event this
-    /// V1 lifecycle needs. Deliberately `async`, called once from
-    /// `CompositionRoot.build()` (already `async`) — not from either
-    /// domain module's own `configure`, since neither domain package may
-    /// see the other (see this type's own doc comment).
+    /// V1 lifecycle needs. Called once from `CompositionRoot.build()` —
+    /// not from either domain module's own `configure`, since neither
+    /// domain package may see the other (see this type's own doc
+    /// comment).
     ///
-    /// `EventBus.subscribe`'s handler type is a plain, synchronous
-    /// `@Sendable (Event) -> Void` closure — it cannot itself `await` a
-    /// hop onto `@MainActor` (where this service and its SwiftData-backed
-    /// dependencies live), so each handler wraps its actual work in
-    /// `Task { @MainActor in ... }`. This is NOT redesigning `EventBus`
-    /// (its actor/closure shape is unchanged); it is the same "actor-hop
-    /// via `Task`" pattern this project's own `EventBusTests.swift`
-    /// already uses for its subscribers. The practical consequence: live,
-    /// production event delivery through this path is asynchronous
-    /// relative to the publish call, same as `PlanningService`/
-    /// `TrainingService`'s own fire-and-forget publish — see those types'
-    /// doc comments. Every `handle...` method's actual DECISION logic is
-    /// still fully deterministic and directly unit-tested by calling it
-    /// with a constructed event, bypassing this live async hop entirely.
-    public func subscribeToEvents(_ eventBus: EventBus) async {
-        await eventBus.subscribe(to: PlannedActivityChanged.self) { [weak self] event in
-            Task { @MainActor in self?.handlePlannedActivityChanged(event) }
+    /// PR #36 follow-up (deterministic delivery): `EventBus.subscribe`'s
+    /// `handler` parameter is now `@MainActor`-qualified (not merely
+    /// `@Sendable`) — see `EventBus`'s own doc comment for the full
+    /// reasoning. That lets each closure below call this service's own
+    /// `@MainActor` `handle...` methods DIRECTLY, synchronously — no
+    /// `Task`, no actor-hop of any kind. Combined with `PlanningService`/
+    /// `TrainingService` now calling `eventBus.publish(event)` directly
+    /// (also synchronous, also no `Task`), the full chain — canonical
+    /// mutation -> publish -> this handler -> reminder reconciliation —
+    /// is one synchronous, same-actor call sequence: by the time the
+    /// ORIGINAL `PlanningService`/`TrainingService` mutation call
+    /// returns, the corresponding reminder-lifecycle reaction below has
+    /// ALREADY fully run. This method itself no longer needs to be
+    /// `async` either, for the same reason. Every `handle...` method's
+    /// decision logic is unchanged and remains directly unit-testable by
+    /// calling it with a constructed event.
+    public func subscribeToEvents(_ eventBus: EventBus) {
+        eventBus.subscribe(to: PlannedActivityChanged.self) { [weak self] event in
+            self?.handlePlannedActivityChanged(event)
         }
-        await eventBus.subscribe(to: PlannedActivityDeleted.self) { [weak self] event in
-            Task { @MainActor in self?.handlePlannedActivityDeleted(event) }
+        eventBus.subscribe(to: PlannedActivityDeleted.self) { [weak self] event in
+            self?.handlePlannedActivityDeleted(event)
         }
-        await eventBus.subscribe(to: ActivityLogged.self) { [weak self] event in
-            Task { @MainActor in self?.handleActivityLogged(event) }
+        eventBus.subscribe(to: ActivityLogged.self) { [weak self] event in
+            self?.handleActivityLogged(event)
         }
     }
 

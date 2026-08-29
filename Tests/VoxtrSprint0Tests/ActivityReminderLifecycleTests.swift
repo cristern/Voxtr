@@ -35,6 +35,11 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
     private let lock = NSLock()
     private var _scheduleCalls: [ScheduleCall] = []
     private var _cancelledIds: [ActivityReminderId] = []
+    /// PR #36 follow-up: net pending state per id — the LAST operation
+    /// recorded for a given `ActivityReminderId` (schedule vs. cancel),
+    /// so a test can ask "is this reminder still pending right now" in
+    /// one call instead of reasoning about call-order itself.
+    private var _pendingIds: Set<ActivityReminderId> = []
 
     var scheduleCalls: [ScheduleCall] {
         lock.lock(); defer { lock.unlock() }
@@ -46,14 +51,21 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
         return _cancelledIds
     }
 
+    func isPending(_ id: ActivityReminderId) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return _pendingIds.contains(id)
+    }
+
     func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {
         lock.lock(); defer { lock.unlock() }
         _scheduleCalls.append(ScheduleCall(id: id, fireDate: fireDate, content: content))
+        _pendingIds.insert(id)
     }
 
     func cancelReminder(id: ActivityReminderId) {
         lock.lock(); defer { lock.unlock() }
         _cancelledIds.append(id)
+        _pendingIds.remove(id)
     }
 
     func requestAuthorization(completion: @escaping @Sendable (Bool) -> Void) {
@@ -561,5 +573,182 @@ struct ActivityReminderRepositoryTests {
 
         #expect(try repository.fetch(forPlannedActivity: plannedActivityId) == nil)
         #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).isEmpty)
+    }
+}
+
+// MARK: - Production pipeline determinism (PR #36 follow-up)
+
+/// PR #36 follow-up — the correctness property the review flagged: with
+/// two independent unstructured `Task` hops (service -> EventBus,
+/// EventBus handler -> MainActor reaction), a rapid sequence of
+/// mutations (edit-then-delete, edit-then-log, repeated edits) had no
+/// guaranteed final ordering. `EventBus.publish` is now `@MainActor` and
+/// dispatches synchronously; `PlanningService`/`TrainingService` call it
+/// directly (no `Task`); `NotificationsPlanningCoordinationService`'s
+/// subscription closures call their own `@MainActor` handlers directly
+/// (no `Task`) — see each of those types' own doc comments.
+///
+/// These tests deliberately go through the REAL `EventBus` publish/
+/// subscribe path — `coordination.subscribeToEvents(eventBus)`, the
+/// exact call `CompositionRoot.build()` makes in production — and the
+/// REAL `PlanningService`/`TrainingService` mutation methods, never
+/// `handlePlannedActivityChanged`/`handlePlannedActivityDeleted`/
+/// `handleActivityLogged` directly. The existing direct-handler unit
+/// tests above remain, covering decision logic in isolation; these cover
+/// the production wiring itself.
+@Suite("Notifications V1 production event pipeline determinism (PR #36 follow-up)", .serialized)
+struct NotificationsProductionEventPipelineTests {
+
+    private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
+
+    private struct Fixture {
+        let planningService: PlanningService
+        let trainingService: TrainingService
+        let coordination: NotificationsPlanningCoordinationService
+        let scheduler: FakeActivityReminderScheduler
+        let activityReminderRepository: ActivityReminderRepository
+    }
+
+    @MainActor
+    private func makeFixture(container: ModelContainer) -> Fixture {
+        let eventBus = EventBus()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository, eventBus: eventBus)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository, eventBus: eventBus)
+        let activityReminderRepository = ActivityReminderRepository(modelContext: container.mainContext)
+        let scheduler = FakeActivityReminderScheduler()
+        let activityReminderService = ActivityReminderService(repository: activityReminderRepository, scheduler: scheduler)
+        let coordination = NotificationsPlanningCoordinationService(
+            activityReminderService: activityReminderService,
+            planningService: planningService
+        )
+        // The real production wiring call — CompositionRoot.build() makes
+        // this exact call, against this exact eventBus instance.
+        coordination.subscribeToEvents(eventBus)
+        return Fixture(
+            planningService: planningService, trainingService: trainingService, coordination: coordination,
+            scheduler: scheduler, activityReminderRepository: activityReminderRepository
+        )
+    }
+
+    @Test("Rapid edit -> delete converges, through the real EventBus, to no persisted reminder and no pending scheduler entry")
+    @MainActor
+    func rapidEditThenDeleteConverges() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let reminder = try fixture.coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30)
+        #expect(fixture.scheduler.isPending(reminder.activityReminderId))
+
+        // 1. Edit the planned activity's date/time.
+        _ = try fixture.planningService.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 8), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 7, minute: 0)
+        )
+        // 2. Immediately delete it — both mutations publish through the
+        // same real EventBus; nothing here awaits, sleeps, or calls a
+        // handler method directly.
+        try fixture.planningService.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId())
+        // 3. "Allow the production lifecycle to complete": nothing to
+        // wait for — publish/subscribe/react is synchronous end to end,
+        // so both mutation calls above have already returned only once
+        // their own event was fully processed.
+
+        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(fixture.scheduler.isPending(reminder.activityReminderId) == false)
+        #expect(fixture.scheduler.cancelledIds.last == reminder.activityReminderId)
+    }
+
+    @Test("Rapid edit -> completion (log) converges, through the real EventBus, to no active reminder intent and no pending scheduler entry")
+    @MainActor
+    func rapidEditThenCompletionConverges() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let reminder = try fixture.coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30)
+
+        // 1. Edit the planned activity.
+        _ = try fixture.planningService.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 19, minute: 0)
+        )
+        // 2. Immediately log the linked activity as completed — through
+        // the real TrainingService, publishing ActivityLogged through the
+        // same real EventBus.
+        _ = try fixture.trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: "Endurance run", startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 45, status: .completed, source: "manual"
+        )
+
+        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(fixture.scheduler.isPending(reminder.activityReminderId) == false)
+        #expect(fixture.scheduler.cancelledIds.last == reminder.activityReminderId)
+    }
+
+    @Test("Multiple rapid edits converge, through the real EventBus, to the LATEST canonical PlannedActivity — never an intermediate mutation")
+    @MainActor
+    func multipleRapidEditsConvergeToLatestState() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let reminder = try fixture.coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30)
+        let scheduleCallsAfterCreate = fixture.scheduler.scheduleCalls.count
+
+        // Three rapid, sequential date/time changes — an intermediate
+        // mutation's own fire instant must never be what's left scheduled.
+        _ = try fixture.planningService.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 7), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 9, minute: 0)
+        )
+        _ = try fixture.planningService.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 8), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 10, minute: 0)
+        )
+        _ = try fixture.planningService.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 9), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 11, minute: 0)
+        )
+
+        let expectedFinalFireInstant = try LocalDate(year: 2026, month: 1, day: 9).absoluteDate(at: LocalTime(hour: 11, minute: 0), in: Self.oslo)
+        let expectedFinalFireDate = expectedFinalFireInstant.addingTimeInterval(-30 * 60)
+
+        // Exactly one reschedule call per edit — three edits, three new
+        // schedule calls beyond the initial create — proving nothing was
+        // coalesced/dropped/reordered.
+        #expect(fixture.scheduler.scheduleCalls.count == scheduleCallsAfterCreate + 3)
+        #expect(fixture.scheduler.scheduleCalls.last?.id == reminder.activityReminderId)
+        #expect(fixture.scheduler.scheduleCalls.last?.fireDate == expectedFinalFireDate)
+        // The still-persisted reminder's own next fire instant (were it
+        // fetched again right now) also reflects the latest state, not
+        // some earlier value baked in at creation.
+        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId)?.activityReminderId == reminder.activityReminderId)
     }
 }

@@ -13,7 +13,7 @@ struct EventBusTests {
         }
         let received = Received()
 
-        _ = await bus.subscribe(to: AppDidFinishLaunchingEvent.self) { event in
+        _ = bus.subscribe(to: AppDidFinishLaunchingEvent.self) { event in
             Task { await received.record(event) }
         }
 
@@ -31,10 +31,10 @@ struct EventBusTests {
         actor Counter { var count = 0; func increment() { count += 1 } }
         let counter = Counter()
 
-        let token = await bus.subscribe(to: AppDidFinishLaunchingEvent.self) { _ in
+        let token = bus.subscribe(to: AppDidFinishLaunchingEvent.self) { _ in
             Task { await counter.increment() }
         }
-        await bus.unsubscribe(token, from: AppDidFinishLaunchingEvent.self)
+        bus.unsubscribe(token, from: AppDidFinishLaunchingEvent.self)
         await bus.publish(AppDidFinishLaunchingEvent())
         try? await Task.sleep(for: .milliseconds(50))
 

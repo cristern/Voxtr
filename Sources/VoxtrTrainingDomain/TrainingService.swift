@@ -114,24 +114,26 @@ public final class TrainingService {
             notes: notes
         )
 
-        // Notifications V1 Activity Reminder Foundation: the authoritative
-        // mutation boundary for "an activity was logged" — published only
-        // after the insert above has actually succeeded. Every UI call
-        // path (LogActivityViewModel, DailyTrainingViewModel, Activity
-        // Detail Cancel/Missed, recurring-occurrence Log Activity) already
-        // funnels through this one method via
-        // `TrainingReflectionCoordinationService.logActivity`, so this is
-        // the single place this event needs to be published from — see
-        // this task's own same-pattern audit requirement. Fire-and-forget
-        // `Task`, same reasoning as `PlanningService.editPlannedActivity`'s
-        // own `changedEvent` publish — see that call site's comment.
+        // Notifications V1 Activity Reminder Foundation (PR #36
+        // follow-up: deterministic delivery): the authoritative mutation
+        // boundary for "an activity was logged" — published only after
+        // the insert above has actually succeeded, synchronously,
+        // directly (no `Task`) — `EventBus.publish` is `@MainActor`, and
+        // this method already runs on `@MainActor` (this whole class
+        // is), so this is a plain same-actor call — see `EventBus`'s own
+        // doc comment. Every UI call path (LogActivityViewModel,
+        // DailyTrainingViewModel, Activity Detail Cancel/Missed,
+        // recurring-occurrence Log Activity) already funnels through
+        // this one method via `TrainingReflectionCoordinationService.logActivity`,
+        // so this is the single place this event needs to be published
+        // from — see this task's own same-pattern audit requirement.
         let loggedEvent = ActivityLogged(
             loggedActivityId: logged.loggedActivityId,
             athleteId: athleteId,
             plannedActivityId: plannedActivityId,
             durationMinutes: durationMinutes
         )
-        Task { [eventBus] in await eventBus.publish(loggedEvent) }
+        eventBus.publish(loggedEvent)
 
         return logged
     }

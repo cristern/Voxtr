@@ -13,6 +13,22 @@ import VoxtrTrainingDomain
 // Following the S1.1 lesson: no shared private helper methods for
 // container/repository construction — every test builds its own inline.
 
+/// PR #36 follow-up (deterministic delivery): same `@unchecked Sendable`
+/// recorder pattern as `PlanningServiceTests.swift`'s own — see that
+/// file's doc comment.
+private final class ActivityLoggedRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [ActivityLogged] = []
+    var events: [ActivityLogged] {
+        lock.lock(); defer { lock.unlock() }
+        return _events
+    }
+    func record(_ event: ActivityLogged) {
+        lock.lock(); defer { lock.unlock() }
+        _events.append(event)
+    }
+}
+
 @Suite("TrainingRepository and TrainingService (S3.0)", .serialized)
 struct TrainingRepositoryAndServiceTests {
 
@@ -46,7 +62,7 @@ struct TrainingRepositoryAndServiceTests {
 
     @Test("Logging an activity publishes ActivityLogged, identifying the exact logged activity/athlete/linked planned activity")
     @MainActor
-    func logActivityPublishesActivityLoggedEvent() async throws {
+    func logActivityPublishesActivityLoggedEvent() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = TrainingRepository(modelContext: container.mainContext)
@@ -55,13 +71,12 @@ struct TrainingRepositoryAndServiceTests {
         let athleteId = AthleteId()
         let plannedActivityId = PlannedActivityId()
 
-        actor Received {
-            var events: [ActivityLogged] = []
-            func record(_ event: ActivityLogged) { events.append(event) }
-        }
-        let received = Received()
-        _ = await eventBus.subscribe(to: ActivityLogged.self) { event in
-            Task { await received.record(event) }
+        // PR #36 follow-up (deterministic delivery): EventBus.publish is
+        // now @MainActor and dispatches synchronously — no actor-hop, no
+        // Task, no sleep needed.
+        let recorder = ActivityLoggedRecorder()
+        _ = eventBus.subscribe(to: ActivityLogged.self) { event in
+            recorder.record(event)
         }
 
         let logged = try service.logActivity(
@@ -74,17 +89,12 @@ struct TrainingRepositoryAndServiceTests {
             status: .completed,
             source: "manual"
         )
-        // TrainingService publishes via a fire-and-forget Task
-        // (actor-hop to EventBus), same bounded-wait pattern this
-        // project's own EventBusTests.swift already uses.
-        try? await Task.sleep(for: .milliseconds(50))
 
-        let events = await received.events
-        #expect(events.count == 1)
-        #expect(events.first?.loggedActivityId == logged.loggedActivityId)
-        #expect(events.first?.athleteId == athleteId)
-        #expect(events.first?.plannedActivityId == plannedActivityId)
-        #expect(events.first?.durationMinutes == 45)
+        #expect(recorder.events.count == 1)
+        #expect(recorder.events.first?.loggedActivityId == logged.loggedActivityId)
+        #expect(recorder.events.first?.athleteId == athleteId)
+        #expect(recorder.events.first?.plannedActivityId == plannedActivityId)
+        #expect(recorder.events.first?.durationMinutes == 45)
     }
 
     @Test("Logging an activity without a PlannedActivity link is allowed")

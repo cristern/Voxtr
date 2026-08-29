@@ -14,6 +14,39 @@ import VoxtrCoreReferenceData
 // Following the S1.1 lesson: no shared private helper methods for
 // container/repository construction — every test builds its own inline.
 
+/// PR #36 follow-up (deterministic delivery): a plain `@unchecked
+/// Sendable` recorder — same pattern
+/// `ActivityReminderLifecycleTests.FakeActivityReminderScheduler`
+/// already establishes — captured by an `EventBus.subscribe` handler
+/// closure. `NSLock`-guarded even though delivery is now synchronous and
+/// single-threaded through `@MainActor`, so this stays correct
+/// regardless of that implementation detail.
+private final class PlannedActivityChangedRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [PlannedActivityChanged] = []
+    var events: [PlannedActivityChanged] {
+        lock.lock(); defer { lock.unlock() }
+        return _events
+    }
+    func record(_ event: PlannedActivityChanged) {
+        lock.lock(); defer { lock.unlock() }
+        _events.append(event)
+    }
+}
+
+private final class PlannedActivityDeletedRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [PlannedActivityDeleted] = []
+    var events: [PlannedActivityDeleted] {
+        lock.lock(); defer { lock.unlock() }
+        return _events
+    }
+    func record(_ event: PlannedActivityDeleted) {
+        lock.lock(); defer { lock.unlock() }
+        _events.append(event)
+    }
+}
+
 @Suite("PlanningService (S2.1)", .serialized)
 struct PlanningServiceTests {
 
@@ -176,7 +209,7 @@ struct PlanningServiceTests {
 
     @Test("Editing a PlannedActivity publishes PlannedActivityChanged, identifying the exact activity/athlete/week that changed")
     @MainActor
-    func editPlannedActivityPublishesChangedEvent() async throws {
+    func editPlannedActivityPublishesChangedEvent() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = PlanningRepository(modelContext: container.mainContext)
@@ -193,13 +226,13 @@ struct PlanningServiceTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        actor Received {
-            var events: [PlannedActivityChanged] = []
-            func record(_ event: PlannedActivityChanged) { events.append(event) }
-        }
-        let received = Received()
-        _ = await eventBus.subscribe(to: PlannedActivityChanged.self) { event in
-            Task { await received.record(event) }
+        // PR #36 follow-up (deterministic delivery): EventBus.publish is
+        // now @MainActor and dispatches synchronously — no actor-hop, no
+        // Task, no sleep needed. By the time editPlannedActivity below
+        // returns, this recorder has already been updated (or not).
+        let recorder = PlannedActivityChangedRecorder()
+        _ = eventBus.subscribe(to: PlannedActivityChanged.self) { event in
+            recorder.record(event)
         }
 
         _ = try service.editPlannedActivity(
@@ -210,22 +243,16 @@ struct PlanningServiceTests {
             localDate: LocalDate(year: 2026, month: 1, day: 7),
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
-        // PlanningService publishes via a fire-and-forget Task (actor-hop
-        // to EventBus) rather than making this method async itself — same
-        // bounded-wait pattern this project's own EventBusTests.swift
-        // already uses for the identical actor-hop delivery.
-        try? await Task.sleep(for: .milliseconds(50))
 
-        let events = await received.events
-        #expect(events.count == 1)
-        #expect(events.first?.plannedActivityId == activity.plannedActivityId)
-        #expect(events.first?.athleteId == athleteId)
-        #expect(events.first?.weekPlanId == weekPlan.weekPlanId)
+        #expect(recorder.events.count == 1)
+        #expect(recorder.events.first?.plannedActivityId == activity.plannedActivityId)
+        #expect(recorder.events.first?.athleteId == athleteId)
+        #expect(recorder.events.first?.weekPlanId == weekPlan.weekPlanId)
     }
 
     @Test("Deleting a PlannedActivity publishes PlannedActivityDeleted, identifying the exact activity/athlete that was deleted")
     @MainActor
-    func deletePlannedActivityPublishesDeletedEvent() async throws {
+    func deletePlannedActivityPublishesDeletedEvent() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = PlanningRepository(modelContext: container.mainContext)
@@ -242,22 +269,16 @@ struct PlanningServiceTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
         )
 
-        actor Received {
-            var events: [PlannedActivityDeleted] = []
-            func record(_ event: PlannedActivityDeleted) { events.append(event) }
-        }
-        let received = Received()
-        _ = await eventBus.subscribe(to: PlannedActivityDeleted.self) { event in
-            Task { await received.record(event) }
+        let recorder = PlannedActivityDeletedRecorder()
+        _ = eventBus.subscribe(to: PlannedActivityDeleted.self) { event in
+            recorder.record(event)
         }
 
         try service.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId())
-        try? await Task.sleep(for: .milliseconds(50))
 
-        let events = await received.events
-        #expect(events.count == 1)
-        #expect(events.first?.plannedActivityId == activity.plannedActivityId)
-        #expect(events.first?.athleteId == athleteId)
+        #expect(recorder.events.count == 1)
+        #expect(recorder.events.first?.plannedActivityId == activity.plannedActivityId)
+        #expect(recorder.events.first?.athleteId == athleteId)
     }
 
     @Test("Editing a PlannedActivity against a nonexistent WeekPlan is rejected")
