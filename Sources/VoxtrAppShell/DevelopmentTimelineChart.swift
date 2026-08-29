@@ -188,7 +188,13 @@ public struct DevelopmentTimelineChart: View {
     /// second "which week is selected" source of truth. The ONE
     /// navigation truth remains `AthleteStatisticsViewModel
     /// .selectedWeekStart`, reached only by calling `onSelectWeek`
-    /// below (see that property's own doc comment).
+    /// below (see that property's own doc comment). Review follow-up
+    /// (PR #35): momentary by design — a successful resolution resets
+    /// this back to `nil` in the SAME synchronous binding-set call that
+    /// triggers `onSelectWeek`, so it never stays latched to the last-
+    /// selected week; see `chart`'s own `.chartXSelection` doc comment
+    /// for why that matters (re-tapping the same week after dismissing
+    /// Week Drilldown must produce a fresh selection event).
     @State private var chartXSelectionIsoString: String?
 
     public let points: [DevelopmentTimelinePoint]
@@ -444,6 +450,42 @@ public struct DevelopmentTimelineChart: View {
     static func resolveWeekStart(forSelectedIsoString isoString: String?, points: [DevelopmentTimelinePoint]) -> LocalDate? {
         guard let isoString else { return nil }
         return points.first { $0.weekStart.isoString == isoString }?.weekStart
+    }
+
+    /// Review follow-up (PR #35): the ONE pure decision this chart's
+    /// `.chartXSelection` binding-set closure makes, extracted so the
+    /// same-week-re-entry lifecycle rule is directly testable without a
+    /// rendered gesture. `static`/`internal`, matching every other pure
+    /// decision rule in this file.
+    ///
+    /// `weekStartToSelect` is non-`nil` exactly when `newValue` resolves
+    /// to a real plotted week (via `resolveWeekStart(forSelectedIsoString:points:)`)
+    /// — the caller hands this straight to `onSelectWeek`.
+    ///
+    /// `nextStoredSelection` is what the chart's own transient
+    /// `chartXSelectionIsoString` should become immediately afterward.
+    /// On a SUCCESSFUL resolution this is ALWAYS `nil`, regardless of
+    /// which week was selected — direct chart selection is momentary
+    /// navigation, never sticky chart-selection state (see this type's
+    /// own `chartXSelectionIsoString` doc comment). This is what makes
+    /// re-entry work: after tapping week A, the chart's stored selection
+    /// returns to `nil`; a later tap on week A again therefore produces
+    /// a genuine `nil` → `"weekA-iso"` binding transition, which SwiftUI/
+    /// Swift Charts always propagates as a change, rather than a same-
+    /// value write it could otherwise suppress. A failed resolution
+    /// (`newValue == nil`, or an iso string outside `points`) never
+    /// triggers navigation and stores `newValue` as-is, unchanged from
+    /// this chart's pre-existing contract.
+    struct ChartXSelectionChange: Equatable {
+        let weekStartToSelect: LocalDate?
+        let nextStoredSelection: String?
+    }
+
+    static func resolveChartXSelectionChange(newValue: String?, points: [DevelopmentTimelinePoint]) -> ChartXSelectionChange {
+        guard let weekStart = resolveWeekStart(forSelectedIsoString: newValue, points: points) else {
+            return ChartXSelectionChange(weekStartToSelect: nil, nextStoredSelection: newValue)
+        }
+        return ChartXSelectionChange(weekStartToSelect: weekStart, nextStoredSelection: nil)
     }
 
     /// Week Drilldown UX Refinement round: the week chip row becomes a
@@ -945,19 +987,31 @@ public struct DevelopmentTimelineChart: View {
         // gesture, resolving to the nearest plotted x band regardless of
         // which mark(s) share that x position (stacked Sport segments,
         // grouped Actual/Planned bars, a Trend line point all resolve
-        // identically — see `resolveWeekStart(forSelectedIsoString:points:)`'s
-        // own doc comment). `chartXSelectionIsoString` is purely local,
+        // identically). `chartXSelectionIsoString` is purely local,
         // transient UI-gesture state (see its own doc comment); the
         // resolved `LocalDate` is handed to `onSelectWeek` immediately,
         // which is this chart's ONE existing path into
         // `AthleteStatisticsViewModel.selectWeek(_:)` — no second
-        // selection state, no reload, no persistence.
+        // selection state, no reload, no persistence. The actual
+        // resolution + reset decision is the pure
+        // `resolveChartXSelectionChange(newValue:points:)` above — see
+        // that function's own doc comment for the full contract
+        // (including why a successful selection always resets back to
+        // `nil`, MOMENTARY rather than sticky, so re-tapping the SAME
+        // week after dismissing Week Drilldown reliably produces a
+        // fresh `nil` → value binding transition). This closure only
+        // applies that decision: write the next stored selection, then
+        // — synchronously, in the SAME call, no timer/DispatchQueue/
+        // async choreography of any kind — invoke `onSelectWeek` if a
+        // week was resolved.
         .chartXSelection(value: Binding(
             get: { chartXSelectionIsoString },
             set: { newValue in
-                chartXSelectionIsoString = newValue
-                guard let onSelectWeek, let weekStart = Self.resolveWeekStart(forSelectedIsoString: newValue, points: points) else { return }
-                onSelectWeek(weekStart)
+                let change = Self.resolveChartXSelectionChange(newValue: newValue, points: points)
+                chartXSelectionIsoString = change.nextStoredSelection
+                if let weekStart = change.weekStartToSelect {
+                    onSelectWeek?(weekStart)
+                }
             }
         ))
         .chartYScale(domain: 0...trainingAxisMax)

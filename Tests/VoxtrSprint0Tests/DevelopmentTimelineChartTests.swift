@@ -326,6 +326,74 @@ struct DevelopmentTimelineChartTests {
     // nothing for a runtime test to assert on here — this is verified
     // by architecture/code review instead (see the delivery report's
     // own architecture audit), not a vacuous always-true test.
+
+    // MARK: - PR #35 review follow-up: same-week re-entry lifecycle
+
+    /// Required test 1 (same-week re-entry): a successful selection of
+    /// week A always resets `nextStoredSelection` back to `nil` — this
+    /// is the exact invariant that makes re-entry work, since it is
+    /// what guarantees the chart's own stored selection can never stay
+    /// latched to a value equal to a later tap's own resolved value.
+    /// Calling the pure resolver twice in a row with the SAME iso
+    /// string (simulating "select week A, dismiss, select week A
+    /// again") produces the identical, correct result both times —
+    /// proving there is no hidden state that could make a second
+    /// selection of the same week behave differently from the first.
+    @Test("resolveChartXSelectionChange: selecting the same week twice in a row resolves and resets identically both times")
+    func resolveChartXSelectionChangeSameWeekReEntryWorksTwice() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 60)]
+        let isoString = points[0].weekStart.isoString
+
+        let first = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: isoString, points: points)
+        #expect(first.weekStartToSelect == points[0].weekStart)
+        #expect(first.nextStoredSelection == nil)
+
+        // The resolver takes no "current stored selection" parameter at
+        // all — it is a pure function of (newValue, points) only — so
+        // calling it again with the SAME iso string, exactly as a
+        // second real tap on the same bar would, must produce the
+        // identical result, not a suppressed/different one.
+        let second = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: isoString, points: points)
+        #expect(second.weekStartToSelect == points[0].weekStart)
+        #expect(second.nextStoredSelection == nil)
+    }
+
+    /// Required test 2: a different week resolves correctly immediately
+    /// after another week's selection was resolved and reset.
+    @Test("resolveChartXSelectionChange: selecting week A then week B resolves each to its own weekStart")
+    func resolveChartXSelectionChangeDifferentWeekSelectionWorks() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 60)]
+
+        let selectA = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: points[0].weekStart.isoString, points: points)
+        #expect(selectA.weekStartToSelect == points[0].weekStart)
+        #expect(selectA.nextStoredSelection == nil)
+
+        let selectB = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: points[1].weekStart.isoString, points: points)
+        #expect(selectB.weekStartToSelect == points[1].weekStart)
+        #expect(selectB.nextStoredSelection == nil)
+    }
+
+    /// Required test 3: a `nil` selection never triggers navigation and
+    /// is stored as `nil` — safe, no-op.
+    @Test("resolveChartXSelectionChange: a nil selection never triggers navigation and remains safe")
+    func resolveChartXSelectionChangeNilSelectionIsSafe() {
+        let points = [Self.selectionPoint(2, minutes: 40)]
+        let change = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: nil, points: points)
+        #expect(change.weekStartToSelect == nil)
+        #expect(change.nextStoredSelection == nil)
+    }
+
+    /// Required test 4: an unmatched iso string never triggers
+    /// navigation and never resolves to an unrelated week — it is
+    /// stored as-is (matching this chart's pre-existing "unresolvable
+    /// selection" contract), never silently dropped or substituted.
+    @Test("resolveChartXSelectionChange: an unmatched iso string never triggers navigation and never resolves to an unrelated week")
+    func resolveChartXSelectionChangeUnmatchedSelectionIsSafe() {
+        let points = [Self.selectionPoint(2, minutes: 40), Self.selectionPoint(9, minutes: 60)]
+        let change = DevelopmentTimelineChart.resolveChartXSelectionChange(newValue: "not-a-real-week", points: points)
+        #expect(change.weekStartToSelect == nil)
+        #expect(change.nextStoredSelection == "not-a-real-week")
+    }
 }
 
 /// Fullscreen data-ownership round: focused coverage for
