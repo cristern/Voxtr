@@ -42,6 +42,7 @@ public struct ParentTabShellView: View {
     public let planningService: PlanningService
     public let trainingService: TrainingService
     public let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    public let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     public let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
@@ -70,6 +71,7 @@ public struct ParentTabShellView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -86,6 +88,7 @@ public struct ParentTabShellView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -112,6 +115,7 @@ public struct ParentTabShellView: View {
                 planningService: planningService,
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
@@ -137,6 +141,7 @@ public struct ParentTabShellView: View {
                 planningService: planningService,
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 athleteRepository: athleteRepository,
                 activityChangeBroadcaster: activityChangeBroadcaster,
@@ -161,6 +166,7 @@ public struct ParentTabShellView: View {
                 planningService: planningService,
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,
@@ -271,6 +277,7 @@ private struct ParentPlanTabView: View {
     let planningService: PlanningService
     let trainingService: TrainingService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let athleteRepository: AthleteRepository
     let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
@@ -293,6 +300,7 @@ private struct ParentPlanTabView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         athleteRepository: AthleteRepository,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
@@ -302,6 +310,7 @@ private struct ParentPlanTabView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.athleteRepository = athleteRepository
         self.activityChangeBroadcaster = activityChangeBroadcaster
@@ -324,7 +333,8 @@ private struct ParentPlanTabView: View {
                             actorId: actorId,
                             planningService: planningService,
                             trainingService: trainingService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService
                         )
                     }
                     .accessibilityIdentifier("parentPlan.familyScheduleLink")
@@ -345,6 +355,7 @@ private struct ParentPlanTabView: View {
                                     athleteDisplayName: athlete.givenName,
                                     planningService: planningService,
                                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                                     actorId: actorId
                                 )
                             } label: {
@@ -413,6 +424,7 @@ private struct ParentTrainingTabView: View {
     let planningService: PlanningService
     let trainingService: TrainingService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     let weeklyReflectionService: WeeklyReflectionService
@@ -440,6 +452,7 @@ private struct ParentTrainingTabView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -451,6 +464,7 @@ private struct ParentTrainingTabView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -491,6 +505,7 @@ private struct ParentTrainingTabView: View {
                                         planningService: planningService,
                                         trainingService: trainingService,
                                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                                         actorId: actorId,
                                         athleteDisplayName: athlete.givenName
                                     )

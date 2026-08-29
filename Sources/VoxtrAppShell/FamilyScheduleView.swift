@@ -26,19 +26,22 @@ public struct FamilyScheduleView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
 
     public init(
         viewModel: FamilyScheduleViewModel,
         actorId: ActorId,
         planningService: PlanningService,
         trainingService: TrainingService,
-        trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+        trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.actorId = actorId
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
     }
 
     public var body: some View {
@@ -94,6 +97,7 @@ public struct FamilyScheduleView: View {
                     actorId: actorId,
                     planningService: planningService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                     onActivityLogged: { viewModel.loadSchedule() }
                 )
             } label: {

@@ -24,6 +24,7 @@ public struct WeeklyPlanningView: View {
     private let athleteDisplayName: String
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     private let actorId: ActorId
 
     public init(
@@ -31,12 +32,14 @@ public struct WeeklyPlanningView: View {
         athleteDisplayName: String,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         actorId: ActorId
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.actorId = actorId
     }
 
@@ -135,6 +138,7 @@ public struct WeeklyPlanningView: View {
                             actorId: actorId,
                             planningService: planningService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                             onActivityLogged: { viewModel.refreshAfterActivityDetailMutation() }
                         )
                     } label: {

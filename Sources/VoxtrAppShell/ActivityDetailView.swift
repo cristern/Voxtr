@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 
@@ -352,6 +353,8 @@ struct ActivityEditFormView: View {
 
                 TextField("Location", text: $viewModel.editLocation)
                     .accessibilityIdentifier("activityDetail.editLocationField")
+
+                reminderSection
             }
             .voxtrScreenBackground()
             .tint(VoxtrColor.accent)
@@ -371,6 +374,75 @@ struct ActivityEditFormView: View {
                 }
             }
         }
+    }
+
+    /// Notifications V1 Activity Reminder UI slice: Reminder is
+    /// deliberately NOT wired to this sheet's own "Save" button — every
+    /// toggle/lead-time change here mutates the canonical reminder
+    /// intent immediately, through `ActivityDetailViewModel`'s own
+    /// `setReminderEnabled(_:)`/`setReminderLeadTimeMinutes(_:)`, the
+    /// same "decoupled from Save, fires immediately" design the rest of
+    /// this screen's actions (Cancel, Delete, Log) already use. Gated on
+    /// `viewModel.canSetReminder` — the CANONICAL, already-saved
+    /// `activity.startLocalTime`, not this form's own in-progress edit
+    /// draft — so a start time added in this same session becomes
+    /// available for a reminder only once Save has actually persisted
+    /// it, never a moment earlier as if it already existed.
+    @ViewBuilder
+    private var reminderSection: some View {
+        Section {
+            if viewModel.canSetReminder {
+                Toggle("Reminder", isOn: reminderEnabledBinding)
+                    .accessibilityIdentifier("activityDetail.reminderToggle")
+                    .disabled(viewModel.reminderIsUpdating)
+
+                if viewModel.reminderEnabled {
+                    ReminderLeadTimePickerView(
+                        leadTimeMinutes: $viewModel.reminderLeadTimeMinutes,
+                        onCommit: { viewModel.setReminderLeadTimeMinutes($0) }
+                    )
+                    .disabled(viewModel.reminderIsUpdating)
+                }
+
+                if viewModel.reminderAuthorizationDenied {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(PlanningStrings.reminderAuthorizationDenied)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
+                            .accessibilityIdentifier("activityDetail.reminderAuthorizationDeniedMessage")
+                        Button(PlanningStrings.reminderOpenSettings) {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                UIApplication.shared.open(url)
+                            }
+                        }
+                        .accessibilityIdentifier("activityDetail.reminderOpenSettingsButton")
+                    }
+                }
+
+                if let reminderErrorMessage = viewModel.reminderErrorMessage {
+                    Text(reminderErrorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("activityDetail.reminderErrorMessage")
+                }
+            } else {
+                Text(PlanningStrings.reminderNeedsStartTime)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .accessibilityIdentifier("activityDetail.reminderNeedsStartTimeMessage")
+            }
+        } header: {
+            VoxtrSectionHeading("Reminder")
+        }
+    }
+
+    /// `reminderEnabled` is `private(set)` on the view model — every
+    /// mutation must go through `setReminderEnabled(_:)`, never a bare
+    /// `@Bindable` write, so the authorization round trip always runs.
+    private var reminderEnabledBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.reminderEnabled },
+            set: { viewModel.setReminderEnabled($0) }
+        )
     }
 }
 

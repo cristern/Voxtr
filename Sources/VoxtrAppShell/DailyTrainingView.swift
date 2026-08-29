@@ -15,6 +15,7 @@ public struct DailyTrainingView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     private let actorId: ActorId
     private let athleteDisplayName: String
 
@@ -23,6 +24,7 @@ public struct DailyTrainingView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         actorId: ActorId,
         athleteDisplayName: String
     ) {
@@ -30,6 +32,7 @@ public struct DailyTrainingView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.actorId = actorId
         self.athleteDisplayName = athleteDisplayName
     }
@@ -66,6 +69,7 @@ public struct DailyTrainingView: View {
                                 actorId: actorId,
                                 planningService: planningService,
                                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                                 onActivityLogged: { viewModel.load() }
                             )
                         } label: {

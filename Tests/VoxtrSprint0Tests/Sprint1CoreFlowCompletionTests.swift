@@ -9,6 +9,7 @@ import VoxtrParentDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrNotificationsDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -16,6 +17,23 @@ import VoxtrReflectionDomain
 //
 // Following the S1.1 lesson: no shared private helper methods for
 // container construction — every test builds its own inline.
+
+/// Notifications V1 Activity Reminder UI slice: a trivial no-op
+/// `ActivityReminderScheduling` conformance so `ActivityDetailViewModel`
+/// tests in this file (which do not exercise reminder behavior) can
+/// construct the now-required `NotificationsPlanningCoordinationService`
+/// dependency without touching `UNUserNotificationCenter`.
+private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
+    func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
+    func cancelReminder(id: ActivityReminderId) {}
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+}
+
 @Suite("Sprint 1 Core Flow Completion", .serialized)
 struct Sprint1CoreFlowCompletionTests {
 
@@ -88,6 +106,13 @@ struct Sprint1CoreFlowCompletionTests {
             planningService: planningService,
             trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
                 trainingService: trainingService, reflectionService: reflectionService
+            ),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
             )
         )
 
@@ -143,6 +168,13 @@ struct Sprint1CoreFlowCompletionTests {
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { reloadCallCount += 1 }
         )
         #expect(viewModel.loggedActivity == nil)
@@ -207,6 +239,13 @@ struct Sprint1CoreFlowCompletionTests {
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -275,6 +314,13 @@ struct Sprint1CoreFlowCompletionTests {
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -546,7 +592,14 @@ struct Sprint1CoreFlowCompletionTests {
             loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(viewModel.isCompleted == true)
@@ -595,7 +648,14 @@ struct Sprint1CoreFlowCompletionTests {
             loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(viewModel.isCompleted == false)
@@ -612,6 +672,7 @@ struct Sprint1CoreFlowCompletionTests {
     @MainActor
     private static func makeCompletedActivityDetailViewModel(
         athleteId: AthleteId,
+        container: ModelContainer,
         planningService: PlanningService,
         weekPlan: WeekPlan,
         coordinator: TrainingReflectionCoordinationService,
@@ -634,7 +695,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
     }
 
@@ -654,7 +722,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: nil
         )
 
@@ -676,7 +744,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: nil
         )
 
@@ -698,7 +766,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 4
         )
 
@@ -720,11 +788,11 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModelA = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 2
         )
         let viewModelB = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 5
         )
 
@@ -750,11 +818,11 @@ struct Sprint1CoreFlowCompletionTests {
         let otherWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: otherAthleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 3
         )
         _ = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: otherAthleteId, planningService: planningService, weekPlan: otherWeekPlan,
+            athleteId: otherAthleteId, container: container, planningService: planningService, weekPlan: otherWeekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 5
         )
 
@@ -776,7 +844,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: nil
         )
 
@@ -818,7 +886,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: detail?.loggedActivity, activityReflection: detail?.reflection,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(detail?.reflection != nil) // the reflection genuinely exists...
@@ -840,7 +915,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: nil, sessionForm: 4, sessionFormVisibility: .privateToAthlete
         )
 
@@ -865,7 +940,7 @@ struct Sprint1CoreFlowCompletionTests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
 
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
 
@@ -893,7 +968,7 @@ struct Sprint1CoreFlowCompletionTests {
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
 
@@ -918,7 +993,7 @@ struct Sprint1CoreFlowCompletionTests {
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
         viewModel.prefillLoggedActivityEditForm()
@@ -947,7 +1022,7 @@ struct Sprint1CoreFlowCompletionTests {
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
         viewModel.prefillLoggedActivityEditForm()
@@ -979,7 +1054,7 @@ struct Sprint1CoreFlowCompletionTests {
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
         // A view model wired to a DIFFERENT athlete but pointed at the
@@ -996,7 +1071,14 @@ struct Sprint1CoreFlowCompletionTests {
             activityReflection: viewModel.activityReflection,
             weekPlanId: weekPlan.weekPlanId, athleteId: AthleteId(), athleteDisplayName: "Someone Else",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         otherAthleteViewModel.prefillLoggedActivityEditForm()
         otherAthleteViewModel.editLoggedPerceivedExertion = 1
@@ -1027,7 +1109,7 @@ struct Sprint1CoreFlowCompletionTests {
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: TrainingPlanningCoordinationService.weekStart())
         let viewModel = try Self.makeCompletedActivityDetailViewModel(
-            athleteId: athleteId, planningService: planningService, weekPlan: weekPlan,
+            athleteId: athleteId, container: container, planningService: planningService, weekPlan: weekPlan,
             coordinator: coordinator, perceivedExertion: 7, sessionForm: 4
         )
         viewModel.prefillLoggedActivityEditForm()
@@ -1079,7 +1161,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: detail?.loggedActivity,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         // Opens safely with no historical value — never fabricated.
@@ -1129,7 +1218,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: logged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         viewModel.prefillLoggedActivityEditForm()
         viewModel.editLoggedPerceivedExertion = 5
@@ -1181,13 +1277,27 @@ struct Sprint1CoreFlowCompletionTests {
             activity: completedActivity, isCompleted: true, loggedActivity: completedLogged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         let missedViewModel = ActivityDetailViewModel(
             activity: missedActivity, isCompleted: true, loggedActivity: missedLogged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(completedViewModel.canEditLoggedDuration == true)
@@ -1224,7 +1334,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: logged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         viewModel.prefillLoggedActivityEditForm()
         #expect(viewModel.editLoggedDurationMinutes == 35)
@@ -1270,7 +1387,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: true, loggedActivity: logged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         viewModel.prefillLoggedActivityEditForm()
         viewModel.editLoggedDurationMinutes = 0
@@ -1305,7 +1429,14 @@ struct Sprint1CoreFlowCompletionTests {
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: coordinator
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(viewModel.canCancel == true)
@@ -1336,6 +1467,13 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -1373,7 +1511,14 @@ struct Sprint1CoreFlowCompletionTests {
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: coordinator
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(viewModel.cancelActivity())
@@ -1405,7 +1550,14 @@ struct Sprint1CoreFlowCompletionTests {
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: coordinator
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
 
         #expect(viewModel.canReopen == false)
@@ -1458,7 +1610,14 @@ struct Sprint1CoreFlowCompletionTests {
                 isWeekPlanDraft: true,
                 deletedByActorId: ActorId(),
                 planningService: planningService,
-                trainingReflectionCoordinationService: coordinator
+                trainingReflectionCoordinationService: coordinator,
+                notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                    activityReminderService: ActivityReminderService(
+                        repository: ActivityReminderRepository(modelContext: container.mainContext),
+                        scheduler: NoOpActivityReminderScheduler()
+                    ),
+                    planningService: planningService
+                )
             )
 
             #expect(viewModel.canReopen == (status == .missed))
@@ -1514,6 +1673,13 @@ struct Sprint1CoreFlowCompletionTests {
             deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { hostReloads += 1 }
         )
 
@@ -1552,6 +1718,13 @@ struct Sprint1CoreFlowCompletionTests {
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { reloadCallCount += 1 }
         )
         #expect(viewModel.cancelActivity())
@@ -1599,7 +1772,14 @@ struct Sprint1CoreFlowCompletionTests {
         let viewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: coordinator
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         #expect(viewModel.cancelActivity())
         #expect(viewModel.reopenActivity())
@@ -1636,7 +1816,14 @@ struct Sprint1CoreFlowCompletionTests {
         let unresolvedViewModel = ActivityDetailViewModel(
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: coordinator
+            planningService: planningService, trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         #expect(unresolvedViewModel.reopenActivity() == false)
 
@@ -1655,7 +1842,14 @@ struct Sprint1CoreFlowCompletionTests {
             activity: completedActivity, isCompleted: true, loggedActivity: completedLogged,
             weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, athleteDisplayName: "Oliver",
             isWeekPlanDraft: true, deletedByActorId: ActorId(), planningService: planningService,
-            trainingReflectionCoordinationService: coordinator
+            trainingReflectionCoordinationService: coordinator,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         #expect(completedViewModel.canReopen == false)
         #expect(completedViewModel.reopenActivity() == false)

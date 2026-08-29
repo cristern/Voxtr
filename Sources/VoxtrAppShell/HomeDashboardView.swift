@@ -147,6 +147,7 @@ public struct HomeDashboardView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     /// Athlete Home "Now" restructure round: this property is no
     /// longer read anywhere in this file's body — its only use was
     /// constructing the now-removed "Daily Training" `NavigationLink`'s
@@ -196,6 +197,7 @@ public struct HomeDashboardView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -212,6 +214,7 @@ public struct HomeDashboardView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -303,6 +306,7 @@ public struct HomeDashboardView: View {
                     actorId: committedByActorId,
                     planningService: planningService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                     onActivityLogged: {
                         homeDashboardDebugLog("onActivityLogged fired for rowId=\(familyHomeRow.id)")
                         viewModel.loadTodaysTraining()
