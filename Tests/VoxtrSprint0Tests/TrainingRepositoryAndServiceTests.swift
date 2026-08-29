@@ -42,6 +42,51 @@ struct TrainingRepositoryAndServiceTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
     }
 
+    // MARK: - Notifications V1 Activity Reminder Foundation: ActivityLogged publication
+
+    @Test("Logging an activity publishes ActivityLogged, identifying the exact logged activity/athlete/linked planned activity")
+    @MainActor
+    func logActivityPublishesActivityLoggedEvent() async throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let eventBus = EventBus()
+        let service = TrainingService(repository: repository, eventBus: eventBus)
+        let athleteId = AthleteId()
+        let plannedActivityId = PlannedActivityId()
+
+        actor Received {
+            var events: [ActivityLogged] = []
+            func record(_ event: ActivityLogged) { events.append(event) }
+        }
+        let received = Received()
+        _ = await eventBus.subscribe(to: ActivityLogged.self) { event in
+            Task { await received.record(event) }
+        }
+
+        let logged = try service.logActivity(
+            athleteId: athleteId,
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 45,
+            status: .completed,
+            source: "manual"
+        )
+        // TrainingService publishes via a fire-and-forget Task
+        // (actor-hop to EventBus), same bounded-wait pattern this
+        // project's own EventBusTests.swift already uses.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        let events = await received.events
+        #expect(events.count == 1)
+        #expect(events.first?.loggedActivityId == logged.loggedActivityId)
+        #expect(events.first?.athleteId == athleteId)
+        #expect(events.first?.plannedActivityId == plannedActivityId)
+        #expect(events.first?.durationMinutes == 45)
+    }
+
     @Test("Logging an activity without a PlannedActivity link is allowed")
     @MainActor
     func logActivityWithoutLinkIsAllowed() throws {

@@ -91,9 +91,13 @@ public enum RecommendationResponseType: String, Codable, Sendable, CaseIterable 
     case accept, decline, postpone, needsDiscussion, notRelevant
 }
 
-public enum ReminderDeliveryState: String, Codable, Sendable, CaseIterable {
-    case scheduled, delivered, failed, cancelled, suppressed
-}
+// `ReminderDeliveryState` (v1.3 Section 13's original NotificationRule/
+// ScheduledReminder/DeliveryRecord scaffold) removed by Notifications V1
+// Activity Reminder Foundation — its only consumers were the superseded
+// scaffold types (see `VoxtrNotificationsDomain/NotificationsEntities.swift`'s
+// own doc comment for why); no delivery-state persistence exists in the
+// approved V1 model, so this enum had no remaining consumer anywhere in
+// the codebase. Do not re-add it without a real consumer.
 
 public enum SyncState: String, Codable, Sendable, CaseIterable {
     case localOnly, pendingUpload, synced, conflict, tombstoned

@@ -48,9 +48,15 @@ public enum TrainingServiceError: Error, Equatable {
 @MainActor
 public final class TrainingService {
     private let repository: TrainingRepository
+    private let eventBus: EventBus
 
-    public init(repository: TrainingRepository) {
+    /// Notifications V1 Activity Reminder Foundation: `eventBus` defaults
+    /// to a fresh, private `EventBus()` instance — same reasoning as
+    /// `PlanningService.init`'s own default, see that initializer's doc
+    /// comment.
+    public init(repository: TrainingRepository, eventBus: EventBus = EventBus()) {
         self.repository = repository
+        self.eventBus = eventBus
     }
 
     /// Creates a `LoggedActivity`, optionally linked to a
@@ -92,7 +98,7 @@ public final class TrainingService {
                 throw TrainingServiceError.plannedActivityAlreadyLinked
             }
         }
-        return try repository.insertLoggedActivity(
+        let logged = try repository.insertLoggedActivity(
             athleteId: athleteId,
             plannedActivityId: plannedActivityId,
             sportId: sportId,
@@ -107,6 +113,27 @@ public final class TrainingService {
             source: source,
             notes: notes
         )
+
+        // Notifications V1 Activity Reminder Foundation: the authoritative
+        // mutation boundary for "an activity was logged" — published only
+        // after the insert above has actually succeeded. Every UI call
+        // path (LogActivityViewModel, DailyTrainingViewModel, Activity
+        // Detail Cancel/Missed, recurring-occurrence Log Activity) already
+        // funnels through this one method via
+        // `TrainingReflectionCoordinationService.logActivity`, so this is
+        // the single place this event needs to be published from — see
+        // this task's own same-pattern audit requirement. Fire-and-forget
+        // `Task`, same reasoning as `PlanningService.editPlannedActivity`'s
+        // own `changedEvent` publish — see that call site's comment.
+        let loggedEvent = ActivityLogged(
+            loggedActivityId: logged.loggedActivityId,
+            athleteId: athleteId,
+            plannedActivityId: plannedActivityId,
+            durationMinutes: durationMinutes
+        )
+        Task { [eventBus] in await eventBus.publish(loggedEvent) }
+
+        return logged
     }
 
     public func fetchLoggedActivities(forAthlete athleteId: AthleteId) throws -> [LoggedActivity] {

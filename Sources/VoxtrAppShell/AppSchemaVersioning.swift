@@ -890,12 +890,56 @@ public enum AppSchemaV3: VersionedSchema {
 /// across the `title` optionality transition and `ActivityType.physicalTraining`
 /// backward compatibility, with no store reset or reinstall required.
 ///
-/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
-/// now the LATEST version); it will need freezing itself the next time a
-/// genuine `AppSchemaV5` is added.
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V4 was
+/// the latest version; Notifications V1 Activity Reminder Foundation now
+/// freezes it to the exact 18-entity literal V4 always actually had,
+/// following this file's own "HOW TO ADD A NEW VERSION" step 1 — see
+/// `AppSchemaV5` immediately below for the new latest version.
 public enum AppSchemaV4: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(4, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+        ]
+    }
+}
+
+/// Notifications V1 Activity Reminder Foundation: the current, live
+/// version. Adds ONE model type, `ActivityReminder.self`
+/// (`VoxtrNotificationsDomain`) — the first Notifications model type ever
+/// registered in the live schema (see `AppSchema.modelTypes`'s own doc
+/// comment). Purely additive: no existing entity or property is renamed,
+/// removed, or changed in place, so the V4 → V5 migration stage below is
+/// `.lightweight`, the same class of change as every prior "add one new
+/// model type" version bump in this file's history (V1→V2's
+/// `DailyStatus`/`AthleteSettings`, V3→V4's `Sport`).
+///
+/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
+/// now the LATEST version); it will need freezing itself the next time a
+/// genuine `AppSchemaV6` is added.
+public enum AppSchemaV5: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(5, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -954,7 +998,7 @@ public enum AppSchemaV4: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self]
+        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -990,11 +1034,21 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// `SportRepository.seedCanonicalSportsIfNeeded()` at first launch);
     /// an existing V3 store gains the new empty `Sport` table with its
     /// existing 17 entities' data completely untouched.
+    /// V4 ("4.0.0", 18 entities) → V5 ("5.0.0", 19 entities — adds
+    /// `ActivityReminder.self`, Notifications V1 Activity Reminder
+    /// Foundation). `.lightweight`: the only structural change SwiftData
+    /// needs to reason about is the new `ActivityReminder` entity/table,
+    /// purely additive — same class of change as every prior "one new
+    /// model type" stage above. A fresh install starts directly under V5
+    /// with an empty `ActivityReminder` table; an existing V4 store gains
+    /// that new empty table with its existing 18 entities' data
+    /// completely untouched.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
             .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self),
             .lightweight(fromVersion: AppSchemaV3.self, toVersion: AppSchemaV4.self),
+            .lightweight(fromVersion: AppSchemaV4.self, toVersion: AppSchemaV5.self),
         ]
     }
 }

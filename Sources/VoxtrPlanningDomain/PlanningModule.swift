@@ -24,7 +24,7 @@ public struct PlanningModule: VoxtrModule {
         let repository = PlanningRepository(modelContext: modelContainer.mainContext)
         container.register(PlanningRepository.self) { repository }
 
-        let service = PlanningService(repository: repository)
+        let service = PlanningService(repository: repository, eventBus: eventBus)
         container.register(PlanningService.self) { service }
     }
 }

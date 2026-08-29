@@ -172,6 +172,94 @@ struct PlanningServiceTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
     }
 
+    // MARK: - Notifications V1 Activity Reminder Foundation: PlannedActivityChanged/PlannedActivityDeleted publication
+
+    @Test("Editing a PlannedActivity publishes PlannedActivityChanged, identifying the exact activity/athlete/week that changed")
+    @MainActor
+    func editPlannedActivityPublishesChangedEvent() async throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let eventBus = EventBus()
+        let service = PlanningService(repository: repository, eventBus: eventBus)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        actor Received {
+            var events: [PlannedActivityChanged] = []
+            func record(_ event: PlannedActivityChanged) { events.append(event) }
+        }
+        let received = Received()
+        _ = await eventBus.subscribe(to: PlannedActivityChanged.self) { event in
+            Task { await received.record(event) }
+        }
+
+        _ = try service.editPlannedActivity(
+            activity.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .recovery,
+            title: "Mobility session",
+            localDate: LocalDate(year: 2026, month: 1, day: 7),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        // PlanningService publishes via a fire-and-forget Task (actor-hop
+        // to EventBus) rather than making this method async itself — same
+        // bounded-wait pattern this project's own EventBusTests.swift
+        // already uses for the identical actor-hop delivery.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        let events = await received.events
+        #expect(events.count == 1)
+        #expect(events.first?.plannedActivityId == activity.plannedActivityId)
+        #expect(events.first?.athleteId == athleteId)
+        #expect(events.first?.weekPlanId == weekPlan.weekPlanId)
+    }
+
+    @Test("Deleting a PlannedActivity publishes PlannedActivityDeleted, identifying the exact activity/athlete that was deleted")
+    @MainActor
+    func deletePlannedActivityPublishesDeletedEvent() async throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let eventBus = EventBus()
+        let service = PlanningService(repository: repository, eventBus: eventBus)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        actor Received {
+            var events: [PlannedActivityDeleted] = []
+            func record(_ event: PlannedActivityDeleted) { events.append(event) }
+        }
+        let received = Received()
+        _ = await eventBus.subscribe(to: PlannedActivityDeleted.self) { event in
+            Task { await received.record(event) }
+        }
+
+        try service.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId())
+        try? await Task.sleep(for: .milliseconds(50))
+
+        let events = await received.events
+        #expect(events.count == 1)
+        #expect(events.first?.plannedActivityId == activity.plannedActivityId)
+        #expect(events.first?.athleteId == athleteId)
+    }
+
     @Test("Editing a PlannedActivity against a nonexistent WeekPlan is rejected")
     @MainActor
     func editPlannedActivityRejectsMissingWeekPlan() throws {

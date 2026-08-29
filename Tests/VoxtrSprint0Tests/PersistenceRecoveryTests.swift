@@ -9,6 +9,7 @@ import VoxtrParentDomain
 import VoxtrReflectionDomain
 import VoxtrPlanningDomain
 import VoxtrCoreReferenceData
+import VoxtrNotificationsDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -184,14 +185,89 @@ struct PersistenceRecoveryTests {
         // canonical preference round): updated to AppSchemaV3, matching
         // CompositionRoot.build's own real default after that round's
         // version bump. Sport / Activity Identity domain foundation:
-        // updated again to AppSchemaV4, matching that round's own bump.
+        // updated again to AppSchemaV4. Notifications V1 Activity
+        // Reminder Foundation: updated again to AppSchemaV5, matching
+        // that round's own bump.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV4.self,
+            versionedSchema: AppSchemaV5.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
 
         #expect(container.schema.entities.count == AppSchema.modelTypes.count)
+    }
+
+    /// Notifications V1 Activity Reminder Foundation, requirement 2:
+    /// migration preserves existing data and registers the new
+    /// `ActivityReminder` table. Simulates the scenario every existing
+    /// TestFlight install hits after updating to a build containing this
+    /// round: a store already on disk under the OLD, now-frozen V4
+    /// schema, holding real Planning data written before
+    /// `ActivityReminder` ever existed as a concept.
+    @Test("A store created under AppSchemaV4 (18 entities, no ActivityReminder table) reopens successfully under AppSchemaV5 via the lightweight migration stage — existing PlannedActivity data survives untouched, and the new ActivityReminder table is genuinely usable against the migrated store")
+    @MainActor
+    func existingV4StoreMigratesToV5Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v4-to-v5-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v4Schema = Schema(versionedSchema: AppSchemaV4.self)
+        var athleteRawId: UUID
+        var plannedActivityRawId: UUID
+        do {
+            let v4Container = try ModelContainer(
+                for: v4Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v4Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v4Container.mainContext.insert(athlete)
+            try v4Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            let athleteId = AthleteId(rawValue: athleteRawId)
+            let weekPlan = WeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 8, day: 17))
+            v4Container.mainContext.insert(weekPlan)
+            let plannedActivity = PlannedActivity(
+                weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 8, day: 18),
+                startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            v4Container.mainContext.insert(plannedActivity)
+            try v4Container.mainContext.save()
+            plannedActivityRawId = plannedActivity.id
+            // No ActivityReminder table exists at all under V4 — nothing
+            // to seed; this concept did not exist yet.
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V5) — the real production default
+        // (CompositionRoot.build's own `versionedSchema: AppSchemaV5.self`).
+        let v5Schema = Schema(versionedSchema: AppSchemaV5.self)
+        let v5Container = try ModelContainer(
+            for: v5Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v5Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity survived completely untouched.
+        let migratedActivity = try v5Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Endurance run")
+
+        // The new ActivityReminder table is genuinely usable against the
+        // migrated store — proves the lightweight stage actually created
+        // it, not merely that the container opened without throwing.
+        let activityReminderRepository = ActivityReminderRepository(modelContext: v5Container.mainContext)
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let plannedActivityId = PlannedActivityId(rawValue: plannedActivityRawId)
+        let reminder = try activityReminderRepository.insert(athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30)
+        #expect(reminder.leadTimeMinutes == 30)
+        #expect(try v5Container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 1)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

@@ -7,6 +7,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrNotificationsDomain
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -63,15 +64,18 @@ public final class CompositionRoot {
     /// ("3.0.0", same 17 entities — adds
     /// `AthleteSettings.preferredColor: AthleteColor?`). Sport / Activity
     /// Identity domain foundation round: `AppSchemaV3` is now itself
-    /// FROZEN and this default targets `AppSchemaV4` ("4.0.0", 18
-    /// entities — activates `Sport.self`), the current genuine version.
+    /// FROZEN and this default targeted `AppSchemaV4` ("4.0.0", 18
+    /// entities — activates `Sport.self`). Notifications V1 Activity
+    /// Reminder Foundation: `AppSchemaV4` is now itself FROZEN and this
+    /// default targets `AppSchemaV5` ("5.0.0", 19 entities — activates
+    /// `ActivityReminder.self`), the current genuine version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV4.self,
+            versionedSchema: AppSchemaV5.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
@@ -221,6 +225,22 @@ public final class CompositionRoot {
             weeklyReflectionService: container.resolve(WeeklyReflectionService.self)
         )
         container.register(StatisticsService.self) { statisticsService }
+
+        // Notifications V1 Activity Reminder Foundation: the one place
+        // ActivityReminderService (Notifications) and PlanningService are
+        // used together — same placement rationale as
+        // trainingPlanningCoordinationService above. Subscribes to the
+        // Planning/Training business events this V1 lifecycle needs
+        // AFTER both domain modules' own `configure` has already
+        // registered their services above, and BEFORE `build()` returns,
+        // so the subscription is guaranteed active before any UI can
+        // trigger a mutation.
+        let notificationsPlanningCoordinationService = NotificationsPlanningCoordinationService(
+            activityReminderService: container.resolve(ActivityReminderService.self),
+            planningService: container.resolve(PlanningService.self)
+        )
+        container.register(NotificationsPlanningCoordinationService.self) { notificationsPlanningCoordinationService }
+        await notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
 
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")

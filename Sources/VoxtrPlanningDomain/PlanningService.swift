@@ -28,9 +28,19 @@ public enum PlanningServiceError: Error, Equatable {
 @MainActor
 public final class PlanningService {
     private let repository: PlanningRepository
+    private let eventBus: EventBus
 
-    public init(repository: PlanningRepository) {
+    /// Notifications V1 Activity Reminder Foundation: `eventBus` defaults
+    /// to a fresh, private `EventBus()` instance rather than
+    /// `EventBus.shared` — every existing call site (production and the
+    /// large number of tests already constructing `PlanningService(repository:)`
+    /// with one argument) keeps compiling unchanged and publishes to a
+    /// bus nobody else observes, which is harmless for them. Production
+    /// composition (`PlanningModule.configure`) passes the real, shared
+    /// bus explicitly.
+    public init(repository: PlanningRepository, eventBus: EventBus = EventBus()) {
         self.repository = repository
+        self.eventBus = eventBus
     }
 
     /// Returns the existing draft `WeekPlan` for this athlete/week if
@@ -211,6 +221,29 @@ public final class PlanningService {
         activity.updatedAt = .now
 
         try repository.save()
+
+        // Notifications V1 Activity Reminder Foundation: the authoritative
+        // mutation boundary for "a PlannedActivity changed" — published
+        // only after the save above has actually succeeded. `changeType`
+        // is a fixed constant, not a diff of which fields changed:
+        // `NotificationsPlanningCoordinationService` always re-reads the
+        // current canonical activity to recompute a reminder's fire
+        // instant rather than trusting anything about what changed from
+        // the event payload, so no finer-grained signal is needed here.
+        // EventBus is an actor; this fire-and-forget `Task` is the same
+        // pattern this project's own `EventBusTests.swift` already uses
+        // for actor-hop event delivery, kept here rather than making this
+        // method `async` (which would ripple into every ViewModel call
+        // site) — the mutation itself has already fully committed by this
+        // point regardless of when the publish is actually observed.
+        let changedEvent = PlannedActivityChanged(
+            plannedActivityId: activity.plannedActivityId,
+            athleteId: AthleteId(rawValue: activity.athleteId),
+            weekPlanId: weekPlanId,
+            changeType: "edited"
+        )
+        Task { [eventBus] in await eventBus.publish(changedEvent) }
+
         return activity
     }
 
@@ -403,7 +436,29 @@ public final class PlanningService {
         guard activity.weekPlanId == weekPlanId.rawValue else {
             throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
         }
+        let deletedPlannedActivityId = activity.plannedActivityId
+        let deletedAthleteId = AthleteId(rawValue: activity.athleteId)
         try repository.deletePlannedActivity(activity, deletedBy: deletedBy)
+
+        // Notifications V1 Activity Reminder Foundation: identity
+        // captured BEFORE the delete above, not read from `activity`
+        // afterward — same reasoning as `changedEvent` in
+        // `editPlannedActivity`, see that call site's own comment for why
+        // this uses a fire-and-forget `Task` rather than making this
+        // method `async`.
+        let deletedEvent = PlannedActivityDeleted(plannedActivityId: deletedPlannedActivityId, athleteId: deletedAthleteId)
+        Task { [eventBus] in await eventBus.publish(deletedEvent) }
+    }
+
+    /// Notifications V1 Activity Reminder Foundation: a thin passthrough,
+    /// matching this service's own established "reuse PlanningService"
+    /// boundary — needed so a cross-domain caller
+    /// (`NotificationsPlanningCoordinationService`, in `VoxtrAppShell`)
+    /// can resolve a `PlannedActivity`'s current canonical date, start
+    /// time, time zone, and title by stable id, without reaching into
+    /// `PlanningRepository` directly.
+    public func fetchPlannedActivity(byId plannedActivityId: PlannedActivityId) throws -> PlannedActivity? {
+        try repository.fetchPlannedActivity(byId: plannedActivityId)
     }
 
     // MARK: - Recurring Planned Activities
