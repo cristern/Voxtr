@@ -70,7 +70,16 @@ public final class ActivityReminderRepository {
             plannedActivityId: plannedActivityId,
             leadTimeMinutes: leadTimeMinutes,
             reminderText: reminderText,
-            createdAt: createdAt
+            createdAt: createdAt,
+            // PR #38 review follow-up: `updatedAt` is the recency key
+            // `fetchRecentDistinctReminderTexts` now sorts by (see that
+            // method's own doc comment) — for a freshly-inserted row,
+            // "last touched" and "created" are the exact same instant,
+            // so this follows the caller-supplied `createdAt` rather
+            // than taking its own, separate `.now` (which would
+            // otherwise make deterministic-`createdAt` tests
+            // non-deterministic again through this second field).
+            updatedAt: createdAt
         )
         modelContext.insert(reminder)
         try modelContext.save()
@@ -98,11 +107,17 @@ public final class ActivityReminderRepository {
     /// scheduled notification's own request identity) across a
     /// lead-time or text edit, rather than delete-then-recreate under a
     /// new id.
-    public func update(_ reminder: ActivityReminder, leadTimeMinutes: Int, reminderText: String?) throws -> ActivityReminder {
+    /// `updatedAt` defaults to `.now`, matching `ActivityReminder`'s own
+    /// established meaning of "when was this row last touched" —
+    /// exposed here (not merely defaulted internally) so recent-text-
+    /// suggestion tests can construct an edit under an explicit, distinct
+    /// timestamp rather than relying on real wall-clock ordering, the
+    /// same reason `insert(...)`'s own `createdAt:` parameter exists.
+    public func update(_ reminder: ActivityReminder, leadTimeMinutes: Int, reminderText: String?, updatedAt: Date = .now) throws -> ActivityReminder {
         precondition(leadTimeMinutes >= 0, "leadTimeMinutes must be non-negative")
         reminder.leadTimeMinutes = leadTimeMinutes
         reminder.reminderText = reminderText
-        reminder.updatedAt = .now
+        reminder.updatedAt = updatedAt
         try modelContext.save()
         return reminder
     }
@@ -126,20 +141,32 @@ public final class ActivityReminderRepository {
     /// it here, rather than inventing a separate suggestion-privacy
     /// rule, is what keeps this boundary correct.
     ///
-    /// Ordered by most-recent `createdAt` first, deduplicated by exact
-    /// (trimmed) text — first occurrence in that recency order wins, so
-    /// re-using an already-suggested text never produces a duplicate
-    /// entry or changes its position based on staleness. Bounded to
-    /// `limit` results; empty/whitespace-only text is never suggested.
-    /// No ranking beyond simple recency, no AI, no separate canonical
-    /// "reminder type" — this reads the exact free text users already
-    /// typed, nothing more.
+    /// Ordered by most-recent `updatedAt` first — PR #38 review
+    /// follow-up: this used to sort by `createdAt`, which only reflects
+    /// when a row was first inserted. `updatedAt` is the field that
+    /// genuinely represents "when was this reminder's text last
+    /// touched": `insert(...)` sets it equal to `createdAt` (creating a
+    /// row IS a use, at that same instant), and `update(...)` bumps it
+    /// on every edit. So re-typing/reusing an existing reminder's text
+    /// (editing it in place, rather than creating a brand-new row)
+    /// genuinely counts as a fresh "use" and moves that text back toward
+    /// the front of the suggestion list — matching "prefer most recently
+    /// used" as the approved contract actually means, with no new
+    /// scoring or history model: this reads the one canonical timestamp
+    /// `ActivityReminder` already maintains for exactly this purpose.
+    ///
+    /// Deduplicated by exact (trimmed) text — first occurrence in that
+    /// recency order wins, so re-using an already-suggested text never
+    /// produces a duplicate entry. Bounded to `limit` results; empty/
+    /// whitespace-only text is never suggested. No ranking beyond simple
+    /// recency, no AI, no separate canonical "reminder type" — this
+    /// reads the exact free text users already typed, nothing more.
     public func fetchRecentDistinctReminderTexts(forAthlete athleteId: AthleteId, limit: Int) throws -> [String] {
         let rawId = athleteId.rawValue
         let all = try modelContext.fetch(FetchDescriptor<ActivityReminder>())
         let ordered = all
             .filter { $0.athleteId == rawId }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted { $0.updatedAt > $1.updatedAt }
 
         var seen: Set<String> = []
         var result: [String] = []

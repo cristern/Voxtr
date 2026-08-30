@@ -85,7 +85,13 @@ public final class NotificationsPlanningCoordinationService {
         case fireDateInPast
         /// `updateReminder`/`deleteReminder` addressed an
         /// `ActivityReminderId` that no longer exists (already removed
-        /// by a concurrent lifecycle reaction, or never existed).
+        /// by a concurrent lifecycle reaction, or never existed) — OR
+        /// (PR #38 review follow-up) one that DOES exist but does not
+        /// belong to the given `athleteId`/`plannedActivityId`. The two
+        /// cases are deliberately reported identically: a caller must
+        /// never be able to distinguish "not found" from "not yours" by
+        /// the error it gets back, which would itself leak existence
+        /// across the identity/privacy boundary.
         case reminderNotFound
     }
 
@@ -165,6 +171,17 @@ public final class NotificationsPlanningCoordinationService {
     /// reschedules it under the SAME request identity. Re-validates
     /// against CURRENT canonical Planning truth (never trusting a
     /// caller-supplied fire date), exactly like `createReminder` above.
+    ///
+    /// PR #38 review follow-up: this used to validate that `activity`
+    /// belongs to `athleteId`, then fetch/update `activityReminderId`
+    /// WITHOUT ever proving that specific reminder itself belongs to
+    /// `athleteId`/`plannedActivityId` — a caller could supply a
+    /// genuine `ActivityReminderId` from a completely different
+    /// activity (or a different athlete's) alongside an unrelated
+    /// `athleteId`/`plannedActivityId` it does own, and the reminder
+    /// would be silently retargeted. `resolveOwnedReminder` below closes
+    /// that gap: the identity/privacy boundary is proven BEFORE any
+    /// mutation or scheduling call is made.
     @discardableResult
     public func updateReminder(
         activityReminderId: ActivityReminderId,
@@ -174,6 +191,7 @@ public final class NotificationsPlanningCoordinationService {
         reminderText: String? = nil
     ) throws -> ActivityReminder {
         let activity = try resolveActivity(athleteId: athleteId, plannedActivityId: plannedActivityId)
+        try resolveOwnedReminder(activityReminderId, athleteId: athleteId, plannedActivityId: plannedActivityId)
         let fireDate = try computeFireDate(for: activity, leadTimeMinutes: leadTimeMinutes)
         do {
             return try activityReminderService.updateReminder(
@@ -198,6 +216,30 @@ public final class NotificationsPlanningCoordinationService {
         return activity
     }
 
+    /// PR #38 review follow-up: proves `activityReminderId` genuinely
+    /// belongs to BOTH `athleteId` AND `plannedActivityId` before any
+    /// caller is allowed to mutate/schedule/cancel it — never trusts a
+    /// caller-supplied combination of `ActivityReminderId`/`AthleteId`/
+    /// `PlannedActivityId` on its own. Used by `updateReminder` above and
+    /// `deleteReminder` below, the two UI-facing entry points that
+    /// address one specific reminder by id. Throws `.reminderNotFound`
+    /// (never a distinct "found, but not yours" case — see that error
+    /// case's own doc comment) whether the id doesn't exist at all, or
+    /// exists but belongs to a different athlete/activity.
+    @discardableResult
+    private func resolveOwnedReminder(
+        _ activityReminderId: ActivityReminderId,
+        athleteId: AthleteId,
+        plannedActivityId: PlannedActivityId
+    ) throws -> ActivityReminder {
+        guard let reminder = try activityReminderService.reminder(byId: activityReminderId),
+              reminder.athleteId == athleteId.rawValue,
+              reminder.plannedActivityId == plannedActivityId.rawValue else {
+            throw CoordinationError.reminderNotFound
+        }
+        return reminder
+    }
+
     private func computeFireDate(for activity: PlannedActivity, leadTimeMinutes: Int) throws -> Date {
         guard let startLocalTime = activity.startLocalTime else {
             throw CoordinationError.plannedActivityHasNoStartTime
@@ -220,8 +262,38 @@ public final class NotificationsPlanningCoordinationService {
 
     /// Removing ONE reminder — cancels its pending notification and
     /// removes its intent row. Never affects any sibling reminder for
-    /// the same activity. A thin passthrough; a no-op if already gone.
-    public func deleteReminder(_ activityReminderId: ActivityReminderId) throws {
+    /// the same activity.
+    ///
+    /// PR #38 review follow-up: now requires the caller's own
+    /// `athleteId`/`plannedActivityId` context (every UI-facing caller
+    /// already has both in scope — a reminder is only ever removed from
+    /// a screen already showing one specific athlete's one specific
+    /// activity) and validates `activityReminderId` genuinely belongs to
+    /// that context via `resolveOwnedReminder`, the SAME boundary
+    /// `updateReminder` enforces, before touching anything. This used to
+    /// trust a raw `ActivityReminderId` alone.
+    ///
+    /// Two distinct "nothing to delete" outcomes are deliberately kept
+    /// separate: if `activityReminderId` does not exist at all
+    /// (already removed by a concurrent lifecycle reaction, or this
+    /// exact delete already ran), this is a safe, idempotent no-op —
+    /// nothing was mutated, and nothing needed to be. If it DOES exist
+    /// but belongs to a different athlete/activity, this throws
+    /// `CoordinationError.reminderNotFound` rather than silently
+    /// no-op-ing — a caller must be able to tell "already gone" (safe to
+    /// treat as removed) apart from "not yours" (a real problem, never a
+    /// false success).
+    public func deleteReminder(
+        _ activityReminderId: ActivityReminderId,
+        athleteId: AthleteId,
+        plannedActivityId: PlannedActivityId
+    ) throws {
+        guard let reminder = try activityReminderService.reminder(byId: activityReminderId) else {
+            return
+        }
+        guard reminder.athleteId == athleteId.rawValue, reminder.plannedActivityId == plannedActivityId.rawValue else {
+            throw CoordinationError.reminderNotFound
+        }
         try activityReminderService.cancelReminder(activityReminderId)
     }
 

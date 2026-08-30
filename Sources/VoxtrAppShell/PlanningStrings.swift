@@ -71,4 +71,16 @@ public enum PlanningStrings {
             defaultValue: "This reminder could not be saved. Please try again."
         )
     }
+
+    /// PR #38 review follow-up: shown after a Planned Activity create
+    /// that itself succeeded, but one or more staged reminders did not —
+    /// makes explicit that the activity IS saved, only the reminder is
+    /// affected, before the specific reason (denied authorization, past
+    /// fire date, generic failure) is shown alongside it.
+    public static var reminderNotSavedAfterActivitySaved: String {
+        String(
+            localized: "planning.reminder.notSavedAfterActivitySaved",
+            defaultValue: "The activity was saved, but this reminder could not be set."
+        )
+    }
 }

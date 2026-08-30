@@ -314,16 +314,37 @@ public final class ActivityDetailViewModel {
         reminders.append(ActivityReminderDraft())
     }
 
-    /// Removes ONE reminder row. If it was already persisted, cancels
-    /// its pending notification and removes its intent row first — a
-    /// row that was never successfully persisted (still local-only, or
-    /// its last commit attempt failed) is simply dropped from the list.
-    /// Never affects any sibling reminder.
+    /// Removes ONE reminder row. A row that was never successfully
+    /// persisted (still local-only, or its last commit attempt failed)
+    /// has nothing canonical to remove — safe to drop from the list
+    /// immediately. Never affects any sibling reminder.
+    ///
+    /// PR #38 review follow-up: a persisted row used to call
+    /// `deleteReminder` with `try?` and remove the local row
+    /// unconditionally regardless of outcome — a canonical delete
+    /// failure could leave the UI falsely showing the reminder as
+    /// removed while it was, in truth, still active. The local row is
+    /// now removed ONLY after the canonical delete genuinely succeeds;
+    /// on failure, canonical state is reloaded (so this screen reflects
+    /// what is actually true, never a stale guess) and the same calm
+    /// reminder error surface `commitReminder`'s own failure path
+    /// already uses is shown on that row.
     public func removeReminder(_ draft: ActivityReminderDraft) {
-        if let persistedId = draft.persistedId {
-            try? notificationsPlanningCoordinationService.deleteReminder(persistedId)
+        guard let persistedId = draft.persistedId else {
+            reminders.removeAll { $0.id == draft.id }
+            return
         }
-        reminders.removeAll { $0.id == draft.id }
+        do {
+            try notificationsPlanningCoordinationService.deleteReminder(
+                persistedId, athleteId: athleteId, plannedActivityId: activity.plannedActivityId
+            )
+            reminders.removeAll { $0.id == draft.id }
+        } catch {
+            prefillReminderForm()
+            if let index = reminders.firstIndex(where: { $0.persistedId == persistedId }) {
+                reminders[index].errorMessage = PlanningStrings.reminderGenericError
+            }
+        }
     }
 
     /// `ActivityReminderListEditorView`'s own commit callback — fired

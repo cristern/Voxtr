@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 
@@ -219,6 +220,52 @@ public struct WeeklyPlanningView: View {
                     .accessibilityIdentifier("planning.addActivityButton")
                 } header: {
                     VoxtrSectionHeading("Add activity")
+                }
+                .voxtrRowSurface()
+            }
+
+            // PR #38 review follow-up: an activity created successfully
+            // even though one or more of its staged reminders did not
+            // (denied authorization, past fire date, generic failure).
+            // The "Add activity" form above has already reset for the
+            // next entry by the time this can appear — this is a
+            // SEPARATE, persistent summary so that outcome is never
+            // silently lost. Empty (and therefore hidden) whenever the
+            // most recent add had no reminder trouble to report.
+            if !viewModel.createReminderOutcomes.isEmpty {
+                Section {
+                    ForEach(viewModel.createReminderOutcomes) { outcome in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(outcome.text)
+                                .font(VoxtrTypography.cardTitle)
+                                .foregroundStyle(VoxtrColor.textPrimary)
+                            Text(PlanningStrings.reminderNotSavedAfterActivitySaved)
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
+                            if outcome.authorizationDenied {
+                                Text(PlanningStrings.reminderAuthorizationDenied)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(VoxtrColor.textSecondary)
+                                Button(PlanningStrings.reminderOpenSettings) {
+                                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                                        UIApplication.shared.open(url)
+                                    }
+                                }
+                                .accessibilityIdentifier("planning.createReminderOutcome.openSettingsButton.\(outcome.id.uuidString)")
+                            } else if let errorMessage = outcome.errorMessage {
+                                Text(errorMessage)
+                                    .font(VoxtrTypography.metadata)
+                                    .foregroundStyle(.red)
+                            }
+                        }
+                        .accessibilityIdentifier("planning.createReminderOutcome.row.\(outcome.id.uuidString)")
+                    }
+                    Button("Dismiss") {
+                        viewModel.dismissCreateReminderOutcomes()
+                    }
+                    .accessibilityIdentifier("planning.createReminderOutcome.dismissButton")
+                } header: {
+                    VoxtrSectionHeading("Reminder not saved")
                 }
                 .voxtrRowSurface()
             }

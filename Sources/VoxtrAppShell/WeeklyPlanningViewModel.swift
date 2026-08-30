@@ -52,6 +52,22 @@ public final class WeeklyPlanningViewModel {
     /// screen load (`loadOrCreateWeekPlan()`), same source
     /// `ActivityDetailViewModel.recentReminderTextSuggestions` reads.
     public private(set) var newActivityReminderRecentTextSuggestions: [String] = []
+    /// PR #38 review follow-up: the outcome of the MOST RECENT
+    /// `addActivity()` call's staged reminders that did NOT fully
+    /// succeed — `authorizationDenied`, `fireDateInPast`, or a generic
+    /// failure — once `persistDraftReminders` resolves. Planning
+    /// creation stays authoritative (a reminder outcome here NEVER rolls
+    /// back or invalidates the already-created `PlannedActivity`), but
+    /// that outcome must not vanish silently either: `addActivity()`
+    /// already resets `newActivityReminders` for the next entry the
+    /// instant the activity itself is saved, so this is a SEPARATE list
+    /// the user can still see and act on (open Settings for a denied
+    /// authorization, read why a reminder wasn't saved) after that reset
+    /// happens. A cleanly `.enabled` draft has nothing left to show the
+    /// user, so only non-success outcomes are kept here. Cleared at the
+    /// start of the next `addActivity()` call, and explicitly via
+    /// `dismissCreateReminderOutcomes()` once the user has seen it.
+    public private(set) var createReminderOutcomes: [ActivityReminderDraft] = []
     /// Post-mutation navigation and stale-state consistency audit
     /// (Issue B): increments on every SUCCESSFUL `addActivity()` only —
     /// never on validation failure or persistence failure. Same "simple
@@ -211,6 +227,14 @@ public final class WeeklyPlanningViewModel {
         newActivityReminders.removeAll { $0.id == draft.id }
     }
 
+    /// PR #38 review follow-up: dismisses the calm reminder-outcome
+    /// summary shown after a create whose activity saved successfully
+    /// but one or more staged reminders did not — see
+    /// `createReminderOutcomes`'s own doc comment.
+    public func dismissCreateReminderOutcomes() {
+        createReminderOutcomes = []
+    }
+
     /// Creates the canonical `PlannedActivity` FIRST; only once that
     /// succeeds are any staged draft reminders persisted/scheduled
     /// against its real, stable `PlannedActivityId` (via
@@ -225,6 +249,11 @@ public final class WeeklyPlanningViewModel {
     public func addActivity() {
         guard let weekPlan else { return }
         errorMessage = nil
+        // PR #38 review follow-up: clear any leftover outcome from a
+        // PRIOR successful add before starting a new one, so a stale
+        // "reminder not saved" summary from a previous activity is never
+        // mistaken for belonging to this one.
+        createReminderOutcomes = []
         let trimmedTitle = newActivityTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         let components = Calendar.current.dateComponents([.year, .month, .day], from: newActivityDate)
         let localDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
@@ -257,16 +286,26 @@ public final class WeeklyPlanningViewModel {
             if !stagedReminders.isEmpty {
                 notificationsPlanningCoordinationService.persistDraftReminders(
                     stagedReminders, athleteId: athleteId, plannedActivityId: created.plannedActivityId
-                ) { _ in
-                    // Any per-reminder outcome (denied authorization,
-                    // fire date in the past) is calmly reflected on the
-                    // draft itself, not surfaced here — the activity
-                    // this method is responsible for is already saved
-                    // and valid either way. A user who wants to inspect
-                    // or retry a specific reminder does so from the
+                ) { [weak self] outcomes in
+                    // PR #38 review follow-up: this used to discard
+                    // `outcomes` entirely (`{ _ in }`) — a user who
+                    // denied notification permission (or hit a
+                    // fire-date-in-the-past/generic failure) during
+                    // create got no visible explanation and no Settings
+                    // route, even though `newActivityReminders` had
+                    // already been reset for the next entry by the time
+                    // this closure runs. The activity itself is never
+                    // rolled back for this — `created` is already saved
+                    // and valid either way — but the outcome must not
+                    // vanish silently. Only non-success outcomes are
+                    // kept; a cleanly `.enabled` draft has nothing left
+                    // to show. A user who wants to inspect or retry a
+                    // specific reminder can also still do so from the
                     // activity's own Edit screen, where
                     // `ActivityDetailViewModel.reminders` reloads the
                     // real, current, per-reminder state fresh.
+                    guard let self else { return }
+                    self.createReminderOutcomes = outcomes.filter { $0.authorizationDenied || $0.errorMessage != nil }
                 }
             }
         } catch let error as PlanningServiceError {
