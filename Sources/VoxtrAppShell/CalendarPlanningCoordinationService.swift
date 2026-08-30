@@ -33,11 +33,17 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
 /// for a Parent's own manual edit.
 ///
 /// Recurring calendar events: EventKit reports each occurrence of a
-/// recurring series as its own `ExternalCalendarEvent` (own
-/// `eventIdentifier`, own `startDate`) — this type imports each one
-/// independently, like any other event. It never creates or infers a
-/// Vǫxtr `RecurringPlannedActivity` rule from Calendar recurrence, and
-/// never touches that type at all.
+/// recurring series as its own `ExternalCalendarEvent`, but occurrences
+/// of the SAME series share the SAME `eventIdentifier` — see
+/// `ExternalCalendarEvent`'s own doc comment (PR #39 review follow-up,
+/// Blocker 2: an earlier version of this comment incorrectly claimed
+/// each occurrence had its own `eventIdentifier`; verified against
+/// Apple's actual documented behavior and corrected). This type imports
+/// each concrete occurrence independently, like any other event,
+/// identified by `(eventIdentifier, occurrenceDate)` together — see
+/// `externalSourceId(calendarIdentifier:eventIdentifier:occurrenceDate:)`
+/// below. It never creates or infers a Vǫxtr `RecurringPlannedActivity`
+/// rule from Calendar recurrence, and never touches that type at all.
 @MainActor
 public final class CalendarPlanningCoordinationService {
     /// The generic provenance-pair `type` half stamped on every
@@ -173,17 +179,47 @@ public final class CalendarPlanningCoordinationService {
     /// cancel) — "mapping disabled -> no new import." Safe and idempotent
     /// to call repeatedly (e.g. on every app foreground); each mapping's
     /// own `lastReconciledAt` is recorded whether or not anything
-    /// changed. A single mapping's failure (e.g. its calendar was
-    /// removed) does not prevent the others from reconciling.
+    /// changed (only on a SUCCESSFUL reconciliation — see `reconcile(_:)`).
+    /// A single mapping's failure (e.g. its calendar was removed, or its
+    /// athlete is no longer resolvable) does not prevent the others from
+    /// reconciling.
+    ///
+    /// PR #39 review follow-up (Blocker 1): the earlier version of this
+    /// method called `try reconcile(mapping)` directly inside the loop —
+    /// under Swift's own error-propagation rules, ANY single mapping
+    /// throwing (a removed calendar, an unresolvable athlete) aborted the
+    /// entire function immediately, silently skipping every mapping still
+    /// to come. That directly contradicted this method's own doc comment
+    /// above. Each mapping's `reconcile(_:)` call is now individually
+    /// caught: a failing mapping contributes no entry to the returned
+    /// dictionary (never a fabricated zeroed outcome — this method
+    /// reports only what genuinely happened) and every other mapping
+    /// still reconciles normally in the same run.
     @discardableResult
     public func reconcileAllEnabledMappings() throws -> [CalendarPlanningMappingId: ReconciliationOutcome] {
         var results: [CalendarPlanningMappingId: ReconciliationOutcome] = [:]
         for mapping in try mappingRepository.fetchAllEnabled() {
-            results[mapping.calendarPlanningMappingId] = try reconcile(mapping)
+            do {
+                results[mapping.calendarPlanningMappingId] = try reconcile(mapping)
+            } catch {
+                continue
+            }
         }
         return results
     }
 
+    /// PR #39 review follow-up (Blocker 1): `calendarEventProvider.events(...)`
+    /// below is a plain `try` — if the provider throws
+    /// `CalendarEventProviderError.calendarUnavailable` (calendar
+    /// removed/unresolvable), this method throws immediately and
+    /// performs NO create/update/cancel for this mapping at all; nothing
+    /// after this call runs, including `cancelDisappearedActivities` and
+    /// `mappingRepository.recordReconciliation`. An unavailable source is
+    /// therefore never interpreted as "every previously-imported event
+    /// disappeared" — only a genuinely successful (possibly empty) fetch
+    /// can ever reach the cancellation step below. The caller
+    /// (`reconcileAllEnabledMappings`) is responsible for not letting one
+    /// mapping's thrown error stop the others.
     @discardableResult
     public func reconcile(_ mapping: CalendarPlanningMapping) throws -> ReconciliationOutcome {
         let athleteId = AthleteId(rawValue: mapping.athleteId)
@@ -211,7 +247,11 @@ public final class CalendarPlanningCoordinationService {
 
         var seenExternalSourceIds: Set<String> = []
         for event in qualifyingEvents {
-            let externalSourceId = Self.externalSourceId(calendarIdentifier: mapping.calendarIdentifier, eventIdentifier: event.eventIdentifier)
+            let externalSourceId = Self.externalSourceId(
+                calendarIdentifier: mapping.calendarIdentifier,
+                eventIdentifier: event.eventIdentifier,
+                occurrenceDate: event.occurrenceDate
+            )
             seenExternalSourceIds.insert(externalSourceId)
             let outcome = try applyEvent(event, externalSourceId: externalSourceId, mapping: mapping, athlete: athlete)
             switch outcome {
@@ -360,8 +400,21 @@ public final class CalendarPlanningCoordinationService {
 
     // MARK: - Identity + time normalization
 
-    static func externalSourceId(calendarIdentifier: String, eventIdentifier: String) -> String {
-        "\(calendarIdentifier)|\(eventIdentifier)"
+    /// PR #39 review follow-up (Blocker 2): `eventIdentifier` alone is
+    /// NOT a valid occurrence identity — every concrete occurrence of the
+    /// same recurring series shares the SAME `eventIdentifier` (see
+    /// `ExternalCalendarEvent`'s own doc comment). `occurrenceDate` is
+    /// what actually distinguishes one occurrence from its siblings, and
+    /// — critically — Apple documents it as remaining STABLE even after
+    /// that occurrence is detached and its `startDate` moved. Using it
+    /// here (rather than the mutable `startDate`) means a moved/detached
+    /// occurrence's `externalSourceId` does not change, so reconciliation
+    /// finds the SAME already-imported `PlannedActivity` and updates it
+    /// in place — never re-creating it under a new identity, and never
+    /// colliding with a sibling occurrence that happens to move to the
+    /// same new time.
+    static func externalSourceId(calendarIdentifier: String, eventIdentifier: String, occurrenceDate: Date) -> String {
+        "\(calendarIdentifier)|\(eventIdentifier)|\(occurrenceDate.timeIntervalSince1970)"
     }
 
     /// The ONE place an `ExternalCalendarEvent`'s absolute `Date` is

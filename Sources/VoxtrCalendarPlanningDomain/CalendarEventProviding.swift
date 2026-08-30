@@ -39,8 +39,29 @@ public struct AvailableCalendar: Sendable, Equatable, Identifiable {
 /// documents this as not guaranteed stable across a database rebuild
 /// (e.g. re-adding an account); see `CalendarEventProviding`'s own doc
 /// comment for how this V1 slice treats that risk.
+///
+/// PR #39 review follow-up (Blocker 2): `eventIdentifier` is NOT unique
+/// per occurrence of a recurring event — Apple documents that every
+/// concrete occurrence of the same recurring series shares the SAME
+/// `EKEvent.eventIdentifier`. The earlier version of this type (and the
+/// coordination service built on it) assumed each occurrence carried its
+/// own `eventIdentifier`; that assumption was never verified against the
+/// real API and was wrong. `occurrenceDate` is the field Apple actually
+/// documents for this purpose (`EKEvent.occurrenceDate`): the specific
+/// occurrence's original scheduled date, stable even if that occurrence
+/// is later detached and its `startDate` moved. Occurrence identity is
+/// therefore `(eventIdentifier, occurrenceDate)` together, never
+/// `eventIdentifier` alone — see `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:eventIdentifier:occurrenceDate:)`.
 public struct ExternalCalendarEvent: Sendable, Equatable {
     public let eventIdentifier: String
+    /// `EKEvent.occurrenceDate` — the stable identity of THIS specific
+    /// occurrence within its series (see this type's own doc comment
+    /// above for why `eventIdentifier` alone cannot distinguish
+    /// occurrences). Defaults to `startDate` when not supplied
+    /// explicitly, which is the correct value for a genuinely
+    /// non-recurring event (EventKit itself reports the same value for
+    /// both in that case).
+    public let occurrenceDate: Date
     public let calendarIdentifier: String
     public let title: String?
     public let startDate: Date
@@ -55,6 +76,7 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
 
     public init(
         eventIdentifier: String,
+        occurrenceDate: Date? = nil,
         calendarIdentifier: String,
         title: String?,
         startDate: Date,
@@ -63,6 +85,7 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         isRecurring: Bool
     ) {
         self.eventIdentifier = eventIdentifier
+        self.occurrenceDate = occurrenceDate ?? startDate
         self.calendarIdentifier = calendarIdentifier
         self.title = title
         self.startDate = startDate
@@ -70,6 +93,20 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         self.isAllDay = isAllDay
         self.isRecurring = isRecurring
     }
+}
+
+/// PR #39 review follow-up (Blocker 1): thrown by `CalendarEventProviding.events(inCalendar:from:to:)`
+/// when the source calendar itself could not be read — e.g. it no
+/// longer exists, or the underlying store cannot currently resolve it —
+/// as distinct from a genuine, authoritative empty result (`[]`, "this
+/// calendar was read successfully and has no matching events right
+/// now"). Only an authoritative empty result may be treated as evidence
+/// that previously-imported events disappeared; `calendarUnavailable`
+/// must never be interpreted as cancellation. See
+/// `CalendarPlanningCoordinationService.reconcile(_:)`'s own doc comment
+/// for how this is enforced.
+public enum CalendarEventProviderError: Error, Sendable, Equatable {
+    case calendarUnavailable
 }
 
 /// The ONE boundary between Planning import/sync and whatever actually
@@ -105,5 +142,17 @@ public protocol CalendarEventProviding: Sendable {
     /// `[from, to]` — the reconciliation window
     /// `CalendarPlanningCoordinationService` computes and owns; this
     /// protocol has no opinion on how wide that window should be.
+    ///
+    /// PR #39 review follow-up (Blocker 1): the result MUST distinguish
+    /// two genuinely different states, and an implementation must never
+    /// collapse them into the same `[]`:
+    ///   - the calendar was read successfully and authoritatively
+    ///     contains no matching events right now — returns `[]`;
+    ///   - the calendar could not be read at all (removed, unresolvable,
+    ///     store error) — throws `CalendarEventProviderError.calendarUnavailable`,
+    ///     never `[]`.
+    /// Only the first case is evidence that a previously-imported event
+    /// disappeared; reconciliation relies on this distinction to avoid
+    /// treating a transient/permanent read failure as mass cancellation.
     func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent]
 }

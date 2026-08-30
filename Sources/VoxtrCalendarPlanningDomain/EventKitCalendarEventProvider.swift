@@ -33,13 +33,28 @@ public final class EventKitCalendarEventProvider: CalendarEventProviding, @unche
     }
 
     public func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] {
+        // PR #39 review follow-up (Blocker 1): a calendar that no longer
+        // resolves is NOT the same as "read successfully, zero matching
+        // events" — the former must never be treated as authoritative
+        // evidence that previously-imported events disappeared (see
+        // `CalendarEventProviderError`'s own doc comment). Throwing here,
+        // rather than returning `[]`, is what lets
+        // `CalendarPlanningCoordinationService.reconcile(_:)` tell the
+        // two states apart.
         guard let calendar = store.calendar(withIdentifier: calendarIdentifier) else {
-            return []
+            throw CalendarEventProviderError.calendarUnavailable
         }
         let predicate = store.predicateForEvents(withStart: from, end: to, calendars: [calendar])
         return store.events(matching: predicate).map { event in
             ExternalCalendarEvent(
                 eventIdentifier: event.eventIdentifier,
+                // PR #39 review follow-up (Blocker 2): `event.occurrenceDate`,
+                // never `event.startDate` — see `ExternalCalendarEvent`'s
+                // own doc comment for why `eventIdentifier` alone cannot
+                // distinguish occurrences of the same recurring series,
+                // and why `occurrenceDate` (not the mutable `startDate`)
+                // is the field that stays stable across a detach/move.
+                occurrenceDate: event.occurrenceDate,
                 calendarIdentifier: calendarIdentifier,
                 title: event.title,
                 startDate: event.startDate,
