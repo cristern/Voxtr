@@ -14,7 +14,15 @@ import VoxtrNotificationsDomain
 /// request errors — they are calm, expected outcomes a UI must be able
 /// to show without treating them as a failure.
 public enum ReminderEnableResult: Sendable, Equatable {
-    case enabled(ActivityReminder)
+    /// PR #37 follow-up (Codemagic compile fix): the plain,
+    /// `Sendable`-safe value the UI actually needs — never the SwiftData
+    /// `ActivityReminder` persistence model itself, which is
+    /// intentionally NOT `Sendable` (a `@Model` reference type tied to
+    /// its own `ModelContext`, never meant to cross this `@MainActor
+    /// @Sendable` completion boundary). `finishEnabling` below extracts
+    /// this from the authoritative, just-persisted reminder before
+    /// returning.
+    case enabled(leadTimeMinutes: Int)
     /// The user was asked (or had already been asked) and declined —
     /// UI should explain this calmly and offer a path to system
     /// Settings, per this slice's own explicit contract. No reminder is
@@ -248,7 +256,7 @@ public final class NotificationsPlanningCoordinationService {
     ) {
         do {
             let reminder = try createReminder(athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: leadTimeMinutes)
-            completion(.success(.enabled(reminder)))
+            completion(.success(.enabled(leadTimeMinutes: reminder.leadTimeMinutes)))
         } catch CoordinationError.fireDateInPast {
             completion(.success(.fireDateInPast))
         } catch let error as CoordinationError {

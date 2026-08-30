@@ -366,9 +366,9 @@ public final class ActivityDetailViewModel {
             guard let self else { return }
             self.reminderIsUpdating = false
             switch result {
-            case .success(.enabled(let reminder)):
+            case .success(.enabled(let leadTimeMinutes)):
                 self.reminderEnabled = true
-                self.reminderLeadTimeMinutes = reminder.leadTimeMinutes
+                self.reminderLeadTimeMinutes = leadTimeMinutes
             case .success(.authorizationDenied):
                 self.reminderEnabled = false
                 self.reminderAuthorizationDenied = true
