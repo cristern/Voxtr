@@ -1,4 +1,5 @@
 import Foundation
+import VoxtrCoreContracts
 import VoxtrNotificationsDomain
 
 /// Activity Reminder What/When: the ONE small value type both the
