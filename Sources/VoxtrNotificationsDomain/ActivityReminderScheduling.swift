@@ -21,6 +21,18 @@ public struct ActivityReminderContent: Sendable, Equatable {
     }
 }
 
+/// Notifications V1 Activity Reminder UI slice: the three states this
+/// foundation distinguishes for permission UX — deliberately not
+/// `UNAuthorizationStatus` itself (`.provisional`/`.ephemeral` collapse
+/// into `.authorized` here; nothing in this app requests those modes),
+/// so no layer above the production adapter ever imports `UserNotifications`.
+public enum ActivityReminderAuthorizationStatus: Sendable, Equatable {
+    /// The user has never been asked.
+    case notDetermined
+    case authorized
+    case denied
+}
+
 /// Notifications V1 Activity Reminder Foundation: the scheduling
 /// boundary that keeps every other layer (domain/application logic,
 /// tests) free of any direct `UNUserNotificationCenter` dependency —
@@ -57,16 +69,35 @@ public protocol ActivityReminderScheduling: Sendable {
     /// none is pending.
     func cancelReminder(id: ActivityReminderId)
 
-    /// Requests local-notification authorization from the user.
+    /// Reports the CURRENT authorization decision without prompting the
+    /// user — the "should I even ask?" check `NotificationsPlanningCoordinationService
+    /// .enableReminder` makes before ever calling `requestAuthorization`
+    /// below, per this UI slice's own explicit "permission requested
+    /// contextually only when the user first attempts to enable a
+    /// reminder" contract.
     ///
-    /// Exposed here so the scheduling boundary is complete for the
-    /// LATER contextual "enable a reminder" UI flow this foundation
-    /// exists to support — it is deliberately never called by anything
-    /// in this task (no production call site exists in this PR). Apple's
-    /// own `UNUserNotificationCenter.requestAuthorization` is itself
-    /// idempotent — once the user has responded, calling it again never
-    /// re-prompts, it just reports the existing decision — so this
-    /// method needs no separate "check current status first" step of its
-    /// own.
-    func requestAuthorization(completion: @escaping @Sendable (Bool) -> Void)
+    /// `completion` is `@MainActor`-qualified so a caller already on
+    /// `@MainActor` (every real caller in this app) can act on the
+    /// result directly, with no `Task`/actor-hop of its own — the
+    /// production adapter is the one place that DOES need a real hop
+    /// (bridging `UNUserNotificationCenter`'s own arbitrary-queue
+    /// completion handler back onto `@MainActor`), and it owns that
+    /// entirely internally; callers never see it. See
+    /// `UNUserNotificationCenterActivityReminderScheduler`'s own doc
+    /// comment.
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void)
+
+    /// Requests local-notification authorization from the user — the
+    /// real system prompt, shown at most once per install (Apple's own
+    /// `UNUserNotificationCenter.requestAuthorization` is idempotent:
+    /// once the user has responded, calling it again never re-prompts,
+    /// it just reports the existing decision). Only ever called by
+    /// `NotificationsPlanningCoordinationService.enableReminder` when
+    /// `authorizationStatus` above reports `.notDetermined` — this
+    /// protocol requirement exists so the scheduling boundary owns the
+    /// actual OS interaction; the DECISION of when to call it belongs to
+    /// the coordination service, not to this adapter (see this
+    /// protocol's own doc comment: "the scheduling adapter must not
+    /// silently become the owner of UX permission flow").
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void)
 }

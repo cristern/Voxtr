@@ -8,6 +8,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrNotificationsDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -15,6 +16,23 @@ import VoxtrReflectionDomain
 //
 // Following the S1.1 lesson: no shared private helper methods for
 // container construction — every test builds its own inline.
+
+/// Notifications V1 Activity Reminder UI slice: a trivial no-op
+/// `ActivityReminderScheduling` conformance so `ActivityDetailViewModel`
+/// tests in this file (which do not exercise reminder behavior) can
+/// construct the now-required `NotificationsPlanningCoordinationService`
+/// dependency without touching `UNUserNotificationCenter`.
+private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
+    func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
+    func cancelReminder(id: ActivityReminderId) {}
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+}
+
 @Suite("Sprint 1 completion: Tomorrow and Family Schedule", .serialized)
 struct FamilyScheduleAndTomorrowTests {
 
@@ -470,6 +488,13 @@ struct FamilyScheduleAndTomorrowTests {
             planningService: planningService,
             trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
                 trainingService: trainingService, reflectionService: reflectionService
+            ),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
             )
         )
         #expect(detailViewModel.activity.plannedActivityId == created.plannedActivityId)

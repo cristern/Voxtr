@@ -41,6 +41,7 @@ public struct FamilyHomeView: View {
     public let planningService: PlanningService
     public let trainingService: TrainingService
     public let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    public let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     public let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     public let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     public let weeklyReflectionService: WeeklyReflectionService
@@ -63,6 +64,7 @@ public struct FamilyHomeView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -77,6 +79,7 @@ public struct FamilyHomeView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -95,6 +98,7 @@ public struct FamilyHomeView: View {
                 planningService: planningService,
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 weeklyReviewCoordinationService: weeklyReviewCoordinationService,
                 weeklyReflectionService: weeklyReflectionService,

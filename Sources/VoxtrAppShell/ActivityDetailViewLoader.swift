@@ -38,6 +38,12 @@ public struct ActivityDetailViewLoader: View {
     let actorId: ActorId
     let planningService: PlanningService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Notifications V1 Activity Reminder UI slice: threaded through
+    /// unconditionally, matching this loader's own established
+    /// "no domain-service dependency is optional" convention — the
+    /// Activity Reminder control is available on this screen regardless
+    /// of entry point.
+    let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     /// Post-mutation navigation and stale-state consistency audit: the
     /// caller's own reload/refresh entry point — called the moment a
     /// log genuinely succeeds inside `ActivityDetailView`, so the
@@ -57,6 +63,7 @@ public struct ActivityDetailViewLoader: View {
         actorId: ActorId,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         onActivityLogged: @escaping () -> Void = {}
     ) {
         self.plannedActivity = plannedActivity
@@ -65,6 +72,7 @@ public struct ActivityDetailViewLoader: View {
         self.actorId = actorId
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.onActivityLogged = onActivityLogged
     }
 
@@ -115,6 +123,7 @@ public struct ActivityDetailViewLoader: View {
                 deletedByActorId: actorId,
                 planningService: planningService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 onActivityLogged: onActivityLogged
             )
         }

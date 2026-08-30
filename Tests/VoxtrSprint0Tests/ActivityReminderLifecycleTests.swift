@@ -40,6 +40,14 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
     /// so a test can ask "is this reminder still pending right now" in
     /// one call instead of reasoning about call-order itself.
     private var _pendingIds: Set<ActivityReminderId> = []
+    /// Notifications V1 Activity Reminder UI slice: configurable
+    /// authorization state — defaults to `.authorized` so every existing
+    /// test above (which never touches `enableReminder`/authorization at
+    /// all) is unaffected; a UI-slice test overrides this before calling
+    /// `NotificationsPlanningCoordinationService.enableReminder`.
+    private var _authorizationStatus: ActivityReminderAuthorizationStatus = .authorized
+    private var _requestAuthorizationResult: Bool = true
+    private var _requestAuthorizationCallCount = 0
 
     var scheduleCalls: [ScheduleCall] {
         lock.lock(); defer { lock.unlock() }
@@ -49,6 +57,21 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
     var cancelledIds: [ActivityReminderId] {
         lock.lock(); defer { lock.unlock() }
         return _cancelledIds
+    }
+
+    var authorizationStatusValue: ActivityReminderAuthorizationStatus {
+        get { lock.lock(); defer { lock.unlock() }; return _authorizationStatus }
+        set { lock.lock(); defer { lock.unlock() }; _authorizationStatus = newValue }
+    }
+
+    var requestAuthorizationResult: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return _requestAuthorizationResult }
+        set { lock.lock(); defer { lock.unlock() }; _requestAuthorizationResult = newValue }
+    }
+
+    var requestAuthorizationCallCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return _requestAuthorizationCallCount
     }
 
     func isPending(_ id: ActivityReminderId) -> Bool {
@@ -68,8 +91,28 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
         _pendingIds.remove(id)
     }
 
-    func requestAuthorization(completion: @escaping @Sendable (Bool) -> Void) {
-        completion(true)
+    /// Every call site in this app (and in these tests) is already
+    /// `@MainActor` — same guarantee the protocol's own doc comment
+    /// describes for every real caller. `MainActor.assumeIsolated`
+    /// asserts that at runtime rather than requiring this nonisolated
+    /// (lock-guarded, `@unchecked Sendable`) test double to hop via
+    /// `Task`, which would make these tests non-deterministic — the
+    /// exact class of bug PR #36's own follow-up removed from production.
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        let status = authorizationStatusValue
+        MainActor.assumeIsolated {
+            completion(status)
+        }
+    }
+
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        lock.lock()
+        _requestAuthorizationCallCount += 1
+        let result = _requestAuthorizationResult
+        lock.unlock()
+        MainActor.assumeIsolated {
+            completion(result)
+        }
     }
 }
 
@@ -222,6 +265,31 @@ struct ActivityReminderServiceTests {
     }
 }
 
+/// Notifications V1 Activity Reminder UI slice: a deterministic,
+/// fixed-`now` `DateProvider` — same pattern
+/// `DailyQuoteProviderTests.FixedDateProvider` already establishes for
+/// this exact purpose. `NotificationsPlanningCoordinationService.createReminder`
+/// now rejects a fire date that has already passed relative to
+/// `dateProvider.now`; every fixture below uses `LocalDate(year: 2026, ...)`
+/// activity dates, so this fixed "now" is pinned safely BEFORE all of
+/// them — decoupling these tests from the real wall-clock date (which,
+/// left as the default `SystemDateProvider()`, would make every one of
+/// these 2026 fixtures silently start failing the moment real time
+/// passes 2026 — exactly the class of non-determinism CLAUDE.md's
+/// testing rules forbid).
+private struct FixedDateProvider: DateProvider {
+    let now: Date
+}
+
+private func notificationsLifecycleTestsFixedNow() -> Date {
+    var components = DateComponents()
+    components.year = 2025
+    components.month = 12
+    components.day = 1
+    components.timeZone = TimeZone(identifier: "UTC")
+    return Calendar(identifier: .gregorian).date(from: components) ?? Date(timeIntervalSince1970: 1_764_547_200)
+}
+
 // MARK: - NotificationsPlanningCoordinationService (cross-domain lifecycle)
 
 @Suite("NotificationsPlanningCoordinationService (Notifications V1 Activity Reminder Foundation)", .serialized)
@@ -243,7 +311,8 @@ struct NotificationsPlanningCoordinationServiceTests {
         let activityReminderService = ActivityReminderService(repository: activityReminderRepository, scheduler: scheduler)
         let coordination = NotificationsPlanningCoordinationService(
             activityReminderService: activityReminderService,
-            planningService: planningService
+            planningService: planningService,
+            dateProvider: FixedDateProvider(now: notificationsLifecycleTestsFixedNow())
         )
         return (planningService, coordination, scheduler, activityReminderRepository)
     }
@@ -290,6 +359,39 @@ struct NotificationsPlanningCoordinationServiceTests {
 
         let expectedFireInstant = try LocalDate(year: 2026, month: 1, day: 6).absoluteDate(at: LocalTime(hour: 18, minute: 0), in: Self.oslo)
         #expect(scheduler.scheduleCalls.first?.fireDate == expectedFireInstant.addingTimeInterval(-10 * 60))
+    }
+
+    /// PR #37 follow-up: the prior `0...10080` (7-day) ceiling on
+    /// `ActivityReminder.leadTimeMinutes` was an unapproved product
+    /// limit — Custom must support arbitrary lead time before the
+    /// activity. 20 days (28,800 minutes) is comfortably beyond the old
+    /// ceiling; this proves it is no longer enforced anywhere in the
+    /// create path, not merely relaxed to a different, still-arbitrary
+    /// number.
+    @Test("createReminder accepts a lead time well beyond the old, unapproved 7-day (10080-minute) ceiling")
+    @MainActor
+    func createReminderAcceptsLeadTimeBeyondSevenDays() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, _) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Season opener", localDate: LocalDate(year: 2026, month: 3, day: 3), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let twentyDaysInMinutes = 20 * 24 * 60
+
+        let reminder = try coordination.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: twentyDaysInMinutes
+        )
+
+        let expectedFireInstant = try LocalDate(year: 2026, month: 3, day: 3).absoluteDate(at: LocalTime(hour: 18, minute: 0), in: Self.oslo)
+        let expectedFireDate = expectedFireInstant.addingTimeInterval(-Double(twentyDaysInMinutes) * 60)
+        #expect(reminder.leadTimeMinutes == twentyDaysInMinutes)
+        #expect(scheduler.scheduleCalls.count == 1)
+        #expect(scheduler.scheduleCalls.first?.fireDate == expectedFireDate)
     }
 
     @Test("createReminder rejects a PlannedActivity that belongs to a different athlete")
@@ -621,7 +723,8 @@ struct NotificationsProductionEventPipelineTests {
         let activityReminderService = ActivityReminderService(repository: activityReminderRepository, scheduler: scheduler)
         let coordination = NotificationsPlanningCoordinationService(
             activityReminderService: activityReminderService,
-            planningService: planningService
+            planningService: planningService,
+            dateProvider: FixedDateProvider(now: notificationsLifecycleTestsFixedNow())
         )
         // The real production wiring call — CompositionRoot.build() makes
         // this exact call, against this exact eventBus instance.

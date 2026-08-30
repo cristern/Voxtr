@@ -9,6 +9,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrNotificationsDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -16,6 +17,22 @@ import VoxtrReflectionDomain
 //
 // Following the S1.1 lesson: no shared private helper methods for
 // container/repository construction — every test builds its own inline.
+
+/// Notifications V1 Activity Reminder UI slice: a trivial no-op
+/// `ActivityReminderScheduling` conformance so `ActivityDetailViewModel`
+/// tests in this file (which do not exercise reminder behavior) can
+/// construct the now-required `NotificationsPlanningCoordinationService`
+/// dependency without touching `UNUserNotificationCenter`.
+private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
+    func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
+    func cancelReminder(id: ActivityReminderId) {}
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+}
 
 @Suite("HomeDashboardViewModel (Sprint 12)", .serialized)
 struct HomeDashboardViewModelTests {
@@ -602,6 +619,13 @@ struct HomeDashboardViewModelTests {
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: {
                 homeDashboardViewModel.loadTodaysTraining()
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -756,6 +780,13 @@ struct HomeDashboardViewModelTests {
             activity: activityA, isCompleted: false, weekPlanId: weekPlanA.weekPlanId,
             athleteId: athleteA, athleteDisplayName: "Athlete A", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: { homeDashboardViewModelA.loadTodayActivityRows() }
         )
         let logA = detailViewModelA.makeLogActivityViewModel()
@@ -833,6 +864,13 @@ struct HomeDashboardViewModelTests {
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: {
                 reloadCallCount += 1
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -1265,6 +1303,13 @@ struct HomeDashboardViewModelTests {
             activity: activity, isCompleted: false, weekPlanId: weekPlan.weekPlanId,
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
             onActivityLogged: {
                 homeDashboardViewModel.loadTodaysTraining()
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -1349,7 +1394,14 @@ struct HomeDashboardViewModelTests {
         let detailViewModelA = ActivityDetailViewModel(
             activity: activityA, isCompleted: false, weekPlanId: weekPlanA.weekPlanId,
             athleteId: athleteA, athleteDisplayName: "Athlete A", isWeekPlanDraft: true, deletedByActorId: ActorId(),
-            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService
+            planningService: planningService, trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            )
         )
         #expect(detailViewModelA.deleteActivity() == true)
 
@@ -1407,6 +1459,13 @@ struct HomeDashboardViewModelTests {
             trainingReflectionCoordinationService: TrainingReflectionCoordinationService(
                 trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
                 reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+            ),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
             )
         )
         #expect(detailViewModel.deleteActivity() == true)

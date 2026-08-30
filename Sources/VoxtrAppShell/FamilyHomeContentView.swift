@@ -149,6 +149,7 @@ public struct FamilyHomeContentView: View {
     private let planningService: PlanningService
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     private let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     private let weeklyReviewCoordinationService: WeeklyReviewCoordinationService
     private let weeklyReflectionService: WeeklyReflectionService
@@ -176,6 +177,7 @@ public struct FamilyHomeContentView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         weeklyReviewCoordinationService: WeeklyReviewCoordinationService,
         weeklyReflectionService: WeeklyReflectionService,
@@ -190,6 +192,7 @@ public struct FamilyHomeContentView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.weeklyReviewCoordinationService = weeklyReviewCoordinationService
         self.weeklyReflectionService = weeklyReflectionService
@@ -307,7 +310,8 @@ public struct FamilyHomeContentView: View {
                         actorId: ActorId(rawValue: family.participant.id),
                         planningService: planningService,
                         trainingService: trainingService,
-                        trainingReflectionCoordinationService: trainingReflectionCoordinationService
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService
                     )
                 case .sleepCapture(let athleteId):
                     if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
@@ -852,6 +856,7 @@ public struct FamilyHomeContentView: View {
             planningService: planningService,
             trainingService: trainingService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
             weeklyReviewCoordinationService: weeklyReviewCoordinationService,
             weeklyReflectionService: weeklyReflectionService,
@@ -873,6 +878,7 @@ public struct FamilyHomeContentView: View {
             actorId: ActorId(rawValue: family.participant.id),
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
             onActivityLogged: { viewModel.refresh() }
         )
     }

@@ -54,9 +54,40 @@ public struct UNUserNotificationCenterActivityReminderScheduler: ActivityReminde
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.requestIdentifier(for: id)])
     }
 
-    public func requestAuthorization(completion: @escaping @Sendable (Bool) -> Void) {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            completion(granted)
+    /// `UNUserNotificationCenter.getNotificationSettings`'s completion
+    /// handler runs on an arbitrary queue (Apple's own documented
+    /// behavior, not Swift-concurrency-isolated) — `Task { @MainActor in
+    /// ... }` is the genuine, unavoidable bridge back onto `@MainActor`
+    /// so `completion`'s own `@MainActor` type is honored. This is the
+    /// ONE place in the whole Activity Reminder feature that needs this
+    /// kind of hop: every caller of THIS method (via `ActivityReminderService`/
+    /// `NotificationsPlanningCoordinationService`) can assume `completion`
+    /// always runs on `@MainActor`, with no hop of their own.
+    public func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status: ActivityReminderAuthorizationStatus
+            switch settings.authorizationStatus {
+            case .authorized, .provisional, .ephemeral:
+                status = .authorized
+            case .denied:
+                status = .denied
+            case .notDetermined:
+                status = .notDetermined
+            @unknown default:
+                status = .notDetermined
+            }
+            Task { @MainActor in completion(status) }
+        }
+    }
+
+    /// Badge is deliberately NOT requested — this feature never sets an
+    /// app badge, per this UI slice's own explicit "do not
+    /// request/use badge permission" requirement. Same arbitrary-queue
+    /// completion-handler bridging as `authorizationStatus` above, for
+    /// the same reason.
+    public func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            Task { @MainActor in completion(granted) }
         }
     }
 }

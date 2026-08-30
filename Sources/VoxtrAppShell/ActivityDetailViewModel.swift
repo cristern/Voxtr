@@ -3,6 +3,7 @@ import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrNotificationsDomain
 
 /// Sprint 1 (Daily Use Foundation), Part 3. The ONE Activity Detail
 /// screen every planned activity opens into, regardless of entry point
@@ -71,6 +72,40 @@ public final class ActivityDetailViewModel {
     /// when the field is actually shown.
     public var editLoggedDurationMinutes: Int = 60
 
+    /// Notifications V1 Activity Reminder UI slice: this screen's own
+    /// mirror of the reminder intent for `activity`, loaded via
+    /// `NotificationsPlanningCoordinationService.fetchReminder(forPlannedActivity:)`
+    /// — never a second, independently-computed reminder state.
+    /// Refreshed from canonical state in `prefillReminderForm()` (called
+    /// from `init`, and again after `saveEdit()`/`cancelActivity()`
+    /// succeed, since either can cause the foundation's own EventBus
+    /// reconciliation to reschedule or cancel the active reminder).
+    public private(set) var reminderEnabled: Bool = false
+    /// Bound directly by `ReminderLeadTimePickerView` — see that
+    /// component's own doc comment: live edits (typing a Custom value)
+    /// update this directly for display, while the actual persisted
+    /// mutation only runs once a value is committed, via
+    /// `setReminderLeadTimeMinutes(_:)` below.
+    public var reminderLeadTimeMinutes: Int = 30
+    /// Set when the user's most recent attempt to enable/change a
+    /// reminder was declined by notification authorization — distinct
+    /// from `reminderErrorMessage`, since this is a calm, expected
+    /// outcome the UI offers a path to system Settings for, not a
+    /// failure.
+    public private(set) var reminderAuthorizationDenied: Bool = false
+    public private(set) var reminderErrorMessage: String?
+    /// True only while `enableReminder`'s own authorization-check/
+    /// request/create round trip is in flight — lets the UI disable the
+    /// control briefly rather than allow overlapping toggles.
+    public private(set) var reminderIsUpdating: Bool = false
+
+    /// Approved product contract: "If the activity has no start time,
+    /// the reminder control must be unavailable" — read directly from
+    /// `activity.startLocalTime`, the same canonical field
+    /// `NotificationsPlanningCoordinationService.createReminder` itself
+    /// requires, never a separately maintained flag.
+    public var canSetReminder: Bool { activity.startLocalTime != nil }
+
     /// Sprint 1.1, P1 (athlete context): passed in by the caller, which
     /// already has the athlete's name (a `FamilyHomeRow`, an
     /// `athleteDisplayName` property, etc.) — no repository re-fetch or
@@ -83,6 +118,12 @@ public final class ActivityDetailViewModel {
     private let deletedByActorId: ActorId
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Notifications V1 Activity Reminder UI slice: the sole
+    /// cross-domain coordination point for reminder intent — never
+    /// `ActivityReminderService`/`ActivityReminderScheduling` directly,
+    /// matching this service's own "Notifications owns reminder intent
+    /// and delivery infrastructure" boundary.
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     /// Post-mutation navigation and stale-state consistency audit: the
     /// explicit signal back to whichever screen pushed this one (Family
     /// Home, Athlete Home, Daily Training, Family Schedule, Weekly
@@ -122,6 +163,7 @@ public final class ActivityDetailViewModel {
         deletedByActorId: ActorId,
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         onActivityLogged: @escaping () -> Void = {}
     ) {
         self.activity = activity
@@ -135,8 +177,10 @@ public final class ActivityDetailViewModel {
         self.deletedByActorId = deletedByActorId
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.onActivityLogged = onActivityLogged
         prefillEditForm()
+        prefillReminderForm()
     }
 
     /// RPE — read directly from the canonical `LoggedActivity` field,
@@ -242,6 +286,102 @@ public final class ActivityDetailViewModel {
         editLocation = activity.location ?? ""
     }
 
+    /// Notifications V1 Activity Reminder UI slice: loads the current
+    /// reminder intent for `activity` from canonical Notifications
+    /// truth — Off (default) when none exists, matching this slice's
+    /// own "Reminder is Off by default" and "existing reminder must
+    /// load correctly when editing" requirements. `try?` here mirrors
+    /// this screen's own established convention for read-only prefill
+    /// (see `deleteActivity`/`cancelActivity`'s own throwing calls,
+    /// which surface errors; this is a display-only read where a
+    /// failure just means Off is shown, not a silent data loss).
+    public func prefillReminderForm() {
+        reminderErrorMessage = nil
+        reminderAuthorizationDenied = false
+        guard let reminder = try? notificationsPlanningCoordinationService.fetchReminder(
+            forPlannedActivity: activity.plannedActivityId
+        ) else {
+            reminderEnabled = false
+            return
+        }
+        reminderEnabled = true
+        reminderLeadTimeMinutes = reminder.leadTimeMinutes
+    }
+
+    /// Notifications V1 Activity Reminder UI slice: the Reminder
+    /// toggle's own entry point. Turning Off cancels/removes the
+    /// reminder immediately — no authorization check needed for that
+    /// direction. Turning On runs the full `enableReminder` round trip
+    /// via `applyReminder(leadTimeMinutes:)`, using whatever lead time
+    /// is currently selected (the default preset, or a previously
+    /// prefilled value).
+    public func setReminderEnabled(_ enabled: Bool) {
+        reminderErrorMessage = nil
+        guard enabled else {
+            reminderAuthorizationDenied = false
+            do {
+                try notificationsPlanningCoordinationService.disableReminder(
+                    forPlannedActivity: activity.plannedActivityId
+                )
+            } catch {
+                reminderErrorMessage = PlanningStrings.reminderGenericError
+            }
+            reminderEnabled = false
+            return
+        }
+        applyReminder(leadTimeMinutes: reminderLeadTimeMinutes)
+    }
+
+    /// Notifications V1 Activity Reminder UI slice: `ReminderLeadTimePickerView`'s
+    /// own commit callback — fired only on a genuinely committed lead
+    /// time (a preset tap, or Custom losing focus with a valid value),
+    /// never per keystroke. A no-op if the reminder isn't currently
+    /// enabled: the picker's own live-typing display already keeps
+    /// `reminderLeadTimeMinutes` correct via its two-way binding, and
+    /// there is nothing to reschedule until the user turns Reminder On.
+    public func setReminderLeadTimeMinutes(_ minutes: Int) {
+        reminderLeadTimeMinutes = minutes
+        guard reminderEnabled else { return }
+        applyReminder(leadTimeMinutes: minutes)
+    }
+
+    /// The shared enable/change-lead-time path — `NotificationsPlanningCoordinationService
+    /// .enableReminder` already replaces any existing reminder for this
+    /// activity, so "turn on" and "change lead time while already on"
+    /// are the exact same call. Requests authorization contextually
+    /// (only via the coordination service, never here directly) and
+    /// maps every outcome to this screen's own displayed state — never
+    /// leaves `reminderEnabled` true without a genuinely active,
+    /// scheduled reminder.
+    private func applyReminder(leadTimeMinutes: Int) {
+        guard canSetReminder else { return }
+        reminderErrorMessage = nil
+        reminderAuthorizationDenied = false
+        reminderIsUpdating = true
+        notificationsPlanningCoordinationService.enableReminder(
+            athleteId: athleteId,
+            plannedActivityId: activity.plannedActivityId,
+            leadTimeMinutes: leadTimeMinutes
+        ) { [weak self] result in
+            guard let self else { return }
+            self.reminderIsUpdating = false
+            switch result {
+            case .success(.enabled(let leadTimeMinutes)):
+                self.reminderEnabled = true
+                self.reminderLeadTimeMinutes = leadTimeMinutes
+            case .success(.authorizationDenied):
+                self.reminderEnabled = false
+                self.reminderAuthorizationDenied = true
+            case .success(.fireDateInPast):
+                self.reminderEnabled = false
+                self.reminderErrorMessage = PlanningStrings.reminderFireDateInPast
+            case .failure:
+                self.reminderEnabled = false
+                self.reminderErrorMessage = PlanningStrings.reminderGenericError
+            }
+        }
+    }
+
     @discardableResult
     public func saveEdit() -> Bool {
         errorMessage = nil
@@ -260,6 +400,15 @@ public final class ActivityDetailViewModel {
                 location: editLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editLocation
             )
             activity = updated
+            // Notifications V1 Activity Reminder UI slice: an edit that
+            // changed date/time/timezone already triggered the
+            // foundation's own EventBus reconciliation
+            // (`NotificationsPlanningCoordinationService.handlePlannedActivityChanged`)
+            // synchronously, before this call returns — this just
+            // re-reads whatever it decided (rescheduled, or cancelled if
+            // the new time is in the past / the start time was removed),
+            // so the displayed Reminder control never shows stale state.
+            prefillReminderForm()
             onActivityLogged()
             return true
         } catch let error as PlanningServiceError {
@@ -348,6 +497,14 @@ public final class ActivityDetailViewModel {
             )
             loggedActivity = result.loggedActivity
             isCompleted = true
+            // Notifications V1 Activity Reminder UI slice: cancelling
+            // this activity already published `ActivityLogged`
+            // synchronously above (via `TrainingReflectionCoordinationService
+            // .logActivity` -> `TrainingService`), which the foundation's
+            // `handleActivityLogged` reacts to by cancelling any active
+            // reminder — re-reads that outcome so the Reminder control
+            // reflects Off immediately, never a stale "still on" display.
+            prefillReminderForm()
             onActivityLogged()
             return true
         } catch TrainingServiceError.plannedActivityAlreadyLinked {

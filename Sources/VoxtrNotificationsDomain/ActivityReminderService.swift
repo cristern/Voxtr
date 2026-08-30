@@ -26,6 +26,21 @@ public final class ActivityReminderService {
         try repository.fetch(forPlannedActivity: plannedActivityId)
     }
 
+    /// Notifications V1 Activity Reminder UI slice: thin passthroughs to
+    /// the scheduling boundary's own permission surface — kept here (not
+    /// skipped in favor of callers reaching the scheduler directly) so
+    /// `NotificationsPlanningCoordinationService` only ever depends on
+    /// `ActivityReminderService`, never on `ActivityReminderScheduling`
+    /// itself, matching this file's own "Notifications owns reminder
+    /// intent and delivery infrastructure" boundary.
+    public func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        scheduler.authorizationStatus(completion: completion)
+    }
+
+    public func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        scheduler.requestAuthorization(completion: completion)
+    }
+
     /// Creates a new reminder intent for `plannedActivityId` and
     /// schedules its notification at `fireDate`. Replaces — rather than
     /// duplicating alongside — any reminder already active for this
