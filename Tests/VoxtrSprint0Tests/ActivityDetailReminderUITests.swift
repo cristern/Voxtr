@@ -420,6 +420,58 @@ struct ActivityDetailReminderUITests {
         #expect(fixture.scheduler.scheduleCallCount == 0)
     }
 
+    /// PR #38 review follow-up, blocker 3: `removeReminder` used to
+    /// call the canonical delete with `try?` and remove the local row
+    /// UNCONDITIONALLY regardless of outcome — a canonical failure could
+    /// leave the UI falsely showing a reminder as removed while it was,
+    /// in truth, still active. This in-memory SwiftData test double has
+    /// no injectable I/O-failure seam, so the most deterministic way
+    /// available here to force a genuine canonical-delete REJECTION is
+    /// the SAME identity boundary `deleteReminder` now enforces
+    /// (`NotificationsPlanningCoordinationServiceTests` covers that
+    /// boundary directly): a draft whose `persistedId` does not
+    /// genuinely belong to THIS activity — a state the real UI can
+    /// never itself produce, but one that proves the safety property
+    /// end-to-end through `ActivityDetailViewModel` regardless of WHY
+    /// the canonical delete failed. Both reminders remain canonically
+    /// untouched, and the real, correctly-owned reminder is still shown
+    /// — never a false "removed" state.
+    @Test("A reminder whose canonical delete is rejected is never removed from the UI, and nothing canonical is mutated")
+    @MainActor
+    func removeReminderNeverFakesSuccessWhenCanonicalDeleteFails() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        let realReminder = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
+        )
+        // A second, UNRELATED activity's own reminder — never shown on
+        // this screen; its id is spliced into a draft below purely to
+        // force a genuine, deterministic ownership-mismatch rejection.
+        let (_, otherActivity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 8, minute: 0))
+        let unrelatedReminder = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: otherActivity.plannedActivityId, leadTimeMinutes: 15, reminderText: "Warm up"
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.reminders.count == 1)
+
+        var mismatchedDraft = viewModel.reminders[0]
+        mismatchedDraft.persistedId = unrelatedReminder.activityReminderId
+        viewModel.removeReminder(mismatchedDraft)
+
+        // The real, correctly-owned reminder is untouched and still
+        // shown — a rejected/failed delete never fakes a local success.
+        #expect(viewModel.reminders.count == 1)
+        #expect(viewModel.reminders.first?.persistedId == realReminder.activityReminderId)
+        #expect(viewModel.reminders.first?.text == "Eat")
+        #expect(fixture.scheduler.cancelledIds.isEmpty)
+        // Nothing was mutated canonically, on EITHER activity.
+        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: activity.plannedActivityId).count == 1)
+        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: otherActivity.plannedActivityId).count == 1)
+    }
+
     @Test("Saving an edit that removes the start time cancels every reminder and updates the displayed list")
     @MainActor
     func savingEditWithoutStartTimeCancelsAllReminders() throws {

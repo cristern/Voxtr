@@ -227,7 +227,14 @@ struct WeeklyPlanningReminderTests {
     /// Item 15: a staged reminder that cannot be enabled (permission
     /// denied) must never invalidate the already-successfully-created
     /// PlannedActivity.
-    @Test("Permission denied on a staged reminder does not invalidate the successfully-created activity")
+    ///
+    /// PR #38 review follow-up, blocker 2 / test 4: the denied outcome
+    /// must also remain VISIBLE to the user (never silently discarded)
+    /// even though the "Add activity" form's own draft state has already
+    /// reset for the next entry by the time this resolves — asserted via
+    /// `createReminderOutcomes`, the same real per-draft state the
+    /// Settings-route UI renders from.
+    @Test("Permission denied on a staged reminder does not invalidate the successfully-created activity, and remains visible with a Settings route")
     @MainActor
     func permissionDeniedDoesNotInvalidateSuccessfulActivityCreation() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -254,5 +261,92 @@ struct WeeklyPlanningReminderTests {
         let persistedReminders = try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: created.plannedActivityId)
         #expect(persistedReminders.isEmpty)
         #expect(fixture.scheduler.scheduleCallCount == 0)
+        // The denied outcome is not silently discarded — it remains
+        // visible (with its own Settings-route affordance available in
+        // the UI, driven by `authorizationDenied`) even though the
+        // create form's own draft list has already reset.
+        #expect(viewModel.newActivityReminders.isEmpty)
+        #expect(viewModel.createReminderOutcomes.count == 1)
+        #expect(viewModel.createReminderOutcomes.first?.text == "Eat")
+        #expect(viewModel.createReminderOutcomes.first?.authorizationDenied == true)
+
+        // Dismissing clears it explicitly.
+        viewModel.dismissCreateReminderOutcomes()
+        #expect(viewModel.createReminderOutcomes.isEmpty)
+    }
+
+    /// PR #38 review follow-up, blocker 2 / test 5: a reminder-specific
+    /// failure that is NOT an authorization denial (here: the computed
+    /// fire date already being in the past) must ALSO never roll back
+    /// the already-created activity, and must ALSO remain visible rather
+    /// than vanish silently.
+    @Test("A reminder whose fire date is already in the past does not invalidate the successfully-created activity, and remains visible")
+    @MainActor
+    func fireDateInPastReminderDoesNotInvalidateSuccessfulActivityCreation() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId)
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.newActivityTitle = "Hockey practice"
+        // `weeklyPlanningReminderTestsFixedNow()` (this fixture's
+        // `dateProvider`) is 2025-12-01 UTC — same fixed "now"
+        // `ActivityDetailReminderUITests.pastFireDateHandledSafely` uses
+        // for the identical scenario. Setting the draft activity's OWN
+        // date explicitly before that (rather than relying on
+        // `newActivityDate`'s real wall-clock default) makes ANY
+        // positive lead time resolve to a fire date already in the
+        // past — deterministic, never dependent on when this test
+        // happens to run.
+        viewModel.newActivityDate = Calendar.current.date(from: DateComponents(year: 2025, month: 11, day: 4)) ?? .now
+        viewModel.newActivityHasStartTime = true
+        viewModel.newActivityStartTime = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? .now
+        viewModel.addNewActivityReminderDraft()
+        viewModel.newActivityReminders[0].text = "Eat"
+        viewModel.newActivityReminders[0].leadTimeMinutes = 30
+
+        viewModel.addActivity()
+
+        #expect(viewModel.errorMessage == nil)
+        let created = try #require(viewModel.activities.first { $0.title == "Hockey practice" })
+        let persistedReminders = try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: created.plannedActivityId)
+        #expect(persistedReminders.isEmpty)
+        #expect(fixture.scheduler.scheduleCallCount == 0)
+        #expect(viewModel.createReminderOutcomes.count == 1)
+        #expect(viewModel.createReminderOutcomes.first?.errorMessage == PlanningStrings.reminderFireDateInPast)
+    }
+
+    /// PR #38 review follow-up: a leftover outcome from a PRIOR
+    /// successful add must never bleed into the summary shown for the
+    /// NEXT one.
+    @Test("A prior add's reminder outcome is cleared at the start of the next addActivity() call")
+    @MainActor
+    func createReminderOutcomesResetOnNextAdd() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        fixture.scheduler.authorizationStatusValue = .denied
+        let athleteId = AthleteId()
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId)
+        viewModel.loadOrCreateWeekPlan()
+
+        viewModel.newActivityTitle = "Hockey practice"
+        viewModel.newActivityHasStartTime = true
+        viewModel.newActivityStartTime = Calendar.current.date(from: DateComponents(hour: 18, minute: 0)) ?? .now
+        viewModel.addNewActivityReminderDraft()
+        viewModel.newActivityReminders[0].text = "Eat"
+        viewModel.addActivity()
+        #expect(viewModel.createReminderOutcomes.count == 1)
+
+        // A second add with NO staged reminder at all.
+        viewModel.newActivityTitle = "Swim practice"
+        viewModel.newActivityHasStartTime = true
+        viewModel.newActivityStartTime = Calendar.current.date(from: DateComponents(hour: 7, minute: 0)) ?? .now
+        viewModel.addActivity()
+
+        #expect(viewModel.errorMessage == nil)
+        #expect(viewModel.createReminderOutcomes.isEmpty)
     }
 }

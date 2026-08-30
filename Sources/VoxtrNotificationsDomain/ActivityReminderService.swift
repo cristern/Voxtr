@@ -44,6 +44,17 @@ public final class ActivityReminderService {
         try repository.fetchAll(forPlannedActivity: plannedActivityId)
     }
 
+    /// PR #38 review follow-up: fetches ONE reminder by its own stable
+    /// id, with no ownership check of its own — used by
+    /// `NotificationsPlanningCoordinationService.updateReminder`/
+    /// `deleteReminder` to verify a caller-supplied `ActivityReminderId`
+    /// genuinely belongs to the `athleteId`/`plannedActivityId` context
+    /// it was addressed through, BEFORE trusting it, never to bypass
+    /// that check. Returns `nil` if no reminder with this id exists.
+    public func reminder(byId activityReminderId: ActivityReminderId) throws -> ActivityReminder? {
+        try repository.fetch(byId: activityReminderId)
+    }
+
     /// Notifications V1 Activity Reminder UI slice: thin passthroughs to
     /// the scheduling boundary's own permission surface — kept here (not
     /// skipped in favor of callers reaching the scheduler directly) so

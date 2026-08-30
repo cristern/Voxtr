@@ -758,6 +758,179 @@ struct NotificationsPlanningCoordinationServiceTests {
         #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activityB.plannedActivityId).first?.activityReminderId == reminderB.activityReminderId)
         #expect(scheduler.scheduleCalls.count == 2) // no new schedule call was ever made for B
     }
+
+    // MARK: - PR #38 review follow-up: reminder identity/ownership boundary
+
+    /// Blocker 1, required test 1: `updateReminder` used to validate
+    /// only that the SUPPLIED `plannedActivityId` belongs to
+    /// `athleteId`, then blindly fetch/update `activityReminderId`
+    /// without ever proving THAT reminder belongs to the same activity.
+    /// A caller could supply a genuine reminder id from a completely
+    /// different (but same-athlete) activity, alongside an unrelated
+    /// activity it does own, and retarget it. Must now be rejected
+    /// before any mutation or reschedule happens.
+    @Test("updateReminder rejects a reminder that belongs to a different PlannedActivity, even for the same athlete")
+    @MainActor
+    func updateReminderRejectsReminderFromDifferentActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activityA = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run A", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let activityB = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run B", localDate: LocalDate(year: 2026, month: 1, day: 7), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 8, minute: 0)
+        )
+        let reminderA = try coordination.createReminder(
+            athleteId: athleteId, plannedActivityId: activityA.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
+        )
+
+        #expect(throws: NotificationsPlanningCoordinationService.CoordinationError.reminderNotFound) {
+            try coordination.updateReminder(
+                activityReminderId: reminderA.activityReminderId, athleteId: athleteId, plannedActivityId: activityB.plannedActivityId,
+                leadTimeMinutes: 99, reminderText: "Hijacked"
+            )
+        }
+
+        let unchanged = try activityReminderRepository.fetch(byId: reminderA.activityReminderId)
+        #expect(unchanged?.leadTimeMinutes == 30)
+        #expect(unchanged?.reminderText == "Eat")
+        #expect(scheduler.scheduleCalls.count == 1) // only the original create — no reschedule happened
+    }
+
+    /// Blocker 1, required test 2: the same boundary, across athletes —
+    /// a reminder genuinely owned by one athlete must never be
+    /// updatable by supplying a different athlete's own (otherwise
+    /// valid) `athleteId`/`plannedActivityId`.
+    @Test("updateReminder rejects a reminder that belongs to a different athlete")
+    @MainActor
+    func updateReminderRejectsReminderFromDifferentAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let ownerAthleteId = AthleteId()
+        let otherAthleteId = AthleteId()
+        let ownerWeekPlan = try planning.getOrCreateWeekPlan(athleteId: ownerAthleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let ownerActivity = try planning.addPlannedActivity(
+            toWeekPlan: ownerWeekPlan.weekPlanId, athleteId: ownerAthleteId, activityType: .individualTraining,
+            title: "Run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let otherWeekPlan = try planning.getOrCreateWeekPlan(athleteId: otherAthleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let otherActivity = try planning.addPlannedActivity(
+            toWeekPlan: otherWeekPlan.weekPlanId, athleteId: otherAthleteId, activityType: .individualTraining,
+            title: "Other athlete's run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 9, minute: 0)
+        )
+        let ownerReminder = try coordination.createReminder(
+            athleteId: ownerAthleteId, plannedActivityId: ownerActivity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
+        )
+
+        #expect(throws: NotificationsPlanningCoordinationService.CoordinationError.reminderNotFound) {
+            try coordination.updateReminder(
+                activityReminderId: ownerReminder.activityReminderId, athleteId: otherAthleteId, plannedActivityId: otherActivity.plannedActivityId,
+                leadTimeMinutes: 99, reminderText: "Hijacked"
+            )
+        }
+
+        let unchanged = try activityReminderRepository.fetch(byId: ownerReminder.activityReminderId)
+        #expect(unchanged?.leadTimeMinutes == 30)
+        #expect(unchanged?.reminderText == "Eat")
+        #expect(scheduler.scheduleCalls.count == 1)
+    }
+
+    /// Blocker 1's delete-path audit: `deleteReminder` enforces the SAME
+    /// ownership boundary `updateReminder` does — never mutates anything
+    /// when the supplied context doesn't genuinely own the reminder.
+    @Test("deleteReminder rejects (never mutates) a reminder addressed through a mismatched PlannedActivityId")
+    @MainActor
+    func deleteReminderRejectsMismatchedActivityContext() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activityA = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run A", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let activityB = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run B", localDate: LocalDate(year: 2026, month: 1, day: 7), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 8, minute: 0)
+        )
+        let reminderA = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activityA.plannedActivityId, leadTimeMinutes: 30)
+
+        #expect(throws: NotificationsPlanningCoordinationService.CoordinationError.reminderNotFound) {
+            try coordination.deleteReminder(reminderA.activityReminderId, athleteId: athleteId, plannedActivityId: activityB.plannedActivityId)
+        }
+
+        #expect(scheduler.cancelledIds.isEmpty)
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activityA.plannedActivityId).count == 1)
+    }
+
+    /// A successful `deleteReminder`, at the coordination layer, still
+    /// removes exactly the selected reminder — a sibling for the same
+    /// activity, and an unrelated activity's own reminder, are both
+    /// completely untouched.
+    @Test("deleteReminder removes exactly the selected reminder, leaving a sibling and an unrelated activity's reminder untouched")
+    @MainActor
+    func deleteReminderRemovesOnlySelectedReminder() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let otherActivity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run", localDate: LocalDate(year: 2026, month: 1, day: 7), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 8, minute: 0)
+        )
+        let eat = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat")
+        let packBag = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag")
+        let otherReminder = try coordination.createReminder(athleteId: athleteId, plannedActivityId: otherActivity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Warm up")
+
+        try coordination.deleteReminder(eat.activityReminderId, athleteId: athleteId, plannedActivityId: activity.plannedActivityId)
+
+        #expect(scheduler.cancelledIds == [eat.activityReminderId])
+        let remaining = try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId)
+        #expect(remaining.map(\.activityReminderId) == [packBag.activityReminderId])
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: otherActivity.plannedActivityId).first?.activityReminderId == otherReminder.activityReminderId)
+    }
+
+    /// `deleteReminder` stays a safe, idempotent no-op when the id no
+    /// longer exists AT ALL — deliberately distinct from the ownership-
+    /// mismatch case above, which throws rather than silently no-op-ing.
+    @Test("deleteReminder is a safe no-op for an ActivityReminderId that no longer exists")
+    @MainActor
+    func deleteReminderNoOpWhenAlreadyGone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, _) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+
+        try coordination.deleteReminder(ActivityReminderId(), athleteId: athleteId, plannedActivityId: activity.plannedActivityId)
+
+        #expect(scheduler.cancelledIds.isEmpty)
+    }
 }
 
 // MARK: - Deterministic notification request identity (production adapter)
@@ -928,6 +1101,40 @@ struct ActivityReminderRepositoryTests {
         let suggestions = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 3)
 
         #expect(suggestions.count == 3)
+    }
+
+    /// PR #38 review follow-up (recent-text note): "most recently used"
+    /// must reflect an EDIT to an already-existing reminder, not only
+    /// original insertion order — editing "Eat" (created FIRST) after
+    /// "Pack bag" (created SECOND) must move "Eat" back in front, since
+    /// that edit is itself a fresh use of that text. Chosen semantics:
+    /// recency is keyed on `ActivityReminder.updatedAt` (bumped by both
+    /// `insert`, which sets it equal to `createdAt`, and `update`, on
+    /// every edit) — no new scoring or history model, reusing the one
+    /// canonical timestamp the model already maintains for exactly this
+    /// meaning.
+    @Test("Editing an already-existing reminder's text counts as a fresh use for recency, even if it was created earlier")
+    @MainActor
+    func recentReminderTextsReflectEditsNotJustCreationOrder() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        let eat = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 120, reminderText: "Eat", createdAt: base)
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 45, reminderText: "Pack bag", createdAt: base.addingTimeInterval(60))
+
+        // Creation order alone would put "Pack bag" first — confirm that
+        // baseline before the edit below changes it.
+        #expect(try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 5) == ["Pack bag", "Eat"])
+
+        // Editing "Eat" (unrelated field, same text) at a LATER instant
+        // than "Pack bag" was ever touched is itself a fresh "use."
+        _ = try repository.update(eat, leadTimeMinutes: 90, reminderText: "Eat", updatedAt: base.addingTimeInterval(120))
+
+        let suggestions = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 5)
+        #expect(suggestions == ["Eat", "Pack bag"])
     }
 }
 
