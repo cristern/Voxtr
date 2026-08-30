@@ -13,19 +13,26 @@ import VoxtrNotificationsDomain
 // types and require the Xcode/macOS SwiftData runtime — written but not
 // executed in this sandbox.
 //
+// Activity Reminder What/When: rewritten from PR #37's single-reminder
+// shape to the generalized `ActivityDetailViewModel.reminders:
+// [ActivityReminderDraft]` list — see that property's own doc comment.
+// Domain/service-level multi-reminder coverage (coexistence, sibling
+// isolation, lifecycle reconciliation) lives in
+// `ActivityReminderLifecycleTests.swift`; this file covers the
+// ViewModel/UI-facing layer specifically: prefill mapping, add/edit/
+// remove, and per-row permission/error state.
+//
 // Following the S1.1 lesson: no shared private helper methods for
 // container construction — every test builds its own inline (the
-// `makeFixture`/`makeActivity` helpers below only assemble already-
-// constructed services/fixtures, matching the same, already-accepted
-// deviation `ActivityReminderLifecycleTests.makeServices` establishes).
+// `makeFixture`/`makeActivity`/`makeViewModel` helpers below only
+// assemble already-constructed services/fixtures, matching the same,
+// already-accepted deviation `ActivityReminderLifecycleTests.makeServices`
+// establishes).
 
-/// Notifications V1 Activity Reminder UI slice: a recording,
-/// deterministic, configurable test double for `ActivityReminderScheduling` —
-/// never `UNUserNotificationCenter` — per this task's explicit "do not
-/// use real UNUserNotificationCenter in deterministic unit tests" rule.
-/// File-local (not shared with `ActivityReminderLifecycleTests.swift`'s
-/// own, differently-scoped `FakeActivityReminderScheduler`), per this
-/// project's "every test file builds its own inline" convention.
+/// A recording, deterministic, configurable test double for
+/// `ActivityReminderScheduling` — never `UNUserNotificationCenter`.
+/// File-local, per this project's "every test file builds its own
+/// inline" convention.
 private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @unchecked Sendable {
     private let lock = NSLock()
     private var _scheduleCallCount = 0
@@ -61,11 +68,6 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
         _cancelledIds.append(id)
     }
 
-    /// Every call site (this app's production code, and every test
-    /// below) is already `@MainActor` — `MainActor.assumeIsolated`
-    /// asserts that at runtime rather than forcing this nonisolated,
-    /// lock-guarded double to hop via `Task`, which would make these
-    /// tests non-deterministic.
     func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
         let status = authorizationStatusValue
         MainActor.assumeIsolated { completion(status) }
@@ -80,9 +82,6 @@ private final class FakeActivityReminderScheduler: ActivityReminderScheduling, @
     }
 }
 
-/// Deterministic "now" — every activity fixture below is dated in
-/// January 2026, safely after this fixed reference, so lead-time/
-/// past-fire-date arithmetic never depends on the real wall-clock date.
 private struct FixedDateProvider: DateProvider {
     let now: Date
 }
@@ -96,7 +95,7 @@ private func activityDetailReminderTestsFixedNow() -> Date {
     return Calendar(identifier: .gregorian).date(from: components) ?? Date(timeIntervalSince1970: 1_764_547_200)
 }
 
-@Suite("ActivityDetailViewModel Reminder control (Notifications V1 Activity Reminder UI slice)", .serialized)
+@Suite("ActivityDetailViewModel Reminder list (Activity Reminder What/When)", .serialized)
 struct ActivityDetailReminderUITests {
 
     private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
@@ -108,12 +107,6 @@ struct ActivityDetailReminderUITests {
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         scheduler: FakeActivityReminderScheduler
     ) {
-        // A shared, real `EventBus` — the same production wiring
-        // `CompositionRoot.build()` performs (`PlanningService`/
-        // `TrainingService` publish; `NotificationsPlanningCoordinationService
-        // .subscribeToEvents` reacts) — so `saveEdit()`/cancel/log
-        // lifecycle reconciliation behaves exactly as it does in the
-        // running app, not a hand-simulated approximation of it.
         let eventBus = EventBus()
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext), eventBus: eventBus)
         let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
@@ -143,7 +136,7 @@ struct ActivityDetailReminderUITests {
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
         let activity = try planningService.addPlannedActivity(
             toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
             startLocalTime: startLocalTime
         )
         return (weekPlan, activity)
@@ -170,9 +163,9 @@ struct ActivityDetailReminderUITests {
         )
     }
 
-    @Test("Reminder control loads Off when no reminder intent exists")
+    @Test("Reminder list loads empty when no reminders exist")
     @MainActor
-    func loadsOffWhenNoIntentExists() throws {
+    func loadsEmptyWhenNoRemindersExist() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
@@ -181,31 +174,63 @@ struct ActivityDetailReminderUITests {
 
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        #expect(viewModel.reminderEnabled == false)
+        #expect(viewModel.reminders.isEmpty)
         #expect(viewModel.canSetReminder == true)
     }
 
-    @Test("An existing reminder loads with its correct lead time")
+    /// Item 16: multiple existing reminders load with their own correct
+    /// text and lead time.
+    @Test("Multiple existing reminders load with their own correct text and lead time")
     @MainActor
-    func loadsExistingReminderWithCorrectLeadTime() throws {
+    func loadsMultipleExistingRemindersCorrectly() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
         let athleteId = AthleteId()
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
-        _ = try fixture.notificationsPlanningCoordinationService.createReminder(
-            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 20
+        let eat = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat"
+        )
+        let packBag = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag"
         )
 
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        #expect(viewModel.reminderEnabled == true)
-        #expect(viewModel.reminderLeadTimeMinutes == 20)
+        #expect(viewModel.reminders.count == 2)
+        #expect(viewModel.reminders.contains { $0.persistedId == eat.activityReminderId && $0.text == "Eat" && $0.leadTimeMinutes == 120 })
+        #expect(viewModel.reminders.contains { $0.persistedId == packBag.activityReminderId && $0.text == "Pack bag" && $0.leadTimeMinutes == 45 })
     }
 
-    @Test("Enabling with notifications already authorized creates and schedules a reminder")
+    /// Item 18: a pre-existing PR #37-era reminder (created before
+    /// `reminderText` existed, persisted with `nil`) is still
+    /// represented — as an empty-text draft, never a fabricated value —
+    /// by the new generalized multi-reminder model.
+    @Test("A legacy reminder with no user-authored text loads as an empty-text draft, not a fabricated value")
     @MainActor
-    func enablingWithAuthorizedNotificationsSchedulesReminder() throws {
+    func loadsLegacyReminderWithNoTextAsEmptyDraft() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        // Directly through the repository, bypassing reminderText, to
+        // simulate a row created before this field existed.
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let legacy = try repository.insert(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30)
+        #expect(legacy.reminderText == nil)
+
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        #expect(viewModel.reminders.count == 1)
+        #expect(viewModel.reminders.first?.text == "")
+        #expect(viewModel.reminders.first?.leadTimeMinutes == 30)
+        #expect(viewModel.reminders.first?.persistedId == legacy.activityReminderId)
+    }
+
+    @Test("Committing a new reminder with authorized notifications creates and schedules it")
+    @MainActor
+    func committingNewReminderWithAuthorizedNotificationsSchedules() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
@@ -214,18 +239,21 @@ struct ActivityDetailReminderUITests {
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        viewModel.setReminderEnabled(true)
+        viewModel.addReminder()
+        #expect(viewModel.reminders.count == 1)
+        viewModel.reminders[0].text = "Pack bag"
+        viewModel.commitReminder(viewModel.reminders[0])
 
-        #expect(viewModel.reminderEnabled == true)
-        #expect(viewModel.reminderErrorMessage == nil)
-        #expect(viewModel.reminderAuthorizationDenied == false)
+        #expect(viewModel.reminders.first?.persistedId != nil)
+        #expect(viewModel.reminders.first?.errorMessage == nil)
+        #expect(viewModel.reminders.first?.authorizationDenied == false)
         #expect(fixture.scheduler.scheduleCallCount == 1)
         #expect(fixture.scheduler.requestAuthorizationCallCount == 0)
     }
 
-    @Test("The first enable from notDetermined requests authorization exactly once, then creates the reminder when granted")
+    @Test("The first commit from notDetermined requests authorization exactly once, then creates the reminder when granted")
     @MainActor
-    func firstEnableFromNotDeterminedRequestsAuthorization() throws {
+    func firstCommitFromNotDeterminedRequestsAuthorization() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
@@ -235,14 +263,16 @@ struct ActivityDetailReminderUITests {
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        viewModel.setReminderEnabled(true)
+        viewModel.addReminder()
+        viewModel.reminders[0].text = "Eat"
+        viewModel.commitReminder(viewModel.reminders[0])
 
         #expect(fixture.scheduler.requestAuthorizationCallCount == 1)
-        #expect(viewModel.reminderEnabled == true)
+        #expect(viewModel.reminders.first?.persistedId != nil)
         #expect(fixture.scheduler.scheduleCallCount == 1)
     }
 
-    @Test("Denied authorization never creates an active reminder and surfaces the denied UI state")
+    @Test("Denied authorization never creates the reminder and surfaces the denied state on that row")
     @MainActor
     func deniedAuthorizationDoesNotCreateReminder() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -253,79 +283,79 @@ struct ActivityDetailReminderUITests {
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        viewModel.setReminderEnabled(true)
+        viewModel.addReminder()
+        viewModel.reminders[0].text = "Eat"
+        viewModel.commitReminder(viewModel.reminders[0])
 
-        #expect(viewModel.reminderEnabled == false)
-        #expect(viewModel.reminderAuthorizationDenied == true)
+        #expect(viewModel.reminders.first?.persistedId == nil)
+        #expect(viewModel.reminders.first?.authorizationDenied == true)
         #expect(fixture.scheduler.scheduleCallCount == 0)
-        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminder(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: activity.plannedActivityId).isEmpty)
     }
 
-    @Test("Declining the first-enable authorization prompt (notDetermined -> denied) never creates a reminder")
+    /// Item 17 (edit direction): editing an already-persisted reminder's
+    /// text/lead time updates the SAME reminder in place — never
+    /// creates a second one.
+    @Test("Editing an already-persisted reminder updates it in place under the same identity")
     @MainActor
-    func decliningFirstEnableRequestDoesNotCreateReminder() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let fixture = makeFixture(container: container)
-        fixture.scheduler.authorizationStatusValue = .notDetermined
-        fixture.scheduler.requestAuthorizationResult = false
-        let athleteId = AthleteId()
-        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
-        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
-
-        viewModel.setReminderEnabled(true)
-
-        #expect(fixture.scheduler.requestAuthorizationCallCount == 1)
-        #expect(viewModel.reminderEnabled == false)
-        #expect(viewModel.reminderAuthorizationDenied == true)
-        #expect(fixture.scheduler.scheduleCallCount == 0)
-    }
-
-    @Test("Turning Reminder Off cancels the scheduled notification and removes the reminder intent")
-    @MainActor
-    func turningOffCancelsReminder() throws {
+    func editingPersistedReminderUpdatesInPlace() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
         let athleteId = AthleteId()
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
-        let reminder = try fixture.notificationsPlanningCoordinationService.createReminder(
-            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30
+        let created = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
         )
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
-        #expect(viewModel.reminderEnabled == true)
+        #expect(viewModel.reminders.count == 1)
 
-        viewModel.setReminderEnabled(false)
+        viewModel.reminders[0].text = "Eat breakfast"
+        viewModel.reminders[0].leadTimeMinutes = 60
+        viewModel.commitReminder(viewModel.reminders[0])
 
-        #expect(viewModel.reminderEnabled == false)
-        #expect(fixture.scheduler.cancelledIds == [reminder.activityReminderId])
-        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminder(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(viewModel.reminders.count == 1)
+        #expect(viewModel.reminders.first?.persistedId == created.activityReminderId)
+        let all = try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: activity.plannedActivityId)
+        #expect(all.count == 1)
+        #expect(all.first?.activityReminderId == created.activityReminderId)
+        #expect(all.first?.reminderText == "Eat breakfast")
+        #expect(all.first?.leadTimeMinutes == 60)
     }
 
-    @Test("Changing the lead time reschedules the SAME reminder under a new fire date")
+    /// Item 17 (remove direction): removing one reminder cancels/removes
+    /// only that one, leaving a sibling reminder untouched.
+    @Test("Removing one reminder cancels only that one, leaving a sibling reminder untouched")
     @MainActor
-    func changingLeadTimeReschedules() throws {
+    func removingOneReminderLeavesSiblingUntouched() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
         let athleteId = AthleteId()
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        let eat = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat"
+        )
+        let packBag = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag"
+        )
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
-        viewModel.setReminderEnabled(true)
-        let fireDateAt30 = fixture.scheduler.lastScheduleFireDate
+        #expect(viewModel.reminders.count == 2)
 
-        viewModel.setReminderLeadTimeMinutes(60)
+        let eatDraft = try #require(viewModel.reminders.first { $0.persistedId == eat.activityReminderId })
+        viewModel.removeReminder(eatDraft)
 
-        #expect(viewModel.reminderEnabled == true)
-        #expect(viewModel.reminderLeadTimeMinutes == 60)
-        #expect(fixture.scheduler.scheduleCallCount == 2)
-        #expect(fixture.scheduler.lastScheduleFireDate != fireDateAt30)
-        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminder(forPlannedActivity: activity.plannedActivityId)?.leadTimeMinutes == 60)
+        #expect(viewModel.reminders.count == 1)
+        #expect(viewModel.reminders.first?.persistedId == packBag.activityReminderId)
+        #expect(fixture.scheduler.cancelledIds == [eat.activityReminderId])
+        let remaining = try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: activity.plannedActivityId)
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.activityReminderId == packBag.activityReminderId)
     }
 
-    @Test("An activity with no start time cannot have its reminder enabled")
+    @Test("An activity with no start time cannot have a reminder committed")
     @MainActor
-    func noStartTimePreventsEnabling() throws {
+    func noStartTimePreventsCommit() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
@@ -335,9 +365,11 @@ struct ActivityDetailReminderUITests {
 
         #expect(viewModel.canSetReminder == false)
 
-        viewModel.setReminderEnabled(true)
+        viewModel.addReminder()
+        viewModel.reminders[0].text = "Eat"
+        viewModel.commitReminder(viewModel.reminders[0])
 
-        #expect(viewModel.reminderEnabled == false)
+        #expect(viewModel.reminders.first?.persistedId == nil)
         #expect(fixture.scheduler.scheduleCallCount == 0)
     }
 
@@ -348,48 +380,68 @@ struct ActivityDetailReminderUITests {
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
         let athleteId = AthleteId()
-        // The fixed "now" is 2025-12-01 UTC; this activity's own fire
-        // instant (2026-01-06 18:00 Oslo) minus an extreme lead time (7
-        // days, the domain's own upper bound) still lands after "now" —
-        // so instead this test makes the ACTIVITY itself already in the
-        // past relative to the fixed reference, the same real-world case
-        // ("a reminder set on an activity whose start time has already
-        // gone by") this guard exists to catch.
+        // Fixed "now" is 2025-12-01 UTC; this activity's own date is
+        // already before that, so any positive lead time resolves to a
+        // fire date in the past — the same real-world case ("a reminder
+        // set on an activity whose start time has already gone by")
+        // this guard exists to catch.
         let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2025, month: 11, day: 3))
         let activity = try fixture.planningService.addPlannedActivity(
             toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Endurance run", localDate: LocalDate(year: 2025, month: 11, day: 4), timeZoneId: Self.oslo,
+            title: "Hockey practice", localDate: LocalDate(year: 2025, month: 11, day: 4), timeZoneId: Self.oslo,
             startLocalTime: LocalTime(hour: 18, minute: 0)
         )
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
 
-        viewModel.setReminderEnabled(true)
+        viewModel.addReminder()
+        viewModel.reminders[0].text = "Eat"
+        viewModel.commitReminder(viewModel.reminders[0])
 
-        #expect(viewModel.reminderEnabled == false)
-        #expect(viewModel.reminderErrorMessage == PlanningStrings.reminderFireDateInPast)
+        #expect(viewModel.reminders.first?.persistedId == nil)
+        #expect(viewModel.reminders.first?.errorMessage == PlanningStrings.reminderFireDateInPast)
         #expect(fixture.scheduler.scheduleCallCount == 0)
-        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminder(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try fixture.notificationsPlanningCoordinationService.fetchReminders(forPlannedActivity: activity.plannedActivityId).isEmpty)
     }
 
-    @Test("Saving an edit that removes the start time cancels an active reminder and updates the displayed control")
+    @Test("Committing an empty-text draft is a no-op — nothing is persisted")
     @MainActor
-    func savingEditWithoutStartTimeCancelsReminder() throws {
+    func committingEmptyTextDraftIsNoOp() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
         let athleteId = AthleteId()
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
-        let reminder = try fixture.notificationsPlanningCoordinationService.createReminder(
-            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        viewModel.addReminder()
+        viewModel.commitReminder(viewModel.reminders[0])
+
+        #expect(viewModel.reminders.first?.persistedId == nil)
+        #expect(fixture.scheduler.scheduleCallCount == 0)
+    }
+
+    @Test("Saving an edit that removes the start time cancels every reminder and updates the displayed list")
+    @MainActor
+    func savingEditWithoutStartTimeCancelsAllReminders() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        let eat = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat"
+        )
+        let packBag = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag"
         )
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
-        #expect(viewModel.reminderEnabled == true)
+        #expect(viewModel.reminders.count == 2)
 
         viewModel.editHasStartTime = false
         #expect(viewModel.saveEdit() == true)
 
         #expect(viewModel.canSetReminder == false)
-        #expect(viewModel.reminderEnabled == false)
-        #expect(fixture.scheduler.cancelledIds == [reminder.activityReminderId])
+        #expect(viewModel.reminders.isEmpty)
+        #expect(Set(fixture.scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
     }
 }

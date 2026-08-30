@@ -44,12 +44,35 @@ import VoxtrCoreContracts
 /// in `VoxtrAppShell`) rather than merely flagging it inactive. No
 /// delivery-history model exists alongside it, per the approved
 /// contract.
+///
+/// Activity Reminder What/When round: `reminderText` is the ONE new
+/// field this round adds — the user-authored "what" ("Pack hockey bag",
+/// "Eat") a reminder is for, distinct from Planning's own activity
+/// title. Optional (`String?`), not because a NEW reminder may
+/// meaningfully have no text (the create/edit UI always collects one),
+/// but purely so a pre-existing PR #37 reminder row — created before
+/// this field existed, with no user-authored text to migrate from —
+/// gets an honest `nil` rather than a fabricated value; see
+/// `AppSchemaVersioning.swift`'s V5→V6 migration stage for the exact
+/// mechanics, and `NotificationsPlanningCoordinationService.buildContent(for:reminderText:)`
+/// for how a `nil` text degrades to this reminder's pre-existing
+/// generic notification wording rather than showing an empty title.
+///
+/// Activity Reminder What/When round: the prior "at most one active
+/// reminder per PlannedActivity" assumption is REMOVED — nothing in
+/// this type itself ever enforced that (no `@Attribute(.unique)` on
+/// `plannedActivityId`), so no schema change is needed to allow
+/// multiple rows per activity; only the repository/service-layer
+/// "fetch (singular) / replace on create" logic built on top of it
+/// needed to change (see `ActivityReminderRepository`/
+/// `ActivityReminderService`'s own updated doc comments).
 @Model
 public final class ActivityReminder {
     @Attribute(.unique) public var id: UUID
     public var athleteId: UUID
     public var plannedActivityId: UUID
     public var leadTimeMinutes: Int
+    public var reminderText: String?
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
@@ -59,6 +82,7 @@ public final class ActivityReminder {
         athleteId: AthleteId,
         plannedActivityId: PlannedActivityId,
         leadTimeMinutes: Int,
+        reminderText: String? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
@@ -78,6 +102,7 @@ public final class ActivityReminder {
         self.athleteId = athleteId.rawValue
         self.plannedActivityId = plannedActivityId.rawValue
         self.leadTimeMinutes = leadTimeMinutes
+        self.reminderText = reminderText
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion

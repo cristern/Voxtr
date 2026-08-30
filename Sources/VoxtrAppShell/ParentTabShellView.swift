@@ -348,6 +348,7 @@ private struct ParentPlanTabView: View {
                                 WeeklyPlanningView(
                                     viewModel: WeeklyPlanningViewModel(
                                         service: planningService,
+                                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                                         athleteId: athlete.athleteId,
                                         committedByActorId: actorId,
                                         activityChangeBroadcaster: activityChangeBroadcaster

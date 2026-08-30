@@ -121,6 +121,7 @@ public struct FamilyScheduleView: View {
                     planningService: planningService,
                     trainingService: trainingService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                     actorId: actorId,
                     onActivityLogged: { viewModel.loadSchedule() }
                 )

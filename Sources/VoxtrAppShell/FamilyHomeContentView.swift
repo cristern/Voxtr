@@ -296,6 +296,7 @@ public struct FamilyHomeContentView: View {
                         planningService: planningService,
                         trainingService: trainingService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                         actorId: ActorId(rawValue: family.participant.id),
                         onActivityLogged: { viewModel.refresh() }
                     )

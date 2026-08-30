@@ -934,12 +934,89 @@ public enum AppSchemaV4: VersionedSchema {
 /// model type" version bump in this file's history (V1→V2's
 /// `DailyStatus`/`AthleteSettings`, V3→V4's `Sport`).
 ///
-/// `models` stays a live passthrough to `AppSchema.modelTypes` (this is
-/// now the LATEST version); it will need freezing itself the next time a
-/// genuine `AppSchemaV6` is added.
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V5
+/// was the latest version; Activity Reminder What/When now freezes it
+/// to the exact 19-entity literal V5 always actually had, plus a
+/// nested, frozen V5-era `ActivityReminder` copy (see that type's own
+/// doc comment below) — following this file's own "HOW TO ADD A NEW
+/// VERSION" step 1, same as `AppSchemaV3`/`AppSchemaV4` before it. See
+/// `AppSchemaV6` immediately below for the new latest version.
 public enum AppSchemaV5: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(5, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            AppSchemaV5.ActivityReminder.self,
+        ]
+    }
+
+    /// FROZEN — the genuine V5-era shape of `ActivityReminder`, before
+    /// Activity Reminder What/When added `reminderText: String?`. This
+    /// type exists ONLY to give `AppSchemaV5.models` above an accurate
+    /// historical shape for migration purposes — nothing in this
+    /// codebase's live repositories/services/UI may construct or read
+    /// it; see `VoxtrNotificationsDomain.ActivityReminder` for the real,
+    /// live, current type.
+    @Model
+    public final class ActivityReminder {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var plannedActivityId: UUID
+        public var leadTimeMinutes: Int
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            plannedActivityId: UUID,
+            leadTimeMinutes: Int,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.plannedActivityId = plannedActivityId
+            self.leadTimeMinutes = leadTimeMinutes
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+    }
+}
+
+/// Activity Reminder What/When: the current, live version. Adds ONE
+/// field to an already-listed live type — `ActivityReminder.reminderText:
+/// String?` — no model *type* addition/removal, so `AppSchema.modelTypes`
+/// itself is unchanged (see that file's own doc comment: a field-level
+/// change does not touch that array). `models` stays a live passthrough
+/// to `AppSchema.modelTypes` (this is now the LATEST version); it will
+/// need freezing itself the next time a genuine `AppSchemaV7` is added.
+public enum AppSchemaV6: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(6, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -998,7 +1075,7 @@ public enum AppSchemaV5: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self]
+        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self, AppSchemaV6.self]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -1043,12 +1120,30 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// with an empty `ActivityReminder` table; an existing V4 store gains
     /// that new empty table with its existing 18 entities' data
     /// completely untouched.
+    ///
+    /// V5 ("5.0.0", 19 entities) → V6 ("6.0.0", same 19 entities — adds
+    /// `ActivityReminder.reminderText: String?`). `.lightweight` again:
+    /// the exact same class of change as V2→V3's `AthleteSettings.preferredColor`
+    /// addition — a genuinely new, genuinely optional column with no
+    /// other value it could infer for an existing row than `nil`, which
+    /// is exactly what this migration needs: every PR #37-era
+    /// `ActivityReminder` row (created before "what" text existed)
+    /// migrates with `reminderText == nil`, honestly representing "no
+    /// user-authored text was ever collected for this reminder" rather
+    /// than inventing one. Every existing reminder's `leadTimeMinutes`/
+    /// `plannedActivityId`/`athleteId` — its actual "when" and "for
+    /// what activity" — is completely untouched; only its "what" starts
+    /// unset, which the application layer already handles explicitly
+    /// (see `ActivityReminder.reminderText`'s and
+    /// `NotificationsPlanningCoordinationService.buildContent(for:reminderText:)`'s
+    /// own doc comments).
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
             .lightweight(fromVersion: AppSchemaV2.self, toVersion: AppSchemaV3.self),
             .lightweight(fromVersion: AppSchemaV3.self, toVersion: AppSchemaV4.self),
             .lightweight(fromVersion: AppSchemaV4.self, toVersion: AppSchemaV5.self),
+            .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
         ]
     }
 }
