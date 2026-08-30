@@ -63,7 +63,17 @@ public final class ActivityReminder {
         updatedAt: Date = .now,
         schemaVersion: Int = 1
     ) {
-        precondition((0...10080).contains(leadTimeMinutes), "leadTimeMinutes must be 0-10080 (0 minutes to 7 days)")
+        // PR #37 follow-up: the prior `0...10080` (7-day) ceiling was an
+        // unapproved product limit — the approved contract only requires
+        // "arbitrary lead time before the activity" for Custom, with no
+        // maximum. This precondition now enforces only what persistence
+        // and downstream fire-date arithmetic genuinely need — a
+        // non-negative value — never a product-level cap. An
+        // extreme value simply resolves to a fire date far in the past,
+        // which `NotificationsPlanningCoordinationService.createReminder`'s
+        // own past-fire-date guard already rejects calmly; nothing here
+        // needs a second, redundant ceiling to stay safe.
+        precondition(leadTimeMinutes >= 0, "leadTimeMinutes must be non-negative")
         self.id = id.rawValue
         self.athleteId = athleteId.rawValue
         self.plannedActivityId = plannedActivityId.rawValue

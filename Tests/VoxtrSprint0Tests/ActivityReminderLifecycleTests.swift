@@ -361,6 +361,39 @@ struct NotificationsPlanningCoordinationServiceTests {
         #expect(scheduler.scheduleCalls.first?.fireDate == expectedFireInstant.addingTimeInterval(-10 * 60))
     }
 
+    /// PR #37 follow-up: the prior `0...10080` (7-day) ceiling on
+    /// `ActivityReminder.leadTimeMinutes` was an unapproved product
+    /// limit — Custom must support arbitrary lead time before the
+    /// activity. 20 days (28,800 minutes) is comfortably beyond the old
+    /// ceiling; this proves it is no longer enforced anywhere in the
+    /// create path, not merely relaxed to a different, still-arbitrary
+    /// number.
+    @Test("createReminder accepts a lead time well beyond the old, unapproved 7-day (10080-minute) ceiling")
+    @MainActor
+    func createReminderAcceptsLeadTimeBeyondSevenDays() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, _) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Season opener", localDate: LocalDate(year: 2026, month: 3, day: 3), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let twentyDaysInMinutes = 20 * 24 * 60
+
+        let reminder = try coordination.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: twentyDaysInMinutes
+        )
+
+        let expectedFireInstant = try LocalDate(year: 2026, month: 3, day: 3).absoluteDate(at: LocalTime(hour: 18, minute: 0), in: Self.oslo)
+        let expectedFireDate = expectedFireInstant.addingTimeInterval(-Double(twentyDaysInMinutes) * 60)
+        #expect(reminder.leadTimeMinutes == twentyDaysInMinutes)
+        #expect(scheduler.scheduleCalls.count == 1)
+        #expect(scheduler.scheduleCalls.first?.fireDate == expectedFireDate)
+    }
+
     @Test("createReminder rejects a PlannedActivity that belongs to a different athlete")
     @MainActor
     func createReminderRejectsCrossAthleteActivity() throws {

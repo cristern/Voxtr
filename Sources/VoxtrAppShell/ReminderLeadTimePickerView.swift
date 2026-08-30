@@ -25,10 +25,17 @@ public struct ReminderLeadTimePickerView: View {
     /// This UI slice's own approved contract: 15 minutes / 30 minutes /
     /// 1 hour before, plus Custom.
     private static let presets = [15, 30, 60]
-    /// `ActivityReminder`'s own persisted bound (`0...10080`, 7 days) —
-    /// Custom's valid range, deliberately not an artificial 60-minute
-    /// ceiling.
-    private static let customValidRange = 1...10080
+    /// PR #37 follow-up: Custom supports arbitrary lead time before the
+    /// activity — no product-level maximum, per the approved contract.
+    /// The lower bound (`1`) is the only genuine rule (a reminder needs
+    /// a positive lead time to mean anything); the upper bound is
+    /// `Int.max`, the widest value `Int(text)` parsing below can ever
+    /// produce — a technical ceiling only, not a product one. An
+    /// extremely large value is still handled safely: it resolves to a
+    /// fire date far in the past, which
+    /// `NotificationsPlanningCoordinationService.createReminder`'s own
+    /// past-fire-date guard already rejects calmly.
+    private static let customValidRange = 1...Int.max
 
     /// Fired only on a genuinely COMMITTED change — a preset tap
     /// (always a discrete, deliberate action), or the Custom field's
