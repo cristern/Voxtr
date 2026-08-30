@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// S1.4: shown when `FamilyRestorationState` is `.existingFamily`.
 /// S2.4: also links to `WeeklyPlanningView`. S3.3: also links to
@@ -58,6 +59,10 @@ public struct FamilyHomeView: View {
     /// `activityChangeBroadcaster` above.
     public let sleepCoordinationService: SleepCoordinationService
     public let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Calendar Planning Source V1: same threading rationale as
+    /// `sleepCoordinationService` above.
+    public let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
+    public let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -73,7 +78,9 @@ public struct FamilyHomeView: View {
         athleteFamilyManagementService: AthleteFamilyManagementService,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -89,6 +96,8 @@ public struct FamilyHomeView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
+        self.sportRepository = sportRepository
     }
 
     public var body: some View {
@@ -107,7 +116,9 @@ public struct FamilyHomeView: View {
                 athleteManagementViewModel: makeAthleteManagementViewModel(),
                 activityChangeBroadcaster: activityChangeBroadcaster,
                 sleepCoordinationService: sleepCoordinationService,
-                sleepChangeBroadcaster: sleepChangeBroadcaster
+                sleepChangeBroadcaster: sleepChangeBroadcaster,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                sportRepository: sportRepository
             )
         } else {
             NavigationStack {
@@ -119,6 +130,13 @@ public struct FamilyHomeView: View {
                             sleepCoordinationService: sleepCoordinationService,
                             athleteId: athlete.athleteId,
                             athleteDisplayName: athlete.givenName
+                        )
+                    },
+                    calendarPlanningViewModel: { athlete in
+                        AthleteCalendarPlanningViewModel(
+                            athleteId: athlete.athleteId,
+                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                            sportRepository: sportRepository
                         )
                     }
                 )

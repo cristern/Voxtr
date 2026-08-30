@@ -87,15 +87,22 @@ public struct AthleteFamilyManagementView: View {
     /// its inline Sleep tracking Toggle (round 10 — see that type's
     /// own doc comment: no dedicated Sleep Settings screen anymore).
     private let sleepSettingsViewModel: (AthleteProfile) -> AthleteSleepSettingsViewModel
+    /// Calendar Planning Source V1: same factory-closure shape as
+    /// `sleepSettingsViewModel` above — this view has no reason to know
+    /// how to construct `CalendarPlanningCoordinationService`/
+    /// `SportRepository` itself.
+    private let calendarPlanningViewModel: (AthleteProfile) -> AthleteCalendarPlanningViewModel
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
         presentationMode: PresentationMode,
-        sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel
+        sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel,
+        calendarPlanningViewModel: @escaping (AthleteProfile) -> AthleteCalendarPlanningViewModel
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
         self.sleepSettingsViewModel = sleepSettingsViewModel
+        self.calendarPlanningViewModel = calendarPlanningViewModel
     }
 
     public var body: some View {
@@ -228,7 +235,8 @@ public struct AthleteFamilyManagementView: View {
             AthleteSettingsView(
                 viewModel: viewModel,
                 athlete: athlete,
-                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
+                sleepSettingsViewModel: sleepSettingsViewModel(athlete),
+                calendarPlanningViewModel: calendarPlanningViewModel(athlete)
             )
         } label: {
             HStack(spacing: 8) {
@@ -334,6 +342,7 @@ struct AthleteSettingsView: View {
     let athlete: AthleteProfile
     @State private var isPresentingForm: Bool = false
     @State private var sleepSettingsViewModel: AthleteSleepSettingsViewModel
+    @State private var calendarPlanningViewModel: AthleteCalendarPlanningViewModel
     /// Design Foundation V0.1 (Athlete Color canonical preference
     /// round): local presentation state for the inline Color control
     /// below — `AthleteSettings` isn't part of the `@Bindable` `viewModel`'s
@@ -358,11 +367,13 @@ struct AthleteSettingsView: View {
     init(
         viewModel: AthleteFamilyManagementViewModel,
         athlete: AthleteProfile,
-        sleepSettingsViewModel: AthleteSleepSettingsViewModel
+        sleepSettingsViewModel: AthleteSleepSettingsViewModel,
+        calendarPlanningViewModel: AthleteCalendarPlanningViewModel
     ) {
         self.viewModel = viewModel
         self.athlete = athlete
         _sleepSettingsViewModel = State(initialValue: sleepSettingsViewModel)
+        _calendarPlanningViewModel = State(initialValue: calendarPlanningViewModel)
         _selectedColor = State(initialValue: viewModel.resolvedColor(for: athlete))
     }
 
@@ -493,6 +504,24 @@ struct AthleteSettingsView: View {
                 VoxtrSectionHeading("Settings")
             } footer: {
                 Text("When Sleep is off, it won't appear on \(athlete.givenName)'s Home or Family Home. Existing Sleep history is kept. Color helps tell \(athlete.givenName) apart on Family Home.")
+            }
+            .voxtrRowSurface()
+
+            // Calendar Planning Source V1: "needs more" per this hub's
+            // own Simple Settings Rule (calendar choice, permission
+            // state, Sport/Activity Type, enable/disable, disconnect) —
+            // a pushed destination, not an inline row, matching Sleep's
+            // OWN reasoning for why it stays inline (single Toggle) vs.
+            // this being genuinely multi-field.
+            Section {
+                NavigationLink {
+                    AthleteCalendarPlanningView(viewModel: calendarPlanningViewModel)
+                } label: {
+                    Text("Calendar")
+                }
+                .accessibilityIdentifier("athleteSettings.calendarLink.\(athlete.id.uuidString)")
+            } header: {
+                VoxtrSectionHeading("Calendar")
             }
             .voxtrRowSurface()
 

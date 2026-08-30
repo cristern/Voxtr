@@ -5,6 +5,7 @@ import VoxtrMotivationDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// TestFlight regression fix (stale mounted Athlete Home after Log/Cancel):
 /// temporary, `#if DEBUG`-only tracing for the exact boundary this
@@ -189,6 +190,12 @@ public struct HomeDashboardView: View {
     /// sheet's own nested `HomeDashboardViewModel` construction below —
     /// same rationale as `activityChangeBroadcaster` immediately above.
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Calendar Planning Source V1: threaded through only to pass to the
+    /// "Manage Athletes" sheet's own nested `AthleteCalendarPlanningViewModel`
+    /// construction below — same rationale as `sleepCoordinationService`
+    /// immediately above.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
+    private let sportRepository: SportRepository
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -207,7 +214,9 @@ public struct HomeDashboardView: View {
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
+        sportRepository: SportRepository
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -225,6 +234,8 @@ public struct HomeDashboardView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
+        self.sportRepository = sportRepository
     }
 
     public var body: some View {
@@ -291,6 +302,13 @@ public struct HomeDashboardView: View {
                             sleepCoordinationService: sleepCoordinationService,
                             athleteId: athlete.athleteId,
                             athleteDisplayName: athlete.givenName
+                        )
+                    },
+                    calendarPlanningViewModel: { athlete in
+                        AthleteCalendarPlanningViewModel(
+                            athleteId: athlete.athleteId,
+                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                            sportRepository: sportRepository
                         )
                     }
                 )

@@ -1,0 +1,636 @@
+import Testing
+import Foundation
+import SwiftData
+import VoxtrCore
+import VoxtrCoreContracts
+import VoxtrAppShell
+import VoxtrAthleteDomain
+import VoxtrPlanningDomain
+import VoxtrTrainingDomain
+import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
+
+// NOTE: like the other persistence-backed tests, these exercise @Model
+// types and require the Xcode/macOS SwiftData runtime — written but not
+// executed in this sandbox.
+//
+// Following the S1.1 lesson: no shared private helper methods for
+// container/repository construction — every test builds its own inline.
+// `FakeCalendarEventProvider` below is the one shared type this file
+// defines for itself (never real EventKit) — matching this project's own
+// "every test file builds its own inline fakes" convention, not a
+// cross-file shared helper.
+
+/// A deterministic, in-memory stand-in for `EventKitCalendarEventProvider`
+/// — never touches real EventKit. `events` is keyed by calendar identifier
+/// so a test can script exactly what "the external source currently says"
+/// for one or more calendars, and change it between reconciliation calls
+/// to simulate an update/disappearance.
+private final class FakeCalendarEventProvider: CalendarEventProviding, @unchecked Sendable {
+    var eventsByCalendar: [String: [ExternalCalendarEvent]] = [:]
+    var authStatus: CalendarAuthorizationStatus = .authorized
+
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        let status = authStatus
+        Task { @MainActor in completion(status) }
+    }
+
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        Task { @MainActor in completion(true) }
+    }
+
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] {
+        eventsByCalendar[calendarIdentifier] ?? []
+    }
+}
+
+private struct FixedDateProvider: DateProvider {
+    let now: Date
+}
+
+@Suite("CalendarPlanningCoordinationService (Calendar Planning Source V1)", .serialized)
+struct CalendarPlanningCoordinationServiceTests {
+
+    private static let referenceDate = Date(timeIntervalSince1970: 1_767_312_000)
+    private static let timeZoneId = TimeZoneId(rawValue: "Europe/Oslo")
+
+    private struct Fixture {
+        let planningService: PlanningService
+        let trainingService: TrainingService
+        let athleteRepository: AthleteRepository
+        let mappingRepository: CalendarPlanningMappingRepository
+        let calendarProvider: FakeCalendarEventProvider
+        let coordinationService: CalendarPlanningCoordinationService
+        let athleteId: AthleteId
+    }
+
+    private func makeFixture(referenceDate: Date = referenceDate) throws -> Fixture {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let mappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let calendarProvider = FakeCalendarEventProvider()
+        let coordinationService = CalendarPlanningCoordinationService(
+            mappingRepository: mappingRepository,
+            calendarEventProvider: calendarProvider,
+            planningService: planningService,
+            trainingService: trainingService,
+            athleteRepository: athleteRepository,
+            dateProvider: FixedDateProvider(now: referenceDate)
+        )
+        let athlete = try athleteRepository.createAthlete(
+            workspaceId: WorkspaceId(),
+            givenName: "Runner",
+            birthDate: LocalDate(year: 2012, month: 3, day: 1),
+            timeZoneId: Self.timeZoneId,
+            developmentStage: .parentLed
+        )
+        return Fixture(
+            planningService: planningService,
+            trainingService: trainingService,
+            athleteRepository: athleteRepository,
+            mappingRepository: mappingRepository,
+            calendarProvider: calendarProvider,
+            coordinationService: coordinationService,
+            athleteId: athlete.athleteId
+        )
+    }
+
+    // 1. mapping configuration uses stable canonical athlete/context IDs
+    @Test("Creating a mapping stores the athlete's stable AthleteId and canonical SportId, not raw strings")
+    @MainActor
+    func mappingUsesStableCanonicalIds() throws {
+        let fixture = try makeFixture()
+        let sportId = SportId()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: sportId
+        )
+
+        #expect(mapping.athleteId == fixture.athleteId.rawValue)
+        #expect(mapping.sportId == sportId.rawValue)
+        #expect(mapping.isEnabled == false)
+    }
+
+    @Test("Creating a mapping for an unknown athlete throws athleteNotFound")
+    @MainActor
+    func mappingRequiresExistingAthlete() throws {
+        let fixture = try makeFixture()
+        #expect(throws: CalendarPlanningCoordinationError.athleteNotFound) {
+            try fixture.coordinationService.createMapping(
+                athleteId: AthleteId(),
+                calendarIdentifier: "cal-1",
+                calendarTitle: "Spond Team",
+                activityType: .individualTraining,
+                sportId: nil
+            )
+        }
+    }
+
+    // 2. first external event creates one PlannedActivity
+    @Test("A qualifying external event creates exactly one PlannedActivity")
+    @MainActor
+    func firstEventCreatesOnePlannedActivity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 1)
+        #expect(outcome.updated == 0)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+        #expect(activities.first?.title == "Team Practice")
+    }
+
+    // 3. repeated reconciliation does NOT duplicate it
+    @Test("Reconciling the same unchanged event twice does not duplicate the PlannedActivity")
+    @MainActor
+    func repeatedReconciliationIsIdempotent() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let secondOutcome = try fixture.coordinationService.reconcile(mapping)
+
+        #expect(secondOutcome.created == 0)
+        #expect(secondOutcome.updated == 1)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+    }
+
+    // 4. external title/time change updates the same PlannedActivity identity
+    @Test("A changed external title/time updates the SAME PlannedActivity identity, not a new one")
+    @MainActor
+    func externalChangeUpdatesSameIdentity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let originalId = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first?.plannedActivityId
+
+        // Same event, different title and later start time — same
+        // calendar+eventIdentifier, still within the reconciliation window.
+        let newStart = start.addingTimeInterval(1800)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice (moved)",
+                startDate: newStart, endDate: newStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.updated == 1)
+        #expect(outcome.created == 0)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+        #expect(activities.first?.title == "Team Practice (moved)")
+        #expect(activities.first?.plannedActivityId == originalId)
+    }
+
+    // 5. two different external events do not collapse into one
+    @Test("Two distinct external events create two distinct PlannedActivities")
+    @MainActor
+    func twoDistinctEventsStayDistinct() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice A",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-2", calendarIdentifier: "cal-1", title: "Practice B",
+                startDate: start.addingTimeInterval(7200), endDate: start.addingTimeInterval(10800), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 2)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 2)
+        #expect(Set(activities.compactMap { $0.title }) == ["Practice A", "Practice B"])
+    }
+
+    // 6. same-looking title/time events with different source identity remain distinct
+    @Test("Two events with identical title/time but different eventIdentifiers remain distinct PlannedActivities")
+    @MainActor
+    func sameLookingEventsWithDifferentIdentityStayDistinct() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-2", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 2)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 2)
+        #expect(Set(activities.map { $0.externalSourceId }).count == 2)
+    }
+
+    // 7. deletion/cancellation behavior for a future unperformed activity
+    @Test("A disappeared external event cancels its unperformed future PlannedActivity")
+    @MainActor
+    func disappearedEventCancelsUnperformedActivity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+
+        // The event disappears (cancelled/removed) from the calendar.
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = []
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+
+        #expect(outcome.cancelled == 1)
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.isEmpty)
+    }
+
+    // 8. proven/logged training truth is not erased by external disappearance
+    @Test("A disappeared external event never removes a PlannedActivity that already has a LoggedActivity")
+    @MainActor
+    func provenTrainingTruthIsNotErased() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let activity = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first
+        let plannedActivityId = try #require(activity?.plannedActivityId)
+
+        _ = try fixture.trainingService.logActivity(
+            athleteId: fixture.athleteId,
+            plannedActivityId: plannedActivityId,
+            activityType: .individualTraining,
+            title: "Practice",
+            startedAt: start
+        )
+
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = []
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+
+        #expect(outcome.cancelled == 0)
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+        #expect(activities.first?.plannedActivityId == plannedActivityId)
+    }
+
+    // 9. recurring external occurrences do not create a Vǫxtr recurrence rule
+    @Test("Recurring external occurrences import as plain PlannedActivities and never create a RecurringPlannedActivity")
+    @MainActor
+    func recurringOccurrencesNeverCreateRecurrenceRule() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Weekly Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-2", calendarIdentifier: "cal-1", title: "Weekly Practice",
+                startDate: start.addingTimeInterval(7 * 86400), endDate: start.addingTimeInterval(7 * 86400 + 3600), isAllDay: false, isRecurring: true
+            )
+        ]
+
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 2)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 2)
+        // Every imported occurrence is an ordinary PlannedActivity with no
+        // RecurringPlannedActivity linkage — confirmed at the repository
+        // level: no RecurringPlannedActivity exists for this athlete at
+        // all, even though two occurrences of what EventKit reports as a
+        // recurring series were just imported.
+        let recurringDefinitions = try fixture.planningService.fetchRecurringPlannedActivities(forAthlete: fixture.athleteId)
+        #expect(recurringDefinitions.isEmpty)
+    }
+
+    // 10. mapping disabled -> no new import
+    @Test("A disabled mapping is never reconciled — no import happens")
+    @MainActor
+    func disabledMappingImportsNothing() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        // Deliberately never enabled.
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        let results = try fixture.coordinationService.reconcileAllEnabledMappings()
+        #expect(results[mapping.calendarPlanningMappingId] == nil)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.isEmpty)
+    }
+
+    // 11. permission denial leaves normal Planning functional
+    @Test("A denied Calendar permission does not prevent normal Planning mutations")
+    @MainActor
+    func permissionDenialLeavesPlanningFunctional() throws {
+        let fixture = try makeFixture()
+        fixture.calendarProvider.authStatus = .denied
+
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(
+            athleteId: fixture.athleteId, weekStart: Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        )
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Manual session", localDate: weekPlan.weekStart, timeZoneId: Self.timeZoneId
+        )
+        #expect(activity.title == "Manual session")
+
+        // No enabled mapping exists, so reconciliation is a no-op — never
+        // an error surfaced to Planning.
+        let results = try fixture.coordinationService.reconcileAllEnabledMappings()
+        #expect(results.isEmpty)
+    }
+
+    // 12. source A and source B cannot accidentally cross-link identities
+    @Test("Two different calendars mapped to different athletes never cross-link identities")
+    @MainActor
+    func differentSourcesNeverCrossLink() throws {
+        let fixture = try makeFixture()
+        let athleteB = try fixture.athleteRepository.createAthlete(
+            workspaceId: WorkspaceId(),
+            givenName: "Second Athlete",
+            birthDate: LocalDate(year: 2013, month: 5, day: 1),
+            timeZoneId: Self.timeZoneId,
+            developmentStage: .parentLed
+        )
+
+        let mappingA = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-A", calendarTitle: "Calendar A",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingA.calendarPlanningMappingId, isEnabled: true)
+        let mappingB = try fixture.coordinationService.createMapping(
+            athleteId: athleteB.athleteId, calendarIdentifier: "cal-B", calendarTitle: "Calendar B",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingB.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        // Deliberately identical eventIdentifier across two different
+        // calendars — the composite `calendarIdentifier|eventIdentifier`
+        // key must still keep them fully separate.
+        fixture.calendarProvider.eventsByCalendar["cal-A"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-shared", calendarIdentifier: "cal-A", title: "A's Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        fixture.calendarProvider.eventsByCalendar["cal-B"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-shared", calendarIdentifier: "cal-B", title: "B's Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        _ = try fixture.coordinationService.reconcileAllEnabledMappings()
+
+        let activitiesA = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        let activitiesB = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: athleteB.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activitiesA.count == 1)
+        #expect(activitiesB.count == 1)
+        #expect(activitiesA.first?.title == "A's Practice")
+        #expect(activitiesB.first?.title == "B's Practice")
+        #expect(activitiesA.first?.externalSourceId != activitiesB.first?.externalSourceId)
+    }
+
+    // 14. imported activity time change preserves existing Planning
+    // event/lifecycle behavior needed by Activity Reminders
+    @Test("An imported activity's external time change preserves its Activity Reminders (same PlannedActivityId)")
+    @MainActor
+    func timeChangePreservesActivityReminders() throws {
+        // `makeFixture()` does not expose its raw `ModelContext`, and an
+        // `ActivityReminderRepository` here needs to be bound to the
+        // EXACT same context the rest of this test's stack uses (matching
+        // `uses(modelContext:)`'s own "single unit of work" contract other
+        // coordination-service tests rely on) — so this test builds its
+        // own fixture inline rather than reusing the shared helper.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let mappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+        let reminderRepository = ActivityReminderRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let calendarProvider = FakeCalendarEventProvider()
+        let coordinationService = CalendarPlanningCoordinationService(
+            mappingRepository: mappingRepository,
+            calendarEventProvider: calendarProvider,
+            planningService: planningService,
+            trainingService: trainingService,
+            athleteRepository: athleteRepository,
+            dateProvider: FixedDateProvider(now: Self.referenceDate)
+        )
+        let athlete = try athleteRepository.createAthlete(
+            workspaceId: WorkspaceId(), givenName: "Runner",
+            birthDate: LocalDate(year: 2012, month: 3, day: 1),
+            timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+        )
+
+        let mapping = try coordinationService.createMapping(
+            athleteId: athlete.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Spond Team",
+            activityType: .individualTraining, sportId: nil
+        )
+        try coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try coordinationService.reconcile(mapping)
+        let plannedActivityId = try #require(
+            try planningService.fetchPlannedActivities(
+                forAthlete: athlete.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            ).first?.plannedActivityId
+        )
+
+        _ = try reminderRepository.insert(
+            athleteId: athlete.athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30
+        )
+
+        let newStart = start.addingTimeInterval(1800)
+        calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: newStart, endDate: newStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let outcome = try coordinationService.reconcile(mapping)
+        #expect(outcome.updated == 1)
+
+        let remindersAfter = try reminderRepository.fetchAll(forPlannedActivity: plannedActivityId)
+        #expect(remindersAfter.count == 1)
+    }
+}
+
+private extension Date {
+    func startOfWeekLocalDate(timeZoneId: TimeZoneId) -> LocalDate {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZoneId.timeZone ?? .gmt
+        let components = calendar.dateComponents([.year, .month, .day], from: self)
+        let localDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
+        return localDate.startOfWeek
+    }
+}

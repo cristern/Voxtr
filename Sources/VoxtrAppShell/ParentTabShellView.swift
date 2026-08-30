@@ -65,6 +65,9 @@ public struct ParentTabShellView: View {
     /// passed down through `RootView`.
     public let statisticsService: StatisticsService
     public let sportRepository: SportRepository
+    /// Calendar Planning Source V1: same threading rationale as
+    /// `notificationsPlanningCoordinationService` above.
+    public let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
 
     public init(
         family: RestoredFamily,
@@ -82,7 +85,8 @@ public struct ParentTabShellView: View {
         sleepCoordinationService: SleepCoordinationService,
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         statisticsService: StatisticsService,
-        sportRepository: SportRepository
+        sportRepository: SportRepository,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     ) {
         self.family = family
         self.planningService = planningService
@@ -100,6 +104,7 @@ public struct ParentTabShellView: View {
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
         self.statisticsService = statisticsService
         self.sportRepository = sportRepository
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
     }
 
     public var body: some View {
@@ -124,7 +129,9 @@ public struct ParentTabShellView: View {
                 athleteFamilyManagementService: athleteFamilyManagementService,
                 activityChangeBroadcaster: activityChangeBroadcaster,
                 sleepCoordinationService: sleepCoordinationService,
-                sleepChangeBroadcaster: sleepChangeBroadcaster
+                sleepChangeBroadcaster: sleepChangeBroadcaster,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                sportRepository: sportRepository
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -219,6 +226,13 @@ public struct ParentTabShellView: View {
                             sleepCoordinationService: sleepCoordinationService,
                             athleteId: athlete.athleteId,
                             athleteDisplayName: athlete.givenName
+                        )
+                    },
+                    calendarPlanningViewModel: { athlete in
+                        AthleteCalendarPlanningViewModel(
+                            athleteId: athlete.athleteId,
+                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                            sportRepository: sportRepository
                         )
                     }
                 )

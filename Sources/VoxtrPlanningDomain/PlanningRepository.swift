@@ -219,6 +219,29 @@ public final class PlanningRepository {
         try fetchPlannedActivities(forWeekPlan: weekPlanId).first { $0.externalSourceId == externalSourceId }
     }
 
+    /// Calendar Planning Source V1: every `PlannedActivity` for one
+    /// athlete stamped with a given `externalSourceType`, across EVERY
+    /// `WeekPlan` — unlike `fetchPlannedActivities(forWeekPlan:)`-scoped
+    /// lookups above, this does not require already knowing which week
+    /// an activity lives in. Needed because an external source's own
+    /// event can move to a different week between reconciliation runs;
+    /// `PlannedActivity.athleteId` is a field on the activity itself
+    /// (not only reachable via its `WeekPlan`), so this needs no new
+    /// persisted relationship. Ordered deterministically by `localDate`,
+    /// matching `fetchPlannedActivities(forWeekPlan:)`'s own convention.
+    public func fetchPlannedActivities(forAthlete athleteId: AthleteId, externalSourceType: String) throws -> [PlannedActivity] {
+        let rawAthleteId = athleteId.rawValue
+        let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
+        return all
+            .filter { $0.athleteId == rawAthleteId && $0.externalSourceType == externalSourceType }
+            .sorted { lhs, rhs in
+                if lhs.localDate != rhs.localDate {
+                    return lhs.localDate < rhs.localDate
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
     // MARK: - RecurringPlannedActivity
 
     /// Inserts a new `RecurringPlannedActivity` definition.

@@ -117,6 +117,15 @@ public final class PlanningService {
     /// S2.2: adds a `PlannedActivity` to an existing `WeekPlan`.
     /// Requirement: "Prevent edits when the referenced WeekPlan does
     /// not exist" — checked here before any insert is attempted.
+    /// `externalSourceId`/`externalSourceType` (added for Calendar
+    /// Planning Source V1, following exactly the same generic
+    /// provenance pair `RecurringPlannedActivity` already established —
+    /// see that type's own doc comment): both default to `nil`, so every
+    /// existing call site is unaffected. A caller stamping them here is
+    /// responsible for its own duplicate-prevention check beforehand
+    /// (`fetchPlannedActivity(forExternalSourceId:weekPlanId:)` or the
+    /// athlete-scoped `fetchPlannedActivities(forAthlete:externalSourceType:)`
+    /// below) — this method itself does not re-check.
     public func addPlannedActivity(
         toWeekPlan weekPlanId: WeekPlanId,
         athleteId: AthleteId,
@@ -129,6 +138,8 @@ public final class PlanningService {
         startLocalTime: LocalTime? = nil,
         plannedDurationMinutes: Int? = nil,
         plannedIntensity: Int? = nil,
+        externalSourceId: String? = nil,
+        externalSourceType: String? = nil,
         notes: String? = nil,
         location: String? = nil
     ) throws -> PlannedActivity {
@@ -157,6 +168,8 @@ public final class PlanningService {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: plannedDurationMinutes,
             plannedIntensity: plannedIntensity,
+            externalSourceId: externalSourceId,
+            externalSourceType: externalSourceType,
             notes: notes,
             location: location
         )
@@ -340,6 +353,14 @@ public final class PlanningService {
     /// row instead of treating that as a hard failure).
     public func fetchPlannedActivity(forExternalSourceId externalSourceId: String, weekPlanId: WeekPlanId) throws -> PlannedActivity? {
         try repository.fetchPlannedActivity(forExternalSourceId: externalSourceId, weekPlanId: weekPlanId)
+    }
+
+    /// Calendar Planning Source V1: a thin passthrough, matching this
+    /// service's own established "reuse PlanningService" boundary — see
+    /// `PlanningRepository.fetchPlannedActivities(forAthlete:externalSourceType:)`
+    /// for why an athlete-scoped (not WeekPlan-scoped) lookup is needed.
+    public func fetchPlannedActivities(forAthlete athleteId: AthleteId, externalSourceType: String) throws -> [PlannedActivity] {
+        try repository.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: externalSourceType)
     }
 
     /// Runtime closeout (stale recurring preview fix): a purely

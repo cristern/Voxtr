@@ -8,6 +8,7 @@ import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 /// The set of `@Model` types the running app persists locally.
 ///
@@ -85,6 +86,14 @@ import VoxtrNotificationsDomain
 /// sprint). This is a genuine model-type addition (`AppSchemaV5`, see
 /// `AppSchemaVersioning.swift`), purely additive: no existing entity or
 /// property is renamed, removed, or changed in place.
+///
+/// Calendar Planning Source V1 adds `CalendarPlanningMapping.self`
+/// (`VoxtrCalendarPlanningDomain`) — the Parent's own persisted, trusted
+/// calendar-to-athlete mapping; imported schedule facts themselves are
+/// never a new entity, they are ordinary `PlannedActivity` rows (see
+/// that type's own pre-existing `externalSourceId`/`externalSourceType`
+/// fields). Genuine model-type addition (`AppSchemaV7`, see
+/// `AppSchemaVersioning.swift`), purely additive.
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -107,6 +116,7 @@ public enum AppSchema {
             AthleteSettings.self,
             Sport.self,
             ActivityReminder.self,
+            CalendarPlanningMapping.self,
         ]
     }
 }

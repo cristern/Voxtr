@@ -45,6 +45,7 @@ let package = Package(
         .library(name: "VoxtrDevelopmentDomain", targets: ["VoxtrDevelopmentDomain"]),
         .library(name: "VoxtrDecisionSupportDomain", targets: ["VoxtrDecisionSupportDomain"]),
         .library(name: "VoxtrNotificationsDomain", targets: ["VoxtrNotificationsDomain"]),
+        .library(name: "VoxtrCalendarPlanningDomain", targets: ["VoxtrCalendarPlanningDomain"]),
         .library(name: "VoxtrSettings", targets: ["VoxtrSettings"]),
     ],
     targets: [
@@ -92,6 +93,16 @@ let package = Package(
         .target(name: "VoxtrDevelopmentDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrDecisionSupportDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrNotificationsDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
+
+        // Calendar Planning Source V1: EventKit is the first external
+        // planning-source PROVIDER validated, behind the
+        // `CalendarEventProviding` protocol boundary this target owns —
+        // not an architectural decision that every future external
+        // source must go through Calendar. Depends only on VoxtrCore +
+        // VoxtrCoreContracts, same as every other *Domain target; the
+        // actual composition with PlanningService/TrainingService lives
+        // in VoxtrAppShell (see CalendarPlanningCoordinationService).
+        .target(name: "VoxtrCalendarPlanningDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrSettings", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
 
         // MARK: - Composition root (the only target allowed to see every module)
@@ -101,7 +112,7 @@ let package = Package(
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain", "VoxtrDevelopmentDomain",
-                "VoxtrDecisionSupportDomain", "VoxtrNotificationsDomain", "VoxtrSettings",
+                "VoxtrDecisionSupportDomain", "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain", "VoxtrSettings",
             ],
             // Sprint 15 (revised): the first resource this target has
             // ever declared — StaticQuoteRepository's bundled
@@ -117,7 +128,7 @@ let package = Package(
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData", "VoxtrAppShell",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain",
-                "VoxtrNotificationsDomain",
+                "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain",
             ]
         ),
     ]
