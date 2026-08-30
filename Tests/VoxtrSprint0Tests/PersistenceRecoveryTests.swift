@@ -188,10 +188,17 @@ struct PersistenceRecoveryTests {
         // version bump. Sport / Activity Identity domain foundation:
         // updated again to AppSchemaV4. Notifications V1 Activity
         // Reminder Foundation: updated again to AppSchemaV5. Activity
-        // Reminder What/When: updated again to AppSchemaV6, matching
-        // that round's own bump.
+        // Reminder What/When: updated again to AppSchemaV6. Calendar
+        // Planning Source V1: updated again to AppSchemaV7, matching
+        // CompositionRoot.build's own real default after that round's
+        // bump — this exact test is the one Codemagic caught lagging
+        // behind that bump (this literal stayed at AppSchemaV6, so
+        // container.schema.entities.count stayed at the frozen V6
+        // shape's 19 while AppSchema.modelTypes.count had already moved
+        // to 20). Keep this literal in lockstep with CompositionRoot's
+        // own default on every future version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV6.self,
+            versionedSchema: AppSchemaV7.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()

@@ -12,12 +12,18 @@ import VoxtrCore
 @Suite("Module registry")
 struct ModuleRegistryTests {
 
+    // Calendar Planning Source V1: adds the `calendarPlanning` domain
+    // (`CalendarPlanningModule`, registered in `ModuleRegistry.allModules()`)
+    // — the tenth domain, bringing this set back in sync with the "ten
+    // domains" this test's own title has always claimed. Update this set
+    // (and, if the count changes again, this comment) whenever a new
+    // domain module is genuinely added to `ModuleRegistry.allModules()`.
     @Test("Exactly the ten domains from 02_Architecture_v1_0 are registered")
     func registersExpectedDomains() {
         let ids = Set(ModuleRegistry.allModules().map { type(of: $0).domainID })
         let expected: Set<String> = [
             "athlete", "parent", "planning", "training", "reflection",
-            "development", "decisionSupport", "notifications", "settings",
+            "development", "decisionSupport", "notifications", "calendarPlanning", "settings",
         ]
         #expect(ids == expected)
     }
