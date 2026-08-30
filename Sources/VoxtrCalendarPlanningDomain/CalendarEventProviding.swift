@@ -41,7 +41,7 @@ public struct AvailableCalendar: Sendable, Equatable, Identifiable {
 /// comment for how this V1 slice treats that risk.
 ///
 /// PR #39 review follow-up (Blocker 2): `eventIdentifier` is NOT unique
-/// per occurrence of a recurring event — Apple documents that every
+/// per occurrence of a RECURRING event — Apple documents that every
 /// concrete occurrence of the same recurring series shares the SAME
 /// `EKEvent.eventIdentifier`. The earlier version of this type (and the
 /// coordination service built on it) assumed each occurrence carried its
@@ -49,18 +49,31 @@ public struct AvailableCalendar: Sendable, Equatable, Identifiable {
 /// real API and was wrong. `occurrenceDate` is the field Apple actually
 /// documents for this purpose (`EKEvent.occurrenceDate`): the specific
 /// occurrence's original scheduled date, stable even if that occurrence
-/// is later detached and its `startDate` moved. Occurrence identity is
-/// therefore `(eventIdentifier, occurrenceDate)` together, never
-/// `eventIdentifier` alone — see `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:eventIdentifier:occurrenceDate:)`.
+/// is later detached and its `startDate` moved. For a recurring event,
+/// occurrence identity is therefore `(eventIdentifier, occurrenceDate)`
+/// together, never `eventIdentifier` alone.
+///
+/// PR #39 review follow-up (second round): that composite rule does NOT
+/// extend to an ORDINARY, non-recurring event. `eventIdentifier` alone is
+/// already a stable, sufficient identity for a non-recurring event's
+/// entire lifetime; a first version of this fix folded `occurrenceDate`
+/// into EVERY event's identity unconditionally, which meant simply
+/// moving an ordinary event's start time changed its own identity (since
+/// `occurrenceDate` defaults to, and for a non-recurring event always
+/// tracks, `startDate`) and produced a duplicate `PlannedActivity`
+/// instead of updating the original — a genuine regression, now fixed.
+/// See `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:event:)`
+/// for the exact rule: `occurrenceDate` participates in identity ONLY
+/// when `isRecurring` is `true`.
 public struct ExternalCalendarEvent: Sendable, Equatable {
     public let eventIdentifier: String
     /// `EKEvent.occurrenceDate` — the stable identity of THIS specific
-    /// occurrence within its series (see this type's own doc comment
-    /// above for why `eventIdentifier` alone cannot distinguish
-    /// occurrences). Defaults to `startDate` when not supplied
-    /// explicitly, which is the correct value for a genuinely
-    /// non-recurring event (EventKit itself reports the same value for
-    /// both in that case).
+    /// occurrence within its series, meaningful for identity purposes
+    /// ONLY when `isRecurring` is `true` (see this type's own doc comment
+    /// above). Defaults to `startDate` when not supplied explicitly,
+    /// matching what a genuinely non-recurring `EKEvent` itself reports
+    /// — though for a non-recurring event this value is never actually
+    /// consulted for identity at all.
     public let occurrenceDate: Date
     public let calendarIdentifier: String
     public let title: String?

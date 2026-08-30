@@ -39,10 +39,24 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
 /// Blocker 2: an earlier version of this comment incorrectly claimed
 /// each occurrence had its own `eventIdentifier`; verified against
 /// Apple's actual documented behavior and corrected). This type imports
-/// each concrete occurrence independently, like any other event,
-/// identified by `(eventIdentifier, occurrenceDate)` together — see
-/// `externalSourceId(calendarIdentifier:eventIdentifier:occurrenceDate:)`
-/// below. It never creates or infers a Vǫxtr `RecurringPlannedActivity`
+/// each concrete occurrence independently, like any other event.
+///
+/// PR #39 review follow-up (second round): identity is NOT one uniform
+/// shape for both cases. An ordinary, non-recurring event is identified
+/// by `calendarIdentifier + eventIdentifier` alone — its `eventIdentifier`
+/// is already stable for that event's whole lifetime, including after a
+/// Parent edits its title or start time in Calendar, so folding a
+/// TIME-DERIVED value into its identity would be wrong (an earlier
+/// version of this fix did exactly that, unconditionally including
+/// `occurrenceDate` — which defaults to `startDate` for a non-recurring
+/// event — in every event's identity; this meant simply moving an
+/// ordinary event's start time changed its own external identity and
+/// caused reconciliation to create a SECOND `PlannedActivity` instead of
+/// updating the first, a genuine regression this round fixes). Only a
+/// RECURRING occurrence (`isRecurring == true`) additionally folds in
+/// `occurrenceDate` — see
+/// `externalSourceId(calendarIdentifier:event:)` below for the exact
+/// gated rule. It never creates or infers a Vǫxtr `RecurringPlannedActivity`
 /// rule from Calendar recurrence, and never touches that type at all.
 @MainActor
 public final class CalendarPlanningCoordinationService {
@@ -247,11 +261,7 @@ public final class CalendarPlanningCoordinationService {
 
         var seenExternalSourceIds: Set<String> = []
         for event in qualifyingEvents {
-            let externalSourceId = Self.externalSourceId(
-                calendarIdentifier: mapping.calendarIdentifier,
-                eventIdentifier: event.eventIdentifier,
-                occurrenceDate: event.occurrenceDate
-            )
+            let externalSourceId = Self.externalSourceId(calendarIdentifier: mapping.calendarIdentifier, event: event)
             seenExternalSourceIds.insert(externalSourceId)
             let outcome = try applyEvent(event, externalSourceId: externalSourceId, mapping: mapping, athlete: athlete)
             switch outcome {
@@ -400,21 +410,38 @@ public final class CalendarPlanningCoordinationService {
 
     // MARK: - Identity + time normalization
 
-    /// PR #39 review follow-up (Blocker 2): `eventIdentifier` alone is
-    /// NOT a valid occurrence identity — every concrete occurrence of the
-    /// same recurring series shares the SAME `eventIdentifier` (see
+    /// PR #39 review follow-up (Blocker 2, then corrected a second round
+    /// later): `eventIdentifier` alone is NOT a valid occurrence identity
+    /// for a RECURRING event — every concrete occurrence of the same
+    /// series shares the SAME `eventIdentifier` (see
     /// `ExternalCalendarEvent`'s own doc comment). `occurrenceDate` is
     /// what actually distinguishes one occurrence from its siblings, and
     /// — critically — Apple documents it as remaining STABLE even after
     /// that occurrence is detached and its `startDate` moved. Using it
-    /// here (rather than the mutable `startDate`) means a moved/detached
+    /// (rather than the mutable `startDate`) means a moved/detached
     /// occurrence's `externalSourceId` does not change, so reconciliation
     /// finds the SAME already-imported `PlannedActivity` and updates it
     /// in place — never re-creating it under a new identity, and never
     /// colliding with a sibling occurrence that happens to move to the
     /// same new time.
-    static func externalSourceId(calendarIdentifier: String, eventIdentifier: String, occurrenceDate: Date) -> String {
-        "\(calendarIdentifier)|\(eventIdentifier)|\(occurrenceDate.timeIntervalSince1970)"
+    ///
+    /// For an ORDINARY, non-recurring event, `eventIdentifier` alone
+    /// already is a valid, stable identity for that event's entire
+    /// lifetime — including across a Parent editing its title or start
+    /// time. Folding `occurrenceDate` into a non-recurring event's
+    /// identity would be actively wrong: `ExternalCalendarEvent.occurrenceDate`
+    /// defaults to (and, for a genuinely non-recurring `EKEvent`, always
+    /// tracks) its own `startDate`, so an ordinary event's identity would
+    /// silently change every time its start time moved — reconciliation
+    /// would then create a SECOND `PlannedActivity` instead of updating
+    /// the first. `isRecurring` (`EKEvent.hasRecurrenceRules`) is
+    /// therefore the gate: only a recurring event's identity includes
+    /// `occurrenceDate` at all.
+    static func externalSourceId(calendarIdentifier: String, event: ExternalCalendarEvent) -> String {
+        guard event.isRecurring else {
+            return "\(calendarIdentifier)|\(event.eventIdentifier)"
+        }
+        return "\(calendarIdentifier)|\(event.eventIdentifier)|\(event.occurrenceDate.timeIntervalSince1970)"
     }
 
     /// The ONE place an `ExternalCalendarEvent`'s absolute `Date` is

@@ -264,6 +264,160 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(activities.first?.plannedActivityId == originalId)
     }
 
+    // PR #39 review follow-up (second round), test 3 of the required
+    // ordinary-event set: title changes ALONE (start time untouched)
+    // must preserve identity — isolates this from the combined
+    // title+time case above.
+    @Test("An ordinary event's title-only change preserves its PlannedActivityId")
+    @MainActor
+    func ordinaryEventTitleOnlyChangePreservesIdentity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let originalId = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first?.plannedActivityId
+
+        // Same start/end — only the title changes.
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Renamed Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 0)
+        #expect(outcome.updated == 1)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+        #expect(activities.first?.title == "Renamed Practice")
+        #expect(activities.first?.plannedActivityId == originalId)
+    }
+
+    // PR #39 review follow-up (second round), test 4 of the required
+    // ordinary-event set: start-time changes ALONE (title untouched)
+    // must preserve identity — this is the exact case the unconditional-
+    // occurrenceDate regression broke (see ExternalCalendarEvent's own
+    // doc comment).
+    @Test("An ordinary event's start-time-only change preserves its PlannedActivityId")
+    @MainActor
+    func ordinaryEventStartTimeOnlyChangePreservesIdentity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let originalId = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first?.plannedActivityId
+
+        // Same title — only the start (and therefore occurrenceDate,
+        // which defaults to startDate) changes.
+        let newStart = start.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: newStart, endDate: newStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 0)
+        #expect(outcome.updated == 1)
+
+        let activities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(activities.count == 1)
+        #expect(activities.first?.startLocalTime != nil)
+        #expect(activities.first?.plannedActivityId == originalId)
+    }
+
+    // PR #39 review follow-up (second round), test 5 of the required
+    // ordinary-event set: a move that stays within the SAME Vǫxtr week
+    // (as opposed to the known "moved to a different week -> skipped"
+    // limitation documented on CalendarPlanningCoordinationService.applyEvent)
+    // must still update the existing PlannedActivity normally, including
+    // the WeekPlanId it belongs to.
+    @Test("An ordinary event moved within the same Vǫxtr week preserves its PlannedActivityId and WeekPlanId")
+    @MainActor
+    func ordinaryEventMoveWithinSameWeekPreservesIdentity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId,
+            calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team",
+            activityType: .individualTraining,
+            sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        // Self.referenceDate is a Friday (UTC) — moving forward 2 days
+        // lands on Sunday, a different calendar day but the SAME
+        // Monday-Sunday Vǫxtr week.
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let before = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first
+        let originalId = try #require(before?.plannedActivityId)
+        let originalWeekPlanId = try #require(before?.weekPlanId)
+
+        let movedStart = start.addingTimeInterval(2 * 86400)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Team Practice",
+                startDate: movedStart, endDate: movedStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 0)
+        #expect(outcome.updated == 1)
+        #expect(outcome.skipped == 0)
+
+        let after = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).first
+        #expect(after?.plannedActivityId == originalId)
+        #expect(after?.weekPlanId == originalWeekPlanId)
+    }
+
     // 5. two different external events do not collapse into one
     @Test("Two distinct external events create two distinct PlannedActivities")
     @MainActor
