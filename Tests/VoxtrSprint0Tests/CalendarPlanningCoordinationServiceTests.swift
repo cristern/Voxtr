@@ -754,7 +754,25 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(activities.count == 2)
     }
 
-    @Test("Moving one recurring occurrence (same eventIdentifier + occurrenceDate, new startDate) updates only that occurrence's PlannedActivity, preserving its identity, without collapsing into its sibling")
+    // PR #39 review follow-up (final EventKit classification round): this
+    // is also the neutral-DTO-level model of a DETACHED recurring
+    // occurrence — same `eventIdentifier` + `occurrenceDate` as its
+    // sibling occurrences, a changed `startDate`, `isRecurring: true`.
+    // `EKEvent.hasRecurrenceRules` alone is documented as insufficient to
+    // classify a detached instance (it can report `false` on that
+    // specific item), so `EventKitCalendarEventProvider` now also
+    // consults `EKEvent.isDetached` when assigning `isRecurring` — see
+    // that file's own doc comment on the assignment. `ExternalCalendarEvent`
+    // has no separate "detached" concept of its own (EventKit-specific
+    // detail stays below the provider boundary); this test proves the
+    // NEUTRAL behavior every detached occurrence needs once correctly
+    // classified `isRecurring: true` at that boundary — occurrence-based
+    // identity, preserved across the move, with no cross-contamination
+    // of its sibling. A real `EKEvent`/adapter-level test is impractical
+    // in this test target (the fake never instantiates `EKEvent`); the
+    // adapter's own classification line is covered by manual
+    // compile-oriented audit instead.
+    @Test("Moving one recurring occurrence (same eventIdentifier + occurrenceDate, new startDate) updates only that occurrence's PlannedActivity, preserving its identity, without collapsing into its sibling — this is also the neutral-DTO model of a detached occurrence")
     @MainActor
     func movingOneRecurringOccurrenceDoesNotCollapseIntoSibling() throws {
         let fixture = try makeFixture()

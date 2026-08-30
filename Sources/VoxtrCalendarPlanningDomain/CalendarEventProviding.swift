@@ -80,11 +80,22 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
     public let startDate: Date
     public let endDate: Date?
     public let isAllDay: Bool
-    /// Informational only — this slice never creates or infers a Vǫxtr
-    /// recurrence rule from it (see `CalendarPlanningCoordinationService`'s
-    /// own doc comment). Every occurrence EventKit returns for a
-    /// recurring series is still just one more `ExternalCalendarEvent`,
-    /// imported (or not) independently like any other.
+    /// The provider-neutral statement: this concrete external event
+    /// belongs to a recurring series and therefore requires
+    /// occurrence-based identity (see `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:event:)`).
+    /// This slice never creates or infers a Vǫxtr recurrence rule from
+    /// it (see `CalendarPlanningCoordinationService`'s own doc comment)
+    /// — every occurrence EventKit returns for a recurring series is
+    /// still just one more `ExternalCalendarEvent`, imported (or not)
+    /// independently like any other.
+    ///
+    /// PR #39 review follow-up (final EventKit classification round):
+    /// no longer "informational only" — this field is now load-bearing
+    /// for identity, so the production adapter's own classification of
+    /// it must be correct for every case EventKit can report, including
+    /// a DETACHED occurrence (see `EventKitCalendarEventProvider`'s own
+    /// doc comment on this assignment for exactly which EventKit
+    /// properties that requires).
     public let isRecurring: Bool
 
     public init(

@@ -434,7 +434,11 @@ public final class CalendarPlanningCoordinationService {
     /// tracks) its own `startDate`, so an ordinary event's identity would
     /// silently change every time its start time moved — reconciliation
     /// would then create a SECOND `PlannedActivity` instead of updating
-    /// the first. `isRecurring` (`EKEvent.hasRecurrenceRules`) is
+    /// the first. `ExternalCalendarEvent.isRecurring` — the
+    /// provider-neutral "this belongs to a recurring series" statement,
+    /// correctly classified below the provider boundary (see
+    /// `EventKitCalendarEventProvider`'s own doc comment on assigning it,
+    /// which is more than just `EKEvent.hasRecurrenceRules` alone) — is
     /// therefore the gate: only a recurring event's identity includes
     /// `occurrenceDate` at all.
     static func externalSourceId(calendarIdentifier: String, event: ExternalCalendarEvent) -> String {

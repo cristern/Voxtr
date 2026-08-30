@@ -60,7 +60,24 @@ public final class EventKitCalendarEventProvider: CalendarEventProviding, @unche
                 startDate: event.startDate,
                 endDate: event.endDate,
                 isAllDay: event.isAllDay,
-                isRecurring: event.hasRecurrenceRules
+                // PR #39 review follow-up (final EventKit classification
+                // round): `hasRecurrenceRules` alone is NOT sufficient —
+                // Apple documents it only as "this calendar item has
+                // recurrence rules," and a DETACHED occurrence (one whose
+                // attributes were individually modified, e.g. moved to a
+                // new time) reports `hasRecurrenceRules == false` on that
+                // specific instance even though it is still one concrete
+                // occurrence of a recurring series and still needs
+                // occurrence-based identity (its `eventIdentifier` is
+                // still shared with the rest of the series, and its
+                // `occurrenceDate` is still the stable field that
+                // distinguishes it). `EKEvent.isDetached` is Apple's own
+                // documented signal for exactly this case ("true if and
+                // only if the event is part of a repeating event and one
+                // or more attributes have been modified"), so it is
+                // included here — `hasRecurrenceRules || isDetached` is
+                // the smallest correct classification EventKit supports.
+                isRecurring: event.hasRecurrenceRules || event.isDetached
             )
         }
     }
