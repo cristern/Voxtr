@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
+import VoxtrNotificationsDomain
 
 /// S2.4: backs `WeeklyPlanningView`. Every state-changing action goes
 /// through `PlanningService` — this type holds no business rules of its
@@ -35,6 +36,22 @@ public final class WeeklyPlanningViewModel {
     /// not a second representation.
     public var newActivityHasDuration: Bool = false
     public var newActivityDurationMinutes: Int = 60
+    /// Activity Reminder What/When (create flow): purely local draft
+    /// state — "never schedule/persist a reminder against a temporary/
+    /// draft activity identity" — until `addActivity()` below actually
+    /// creates the canonical `PlannedActivity` and persists these
+    /// against its real, stable `PlannedActivityId`. Reset to empty
+    /// alongside every other "new activity" field on a successful add.
+    public var newActivityReminders: [ActivityReminderDraft] = []
+    /// Gates the reminder editor in the CREATE form — there is no
+    /// already-saved `PlannedActivity.startLocalTime` to read yet (unlike
+    /// the edit flow's `ActivityDetailViewModel.canSetReminder`), so this
+    /// reads the draft's own `newActivityHasStartTime` toggle directly.
+    public var isNewActivityReminderAvailable: Bool { newActivityHasStartTime }
+    /// Recent-text suggestions for this athlete — loaded once per
+    /// screen load (`loadOrCreateWeekPlan()`), same source
+    /// `ActivityDetailViewModel.recentReminderTextSuggestions` reads.
+    public private(set) var newActivityReminderRecentTextSuggestions: [String] = []
     /// Post-mutation navigation and stale-state consistency audit
     /// (Issue B): increments on every SUCCESSFUL `addActivity()` only —
     /// never on validation failure or persistence failure. Same "simple
@@ -85,6 +102,11 @@ public final class WeeklyPlanningViewModel {
     public var recurringFormLocation: String = ""
 
     private let service: PlanningService
+    /// Activity Reminder What/When: the sole cross-domain coordination
+    /// point for reminder intent — never `ActivityReminderService`
+    /// directly, matching that service's own "Notifications owns
+    /// reminder intent and delivery infrastructure" boundary.
+    private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     /// Shared, athlete-scoped presentation invalidation. Planning
     /// remains the canonical mutation owner; this only tells already-
     /// live read models to refetch after a successful mutation.
@@ -95,12 +117,14 @@ public final class WeeklyPlanningViewModel {
 
     public init(
         service: PlanningService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         athleteId: AthleteId,
         committedByActorId: ActorId,
         weekStart: LocalDate? = nil,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster? = nil
     ) {
         self.service = service
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.athleteId = athleteId
         self.committedByActorId = committedByActorId
         self.weekStart = weekStart ?? Self.currentWeekStart()
@@ -170,8 +194,34 @@ public final class WeeklyPlanningViewModel {
         } catch {
             errorMessage = PlanningStrings.genericServiceError
         }
+        newActivityReminderRecentTextSuggestions = (try? notificationsPlanningCoordinationService.recentReminderTexts(forAthlete: athleteId)) ?? []
     }
 
+    /// Appends a blank draft reminder row to the "Add activity" form —
+    /// purely local UI state, see `newActivityReminders`'s own doc
+    /// comment.
+    public func addNewActivityReminderDraft() {
+        newActivityReminders.append(ActivityReminderDraft())
+    }
+
+    /// Removes one draft reminder row from the "Add activity" form
+    /// before Save — nothing has been persisted yet for it, so this is
+    /// purely a local array mutation.
+    public func removeNewActivityReminderDraft(_ draft: ActivityReminderDraft) {
+        newActivityReminders.removeAll { $0.id == draft.id }
+    }
+
+    /// Creates the canonical `PlannedActivity` FIRST; only once that
+    /// succeeds are any staged draft reminders persisted/scheduled
+    /// against its real, stable `PlannedActivityId` (via
+    /// `NotificationsPlanningCoordinationService.persistDraftReminders`)
+    /// — "never schedule/persist a reminder against a temporary/draft
+    /// activity identity." If activity creation itself fails, no
+    /// reminder is ever attempted. If activity creation succeeds but a
+    /// staged reminder cannot be enabled (permission denied, or its own
+    /// fire date is in the past), the successfully-created
+    /// `PlannedActivity` remains valid regardless — this method never
+    /// rolls it back for a reminder-only failure.
     public func addActivity() {
         guard let weekPlan else { return }
         errorMessage = nil
@@ -179,7 +229,7 @@ public final class WeeklyPlanningViewModel {
         let components = Calendar.current.dateComponents([.year, .month, .day], from: newActivityDate)
         let localDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
         do {
-            _ = try service.addPlannedActivity(
+            let created = try service.addPlannedActivity(
                 toWeekPlan: weekPlan.weekPlanId,
                 athleteId: athleteId,
                 activityType: newActivityType,
@@ -191,6 +241,7 @@ public final class WeeklyPlanningViewModel {
                 plannedDurationMinutes: newActivityHasDuration ? newActivityDurationMinutes : nil,
                 location: newActivityLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newActivityLocation
             )
+            let stagedReminders = newActivityReminders
             newActivityTitle = ""
             newActivitySportId = nil
             newActivityDate = .now
@@ -199,9 +250,25 @@ public final class WeeklyPlanningViewModel {
             newActivityStartTime = .now
             newActivityHasDuration = false
             newActivityDurationMinutes = 60
+            newActivityReminders = []
             activityChangeBroadcaster?.activityChanged(for: athleteId)
             try reloadActivities(for: weekPlan)
             successfulAddActivityTrigger += 1
+            if !stagedReminders.isEmpty {
+                notificationsPlanningCoordinationService.persistDraftReminders(
+                    stagedReminders, athleteId: athleteId, plannedActivityId: created.plannedActivityId
+                ) { _ in
+                    // Any per-reminder outcome (denied authorization,
+                    // fire date in the past) is calmly reflected on the
+                    // draft itself, not surfaced here — the activity
+                    // this method is responsible for is already saved
+                    // and valid either way. A user who wants to inspect
+                    // or retry a specific reminder does so from the
+                    // activity's own Edit screen, where
+                    // `ActivityDetailViewModel.reminders` reloads the
+                    // real, current, per-reminder state fresh.
+                }
+            }
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(for: error)
         } catch {

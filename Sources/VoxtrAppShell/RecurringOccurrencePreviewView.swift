@@ -43,6 +43,13 @@ public struct RecurringOccurrencePreviewView: View {
     let planningService: PlanningService
     let trainingService: TrainingService
     let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
+    /// Activity Reminder What/When: threaded through only to satisfy
+    /// `WeeklyPlanningViewModel`'s now-required dependency when
+    /// `openEditForm()` below opens "Edit Recurring Definition" — that
+    /// sheet is the unrelated recurring-activity management form, never
+    /// this screen's own reminder UI (out of scope for recurring
+    /// activities, per that slice's own explicit exclusion).
+    let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     let actorId: ActorId
     /// Post-mutation navigation and stale-state consistency audit: the
     /// same explicit reload signal `ActivityDetailViewLoader` now
@@ -89,6 +96,7 @@ public struct RecurringOccurrencePreviewView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
         actorId: ActorId,
         onActivityLogged: @escaping () -> Void = {}
     ) {
@@ -97,6 +105,7 @@ public struct RecurringOccurrencePreviewView: View {
         self.planningService = planningService
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
+        self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.actorId = actorId
         self.onActivityLogged = onActivityLogged
     }
@@ -392,6 +401,7 @@ public struct RecurringOccurrencePreviewView: View {
             }
             let viewModel = WeeklyPlanningViewModel(
                 service: planningService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                 athleteId: suggestion.athleteId,
                 committedByActorId: actorId
             )

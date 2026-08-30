@@ -66,16 +66,19 @@ public final class CompositionRoot {
     /// Identity domain foundation round: `AppSchemaV3` is now itself
     /// FROZEN and this default targeted `AppSchemaV4` ("4.0.0", 18
     /// entities — activates `Sport.self`). Notifications V1 Activity
-    /// Reminder Foundation: `AppSchemaV4` is now itself FROZEN and this
-    /// default targets `AppSchemaV5` ("5.0.0", 19 entities — activates
-    /// `ActivityReminder.self`), the current genuine version.
+    /// Reminder Foundation: `AppSchemaV4` was then FROZEN and this
+    /// default targeted `AppSchemaV5` ("5.0.0", 19 entities — activates
+    /// `ActivityReminder.self`). Activity Reminder What/When: `AppSchemaV5`
+    /// is now itself FROZEN and this default targets `AppSchemaV6`
+    /// ("6.0.0", same 19 entities — adds `ActivityReminder.reminderText:
+    /// String?`), the current genuine version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV5.self,
+            versionedSchema: AppSchemaV6.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

@@ -193,6 +193,26 @@ public struct WeeklyPlanningView: View {
                     }
                     TextField("Location (optional)", text: $viewModel.newActivityLocation)
                         .accessibilityIdentifier("planning.newActivityLocationField")
+
+                    VoxtrSectionHeading("Reminders")
+                    ActivityReminderListEditorView(
+                        reminders: $viewModel.newActivityReminders,
+                        isAvailable: viewModel.isNewActivityReminderAvailable,
+                        recentTextSuggestions: viewModel.newActivityReminderRecentTextSuggestions,
+                        isUpdating: false,
+                        onCommit: { _ in
+                            // Create flow: reminders are purely local
+                            // draft state until Save (see
+                            // `newActivityReminders`'s own doc comment)
+                            // — the two-way `$viewModel.newActivityReminders`
+                            // binding above already keeps text/lead-time
+                            // edits live; nothing further needs to
+                            // happen on commit here.
+                        },
+                        onRemove: { viewModel.removeNewActivityReminderDraft($0) },
+                        onAdd: { viewModel.addNewActivityReminderDraft() }
+                    )
+
                     Button("Add activity") {
                         viewModel.addActivity()
                     }

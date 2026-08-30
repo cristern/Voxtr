@@ -150,9 +150,13 @@ struct ActivityReminderServiceTests {
         #expect(scheduler.scheduleCalls.first?.content == content)
     }
 
-    @Test("Creating a second reminder for the same activity replaces the first rather than duplicating it")
+    /// Activity Reminder What/When, item 1-3: a concrete `PlannedActivity`
+    /// may have zero, one, or MULTIPLE independent reminders — creating
+    /// a second one for the same activity must never replace or remove
+    /// the first, and each retains its own text/lead time/schedule.
+    @Test("Creating a second reminder for the same activity does not replace the first — both coexist independently")
     @MainActor
-    func createReminderReplacesExistingOne() throws {
+    func createReminderDoesNotReplaceExistingOne() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = ActivityReminderRepository(modelContext: container.mainContext)
@@ -162,46 +166,94 @@ struct ActivityReminderServiceTests {
         let plannedActivityId = PlannedActivityId()
 
         let first = try service.createReminder(
-            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30,
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat",
             fireDate: Date(timeIntervalSince1970: 1_800_000_000),
-            content: ActivityReminderContent(title: "A", body: "A")
+            content: ActivityReminderContent(title: "Eat", body: "A")
         )
         let second = try service.createReminder(
-            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 15,
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 15, reminderText: "Pack bag",
             fireDate: Date(timeIntervalSince1970: 1_800_100_000),
-            content: ActivityReminderContent(title: "B", body: "B")
+            content: ActivityReminderContent(title: "Pack bag", body: "B")
         )
 
         #expect(first.activityReminderId != second.activityReminderId)
-        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 1)
-        #expect(try repository.fetch(forPlannedActivity: plannedActivityId)?.leadTimeMinutes == 15)
-        #expect(scheduler.cancelledIds == [first.activityReminderId])
+        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 2)
+        let all = try repository.fetchAll(forPlannedActivity: plannedActivityId)
+        #expect(all.count == 2)
+        #expect(all.contains { $0.activityReminderId == first.activityReminderId && $0.leadTimeMinutes == 30 && $0.reminderText == "Eat" })
+        #expect(all.contains { $0.activityReminderId == second.activityReminderId && $0.leadTimeMinutes == 15 && $0.reminderText == "Pack bag" })
+        // Neither reminder was ever cancelled by the other's creation.
+        #expect(scheduler.cancelledIds.isEmpty)
         #expect(scheduler.scheduleCalls.map(\.id) == [first.activityReminderId, second.activityReminderId])
     }
 
-    @Test("Cancelling a reminder removes its intent row and cancels the scheduled notification")
+    /// Item 4: updating or removing one reminder must never affect a
+    /// sibling reminder for the same activity.
+    @Test("Updating one reminder's lead time/text does not affect a sibling reminder for the same activity")
     @MainActor
-    func cancelReminderRemovesAndCancels() throws {
+    func updateReminderDoesNotAffectSibling() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let repository = ActivityReminderRepository(modelContext: container.mainContext)
         let scheduler = FakeActivityReminderScheduler()
         let service = ActivityReminderService(repository: repository, scheduler: scheduler)
+        let athleteId = AthleteId()
         let plannedActivityId = PlannedActivityId()
-        let reminder = try service.createReminder(
-            athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 30,
-            fireDate: Date(timeIntervalSince1970: 1_800_000_000),
-            content: ActivityReminderContent(title: "A", body: "A")
+        let first = try service.createReminder(
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat",
+            fireDate: Date(timeIntervalSince1970: 1_800_000_000), content: ActivityReminderContent(title: "Eat", body: "A")
+        )
+        let second = try service.createReminder(
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 15, reminderText: "Pack bag",
+            fireDate: Date(timeIntervalSince1970: 1_800_100_000), content: ActivityReminderContent(title: "Pack bag", body: "B")
         )
 
-        try service.cancelReminder(forPlannedActivity: plannedActivityId)
+        let updatedFireDate = Date(timeIntervalSince1970: 1_900_000_000)
+        let updated = try service.updateReminder(
+            first.activityReminderId, leadTimeMinutes: 60, reminderText: "Eat breakfast",
+            fireDate: updatedFireDate, content: ActivityReminderContent(title: "Eat breakfast", body: "A")
+        )
 
-        #expect(try repository.fetch(forPlannedActivity: plannedActivityId) == nil)
-        #expect(scheduler.cancelledIds == [reminder.activityReminderId])
-        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 0)
+        #expect(updated.activityReminderId == first.activityReminderId)
+        #expect(updated.leadTimeMinutes == 60)
+        #expect(updated.reminderText == "Eat breakfast")
+        let secondUnchanged = try repository.fetch(byId: second.activityReminderId)
+        #expect(secondUnchanged?.leadTimeMinutes == 15)
+        #expect(secondUnchanged?.reminderText == "Pack bag")
+        #expect(scheduler.cancelledIds.isEmpty)
     }
 
-    @Test("Cancelling when no reminder is active is a safe no-op")
+    /// Item 4 (removal direction): cancelling ONE reminder by its own id
+    /// never affects a sibling reminder for the same activity.
+    @Test("Cancelling one reminder removes its intent row and cancels its notification, leaving a sibling reminder untouched")
+    @MainActor
+    func cancelReminderRemovesAndCancelsWithoutAffectingSibling() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let scheduler = FakeActivityReminderScheduler()
+        let service = ActivityReminderService(repository: repository, scheduler: scheduler)
+        let athleteId = AthleteId()
+        let plannedActivityId = PlannedActivityId()
+        let first = try service.createReminder(
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat",
+            fireDate: Date(timeIntervalSince1970: 1_800_000_000), content: ActivityReminderContent(title: "Eat", body: "A")
+        )
+        let second = try service.createReminder(
+            athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 15, reminderText: "Pack bag",
+            fireDate: Date(timeIntervalSince1970: 1_800_100_000), content: ActivityReminderContent(title: "Pack bag", body: "B")
+        )
+
+        try service.cancelReminder(first.activityReminderId)
+
+        #expect(try repository.fetch(byId: first.activityReminderId) == nil)
+        #expect(scheduler.cancelledIds == [first.activityReminderId])
+        let remaining = try repository.fetchAll(forPlannedActivity: plannedActivityId)
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.activityReminderId == second.activityReminderId)
+    }
+
+    @Test("Cancelling when no reminder with that id is active is a safe no-op")
     @MainActor
     func cancelReminderNoOpWhenNoneActive() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -210,9 +262,37 @@ struct ActivityReminderServiceTests {
         let scheduler = FakeActivityReminderScheduler()
         let service = ActivityReminderService(repository: repository, scheduler: scheduler)
 
-        try service.cancelReminder(forPlannedActivity: PlannedActivityId())
+        try service.cancelReminder(ActivityReminderId())
 
         #expect(scheduler.cancelledIds.isEmpty)
+    }
+
+    /// `cancelAllReminders(forPlannedActivity:)` — the lifecycle-handler
+    /// primitive (activity deleted/logged/start-time-removed) — must
+    /// cancel and remove EVERY reminder for one activity, never only
+    /// the first.
+    @Test("cancelAllReminders cancels and removes every reminder for one activity")
+    @MainActor
+    func cancelAllRemindersRemovesEveryReminder() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let scheduler = FakeActivityReminderScheduler()
+        let service = ActivityReminderService(repository: repository, scheduler: scheduler)
+        let plannedActivityId = PlannedActivityId()
+        let first = try service.createReminder(
+            athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat",
+            fireDate: Date(timeIntervalSince1970: 1_800_000_000), content: ActivityReminderContent(title: "Eat", body: "A")
+        )
+        let second = try service.createReminder(
+            athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 15, reminderText: "Pack bag",
+            fireDate: Date(timeIntervalSince1970: 1_800_100_000), content: ActivityReminderContent(title: "Pack bag", body: "B")
+        )
+
+        try service.cancelAllReminders(forPlannedActivity: plannedActivityId)
+
+        #expect(Set(scheduler.cancelledIds) == Set([first.activityReminderId, second.activityReminderId]))
+        #expect(try repository.fetchAll(forPlannedActivity: plannedActivityId).isEmpty)
     }
 
     @Test("Rescheduling an existing reminder updates its fire date under the SAME stable identity — never a new id")
@@ -232,7 +312,7 @@ struct ActivityReminderServiceTests {
 
         let newFireDate = Date(timeIntervalSince1970: 1_900_000_000)
         let newContent = ActivityReminderContent(title: "A (moved)", body: "Starting soon")
-        try service.rescheduleReminder(forPlannedActivity: plannedActivityId, fireDate: newFireDate, content: newContent)
+        service.rescheduleReminder(reminder, fireDate: newFireDate, content: newContent)
 
         #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 1)
         #expect(scheduler.scheduleCalls.count == 2)
@@ -243,25 +323,6 @@ struct ActivityReminderServiceTests {
         #expect(scheduler.scheduleCalls[1].id == reminder.activityReminderId)
         #expect(scheduler.scheduleCalls[1].fireDate == newFireDate)
         #expect(scheduler.scheduleCalls[1].content == newContent)
-    }
-
-    @Test("Rescheduling when no reminder exists is a safe no-op — never creates one")
-    @MainActor
-    func rescheduleReminderNoOpWhenNoneActive() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let repository = ActivityReminderRepository(modelContext: container.mainContext)
-        let scheduler = FakeActivityReminderScheduler()
-        let service = ActivityReminderService(repository: repository, scheduler: scheduler)
-
-        try service.rescheduleReminder(
-            forPlannedActivity: PlannedActivityId(),
-            fireDate: Date(timeIntervalSince1970: 1_800_000_000),
-            content: ActivityReminderContent(title: "A", body: "A")
-        )
-
-        #expect(scheduler.scheduleCalls.isEmpty)
-        #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 0)
     }
 }
 
@@ -542,7 +603,33 @@ struct NotificationsPlanningCoordinationServiceTests {
         coordination.handlePlannedActivityDeleted(PlannedActivityDeleted(plannedActivityId: activity.plannedActivityId, athleteId: athleteId))
 
         #expect(scheduler.cancelledIds == [reminder.activityReminderId])
-        #expect(try activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
+    }
+
+    /// Item 6 (multiple reminders): activity deletion must reconcile
+    /// EVERY reminder belonging to that activity, never only the first
+    /// one created.
+    @Test("handlePlannedActivityDeleted cancels EVERY reminder for that activity, not only the first")
+    @MainActor
+    func handlePlannedActivityDeletedCancelsAllReminders() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let eat = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat")
+        let packBag = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag")
+
+        try planning.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId())
+        coordination.handlePlannedActivityDeleted(PlannedActivityDeleted(plannedActivityId: activity.plannedActivityId, athleteId: athleteId))
+
+        #expect(Set(scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
     }
 
     @Test("handleActivityLogged cancels a still-pending reminder for the linked planned activity")
@@ -565,7 +652,64 @@ struct NotificationsPlanningCoordinationServiceTests {
         )
 
         #expect(scheduler.cancelledIds == [reminder.activityReminderId])
-        #expect(try activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
+    }
+
+    /// Item 7 (multiple reminders): logging the linked activity must
+    /// reconcile EVERY pending reminder, not only the first.
+    @Test("handleActivityLogged cancels EVERY pending reminder for the linked activity, not only the first")
+    @MainActor
+    func handleActivityLoggedCancelsAllReminders() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let eat = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat")
+        let packBag = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag")
+
+        coordination.handleActivityLogged(
+            ActivityLogged(loggedActivityId: LoggedActivityId(), athleteId: athleteId, plannedActivityId: activity.plannedActivityId, durationMinutes: 45)
+        )
+
+        #expect(Set(scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
+    }
+
+    /// Item 8: removing the activity's start time leaves nothing to
+    /// count down from for ANY reminder — every one must be cancelled.
+    @Test("handlePlannedActivityChanged cancels EVERY reminder when the activity's start time is removed")
+    @MainActor
+    func handlePlannedActivityChangedCancelsAllRemindersWhenStartTimeRemoved() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let (planning, coordination, scheduler, activityReminderRepository) = makeServices(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try planning.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 18, minute: 0)
+        )
+        let eat = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat")
+        let packBag = try coordination.createReminder(athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag")
+
+        _ = try planning.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: nil
+        )
+        coordination.handlePlannedActivityChanged(
+            PlannedActivityChanged(plannedActivityId: activity.plannedActivityId, athleteId: athleteId, weekPlanId: weekPlan.weekPlanId, changeType: "edited")
+        )
+
+        #expect(Set(scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
     }
 
     @Test("handleActivityLogged with no linked PlannedActivity is a safe no-op")
@@ -610,8 +754,8 @@ struct NotificationsPlanningCoordinationServiceTests {
 
         // A's reminder is gone; B's is completely untouched.
         #expect(scheduler.cancelledIds == [reminderA.activityReminderId])
-        #expect(try activityReminderRepository.fetch(forPlannedActivity: activityA.plannedActivityId) == nil)
-        #expect(try activityReminderRepository.fetch(forPlannedActivity: activityB.plannedActivityId)?.activityReminderId == reminderB.activityReminderId)
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activityA.plannedActivityId).isEmpty)
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: activityB.plannedActivityId).first?.activityReminderId == reminderB.activityReminderId)
         #expect(scheduler.scheduleCalls.count == 2) // no new schedule call was ever made for B
     }
 }
@@ -647,7 +791,7 @@ struct ActivityReminderRepositoryTests {
         #expect(AppSchema.modelTypes.contains { ObjectIdentifier($0) == ObjectIdentifier(ActivityReminder.self) })
     }
 
-    @Test("Insert then fetch by PlannedActivityId returns the same reminder")
+    @Test("Insert then fetchAll by PlannedActivityId returns the same reminder")
     @MainActor
     func insertThenFetchByPlannedActivity() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -656,10 +800,32 @@ struct ActivityReminderRepositoryTests {
         let plannedActivityId = PlannedActivityId()
 
         let inserted = try repository.insert(athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 20)
-        let fetched = try repository.fetch(forPlannedActivity: plannedActivityId)
+        let fetched = try repository.fetchAll(forPlannedActivity: plannedActivityId)
 
-        #expect(fetched?.id == inserted.id)
-        #expect(fetched?.leadTimeMinutes == 20)
+        #expect(fetched.count == 1)
+        #expect(fetched.first?.id == inserted.id)
+        #expect(fetched.first?.leadTimeMinutes == 20)
+    }
+
+    /// Activity Reminder What/When, item 1: a concrete PlannedActivity
+    /// may have MULTIPLE independent reminders — fetchAll returns every
+    /// one, each retaining its own text/lead time.
+    @Test("fetchAll returns every reminder for one activity, each retaining its own text and lead time")
+    @MainActor
+    func fetchAllReturnsEveryReminderForActivity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let plannedActivityId = PlannedActivityId()
+
+        let eat = try repository.insert(athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 120, reminderText: "Eat")
+        let packBag = try repository.insert(athleteId: AthleteId(), plannedActivityId: plannedActivityId, leadTimeMinutes: 45, reminderText: "Pack bag")
+
+        let all = try repository.fetchAll(forPlannedActivity: plannedActivityId)
+
+        #expect(all.count == 2)
+        #expect(all.contains { $0.id == eat.id && $0.leadTimeMinutes == 120 && $0.reminderText == "Eat" })
+        #expect(all.contains { $0.id == packBag.id && $0.leadTimeMinutes == 45 && $0.reminderText == "Pack bag" })
     }
 
     @Test("Deleting a reminder leaves no row behind")
@@ -673,8 +839,95 @@ struct ActivityReminderRepositoryTests {
 
         try repository.delete(inserted)
 
-        #expect(try repository.fetch(forPlannedActivity: plannedActivityId) == nil)
+        #expect(try repository.fetchAll(forPlannedActivity: plannedActivityId).isEmpty)
         #expect(try container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).isEmpty)
+    }
+
+    // MARK: - Recent-text suggestions (items 19-21)
+
+    /// Item 19: prior user-authored reminder texts are returned as
+    /// distinct, most-recently-used suggestions.
+    @Test("Recent reminder texts are returned distinct, most-recently-used first")
+    @MainActor
+    func recentReminderTextsReturnsDistinctMostRecentFirst() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 120, reminderText: "Eat", createdAt: base)
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 45, reminderText: "Pack bag", createdAt: base.addingTimeInterval(60))
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 60, reminderText: "Drink water", createdAt: base.addingTimeInterval(120))
+
+        let suggestions = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 5)
+
+        // Explicit, distinct createdAt timestamps (never real wall-clock
+        // ordering) drive the recency order — most recent first.
+        #expect(suggestions == ["Drink water", "Pack bag", "Eat"])
+    }
+
+    /// Item 20: reusing the exact same text does not create a duplicate
+    /// suggestion entry — it moves to the front (most recent) instead.
+    @Test("Reusing the same reminder text does not create a duplicate suggestion entry")
+    @MainActor
+    func recentReminderTextsDeduplicatesReusedText() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+
+        let base = Date(timeIntervalSince1970: 1_800_000_000)
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 120, reminderText: "Eat", createdAt: base)
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 45, reminderText: "Pack bag", createdAt: base.addingTimeInterval(60))
+        _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 90, reminderText: "Eat", createdAt: base.addingTimeInterval(120))
+
+        let suggestions = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 5)
+
+        #expect(suggestions.count == 2)
+        #expect(suggestions == ["Eat", "Pack bag"])
+    }
+
+    /// Item 21: privacy/athlete scope matches this repository's own
+    /// existing per-athlete isolation — a reminder text authored for
+    /// one athlete is never suggested when composing a reminder for a
+    /// DIFFERENT athlete, even within the same family/workspace.
+    @Test("Recent reminder text suggestions never leak between athletes")
+    @MainActor
+    func recentReminderTextsAreScopedPerAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let athleteA = AthleteId()
+        let athleteB = AthleteId()
+
+        _ = try repository.insert(athleteId: athleteA, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 120, reminderText: "Eat")
+        _ = try repository.insert(athleteId: athleteB, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 45, reminderText: "Pack bag")
+
+        let suggestionsForA = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteA, limit: 5)
+        let suggestionsForB = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteB, limit: 5)
+
+        #expect(suggestionsForA == ["Eat"])
+        #expect(suggestionsForB == ["Pack bag"])
+    }
+
+    /// Bounded limit — never shows more than the requested small,
+    /// UI-appropriate count, even with many distinct texts available.
+    @Test("Recent reminder text suggestions are bounded to the requested limit")
+    @MainActor
+    func recentReminderTextsRespectsLimit() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = ActivityReminderRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+
+        for text in ["Eat", "Pack bag", "Drink water", "Bring jersey", "Warm up"] {
+            _ = try repository.insert(athleteId: athleteId, plannedActivityId: PlannedActivityId(), leadTimeMinutes: 30, reminderText: text)
+        }
+
+        let suggestions = try repository.fetchRecentDistinctReminderTexts(forAthlete: athleteId, limit: 3)
+
+        #expect(suggestions.count == 3)
     }
 }
 
@@ -766,7 +1019,7 @@ struct NotificationsProductionEventPipelineTests {
         // so both mutation calls above have already returned only once
         // their own event was fully processed.
 
-        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try fixture.activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
         #expect(fixture.scheduler.isPending(reminder.activityReminderId) == false)
         #expect(fixture.scheduler.cancelledIds.last == reminder.activityReminderId)
     }
@@ -801,7 +1054,7 @@ struct NotificationsProductionEventPipelineTests {
             durationMinutes: 45, status: .completed, source: "manual"
         )
 
-        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId) == nil)
+        #expect(try fixture.activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)
         #expect(fixture.scheduler.isPending(reminder.activityReminderId) == false)
         #expect(fixture.scheduler.cancelledIds.last == reminder.activityReminderId)
     }
@@ -852,6 +1105,6 @@ struct NotificationsProductionEventPipelineTests {
         // The still-persisted reminder's own next fire instant (were it
         // fetched again right now) also reflects the latest state, not
         // some earlier value baked in at creation.
-        #expect(try fixture.activityReminderRepository.fetch(forPlannedActivity: activity.plannedActivityId)?.activityReminderId == reminder.activityReminderId)
+        #expect(try fixture.activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).first?.activityReminderId == reminder.activityReminderId)
     }
 }

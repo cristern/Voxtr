@@ -320,6 +320,7 @@ public struct HomeDashboardView: View {
                     planningService: planningService,
                     trainingService: trainingService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                     actorId: committedByActorId,
                     onActivityLogged: {
                         homeDashboardDebugLog("onActivityLogged fired for recurringOccurrence id=\(suggestion.id)")

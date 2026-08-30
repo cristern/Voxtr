@@ -126,6 +126,7 @@ public struct DailyTrainingView: View {
                                     planningService: planningService,
                                     trainingService: trainingService,
                                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                                     actorId: actorId,
                                     onActivityLogged: { viewModel.load() }
                                 )
@@ -267,6 +268,7 @@ public struct DailyTrainingView: View {
                     Button("Manage Recurring Activities") {
                         let recurringViewModel = WeeklyPlanningViewModel(
                             service: planningService,
+                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
                             athleteId: viewModel.athleteId,
                             committedByActorId: actorId
                         )

@@ -72,32 +72,26 @@ public final class ActivityDetailViewModel {
     /// when the field is actually shown.
     public var editLoggedDurationMinutes: Int = 60
 
-    /// Notifications V1 Activity Reminder UI slice: this screen's own
-    /// mirror of the reminder intent for `activity`, loaded via
-    /// `NotificationsPlanningCoordinationService.fetchReminder(forPlannedActivity:)`
-    /// — never a second, independently-computed reminder state.
-    /// Refreshed from canonical state in `prefillReminderForm()` (called
-    /// from `init`, and again after `saveEdit()`/`cancelActivity()`
-    /// succeed, since either can cause the foundation's own EventBus
-    /// reconciliation to reschedule or cancel the active reminder).
-    public private(set) var reminderEnabled: Bool = false
-    /// Bound directly by `ReminderLeadTimePickerView` — see that
-    /// component's own doc comment: live edits (typing a Custom value)
-    /// update this directly for display, while the actual persisted
-    /// mutation only runs once a value is committed, via
-    /// `setReminderLeadTimeMinutes(_:)` below.
-    public var reminderLeadTimeMinutes: Int = 30
-    /// Set when the user's most recent attempt to enable/change a
-    /// reminder was declined by notification authorization — distinct
-    /// from `reminderErrorMessage`, since this is a calm, expected
-    /// outcome the UI offers a path to system Settings for, not a
-    /// failure.
-    public private(set) var reminderAuthorizationDenied: Bool = false
-    public private(set) var reminderErrorMessage: String?
-    /// True only while `enableReminder`'s own authorization-check/
-    /// request/create round trip is in flight — lets the UI disable the
-    /// control briefly rather than allow overlapping toggles.
-    public private(set) var reminderIsUpdating: Bool = false
+    /// Activity Reminder What/When: this screen's own mirror of EVERY
+    /// reminder intent for `activity` — zero, one, or many — loaded via
+    /// `NotificationsPlanningCoordinationService.fetchReminders(forPlannedActivity:)`
+    /// and mapped to `ActivityReminderDraft`, never a second,
+    /// independently-computed reminder state. Refreshed from canonical
+    /// state in `prefillReminderForm()` (called from `init`, and again
+    /// after `saveEdit()`/`cancelActivity()` succeed, since either can
+    /// cause the foundation's own EventBus reconciliation to reschedule
+    /// or cancel any active reminder).
+    public var reminders: [ActivityReminderDraft] = []
+    /// Recent-text suggestions for this athlete — see
+    /// `ActivityReminderRepository.fetchRecentDistinctReminderTexts(forAthlete:limit:)`
+    /// for the exact recency/privacy-scope/dedup rules. Refreshed
+    /// alongside `reminders` in `prefillReminderForm()`.
+    public private(set) var recentReminderTextSuggestions: [String] = []
+    /// True only while a reminder row's own `upsertReminder`
+    /// authorization-check/request/create-or-update round trip is in
+    /// flight — lets the UI disable that row briefly rather than allow
+    /// overlapping commits.
+    public private(set) var reminderListIsUpdating: Bool = false
 
     /// Approved product contract: "If the activity has no start time,
     /// the reminder control must be unavailable" — read directly from
@@ -286,98 +280,87 @@ public final class ActivityDetailViewModel {
         editLocation = activity.location ?? ""
     }
 
-    /// Notifications V1 Activity Reminder UI slice: loads the current
-    /// reminder intent for `activity` from canonical Notifications
-    /// truth — Off (default) when none exists, matching this slice's
-    /// own "Reminder is Off by default" and "existing reminder must
-    /// load correctly when editing" requirements. `try?` here mirrors
-    /// this screen's own established convention for read-only prefill
-    /// (see `deleteActivity`/`cancelActivity`'s own throwing calls,
-    /// which surface errors; this is a display-only read where a
-    /// failure just means Off is shown, not a silent data loss).
+    /// Activity Reminder What/When: loads EVERY reminder intent for
+    /// `activity` from canonical Notifications truth — an empty list
+    /// (default) when none exist, matching this slice's own "a new
+    /// activity defaults to no reminders" and "existing reminders must
+    /// load correctly when editing" requirements. Also refreshes recent-
+    /// text suggestions for this athlete. `try?` here mirrors this
+    /// screen's own established convention for read-only prefill (see
+    /// `deleteActivity`/`cancelActivity`'s own throwing calls, which
+    /// surface errors; this is a display-only read where a failure just
+    /// means an empty list is shown, not a silent data loss).
     public func prefillReminderForm() {
-        reminderErrorMessage = nil
-        reminderAuthorizationDenied = false
-        guard let reminder = try? notificationsPlanningCoordinationService.fetchReminder(
+        recentReminderTextSuggestions = (try? notificationsPlanningCoordinationService.recentReminderTexts(forAthlete: athleteId)) ?? []
+        guard let fetched = try? notificationsPlanningCoordinationService.fetchReminders(
             forPlannedActivity: activity.plannedActivityId
         ) else {
-            reminderEnabled = false
+            reminders = []
             return
         }
-        reminderEnabled = true
-        reminderLeadTimeMinutes = reminder.leadTimeMinutes
-    }
-
-    /// Notifications V1 Activity Reminder UI slice: the Reminder
-    /// toggle's own entry point. Turning Off cancels/removes the
-    /// reminder immediately — no authorization check needed for that
-    /// direction. Turning On runs the full `enableReminder` round trip
-    /// via `applyReminder(leadTimeMinutes:)`, using whatever lead time
-    /// is currently selected (the default preset, or a previously
-    /// prefilled value).
-    public func setReminderEnabled(_ enabled: Bool) {
-        reminderErrorMessage = nil
-        guard enabled else {
-            reminderAuthorizationDenied = false
-            do {
-                try notificationsPlanningCoordinationService.disableReminder(
-                    forPlannedActivity: activity.plannedActivityId
-                )
-            } catch {
-                reminderErrorMessage = PlanningStrings.reminderGenericError
-            }
-            reminderEnabled = false
-            return
+        reminders = fetched.map { reminder in
+            ActivityReminderDraft(
+                text: reminder.reminderText ?? "",
+                leadTimeMinutes: reminder.leadTimeMinutes,
+                persistedId: reminder.activityReminderId
+            )
         }
-        applyReminder(leadTimeMinutes: reminderLeadTimeMinutes)
     }
 
-    /// Notifications V1 Activity Reminder UI slice: `ReminderLeadTimePickerView`'s
-    /// own commit callback — fired only on a genuinely committed lead
-    /// time (a preset tap, or Custom losing focus with a valid value),
-    /// never per keystroke. A no-op if the reminder isn't currently
-    /// enabled: the picker's own live-typing display already keeps
-    /// `reminderLeadTimeMinutes` correct via its two-way binding, and
-    /// there is nothing to reschedule until the user turns Reminder On.
-    public func setReminderLeadTimeMinutes(_ minutes: Int) {
-        reminderLeadTimeMinutes = minutes
-        guard reminderEnabled else { return }
-        applyReminder(leadTimeMinutes: minutes)
+    /// Appends a new, blank draft row — purely local UI state until the
+    /// user actually types text and it commits (see `commitReminder(_:)`
+    /// below); matches "Add Reminder" in the approved UI sketch.
+    public func addReminder() {
+        reminders.append(ActivityReminderDraft())
     }
 
-    /// The shared enable/change-lead-time path — `NotificationsPlanningCoordinationService
-    /// .enableReminder` already replaces any existing reminder for this
-    /// activity, so "turn on" and "change lead time while already on"
-    /// are the exact same call. Requests authorization contextually
-    /// (only via the coordination service, never here directly) and
-    /// maps every outcome to this screen's own displayed state — never
-    /// leaves `reminderEnabled` true without a genuinely active,
-    /// scheduled reminder.
-    private func applyReminder(leadTimeMinutes: Int) {
-        guard canSetReminder else { return }
-        reminderErrorMessage = nil
-        reminderAuthorizationDenied = false
-        reminderIsUpdating = true
-        notificationsPlanningCoordinationService.enableReminder(
+    /// Removes ONE reminder row. If it was already persisted, cancels
+    /// its pending notification and removes its intent row first — a
+    /// row that was never successfully persisted (still local-only, or
+    /// its last commit attempt failed) is simply dropped from the list.
+    /// Never affects any sibling reminder.
+    public func removeReminder(_ draft: ActivityReminderDraft) {
+        if let persistedId = draft.persistedId {
+            try? notificationsPlanningCoordinationService.deleteReminder(persistedId)
+        }
+        reminders.removeAll { $0.id == draft.id }
+    }
+
+    /// `ActivityReminderListEditorView`'s own commit callback — fired
+    /// only on a genuinely committed row (text field loses focus with
+    /// non-empty text, a suggestion tap, or a lead-time preset/Custom
+    /// value commits), never per keystroke. A no-op if the activity has
+    /// no start time, or the row's text is still empty (nothing
+    /// meaningful to persist yet — the row stays a local draft). Both
+    /// adding a brand-new reminder and editing an already-persisted one
+    /// go through the SAME `upsertReminder` call — `existingReminderId`
+    /// tells the coordination service which case this is.
+    public func commitReminder(_ draft: ActivityReminderDraft) {
+        guard canSetReminder, draft.hasMeaningfulText else { return }
+        guard let index = reminders.firstIndex(where: { $0.id == draft.id }) else { return }
+        reminders[index].errorMessage = nil
+        reminders[index].authorizationDenied = false
+        reminderListIsUpdating = true
+        let text = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        notificationsPlanningCoordinationService.upsertReminder(
             athleteId: athleteId,
             plannedActivityId: activity.plannedActivityId,
-            leadTimeMinutes: leadTimeMinutes
+            existingReminderId: draft.persistedId,
+            leadTimeMinutes: draft.leadTimeMinutes,
+            reminderText: text
         ) { [weak self] result in
             guard let self else { return }
-            self.reminderIsUpdating = false
+            self.reminderListIsUpdating = false
+            guard let index = self.reminders.firstIndex(where: { $0.id == draft.id }) else { return }
             switch result {
-            case .success(.enabled(let leadTimeMinutes)):
-                self.reminderEnabled = true
-                self.reminderLeadTimeMinutes = leadTimeMinutes
+            case .success(.enabled(let activityReminderId)):
+                self.reminders[index].persistedId = activityReminderId
             case .success(.authorizationDenied):
-                self.reminderEnabled = false
-                self.reminderAuthorizationDenied = true
+                self.reminders[index].authorizationDenied = true
             case .success(.fireDateInPast):
-                self.reminderEnabled = false
-                self.reminderErrorMessage = PlanningStrings.reminderFireDateInPast
+                self.reminders[index].errorMessage = PlanningStrings.reminderFireDateInPast
             case .failure:
-                self.reminderEnabled = false
-                self.reminderErrorMessage = PlanningStrings.reminderGenericError
+                self.reminders[index].errorMessage = PlanningStrings.reminderGenericError
             }
         }
     }

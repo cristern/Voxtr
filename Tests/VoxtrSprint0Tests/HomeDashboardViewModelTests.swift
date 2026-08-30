@@ -145,7 +145,15 @@ struct HomeDashboardViewModelTests {
             activityChangeBroadcaster: broadcaster
         )
         let planning = WeeklyPlanningViewModel(
-            service: planningService, athleteId: athleteId, committedByActorId: ActorId(),
+            service: planningService,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: planningService
+            ),
+            athleteId: athleteId, committedByActorId: ActorId(),
             weekStart: weekStart, activityChangeBroadcaster: broadcaster
         )
         planning.loadOrCreateWeekPlan()

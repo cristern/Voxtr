@@ -186,10 +186,11 @@ struct PersistenceRecoveryTests {
         // CompositionRoot.build's own real default after that round's
         // version bump. Sport / Activity Identity domain foundation:
         // updated again to AppSchemaV4. Notifications V1 Activity
-        // Reminder Foundation: updated again to AppSchemaV5, matching
+        // Reminder Foundation: updated again to AppSchemaV5. Activity
+        // Reminder What/When: updated again to AppSchemaV6, matching
         // that round's own bump.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV5.self,
+            versionedSchema: AppSchemaV6.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -268,6 +269,100 @@ struct PersistenceRecoveryTests {
         let reminder = try activityReminderRepository.insert(athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30)
         #expect(reminder.leadTimeMinutes == 30)
         #expect(try v5Container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 1)
+    }
+
+    /// Item 23 (migration): Activity Reminder What/When adds
+    /// `ActivityReminder.reminderText: String?` — a genuinely new,
+    /// genuinely optional column with no other value it could infer for
+    /// an existing row than `nil`. Simulates every existing TestFlight
+    /// install that already has a PR #37-era `ActivityReminder` row
+    /// (created before "what" text existed) reopening under the new
+    /// schema: that row must survive with its real `leadTimeMinutes`/
+    /// `plannedActivityId`/`athleteId` completely untouched, and
+    /// `reminderText == nil` honestly (never a fabricated value) — see
+    /// `AppSchemaVersioning.swift`'s own V5→V6 stage doc comment.
+    @Test("A store created under AppSchemaV5 (with a pre-existing ActivityReminder row, no reminderText column) reopens successfully under AppSchemaV6 via the lightweight migration stage — the existing reminder survives with reminderText == nil, and new reminders can set reminderText")
+    @MainActor
+    func existingV5StoreMigratesToV6Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v5-to-v6-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v5Schema = Schema(versionedSchema: AppSchemaV5.self)
+        var athleteRawId: UUID
+        var plannedActivityRawId: UUID
+        var legacyReminderRawId: UUID
+        do {
+            let v5Container = try ModelContainer(
+                for: v5Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v5Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v5Container.mainContext.insert(athlete)
+            try v5Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            let athleteId = AthleteId(rawValue: athleteRawId)
+            let weekPlan = WeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 8, day: 17))
+            v5Container.mainContext.insert(weekPlan)
+            let plannedActivity = PlannedActivity(
+                weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 8, day: 18),
+                startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            v5Container.mainContext.insert(plannedActivity)
+            try v5Container.mainContext.save()
+            plannedActivityRawId = plannedActivity.id
+
+            // A PR #37-era reminder — the V5 shape has no reminderText
+            // column at all.
+            let activityReminderRepository = ActivityReminderRepository(modelContext: v5Container.mainContext)
+            let legacyReminder = try activityReminderRepository.insert(
+                athleteId: athleteId, plannedActivityId: PlannedActivityId(rawValue: plannedActivity.id), leadTimeMinutes: 30
+            )
+            legacyReminderRawId = legacyReminder.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V6) — the real production default
+        // (CompositionRoot.build's own `versionedSchema: AppSchemaV6.self`).
+        let v6Schema = Schema(versionedSchema: AppSchemaV6.self)
+        let v6Container = try ModelContainer(
+            for: v6Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v6Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity survived completely untouched.
+        let migratedActivity = try v6Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Endurance run")
+
+        // The pre-existing reminder survived: same id, same lead time,
+        // same activity/athlete link — but reminderText is honestly nil,
+        // never fabricated.
+        let activityReminderRepository = ActivityReminderRepository(modelContext: v6Container.mainContext)
+        let migratedReminders = try activityReminderRepository.fetchAll(forPlannedActivity: PlannedActivityId(rawValue: plannedActivityRawId))
+        #expect(migratedReminders.count == 1)
+        #expect(migratedReminders.first?.id == legacyReminderRawId)
+        #expect(migratedReminders.first?.leadTimeMinutes == 30)
+        #expect(migratedReminders.first?.reminderText == nil)
+
+        // A NEW reminder created after migration can set reminderText —
+        // proving the new column is genuinely usable against the
+        // migrated store, not merely that the container opened.
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let newReminder = try activityReminderRepository.insert(
+            athleteId: athleteId, plannedActivityId: PlannedActivityId(rawValue: plannedActivityRawId),
+            leadTimeMinutes: 45, reminderText: "Pack bag"
+        )
+        #expect(newReminder.reminderText == "Pack bag")
+        #expect(try activityReminderRepository.fetchAll(forPlannedActivity: PlannedActivityId(rawValue: plannedActivityRawId)).count == 2)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

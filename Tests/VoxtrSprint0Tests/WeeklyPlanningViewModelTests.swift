@@ -5,6 +5,7 @@ import VoxtrCore
 import VoxtrCoreContracts
 @testable import VoxtrAppShell
 import VoxtrPlanningDomain
+import VoxtrNotificationsDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -12,6 +13,22 @@ import VoxtrPlanningDomain
 //
 // Following the S1.1 lesson: no shared private helper methods for
 // container/service construction — every test builds its own inline.
+
+/// Notifications V1 Activity Reminder UI slice: a trivial no-op
+/// `ActivityReminderScheduling` conformance so `WeeklyPlanningViewModel`
+/// tests in this file (which do not exercise reminder behavior) can
+/// construct the now-required `NotificationsPlanningCoordinationService`
+/// dependency without touching `UNUserNotificationCenter`.
+private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
+    func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
+    func cancelReminder(id: ActivityReminderId) {}
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (ActivityReminderAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+}
 
 @Suite("WeeklyPlanningViewModel (S2.4)", .serialized)
 struct WeeklyPlanningViewModelTests {
@@ -44,7 +61,14 @@ struct WeeklyPlanningViewModelTests {
         broadcaster.subscribe(athleteId: athleteA, subscriberA)
         broadcaster.subscribe(athleteId: athleteB, subscriberB)
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteA, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteA, committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart, activityChangeBroadcaster: broadcaster
         )
         viewModel.loadOrCreateWeekPlan()
@@ -83,7 +107,14 @@ struct WeeklyPlanningViewModelTests {
         broadcaster.subscribe(athleteId: athleteA, subscriberA)
         broadcaster.subscribe(athleteId: athleteB, subscriberB)
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteA, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteA, committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart, activityChangeBroadcaster: broadcaster
         )
         viewModel.loadOrCreateWeekPlan()
@@ -106,6 +137,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -128,6 +166,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -151,6 +196,13 @@ struct WeeklyPlanningViewModelTests {
         let repository = PlanningRepository(modelContext: container.mainContext)
         let viewModel = WeeklyPlanningViewModel(
             service: PlanningService(repository: repository),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: PlanningService(repository: repository)
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -179,6 +231,13 @@ struct WeeklyPlanningViewModelTests {
         let repository = PlanningRepository(modelContext: container.mainContext)
         let viewModel = WeeklyPlanningViewModel(
             service: PlanningService(repository: repository),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: PlanningService(repository: repository)
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -213,6 +272,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -240,6 +306,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -261,6 +334,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -285,6 +365,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -314,6 +401,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -336,6 +430,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -365,6 +466,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -389,6 +497,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -414,6 +529,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -436,6 +558,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -466,6 +595,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -491,6 +627,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -513,6 +656,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -533,6 +683,13 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
             service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
             athleteId: AthleteId(),
             committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
@@ -559,7 +716,14 @@ struct WeeklyPlanningViewModelTests {
         let athleteId = AthleteId()
 
         let currentWeekViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(),
             weekStart: WeeklyPlanningViewModel.currentWeekStart()
         )
         currentWeekViewModel.loadOrCreateWeekPlan()
@@ -567,7 +731,14 @@ struct WeeklyPlanningViewModelTests {
         #expect(currentWeekViewModel.canReopenPlanning == true)
 
         let futureWeekViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(),
             weekStart: WeeklyPlanningViewModel.currentWeekStart().adding(days: 7)
         )
         futureWeekViewModel.loadOrCreateWeekPlan()
@@ -577,7 +748,14 @@ struct WeeklyPlanningViewModelTests {
         // Self.fixedWeekStart (2026-01-05) is a historical week relative
         // to any real "today" this suite could plausibly run on.
         let historicalWeekViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
         )
         historicalWeekViewModel.loadOrCreateWeekPlan()
@@ -588,7 +766,14 @@ struct WeeklyPlanningViewModelTests {
         // there is nothing to reopen.
         #expect(currentWeekViewModel.isCommitted)
         let draftAgain = WeeklyPlanningViewModel(
-            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: AthleteId(), committedByActorId: ActorId(),
             weekStart: WeeklyPlanningViewModel.currentWeekStart()
         )
         draftAgain.loadOrCreateWeekPlan()
@@ -604,7 +789,14 @@ struct WeeklyPlanningViewModelTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(),
             weekStart: WeeklyPlanningViewModel.currentWeekStart()
         )
         viewModel.loadOrCreateWeekPlan()
@@ -635,7 +827,14 @@ struct WeeklyPlanningViewModelTests {
         let repository = PlanningRepository(modelContext: container.mainContext)
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: AthleteId(), committedByActorId: ActorId(),
             weekStart: WeeklyPlanningViewModel.currentWeekStart()
         )
         viewModel.loadOrCreateWeekPlan()
@@ -668,7 +867,14 @@ struct WeeklyPlanningViewModelTests {
         let repository = PlanningRepository(modelContext: container.mainContext)
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: AthleteId(), committedByActorId: ActorId(),
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: AthleteId(), committedByActorId: ActorId(),
             weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
@@ -705,7 +911,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
 
         viewModel.loadOrCreateWeekPlan()
@@ -727,7 +940,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
         let suggestion = try #require(viewModel.recurringSuggestions.first)
@@ -756,7 +976,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
         #expect(viewModel.recurringSuggestions.count == 2)
@@ -781,7 +1008,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let firstViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         firstViewModel.loadOrCreateWeekPlan()
         let suggestion = try #require(firstViewModel.recurringSuggestions.first)
@@ -791,7 +1025,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         // A brand-new ViewModel instance — "reloading from persistence"
         // — has no memory of the dismissal, since it was never stored.
         let secondViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         secondViewModel.loadOrCreateWeekPlan()
 
@@ -812,14 +1053,28 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let firstViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         firstViewModel.loadOrCreateWeekPlan()
         let suggestion = try #require(firstViewModel.recurringSuggestions.first)
         firstViewModel.acceptSuggestion(suggestion)
 
         let secondViewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         secondViewModel.loadOrCreateWeekPlan()
 
@@ -840,7 +1095,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
         let suggestion = try #require(viewModel.recurringSuggestions.first)
@@ -865,7 +1127,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
 
@@ -899,7 +1168,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
 
         viewModel.loadRecurringActivities()
@@ -917,7 +1193,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.recurringFormTitle = "Football"
         viewModel.recurringFormActivityType = .teamTraining
@@ -939,7 +1222,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let container = try controller.makeModelContainer()
         let repository = PlanningRepository(modelContext: container.mainContext)
         let viewModel = WeeklyPlanningViewModel(
-            service: PlanningService(repository: repository), athleteId: AthleteId(),
+            service: PlanningService(repository: repository),
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: PlanningService(repository: repository)
+            ), athleteId: AthleteId(),
             committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         let sportId = SportId()
@@ -967,7 +1257,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
         #expect(viewModel.recurringSuggestions.isEmpty)
@@ -994,7 +1291,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.beginEditingRecurringActivity(created)
         viewModel.recurringFormTitle = "Football (updated)"
@@ -1018,7 +1322,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadRecurringActivities()
         #expect(viewModel.recurringPlannedActivities.first?.isEnabled == true)
@@ -1043,7 +1354,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), effectiveStartDate: Self.rangeStart, effectiveEndDate: Self.rangeEnd
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
 
         viewModel.beginEditingRecurringActivity(created)
@@ -1066,7 +1384,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.recurringFormTitle = "Football"
         viewModel.recurringFormWeekdays = [.monday]
@@ -1088,7 +1413,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         // Empty title — genuinely invalid, rejected by PlanningService's
         // own validation, a real reachable failure rather than a forced
@@ -1121,7 +1453,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.beginEditingRecurringActivity(created)
         viewModel.recurringFormTitle = "Football (updated)"
@@ -1146,7 +1485,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
             effectiveStartDate: Self.fixedWeekStart, effectiveEndDate: Self.fixedWeekStart.adding(days: 60)
         )
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.beginEditingRecurringActivity(created)
         // Empty title — genuinely invalid.
@@ -1173,7 +1519,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
 
@@ -1204,7 +1557,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let existingPreviousWeekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: previousWeekStart)
 
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
 
@@ -1223,7 +1583,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let service = PlanningService(repository: repository)
         let athleteId = AthleteId()
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: athleteId, committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
         viewModel.newActivityTitle = "Week one activity"
@@ -1246,7 +1613,14 @@ struct WeeklyPlanningViewModelRecurringActivityTests {
         let repository = PlanningRepository(modelContext: container.mainContext)
         let service = PlanningService(repository: repository)
         let viewModel = WeeklyPlanningViewModel(
-            service: service, athleteId: AthleteId(), committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ), athleteId: AthleteId(), committedByActorId: ActorId(), weekStart: Self.fixedWeekStart
         )
         viewModel.loadOrCreateWeekPlan()
 
