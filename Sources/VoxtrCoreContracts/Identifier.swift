@@ -62,6 +62,16 @@ public typealias RecommendationId = Identifier<RecommendationTag>
 public enum ActivityReminderTag {}
 public typealias ActivityReminderId = Identifier<ActivityReminderTag>
 
+/// Calendar Planning Source V1: identifies one persisted, Parent-
+/// configured trust mapping from an external calendar to an athlete's
+/// planning context (see `VoxtrCalendarPlanningDomain.CalendarPlanningMapping`).
+/// Not itself an external identity — EventKit's own calendar/event
+/// identifiers are stored as plain strings on that type, per this
+/// project's "typed ID for anything this codebase itself owns and
+/// references by stable identity" convention.
+public enum CalendarPlanningMappingTag {}
+public typealias CalendarPlanningMappingId = Identifier<CalendarPlanningMappingTag>
+
 /// v1.3 Section 3: "String wrapper. Opaque platform account identifier;
 /// never used as email." Deliberately NOT built on the UUID-based
 /// `Identifier<Tag>` generic — its representation is genuinely different.

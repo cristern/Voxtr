@@ -5,6 +5,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
+import VoxtrCoreReferenceData
 
 /// Sprint 1 (Daily Use Foundation), Part 1. Each destination carries
 /// its own identity directly — there is no shared, mutable "currently
@@ -171,6 +172,11 @@ public struct FamilyHomeContentView: View {
     /// coordination service/broadcaster pair.
     private let sleepCoordinationService: SleepCoordinationService
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+    /// Calendar Planning Source V1: threaded to every `HomeDashboardView`
+    /// this view constructs (`athleteOverview(for:)` below) — same
+    /// rationale as `sleepCoordinationService` above.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
+    private let sportRepository: SportRepository
 
     public init(
         family: RestoredFamily,
@@ -186,7 +192,9 @@ public struct FamilyHomeContentView: View {
         athleteManagementViewModel: AthleteFamilyManagementViewModel,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
         sleepCoordinationService: SleepCoordinationService,
-        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
+        sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
+        sportRepository: SportRepository
     ) {
         self.family = family
         self.planningService = planningService
@@ -201,6 +209,8 @@ public struct FamilyHomeContentView: View {
         self.activityChangeBroadcaster = activityChangeBroadcaster
         self.sleepCoordinationService = sleepCoordinationService
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
+        self.sportRepository = sportRepository
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -390,7 +400,26 @@ public struct FamilyHomeContentView: View {
         // Family Schedule appearance, not a captured snapshot — so
         // keeping THIS property current here is exactly what that
         // downstream fix depends on.
+        //
+        // Calendar Planning Source V1, requirement 12 ("Correct
+        // foreground/app-open reconciliation is sufficient for the first
+        // Alpha hypothesis"): this outer `.onAppear` is the one place in
+        // the app guaranteed to refire on every Family Home reappearance
+        // regardless of navigation depth (see the comment above it), so
+        // it is also the deterministic reconciliation trigger for every
+        // explicitly-enabled `CalendarPlanningMapping` — a Parent who
+        // never revisits an athlete's own Calendar screen after initial
+        // setup still gets external changes synced automatically. Best
+        // effort and silent: a Calendar/EventKit failure (e.g. permission
+        // revoked in system Settings after setup) must never break
+        // Planning, so this is `try?`, not surfaced as an error here —
+        // exactly the same "denied permission must not break Planning"
+        // contract `AthleteCalendarPlanningViewModel` enforces on its own
+        // explicit actions. Runs before `viewModel.refresh()` so any
+        // newly created/updated `PlannedActivity` rows are already
+        // reflected in the same reappearance's read.
         .onAppear {
+            try? calendarPlanningCoordinationService.reconcileAllEnabledMappings()
             viewModel.refresh()
         }
     }
@@ -867,7 +896,9 @@ public struct FamilyHomeContentView: View {
             athleteManagementViewModel: athleteManagementViewModel,
             activityChangeBroadcaster: activityChangeBroadcaster,
             sleepCoordinationService: sleepCoordinationService,
-            sleepChangeBroadcaster: sleepChangeBroadcaster
+            sleepChangeBroadcaster: sleepChangeBroadcaster,
+            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+            sportRepository: sportRepository
         )
     }
 

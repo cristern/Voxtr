@@ -8,6 +8,7 @@ import VoxtrReflectionDomain
 import VoxtrDevelopmentDomain
 import VoxtrDecisionSupportDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 import VoxtrSettings
 
 /// One of a small number of files inside `VoxtrAppShell` allowed to
@@ -29,6 +30,7 @@ public enum ModuleRegistry {
             DevelopmentModule(),
             DecisionSupportModule(),
             NotificationsModule(),
+            CalendarPlanningModule(),
             SettingsModule(),
         ]
     }

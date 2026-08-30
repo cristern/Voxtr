@@ -10,6 +10,7 @@ import VoxtrReflectionDomain
 import VoxtrPlanningDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -187,10 +188,17 @@ struct PersistenceRecoveryTests {
         // version bump. Sport / Activity Identity domain foundation:
         // updated again to AppSchemaV4. Notifications V1 Activity
         // Reminder Foundation: updated again to AppSchemaV5. Activity
-        // Reminder What/When: updated again to AppSchemaV6, matching
-        // that round's own bump.
+        // Reminder What/When: updated again to AppSchemaV6. Calendar
+        // Planning Source V1: updated again to AppSchemaV7, matching
+        // CompositionRoot.build's own real default after that round's
+        // bump — this exact test is the one Codemagic caught lagging
+        // behind that bump (this literal stayed at AppSchemaV6, so
+        // container.schema.entities.count stayed at the frozen V6
+        // shape's 19 while AppSchema.modelTypes.count had already moved
+        // to 20). Keep this literal in lockstep with CompositionRoot's
+        // own default on every future version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV6.self,
+            versionedSchema: AppSchemaV7.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -397,6 +405,98 @@ struct PersistenceRecoveryTests {
         )
         #expect(newReminder.reminderText == "Pack bag")
         #expect(try activityReminderRepository.fetchAll(forPlannedActivity: PlannedActivityId(rawValue: plannedActivityRawId)).count == 2)
+    }
+
+    @Test("Calendar Planning Source V1: a store created under AppSchemaV6 (19 entities, no CalendarPlanningMapping table) reopens successfully under AppSchemaV7 via the lightweight migration stage — existing PlannedActivity/ActivityReminder data survives untouched, and the new CalendarPlanningMapping table is genuinely usable against the migrated store")
+    @MainActor
+    func existingV6StoreMigratesToV7Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v6-to-v7-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v6Schema = Schema(versionedSchema: AppSchemaV6.self)
+        var athleteRawId: UUID
+        var plannedActivityRawId: UUID
+        var reminderRawId: UUID
+        do {
+            let v6Container = try ModelContainer(
+                for: v6Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v6Schema, url: storeURL)]
+            )
+            // AppSchemaV6.models declares PlannedActivity/ActivityReminder
+            // via their LIVE types directly (unlike AppSchemaV5, V6 has no
+            // nested frozen copy for either entity — neither's shape
+            // changed between V5 and V6/V7) — so seeding through the real
+            // repositories here is exactly as safe as constructing the
+            // live type literally, matching this file's own
+            // "historical schema containers must be seeded using the
+            // historical schema's own registered types" rule; the
+            // registered type for these two entities under V6 IS the
+            // live type.
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Jonas",
+                birthDate: LocalDate(year: 2012, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v6Container.mainContext.insert(athlete)
+            try v6Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            let athleteId = AthleteId(rawValue: athleteRawId)
+            let weekPlan = WeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 8, day: 17))
+            v6Container.mainContext.insert(weekPlan)
+            let plannedActivity = PlannedActivity(
+                weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 8, day: 18),
+                startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            v6Container.mainContext.insert(plannedActivity)
+            try v6Container.mainContext.save()
+            plannedActivityRawId = plannedActivity.id
+
+            let activityReminderRepository = ActivityReminderRepository(modelContext: v6Container.mainContext)
+            let reminder = try activityReminderRepository.insert(
+                athleteId: athleteId, plannedActivityId: PlannedActivityId(rawValue: plannedActivityRawId),
+                leadTimeMinutes: 30, reminderText: "Pack bag"
+            )
+            reminderRawId = reminder.id
+            // No CalendarPlanningMapping table exists at all under V6 —
+            // nothing to seed; this concept did not exist yet.
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V7) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV7.self`).
+        let v7Schema = Schema(versionedSchema: AppSchemaV7.self)
+        let v7Container = try ModelContainer(
+            for: v7Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v7Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity and ActivityReminder survived
+        // completely untouched.
+        let migratedActivity = try v7Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Endurance run")
+
+        let activityReminderRepository = ActivityReminderRepository(modelContext: v7Container.mainContext)
+        let migratedReminders = try activityReminderRepository.fetchAll(forPlannedActivity: PlannedActivityId(rawValue: plannedActivityRawId))
+        #expect(migratedReminders.count == 1)
+        #expect(migratedReminders.first?.id == reminderRawId)
+        #expect(migratedReminders.first?.reminderText == "Pack bag")
+
+        // The new CalendarPlanningMapping table is genuinely usable
+        // against the migrated store — proves the lightweight stage
+        // actually created it, not merely that the container opened.
+        let mappingRepository = CalendarPlanningMappingRepository(modelContext: v7Container.mainContext)
+        let mapping = try mappingRepository.insert(
+            athleteId: AthleteId(rawValue: athleteRawId), calendarIdentifier: "cal-1",
+            calendarTitle: "Spond Team", activityType: .individualTraining, sportId: nil
+        )
+        #expect(mapping.calendarIdentifier == "cal-1")
+        #expect(try v7Container.mainContext.fetch(FetchDescriptor<CalendarPlanningMapping>()).count == 1)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

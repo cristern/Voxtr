@@ -8,6 +8,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrNotificationsDomain
 
 /// CRITICAL PERSISTENCE RECOVERY (see this work's own root-cause
 /// writeup for the full investigation): this file previously declared
@@ -1007,16 +1008,61 @@ public enum AppSchemaV5: VersionedSchema {
     }
 }
 
-/// Activity Reminder What/When: the current, live version. Adds ONE
-/// field to an already-listed live type — `ActivityReminder.reminderText:
-/// String?` — no model *type* addition/removal, so `AppSchema.modelTypes`
-/// itself is unchanged (see that file's own doc comment: a field-level
-/// change does not touch that array). `models` stays a live passthrough
-/// to `AppSchema.modelTypes` (this is now the LATEST version); it will
-/// need freezing itself the next time a genuine `AppSchemaV7` is added.
+/// Activity Reminder What/When: adds ONE field to an already-listed
+/// live type — `ActivityReminder.reminderText: String?` — no model
+/// *type* addition/removal, so `AppSchema.modelTypes` itself was
+/// unchanged by that round (see that file's own doc comment: a field-
+/// level change does not touch that array).
+///
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V6
+/// was the latest version; Calendar Planning Source V1 now freezes it to
+/// the exact 20-entity literal V6 always actually had, following this
+/// file's own "HOW TO ADD A NEW VERSION" step 1, same as every version
+/// before it. See `AppSchemaV7` immediately below for the new latest
+/// version.
 public enum AppSchemaV6: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(6, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+        ]
+    }
+}
+
+/// Calendar Planning Source V1: the current, live version. Adds ONE
+/// model type, `CalendarPlanningMapping.self` (`VoxtrCalendarPlanningDomain`)
+/// — the Parent's own trusted calendar-to-athlete mapping. Imported
+/// schedule facts are ordinary `PlannedActivity` rows (that type's own
+/// pre-existing `externalSourceId`/`externalSourceType` fields, already
+/// established by Recurring Planned Activities — no shape change to
+/// `PlannedActivity` itself), so this is purely additive: no existing
+/// entity or property is renamed, removed, or changed in place, the
+/// same class of change as every prior "one new model type" version
+/// bump in this file's history.
+public enum AppSchemaV7: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(7, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1075,7 +1121,7 @@ public enum AppSchemaV6: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self, AppSchemaV6.self]
+        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self, AppSchemaV6.self, AppSchemaV7.self]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -1137,6 +1183,17 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// (see `ActivityReminder.reminderText`'s and
     /// `NotificationsPlanningCoordinationService.buildContent(for:reminderText:)`'s
     /// own doc comments).
+    /// V6 ("6.0.0", 19 entities) → V7 ("7.0.0", 20 entities — adds
+    /// `CalendarPlanningMapping.self`). `.lightweight`: the only
+    /// structural change SwiftData needs to reason about is the new
+    /// `CalendarPlanningMapping` entity/table, purely additive — same
+    /// class of change as every prior "one new model type" stage above
+    /// (V1→V2's `DailyStatus`/`AthleteSettings`, V3→V4's `Sport`, V4→V5's
+    /// `ActivityReminder`). A fresh install starts directly under V7
+    /// with an empty `CalendarPlanningMapping` table; an existing V6
+    /// store gains that new empty table with its existing 19 entities'
+    /// data — including every existing `PlannedActivity` and
+    /// `ActivityReminder` row — completely untouched.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
@@ -1144,6 +1201,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: AppSchemaV3.self, toVersion: AppSchemaV4.self),
             .lightweight(fromVersion: AppSchemaV4.self, toVersion: AppSchemaV5.self),
             .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
+            .lightweight(fromVersion: AppSchemaV6.self, toVersion: AppSchemaV7.self),
         ]
     }
 }

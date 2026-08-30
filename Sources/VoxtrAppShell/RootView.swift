@@ -46,7 +46,8 @@ public struct RootView: View {
                 sleepCoordinationService: root.container.resolve(SleepCoordinationService.self),
                 sleepChangeBroadcaster: root.container.resolve(AthleteSleepChangeBroadcaster.self),
                 statisticsService: root.container.resolve(StatisticsService.self),
-                sportRepository: root.container.resolve(SportRepository.self)
+                sportRepository: root.container.resolve(SportRepository.self),
+                calendarPlanningCoordinationService: root.container.resolve(CalendarPlanningCoordinationService.self)
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)

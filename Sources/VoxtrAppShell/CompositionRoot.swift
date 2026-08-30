@@ -8,6 +8,7 @@ import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -69,16 +70,19 @@ public final class CompositionRoot {
     /// Reminder Foundation: `AppSchemaV4` was then FROZEN and this
     /// default targeted `AppSchemaV5` ("5.0.0", 19 entities — activates
     /// `ActivityReminder.self`). Activity Reminder What/When: `AppSchemaV5`
-    /// is now itself FROZEN and this default targets `AppSchemaV6`
-    /// ("6.0.0", same 19 entities — adds `ActivityReminder.reminderText:
-    /// String?`), the current genuine version.
+    /// was then FROZEN and this default targeted `AppSchemaV6` ("6.0.0",
+    /// same 19 entities — adds `ActivityReminder.reminderText: String?`).
+    /// Calendar Planning Source V1: `AppSchemaV6` is now itself FROZEN
+    /// and this default targets `AppSchemaV7` ("7.0.0", 20 entities —
+    /// activates `CalendarPlanningMapping.self`), the current genuine
+    /// version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV6.self,
+            versionedSchema: AppSchemaV7.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
@@ -244,6 +248,23 @@ public final class CompositionRoot {
         )
         container.register(NotificationsPlanningCoordinationService.self) { notificationsPlanningCoordinationService }
         notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
+
+        // Calendar Planning Source V1: the one place
+        // CalendarPlanningMappingRepository (Calendar Planning),
+        // PlanningService, TrainingService, and AthleteRepository are
+        // used together — same placement rationale as every other
+        // cross-domain coordinator above. No EventBus subscription (no
+        // Planning/Training event needs a Calendar Planning reaction);
+        // reconciliation is invoked explicitly from ParentApp lifecycle/
+        // configuration points, never automatically here.
+        let calendarPlanningCoordinationService = CalendarPlanningCoordinationService(
+            mappingRepository: container.resolve(CalendarPlanningMappingRepository.self),
+            calendarEventProvider: EventKitCalendarEventProvider(),
+            planningService: container.resolve(PlanningService.self),
+            trainingService: container.resolve(TrainingService.self),
+            athleteRepository: container.resolve(AthleteRepository.self)
+        )
+        container.register(CalendarPlanningCoordinationService.self) { calendarPlanningCoordinationService }
 
         let log = VoxtrLog.logger(.appShell)
         log.info("Composition root built with \(ModuleRegistry.allModules().count) modules, schema of \(AppSchema.modelTypes.count) model types.")
