@@ -263,12 +263,29 @@ struct PersistenceRecoveryTests {
         // The new ActivityReminder table is genuinely usable against the
         // migrated store — proves the lightweight stage actually created
         // it, not merely that the container opened without throwing.
-        let activityReminderRepository = ActivityReminderRepository(modelContext: v5Container.mainContext)
-        let athleteId = AthleteId(rawValue: athleteRawId)
-        let plannedActivityId = PlannedActivityId(rawValue: plannedActivityRawId)
-        let reminder = try activityReminderRepository.insert(athleteId: athleteId, plannedActivityId: plannedActivityId, leadTimeMinutes: 30)
+        //
+        // Codemagic SwiftData cast-crash fix: v5Container's OWN
+        // registered schema (AppSchemaV5) declares this entity via the
+        // frozen AppSchemaV5.ActivityReminder type, not the live
+        // VoxtrNotificationsDomain.ActivityReminder type
+        // ActivityReminderRepository is permanently bound to (see that
+        // type's own doc comment). Inserting/fetching via the live type
+        // against a container whose own schema expects the nested type
+        // is exactly the Swift-type/entity-name mismatch that produces
+        // SwiftData's fatal "Failed to cast model
+        // VoxtrNotificationsDomain.ActivityReminder ... to
+        // ActivityReminder" — the same lesson
+        // existingV2StoreMigratesToV3Successfully (above) and
+        // existingV1StoreMigratesToV2Successfully (below) already
+        // establish for AthleteSettings/DailyStatus: construct directly
+        // against whatever type THIS container's own schema declares.
+        let reminder = AppSchemaV5.ActivityReminder(
+            athleteId: athleteRawId, plannedActivityId: plannedActivityRawId, leadTimeMinutes: 30
+        )
+        v5Container.mainContext.insert(reminder)
+        try v5Container.mainContext.save()
         #expect(reminder.leadTimeMinutes == 30)
-        #expect(try v5Container.mainContext.fetch(FetchDescriptor<ActivityReminder>()).count == 1)
+        #expect(try v5Container.mainContext.fetch(FetchDescriptor<AppSchemaV5.ActivityReminder>()).count == 1)
     }
 
     /// Item 23 (migration): Activity Reminder What/When adds
@@ -319,10 +336,27 @@ struct PersistenceRecoveryTests {
 
             // A PR #37-era reminder — the V5 shape has no reminderText
             // column at all.
-            let activityReminderRepository = ActivityReminderRepository(modelContext: v5Container.mainContext)
-            let legacyReminder = try activityReminderRepository.insert(
-                athleteId: athleteId, plannedActivityId: PlannedActivityId(rawValue: plannedActivity.id), leadTimeMinutes: 30
+            //
+            // Codemagic SwiftData cast-crash fix: this MUST be
+            // constructed directly against v5Container's OWN registered
+            // type for this entity — the frozen AppSchemaV5.ActivityReminder
+            // — never via ActivityReminderRepository, which is
+            // permanently bound to the LIVE VoxtrNotificationsDomain.ActivityReminder
+            // type. The original version of this test called the
+            // repository here, inserting a live-typed object into a
+            // context whose registered schema (AppSchemaV5) declares a
+            // DIFFERENT Swift type for the identical "ActivityReminder"
+            // entity name — exactly the mismatch behind SwiftData's
+            // fatal "Failed to cast model
+            // VoxtrNotificationsDomain.ActivityReminder ... to
+            // ActivityReminder". Matches the already-correct
+            // AppSchemaV2.AthleteSettings(...) precedent in
+            // existingV2StoreMigratesToV3Successfully, above.
+            let legacyReminder = AppSchemaV5.ActivityReminder(
+                athleteId: athleteRawId, plannedActivityId: plannedActivity.id, leadTimeMinutes: 30
             )
+            v5Container.mainContext.insert(legacyReminder)
+            try v5Container.mainContext.save()
             legacyReminderRawId = legacyReminder.id
         }
         // Container above goes out of scope — genuinely closed, matching
