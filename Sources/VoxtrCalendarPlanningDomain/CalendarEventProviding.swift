@@ -80,6 +80,18 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
     public let startDate: Date
     public let endDate: Date?
     public let isAllDay: Bool
+    /// Calendar V1 metadata inspection round: `notes`/`location`/`url`
+    /// below are DIAGNOSTIC ONLY — read-only display text for the
+    /// Alpha-only inspection surface (`CalendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar:)`),
+    /// never part of `externalSourceId` identity and never consulted for
+    /// any create/update/cancel decision reconciliation makes. They
+    /// exist so a Product Owner can see what a real external source
+    /// actually populates before any matching-rule model is designed —
+    /// this round explicitly does not implement matching/classification
+    /// from them.
+    public let notes: String?
+    public let location: String?
+    public let url: URL?
     /// The provider-neutral statement: this concrete external event
     /// belongs to a recurring series and therefore requires
     /// occurrence-based identity (see `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:event:)`).
@@ -106,7 +118,10 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         startDate: Date,
         endDate: Date?,
         isAllDay: Bool,
-        isRecurring: Bool
+        isRecurring: Bool,
+        notes: String? = nil,
+        location: String? = nil,
+        url: URL? = nil
     ) {
         self.eventIdentifier = eventIdentifier
         self.occurrenceDate = occurrenceDate ?? startDate
@@ -116,6 +131,9 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         self.endDate = endDate
         self.isAllDay = isAllDay
         self.isRecurring = isRecurring
+        self.notes = notes
+        self.location = location
+        self.url = url
     }
 }
 

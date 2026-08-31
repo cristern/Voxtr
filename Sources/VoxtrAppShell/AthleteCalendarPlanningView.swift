@@ -13,9 +13,17 @@ import VoxtrCalendarPlanningDomain
 /// mapping is enabled, permission/error state, and how to disconnect.
 public struct AthleteCalendarPlanningView: View {
     @Bindable var viewModel: AthleteCalendarPlanningViewModel
+    let athleteDisplayName: String
+    /// Calendar V1 recovery round: confirmation state for the
+    /// destructive "Remove imported activities" action — owned by the
+    /// View (presentation), never the ViewModel, matching this
+    /// codebase's own SwiftUI convention (e.g. `AthleteSettingsView`'s
+    /// own Archive confirmation).
+    @State private var isShowingRemoveConfirmation = false
 
-    public init(viewModel: AthleteCalendarPlanningViewModel) {
+    public init(viewModel: AthleteCalendarPlanningViewModel, athleteDisplayName: String) {
         self.viewModel = viewModel
+        self.athleteDisplayName = athleteDisplayName
     }
 
     public var body: some View {
@@ -43,6 +51,19 @@ public struct AthleteCalendarPlanningView: View {
         }
         .navigationTitle("Calendar")
         .onAppear { viewModel.load() }
+        .confirmationDialog(
+            CalendarPlanningStrings.removeImportedActivitiesConfirmationTitle,
+            isPresented: $isShowingRemoveConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button(CalendarPlanningStrings.removeImportedActivitiesButton, role: .destructive) {
+                viewModel.removeImportedActivities()
+            }
+            .accessibilityIdentifier("athleteCalendarPlanning.confirmRemoveImportedActivitiesButton")
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(CalendarPlanningStrings.removeImportedActivitiesConfirmationMessage(athleteDisplayName: athleteDisplayName))
+        }
     }
 
     @ViewBuilder
@@ -138,6 +159,22 @@ public struct AthleteCalendarPlanningView: View {
             VoxtrSectionHeading("Connected calendar")
         }
 
+        // Calendar V1 metadata inspection round: Alpha-only, clearly
+        // diagnostic — never presented as the final import-review UX.
+        // Kept in its own section, separate from every configuration/
+        // action row above and below, so it reads as "look, don't
+        // touch."
+        Section {
+            NavigationLink {
+                CalendarDiagnosticEventsView(viewModel: viewModel)
+            } label: {
+                Text(CalendarPlanningStrings.inspectEventsButton)
+            }
+            .accessibilityIdentifier("athleteCalendarPlanning.inspectEventsLink")
+        } footer: {
+            Text(CalendarPlanningStrings.inspectEventsExplanation)
+        }
+
         if mapping.isEnabled {
             Section {
                 if let outcome = viewModel.lastReconciliationOutcome {
@@ -151,6 +188,28 @@ public struct AthleteCalendarPlanningView: View {
                 }
                 .accessibilityIdentifier("athleteCalendarPlanning.syncNowButton")
             }
+        }
+
+        // Calendar V1 recovery round: deliberately its OWN section,
+        // separate from "Disconnect calendar" below — removing already-
+        // imported activities and disconnecting the calendar are
+        // different actions with different consequences (see this
+        // view's own doc comment and `CalendarPlanningCoordinationService.removeImportedActivities(for:removedBy:)`'s
+        // own doc comment); neither one implies the other, and a Parent
+        // may want either independently.
+        Section {
+            if let outcome = viewModel.lastCleanupOutcome {
+                Text(CalendarPlanningStrings.removeImportedActivitiesResult(
+                    (outcome.removed, outcome.preservedLogged, outcome.historicalWeeksSkipped, outcome.failed)
+                ))
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .accessibilityIdentifier("athleteCalendarPlanning.cleanupResultMessage")
+            }
+            Button(CalendarPlanningStrings.removeImportedActivitiesButton, role: .destructive) {
+                isShowingRemoveConfirmation = true
+            }
+            .accessibilityIdentifier("athleteCalendarPlanning.removeImportedActivitiesButton")
         }
 
         Section {

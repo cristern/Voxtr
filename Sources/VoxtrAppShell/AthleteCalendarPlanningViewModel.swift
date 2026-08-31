@@ -19,6 +19,16 @@ public final class AthleteCalendarPlanningViewModel {
     public let athleteId: AthleteId
     private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let sportRepository: SportRepository
+    /// Calendar V1 recovery round: the real, human Parent this screen's
+    /// destructive actions (removing imported activities, reopening a
+    /// committed week to do so) are attributed to — the same
+    /// `ActorId(rawValue: family.participant.id)` every other explicit,
+    /// Parent-initiated Planning mutation in this app already threads
+    /// through (see `WeeklyPlanningViewModel`/`ActivityDetailViewModel`'s
+    /// own `deletedBy`/`committedByActorId` construction sites). Never
+    /// `.system` — that sentinel is reserved for automatic reconciliation
+    /// side-effects, not a direct tap on a destructive button.
+    private let actorId: ActorId
 
     public private(set) var authorizationStatus: CalendarAuthorizationStatus = .notDetermined
     public private(set) var availableCalendars: [AvailableCalendar] = []
@@ -28,6 +38,16 @@ public final class AthleteCalendarPlanningViewModel {
     public private(set) var mapping: CalendarPlanningMapping?
     public private(set) var errorMessage: String?
     public private(set) var lastReconciliationOutcome: CalendarPlanningCoordinationService.ReconciliationOutcome?
+    /// Calendar V1 recovery round: set after `removeImportedActivities()`
+    /// completes — `nil` beforehand, and cleared again once a fresh
+    /// mapping is created, so a stale outcome from a previous mapping
+    /// can never be shown against a new one.
+    public private(set) var lastCleanupOutcome: CalendarPlanningCoordinationService.ImportedActivityCleanupOutcome?
+    /// Calendar V1 metadata inspection round: populated only by
+    /// `loadDiagnosticEvents()`, on demand — never fetched automatically,
+    /// never persisted, discarded like any other in-memory view state
+    /// once this screen is dismissed.
+    public private(set) var diagnosticEvents: [ExternalCalendarEvent] = []
 
     // New-mapping form state — only meaningful while `mapping == nil`
     // and `authorizationStatus == .authorized`.
@@ -38,11 +58,13 @@ public final class AthleteCalendarPlanningViewModel {
     public init(
         athleteId: AthleteId,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
-        sportRepository: SportRepository
+        sportRepository: SportRepository,
+        actorId: ActorId
     ) {
         self.athleteId = athleteId
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
+        self.actorId = actorId
     }
 
     public func load() {
@@ -143,6 +165,7 @@ public final class AthleteCalendarPlanningViewModel {
             try calendarPlanningCoordinationService.deleteMapping(mapping.calendarPlanningMappingId)
             self.mapping = nil
             lastReconciliationOutcome = nil
+            lastCleanupOutcome = nil
         } catch {
             errorMessage = CalendarPlanningStrings.genericError
         }
@@ -156,5 +179,38 @@ public final class AthleteCalendarPlanningViewModel {
         } catch {
             errorMessage = CalendarPlanningStrings.genericError
         }
+    }
+
+    /// Calendar V1 recovery: the explicit, confirmation-gated "remove
+    /// what this calendar already imported for this athlete" action —
+    /// deliberately separate from `disconnect()` (which, unchanged, still
+    /// never touches already-imported activities) and from `setEnabled(false)`
+    /// (which only stops future reconciliation). The View is responsible
+    /// for the actual confirmation prompt before calling this; this
+    /// method itself performs the destructive action once called. After
+    /// completion the mapping/reconciliation state is refreshed from the
+    /// coordination service, matching every other mutation on this
+    /// screen's own established "re-read canonical state, never assume"
+    /// pattern.
+    public func removeImportedActivities() {
+        guard let mapping else { return }
+        errorMessage = nil
+        do {
+            lastCleanupOutcome = try calendarPlanningCoordinationService.removeImportedActivities(for: mapping, removedBy: actorId)
+            self.mapping = try calendarPlanningCoordinationService.fetchMappings(forAthlete: athleteId).first
+        } catch {
+            errorMessage = CalendarPlanningStrings.genericError
+        }
+    }
+
+    /// Calendar V1 metadata inspection: fetches a small, bounded, never-
+    /// persisted preview of real upcoming events from this athlete's
+    /// connected calendar — Alpha-only diagnostic, see
+    /// `CalendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar:)`'s
+    /// own doc comment.
+    public func loadDiagnosticEvents() {
+        guard let mapping else { return }
+        errorMessage = nil
+        diagnosticEvents = (try? calendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)) ?? []
     }
 }

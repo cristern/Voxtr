@@ -1022,6 +1022,377 @@ struct CalendarPlanningCoordinationServiceTests {
         let remindersAfter = try reminderRepository.fetchAll(forPlannedActivity: plannedActivityId)
         #expect(remindersAfter.count == 1)
     }
+
+    // MARK: - removeImportedActivities (Calendar V1 recovery round)
+
+    // 1. cleanup removes eligible Calendar-imported activities for the
+    // selected athlete/calendar
+    @Test("removeImportedActivities removes an eligible future, unlogged imported activity for the mapping's athlete/calendar")
+    @MainActor
+    func cleanupRemovesEligibleImportedActivity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Oliver's Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        #expect(try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        ).count == 1)
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 1)
+        #expect(outcome.preservedLogged == 0)
+        #expect(outcome.historicalWeeksSkipped == 0)
+        #expect(outcome.failed == 0)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.isEmpty)
+    }
+
+    // 2. manually-created PlannedActivities remain
+    @Test("removeImportedActivities never touches a manually-created PlannedActivity (no externalSourceType)")
+    @MainActor
+    func cleanupPreservesManuallyCreatedActivity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
+        let manual = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Manually added session", localDate: today, timeZoneId: Self.timeZoneId
+        )
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+        #expect(outcome.removed == 0)
+
+        let stillThere = try fixture.planningService.fetchPlannedActivity(byId: manual.plannedActivityId)
+        #expect(stillThere != nil)
+    }
+
+    // 3. Calendar-imported activities belonging to another athlete remain
+    @Test("removeImportedActivities never touches another athlete's activity imported from the SAME calendar")
+    @MainActor
+    func cleanupPreservesOtherAthletesImportedActivity() throws {
+        let fixture = try makeFixture()
+        let athleteB = try fixture.athleteRepository.createAthlete(
+            workspaceId: WorkspaceId(), givenName: "Second Athlete",
+            birthDate: LocalDate(year: 2013, month: 5, day: 1), timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+        )
+        let mappingA = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingA.calendarPlanningMappingId, isEnabled: true)
+        let mappingB = try fixture.coordinationService.createMapping(
+            athleteId: athleteB.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingB.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        // Both mappings reference the same real EventKit calendar (the
+        // exact mixed-calendar scenario this round exists for) — both
+        // reconcile independently, so both athletes end up with their
+        // own imported copy.
+        _ = try fixture.coordinationService.reconcile(mappingA)
+        _ = try fixture.coordinationService.reconcile(mappingB)
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mappingA, removedBy: ActorId())
+        #expect(outcome.removed == 1)
+
+        let athleteAActivities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        let athleteBActivities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: athleteB.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(athleteAActivities.isEmpty)
+        #expect(athleteBActivities.count == 1)
+    }
+
+    // 4. activities imported from another calendar remain
+    @Test("removeImportedActivities never touches the SAME athlete's activity imported from a DIFFERENT calendar")
+    @MainActor
+    func cleanupPreservesOtherCalendarsImportedActivity() throws {
+        let fixture = try makeFixture()
+        let mappingA = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-A", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingA.calendarPlanningMappingId, isEnabled: true)
+        let mappingB = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-B", calendarTitle: "Oliver Football",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mappingB.calendarPlanningMappingId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-A"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-A", title: "From A",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        fixture.calendarProvider.eventsByCalendar["cal-B"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-B", title: "From B",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mappingA)
+        _ = try fixture.coordinationService.reconcile(mappingB)
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mappingA, removedBy: ActorId())
+        #expect(outcome.removed == 1)
+
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.title == "From B")
+    }
+
+    // 5. logged/proven Training is preserved
+    @Test("removeImportedActivities never removes an imported activity that already has a LoggedActivity")
+    @MainActor
+    func cleanupPreservesLoggedActivity() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let plannedActivityId = try #require(
+            try fixture.planningService.fetchPlannedActivities(
+                forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            ).first?.plannedActivityId
+        )
+        _ = try fixture.trainingService.logActivity(
+            athleteId: fixture.athleteId, plannedActivityId: plannedActivityId,
+            activityType: .individualTraining, title: "Practice", startedAt: start
+        )
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 0)
+        #expect(outcome.preservedLogged == 1)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.plannedActivityId == plannedActivityId)
+    }
+
+    // 6. committed eligible current/future week is handled through
+    // canonical Planning semantics
+    @Test("removeImportedActivities reopens a committed CURRENT/FUTURE week through PlanningService.reopenWeekPlan, then removes the activity")
+    @MainActor
+    func cleanupReopensCommittedCurrentWeek() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let activity = try #require(
+            try fixture.planningService.fetchPlannedActivities(
+                forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            ).first
+        )
+        let weekPlanId = WeekPlanId(rawValue: activity.weekPlanId)
+        let weekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlanId))
+        try fixture.planningService.commitWeekPlan(weekPlanId, expectedRevision: weekPlan.revision, committedBy: ActorId())
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlanId)).status == .committed)
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 1)
+        #expect(outcome.historicalWeeksSkipped == 0)
+        #expect(outcome.failed == 0)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.isEmpty)
+    }
+
+    // 7. historical Planning is never destructively reopened
+    @Test("removeImportedActivities never reopens a committed HISTORICAL week — the activity is left in place and counted as historicalWeeksSkipped")
+    @MainActor
+    func cleanupNeverReopensHistoricalWeek() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        // A historical week (well before Self.referenceDate's own week)
+        // seeded directly via the normal Planning mutation path, tagged
+        // with this mapping's own calendarIdentifier prefix — simulating
+        // an import that was never cleaned up before the week became
+        // historical and got committed.
+        let historicalWeekStart = LocalDate(year: 2025, month: 12, day: 1)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: historicalWeekStart)
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Old Practice", localDate: historicalWeekStart, timeZoneId: Self.timeZoneId,
+            externalSourceId: "cal-1|evt-old", externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        try fixture.planningService.commitWeekPlan(weekPlan.weekPlanId, expectedRevision: weekPlan.revision, committedBy: ActorId())
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 0)
+        #expect(outcome.historicalWeeksSkipped == 1)
+        #expect(outcome.failed == 0)
+        let stillCommitted = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlan.weekPlanId))
+        #expect(stillCommitted.status == .committed)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.plannedActivityId == activity.plannedActivityId)
+    }
+
+    // 8. repeated cleanup is safe/idempotent
+    @Test("Calling removeImportedActivities a second time is a safe no-op once everything eligible has already been removed")
+    @MainActor
+    func cleanupIsIdempotent() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+
+        let first = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+        let second = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(first.removed == 1)
+        #expect(second.removed == 0)
+        #expect(second.preservedLogged == 0)
+        #expect(second.historicalWeeksSkipped == 0)
+        #expect(second.failed == 0)
+    }
+
+    // MARK: - Diagnostic metadata inspection (Calendar V1 metadata round)
+
+    // 9. provider maps notes/location/URL correctly when present
+    @Test("fetchDiagnosticEvents returns notes/location/URL exactly as the provider supplies them, bounded and sorted, and these fields never affect identity")
+    @MainActor
+    func diagnosticEventsCarryNotesLocationURL() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        let sampleURL = try #require(URL(string: "https://spond.com/group/abc123"))
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Oliver's Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "Group: U10 Boys Football", location: "Main Pitch", url: sampleURL
+            )
+        ]
+
+        let events = try fixture.coordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)
+
+        #expect(events.count == 1)
+        #expect(events.first?.notes == "Group: U10 Boys Football")
+        #expect(events.first?.location == "Main Pitch")
+        #expect(events.first?.url == sampleURL)
+
+        // Identity is unaffected by notes/location/URL: an otherwise-
+        // identical event with DIFFERENT diagnostic metadata still
+        // reconciles as an UPDATE to the same PlannedActivity, never a
+        // second one.
+        _ = try fixture.coordinationService.reconcile(mapping)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-1", title: "Oliver's Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "Completely different notes", location: "A different field", url: nil
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 0)
+        #expect(outcome.updated == 1)
+    }
+
+    // 10. missing optional metadata is handled safely
+    @Test("fetchDiagnosticEvents handles an event with no notes/location/URL without error, and bounds/sorts results")
+    @MainActor
+    func diagnosticEventsHandleMissingMetadataAndBounding() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        // 12 events, deliberately unsorted and with no notes/location/url
+        // — more than diagnosticEventLimit (10), and none carrying the
+        // optional metadata at all.
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = (0..<12).map { index in
+            let eventStart = start.addingTimeInterval(TimeInterval(11 - index) * 3600)
+            return ExternalCalendarEvent(
+                eventIdentifier: "evt-\(index)", calendarIdentifier: "cal-1", title: "Practice \(index)",
+                startDate: eventStart, endDate: eventStart.addingTimeInterval(1800), isAllDay: false, isRecurring: false
+            )
+        }
+
+        let events = try fixture.coordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)
+
+        #expect(events.count == CalendarPlanningCoordinationService.diagnosticEventLimit)
+        #expect(events.allSatisfy { $0.notes == nil && $0.location == nil && $0.url == nil })
+        // Sorted by startDate ascending — the earliest 10 of the 12 are
+        // kept.
+        #expect(events == events.sorted { $0.startDate < $1.startDate })
+    }
 }
 
 private extension Date {

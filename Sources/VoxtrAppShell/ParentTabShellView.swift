@@ -232,7 +232,8 @@ public struct ParentTabShellView: View {
                         AthleteCalendarPlanningViewModel(
                             athleteId: athlete.athleteId,
                             calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                            sportRepository: sportRepository
+                            sportRepository: sportRepository,
+                            actorId: ActorId(rawValue: family.participant.id)
                         )
                     }
                 )

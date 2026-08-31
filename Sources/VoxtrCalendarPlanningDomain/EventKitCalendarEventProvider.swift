@@ -60,6 +60,15 @@ public final class EventKitCalendarEventProvider: CalendarEventProviding, @unche
                 startDate: event.startDate,
                 endDate: event.endDate,
                 isAllDay: event.isAllDay,
+                // Calendar V1 metadata inspection round: passed straight
+                // through as EventKit itself reports them, `nil` when
+                // absent — never inferred, never defaulted to a
+                // fabricated value. See `ExternalCalendarEvent`'s own
+                // doc comment: diagnostic-only, no identity/classification
+                // use anywhere in this codebase.
+                notes: event.notes,
+                location: event.location,
+                url: event.url,
                 // PR #39 review follow-up (final EventKit classification
                 // round): `hasRecurrenceRules` alone is NOT sufficient —
                 // Apple documents it only as "this calendar item has
