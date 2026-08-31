@@ -200,7 +200,7 @@ public struct AthleteCalendarPlanningView: View {
         Section {
             if let outcome = viewModel.lastCleanupOutcome {
                 Text(CalendarPlanningStrings.removeImportedActivitiesResult(
-                    (outcome.removed, outcome.preservedLogged, outcome.historicalWeeksSkipped, outcome.failed)
+                    (outcome.removed, outcome.preservedLogged, outcome.historicalWeeksSkipped, outcome.failed, outcome.lifecycleRestoreFailed)
                 ))
                 .font(VoxtrTypography.metadata)
                 .foregroundStyle(VoxtrColor.textSecondary)

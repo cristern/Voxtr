@@ -93,11 +93,16 @@ public enum CalendarPlanningStrings {
         )
     }
 
-    public static func removeImportedActivitiesResult(_ outcome: (removed: Int, preservedLogged: Int, historicalWeeksSkipped: Int, failed: Int)) -> String {
+    public static func removeImportedActivitiesResult(
+        _ outcome: (removed: Int, preservedLogged: Int, historicalWeeksSkipped: Int, failed: Int, lifecycleRestoreFailed: Int)
+    ) -> String {
         var parts = ["\(outcome.removed) removed"]
         if outcome.preservedLogged > 0 { parts.append("\(outcome.preservedLogged) kept (already logged)") }
         if outcome.historicalWeeksSkipped > 0 { parts.append("\(outcome.historicalWeeksSkipped) kept (past week)") }
         if outcome.failed > 0 { parts.append("\(outcome.failed) could not be removed") }
+        if outcome.lifecycleRestoreFailed > 0 {
+            parts.append("\(outcome.lifecycleRestoreFailed) week(s) need review (still open)")
+        }
         return parts.joined(separator: ", ")
     }
 

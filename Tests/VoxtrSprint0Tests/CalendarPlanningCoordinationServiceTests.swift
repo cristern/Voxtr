@@ -1044,9 +1044,13 @@ struct CalendarPlanningCoordinationServiceTests {
             )
         ]
         _ = try fixture.coordinationService.reconcile(mapping)
-        #expect(try fixture.planningService.fetchPlannedActivities(
-            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
-        ).count == 1)
+        let seeded = try #require(
+            try fixture.planningService.fetchPlannedActivities(
+                forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            ).first
+        )
+        let weekPlanId = WeekPlanId(rawValue: seeded.weekPlanId)
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlanId)).status == .draft)
 
         let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
 
@@ -1054,10 +1058,14 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(outcome.preservedLogged == 0)
         #expect(outcome.historicalWeeksSkipped == 0)
         #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
         let remaining = try fixture.planningService.fetchPlannedActivities(
             forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
         )
         #expect(remaining.isEmpty)
+        // A week that started as `.draft` must remain `.draft` — cleanup
+        // never mutates lifecycle state it did not itself change.
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlanId)).status == .draft)
     }
 
     // 2. manually-created PlannedActivities remain
@@ -1214,8 +1222,9 @@ struct CalendarPlanningCoordinationServiceTests {
     }
 
     // 6. committed eligible current/future week is handled through
-    // canonical Planning semantics
-    @Test("removeImportedActivities reopens a committed CURRENT/FUTURE week through PlanningService.reopenWeekPlan, then removes the activity")
+    // canonical Planning semantics, and its ORIGINAL committed lifecycle
+    // state is restored afterward — never silently left in `.draft`.
+    @Test("removeImportedActivities reopens a committed CURRENT week through PlanningService.reopenWeekPlan, removes the activity, then restores committed status")
     @MainActor
     func cleanupReopensCommittedCurrentWeek() throws {
         let fixture = try makeFixture()
@@ -1247,6 +1256,104 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(outcome.removed == 1)
         #expect(outcome.historicalWeeksSkipped == 0)
         #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.isEmpty)
+        // The week must end up back in `.committed` — reopening it to
+        // perform cleanup must never be an observable, permanent change
+        // to the Parent's own Planning lifecycle state.
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlanId)).status == .committed)
+    }
+
+    // 6b. same restoration contract for a committed FUTURE week (distinct
+    // from the current week case above — exercises a different
+    // `weekStart` branch of the same eligibility check).
+    @Test("removeImportedActivities reopens a committed FUTURE week, removes the activity, then restores committed status")
+    @MainActor
+    func cleanupRestoresCommittedFutureWeek() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(14 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-future", calendarIdentifier: "cal-1", title: "Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let activity = try #require(
+            try fixture.planningService.fetchPlannedActivities(
+                forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            ).first
+        )
+        let weekPlanId = WeekPlanId(rawValue: activity.weekPlanId)
+        let weekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlanId))
+        #expect(weekPlan.weekStart > Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId))
+        try fixture.planningService.commitWeekPlan(weekPlanId, expectedRevision: weekPlan.revision, committedBy: ActorId())
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 1)
+        #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlanId)).status == .committed)
+    }
+
+    // 6c. a committed week containing MULTIPLE eligible imported
+    // activities is reopened and recommitted exactly ONCE — not once per
+    // activity. `WeekPlan.revision` is used as an indirect witness: one
+    // reopen (+1) and one recommit (+1) yields exactly +2 regardless of
+    // how many activities were removed in between (`deletePlannedActivity`
+    // never itself advances `revision`).
+    @Test("removeImportedActivities reopens/restores a committed week exactly once even with multiple eligible imported activities in it")
+    @MainActor
+    func cleanupHandlesMultipleActivitiesInOneCommittedWeekWithSingleReopenRestore() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        try fixture.coordinationService.setMappingEnabled(mapping.calendarPlanningMappingId, isEnabled: true)
+        let start1 = Self.referenceDate.addingTimeInterval(3600)
+        let start2 = Self.referenceDate.addingTimeInterval(2 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-a", calendarIdentifier: "cal-1", title: "Practice A",
+                startDate: start1, endDate: start1.addingTimeInterval(1800), isAllDay: false, isRecurring: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-b", calendarIdentifier: "cal-1", title: "Practice B",
+                startDate: start2, endDate: start2.addingTimeInterval(1800), isAllDay: false, isRecurring: false
+            )
+        ]
+        _ = try fixture.coordinationService.reconcile(mapping)
+        let seededActivities = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(seededActivities.count == 2)
+        let weekPlanId = WeekPlanId(rawValue: try #require(seededActivities.first).weekPlanId)
+        #expect(seededActivities.allSatisfy { $0.weekPlanId == weekPlanId.rawValue })
+        let weekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlanId))
+        let committedRevision = try fixture.planningService.commitWeekPlan(
+            weekPlanId, expectedRevision: weekPlan.revision, committedBy: ActorId()
+        ).revision
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 2)
+        #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
+        let finalWeekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlanId))
+        #expect(finalWeekPlan.status == .committed)
+        // Exactly one reopen (+1) and one recommit (+1) — never one pair
+        // per activity.
+        #expect(finalWeekPlan.revision == committedRevision + 2)
         let remaining = try fixture.planningService.fetchPlannedActivities(
             forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
         )
@@ -1281,6 +1388,7 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(outcome.removed == 0)
         #expect(outcome.historicalWeeksSkipped == 1)
         #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
         let stillCommitted = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlan.weekPlanId))
         #expect(stillCommitted.status == .committed)
         let remaining = try fixture.planningService.fetchPlannedActivities(

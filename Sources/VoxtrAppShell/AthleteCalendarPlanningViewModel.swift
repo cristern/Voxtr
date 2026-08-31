@@ -208,9 +208,21 @@ public final class AthleteCalendarPlanningViewModel {
     /// connected calendar — Alpha-only diagnostic, see
     /// `CalendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar:)`'s
     /// own doc comment.
+    ///
+    /// Review follow-up: a provider failure (e.g. the calendar was
+    /// removed/unresolvable) must not be indistinguishable from a
+    /// legitimately empty calendar. On failure, stale events are cleared
+    /// and this screen's existing error state is surfaced — no new error
+    /// taxonomy, same `errorMessage` every other method on this class
+    /// already uses.
     public func loadDiagnosticEvents() {
         guard let mapping else { return }
         errorMessage = nil
-        diagnosticEvents = (try? calendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)) ?? []
+        do {
+            diagnosticEvents = try calendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)
+        } catch {
+            diagnosticEvents = []
+            errorMessage = CalendarPlanningStrings.genericError
+        }
     }
 }
