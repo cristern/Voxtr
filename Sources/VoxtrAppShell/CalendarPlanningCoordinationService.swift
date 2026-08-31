@@ -225,11 +225,15 @@ public final class CalendarPlanningCoordinationService {
         /// proven Training truth is never erased by this action, exactly
         /// like automatic reconciliation's own `cancelDisappearedActivities`.
         public let preservedLogged: Int
-        /// Left untouched because its `WeekPlan` is committed AND
-        /// historical (`weekStart` before the current week) — reopening a
-        /// historical week is never permitted (see `WeekPlan.reopen`'s own
-        /// `.historicalWeekNotReopenable` guard), so this action does not
-        /// attempt it. Reported separately from `failed` because it is an
+        /// Left untouched because its `WeekPlan` is historical (`weekStart`
+        /// before the current week) — regardless of whether that historical
+        /// week is `.committed` or `.draft`. This action operates only on
+        /// current/future Planning; a historical `.committed` week is never
+        /// reopened (see `WeekPlan.reopen`'s own `.historicalWeekNotReopenable`
+        /// guard), and a historical `.draft` week is left equally untouched
+        /// by policy, not merely by that guard — both cases are the SAME
+        /// "this is no longer current/future Planning" outcome, reported
+        /// together. Reported separately from `failed` because it is an
         /// expected, permanent-for-this-action outcome, not an error.
         public let historicalWeeksSkipped: Int
         /// Left untouched because of an unexpected failure (e.g. a
@@ -331,18 +335,27 @@ public final class CalendarPlanningCoordinationService {
                 failed += activities.count
                 continue
             }
-            // 2. Remember whether it was originally committed.
+
+            // Review follow-up (BLOCKER): this action operates only on
+            // current/future Planning — a historical week is never
+            // destructively cleaned up, regardless of whether it is
+            // `.committed` or `.draft`. This check runs BEFORE any
+            // status/lifecycle branching below, so a historical `.draft`
+            // week can never fall through to the delete loop the way a
+            // status-first check would allow. Both historical shapes are
+            // the same outcome, reported together — no separate behavior
+            // for historical draft vs. historical committed.
+            guard weekPlan.weekStart >= currentWeekStart else {
+                historicalWeeksSkipped += activities.count
+                continue
+            }
+
+            // 2. Remember whether it was originally committed (current/
+            // future weeks only, by this point).
             let wasOriginallyCommitted = weekPlan.status == .committed
 
             if wasOriginallyCommitted {
-                // 3. Historical committed weeks are never reopened, by
-                // design — this action cannot clean these up, reported
-                // honestly rather than silently skipped.
-                guard weekPlan.weekStart >= currentWeekStart else {
-                    historicalWeeksSkipped += activities.count
-                    continue
-                }
-                // 4. Current/future committed: reopen ONCE for this week.
+                // 3. Current/future committed: reopen ONCE for this week.
                 do {
                     try planningService.reopenWeekPlan(
                         weekPlanId, expectedRevision: weekPlan.revision, reopenedBy: actorId, currentWeekStart: currentWeekStart
@@ -353,7 +366,7 @@ public final class CalendarPlanningCoordinationService {
                 }
             }
 
-            // 5. Process all eligible deletes for this week.
+            // 4. Process all eligible deletes for this week.
             var weekRemoved = 0
             for activity in activities {
                 do {
@@ -368,7 +381,7 @@ public final class CalendarPlanningCoordinationService {
             removed += weekRemoved
 
             guard wasOriginallyCommitted else { continue }
-            // 6. Restore the week's original committed state through the
+            // 5. Restore the week's original committed state through the
             // canonical PlanningService — never left silently in `.draft`.
             // The revision after reopen + N deletes is never assumed here:
             // `deletePlannedActivity` does not itself advance
