@@ -92,6 +92,28 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
     public let notes: String?
     public let location: String?
     public let url: URL?
+    /// Structured-location diagnostic round: `EKEvent.structuredLocation?.title`
+    /// — DIAGNOSTIC ONLY, same rule as `notes`/`location`/`url` above.
+    /// Added specifically to determine whether a real external source
+    /// (e.g. Spond, via a subscribed iOS calendar) exposes location
+    /// through `EKEvent.structuredLocation` rather than (or in addition
+    /// to) the plain `EKEvent.location` string this type already carries
+    /// as `location`. Never synthesized from `location` or vice versa —
+    /// each stays exactly what EventKit itself reports, independently
+    /// `nil` when EventKit reports no structured location. Never part of
+    /// `externalSourceId` identity, never consulted by reconciliation,
+    /// never used for athlete/Sport/Activity Type classification.
+    public let structuredLocationTitle: String?
+    /// Structured-location diagnostic round: whether `EKEvent.structuredLocation?.geoLocation`
+    /// exists — deliberately a presence-only boolean, never the raw
+    /// coordinates themselves. This Alpha diagnostic surface exists to
+    /// answer "does Spond location data reach EventKit as structured
+    /// geodata," not to display or retain a Parent's/athlete's precise
+    /// location; exposing latitude/longitude would expand this surface's
+    /// privacy footprint without adding evidence this investigation
+    /// needs. `false` whenever `structuredLocation` itself is `nil` or
+    /// carries no `geoLocation` — never inferred from any other field.
+    public let hasStructuredLocationCoordinates: Bool
     /// The provider-neutral statement: this concrete external event
     /// belongs to a recurring series and therefore requires
     /// occurrence-based identity (see `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:event:)`).
@@ -121,7 +143,9 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         isRecurring: Bool,
         notes: String? = nil,
         location: String? = nil,
-        url: URL? = nil
+        url: URL? = nil,
+        structuredLocationTitle: String? = nil,
+        hasStructuredLocationCoordinates: Bool = false
     ) {
         self.eventIdentifier = eventIdentifier
         self.occurrenceDate = occurrenceDate ?? startDate
@@ -134,6 +158,8 @@ public struct ExternalCalendarEvent: Sendable, Equatable {
         self.notes = notes
         self.location = location
         self.url = url
+        self.structuredLocationTitle = structuredLocationTitle
+        self.hasStructuredLocationCoordinates = hasStructuredLocationCoordinates
     }
 }
 

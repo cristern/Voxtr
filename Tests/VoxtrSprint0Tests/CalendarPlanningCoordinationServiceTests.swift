@@ -1541,9 +1541,84 @@ struct CalendarPlanningCoordinationServiceTests {
 
         #expect(events.count == CalendarPlanningCoordinationService.diagnosticEventLimit)
         #expect(events.allSatisfy { $0.notes == nil && $0.location == nil && $0.url == nil })
+        // Structured-location diagnostic round: an event with no
+        // structured location at all must be handled exactly as safely
+        // as missing notes/location/URL — nil title, coordinates reported
+        // as unavailable, never synthesized from anything else.
+        #expect(events.allSatisfy { $0.structuredLocationTitle == nil && $0.hasStructuredLocationCoordinates == false })
         // Sorted by startDate ascending — the earliest 10 of the 12 are
         // kept.
         #expect(events == events.sorted { $0.startDate < $1.startDate })
+    }
+
+    // 11. structured location maps separately from plain location, and
+    // never affects identity
+    @Test("fetchDiagnosticEvents exposes structuredLocationTitle/hasStructuredLocationCoordinates independently from plain location, and these fields never affect identity")
+    @MainActor
+    func diagnosticEventsCarryStructuredLocationSeparatelyFromPlainLocation() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        // Two events, deliberately different in shape: one carries BOTH a
+        // plain `location` string AND a structured location with
+        // coordinates (the case this round exists to detect — Spond
+        // location reaching EventKit as structured geodata); the other
+        // carries only a plain `location`, no structured location at all
+        // — proving the two are read independently, never one inferred
+        // from the other.
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-structured", calendarIdentifier: "cal-1", title: "Oliver's Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                location: "Main Pitch", structuredLocationTitle: "Voss Ishall Arena", hasStructuredLocationCoordinates: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-plain-only", calendarIdentifier: "cal-1", title: "Community Practice",
+                startDate: start.addingTimeInterval(7200), endDate: start.addingTimeInterval(10800), isAllDay: false, isRecurring: false,
+                location: "Community Center"
+            )
+        ]
+
+        let events = try fixture.coordinationService.fetchDiagnosticEvents(inCalendar: mapping.calendarIdentifier)
+
+        #expect(events.count == 2)
+        let structured = try #require(events.first { $0.eventIdentifier == "evt-structured" })
+        #expect(structured.location == "Main Pitch")
+        #expect(structured.structuredLocationTitle == "Voss Ishall Arena")
+        #expect(structured.hasStructuredLocationCoordinates == true)
+        let plainOnly = try #require(events.first { $0.eventIdentifier == "evt-plain-only" })
+        #expect(plainOnly.location == "Community Center")
+        #expect(plainOnly.structuredLocationTitle == nil)
+        #expect(plainOnly.hasStructuredLocationCoordinates == false)
+
+        // Identity is unaffected by structured location, exactly like
+        // notes/location/URL above: an otherwise-identical event with a
+        // DIFFERENT structured location still reconciles as an UPDATE to
+        // the same PlannedActivity, never a second one.
+        _ = try fixture.coordinationService.reconcile(mapping)
+        fixture.calendarProvider.eventsByCalendar["cal-1"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-structured", calendarIdentifier: "cal-1", title: "Oliver's Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                location: "Main Pitch", structuredLocationTitle: "A Completely Different Arena", hasStructuredLocationCoordinates: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-plain-only", calendarIdentifier: "cal-1", title: "Community Practice",
+                startDate: start.addingTimeInterval(7200), endDate: start.addingTimeInterval(10800), isAllDay: false, isRecurring: false,
+                location: "Community Center"
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(mapping)
+        #expect(outcome.created == 0)
+        // Both previously-imported events still match by externalSourceId
+        // (identity is entirely eventIdentifier/occurrenceDate-based, per
+        // `externalSourceId(calendarIdentifier:event:)`), so both are
+        // UPDATEs — never a third/fourth PlannedActivity created because
+        // structured location changed.
+        #expect(outcome.updated == 2)
     }
 }
 
