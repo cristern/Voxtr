@@ -177,6 +177,13 @@ public struct FamilyHomeContentView: View {
     /// rationale as `sleepCoordinationService` above.
     private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let sportRepository: SportRepository
+    /// Codemagic follow-up: was already an init parameter (used inline to
+    /// build `FamilyHomeViewModel` below) but never retained as a stored
+    /// property, even though `athleteOverview(for:)` passes it into every
+    /// `HomeDashboardView` this view constructs (needed there to build
+    /// that screen's own "Manage Athletes" `FamilyCalendarSourcesViewModel`
+    /// — see `HomeDashboardView`'s own `athleteRepository` doc comment).
+    private let athleteRepository: AthleteRepository
 
     public init(
         family: RestoredFamily,
@@ -211,6 +218,7 @@ public struct FamilyHomeContentView: View {
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
+        self.athleteRepository = athleteRepository
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
