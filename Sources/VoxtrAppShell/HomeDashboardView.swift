@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrAthleteDomain
 import VoxtrCoachingDomain
 import VoxtrMotivationDomain
 import VoxtrPlanningDomain
