@@ -113,6 +113,39 @@ public final class CalendarPlanningCoordinationService {
         try calendarEventProvider.availableCalendars()
     }
 
+    // MARK: - Alpha diagnostic (metadata inspection only)
+
+    /// Calendar V1 metadata inspection: how far forward, and how many
+    /// events, the Alpha-only diagnostic surface below reads — smaller
+    /// and separate from `reconciliationWindowDays`/no limit, so this
+    /// stays a calm, bounded, quick-to-read list rather than a second
+    /// import surface. Named, explicit policy, matching this type's own
+    /// established "no scattered magic numbers" convention.
+    public static let diagnosticEventHorizonDays = 14
+    public static let diagnosticEventLimit = 10
+
+    /// Calendar V1 metadata inspection: a small, bounded, READ-ONLY look
+    /// at real upcoming events in `calendarIdentifier` — never persisted
+    /// anywhere by this method or its caller, never used for identity or
+    /// classification, and never itself a Planning mutation. Exists
+    /// solely so a Product Owner can see what metadata a real external
+    /// source (e.g. Spond, via a subscribed iOS calendar) actually
+    /// populates per event — notes/location/URL in particular — before
+    /// any event-classification/matching-rule model is designed. Reuses
+    /// the exact same `CalendarEventProviding.events(inCalendar:from:to:)`
+    /// call reconciliation itself uses; this is not a second read path,
+    /// only a smaller, bounded window over the same provider boundary.
+    public func fetchDiagnosticEvents(inCalendar calendarIdentifier: String) throws -> [ExternalCalendarEvent] {
+        let now = dateProvider.now
+        guard let windowEnd = Calendar(identifier: .gregorian).date(
+            byAdding: .day, value: Self.diagnosticEventHorizonDays, to: now
+        ) else {
+            return []
+        }
+        let events = try calendarEventProvider.events(inCalendar: calendarIdentifier, from: now, to: windowEnd)
+        return Array(events.sorted { $0.startDate < $1.startDate }.prefix(Self.diagnosticEventLimit))
+    }
+
     // MARK: - Mapping configuration
 
     public func fetchMappings(forAthlete athleteId: AthleteId) throws -> [CalendarPlanningMapping] {
@@ -166,10 +199,143 @@ public final class CalendarPlanningCoordinationService {
     /// calendar) — never touches any `PlannedActivity` already imported
     /// through it. Those remain normal Planning data, editable/deletable
     /// through the normal Planning UI like anything else; disconnecting
-    /// a source never retroactively erases what it already created.
+    /// a source never retroactively erases what it already created. To
+    /// also remove what it already created, see
+    /// `removeImportedActivities(for:removedBy:)` below — a deliberately
+    /// separate, explicit action, never implied by disconnecting or
+    /// disabling.
     public func deleteMapping(_ mappingId: CalendarPlanningMappingId) throws {
         guard let mapping = try mappingRepository.fetch(byId: mappingId) else { return }
         try mappingRepository.delete(mapping)
+    }
+
+    // MARK: - Recovery
+
+    /// Calendar V1 recovery: outcome of an explicit, Parent-triggered
+    /// "remove everything this mapping imported" action — distinct from
+    /// `ReconciliationOutcome`, which reports what an automatic
+    /// reconciliation run did. Never a silent success: every candidate
+    /// activity ends up in exactly one bucket below, so a caller can
+    /// always tell partial completion from full completion.
+    public struct ImportedActivityCleanupOutcome: Sendable, Equatable {
+        /// Deleted through the normal `PlanningService.deletePlannedActivity`
+        /// path.
+        public let removed: Int
+        /// Left untouched because it already has a `LoggedActivity` —
+        /// proven Training truth is never erased by this action, exactly
+        /// like automatic reconciliation's own `cancelDisappearedActivities`.
+        public let preservedLogged: Int
+        /// Left untouched because its `WeekPlan` is committed AND
+        /// historical (`weekStart` before the current week) — reopening a
+        /// historical week is never permitted (see `WeekPlan.reopen`'s own
+        /// `.historicalWeekNotReopenable` guard), so this action does not
+        /// attempt it. Reported separately from `failed` because it is an
+        /// expected, permanent-for-this-action outcome, not an error.
+        public let historicalWeeksSkipped: Int
+        /// Left untouched because of an unexpected failure (e.g. a
+        /// concurrent revision conflict) reopening or deleting. Distinct
+        /// from `historicalWeeksSkipped` so a caller can tell "this can
+        /// never be cleaned up automatically" from "something went wrong,
+        /// try again."
+        public let failed: Int
+    }
+
+    /// Calendar V1 recovery: removes every currently-linked, not-yet-
+    /// logged `PlannedActivity` this ONE mapping (this athlete + this
+    /// external calendar) has ever imported — the explicit "undo what a
+    /// wrongly-configured connection already created" action a Parent
+    /// reaches for after fixing (or before removing) a mapping that
+    /// pulled in another child's activities from a mixed external
+    /// calendar. Does not disable or delete the mapping itself — call
+    /// `setMappingEnabled`/`deleteMapping` separately if that's also
+    /// wanted; kept deliberately separate so neither one implies the
+    /// other (see `deleteMapping`'s own doc comment).
+    ///
+    /// SCOPING (identity constraint verified against actual repository
+    /// declarations before writing this method): `PlannedActivity` has no
+    /// persisted `CalendarPlanningMappingId` of its own — provenance is
+    /// only ever the generic `externalSourceId`/`externalSourceType` pair
+    /// `RecurringPlannedActivity` already established, exactly as
+    /// `cancelDisappearedActivities` above already relies on. The same
+    /// three canonical facts that method already uses are sufficient and
+    /// necessary to safely scope this action too, with no new persisted
+    /// ID:
+    ///   1. `athleteId == mapping.athleteId` — every `PlannedActivity`
+    ///      already carries its own canonical, stable owning athlete;
+    ///   2. `externalSourceType == Self.externalSourceType` — excludes
+    ///      every manually-created activity (`nil`) AND every Recurring-
+    ///      Planned-Activity-materialized one (`"recurringPlannedActivity"`)
+    ///      in one filter, via `PlanningService.fetchPlannedActivities(forAthlete:externalSourceType:)`;
+    ///   3. `externalSourceId?.hasPrefix("\(mapping.calendarIdentifier)|")` —
+    ///      excludes every activity imported by a DIFFERENT calendar
+    ///      mapping (a different `calendarIdentifier` never produces this
+    ///      exact prefix; see `externalSourceId(calendarIdentifier:event:)`'s
+    ///      own doc comment for the composite format this prefix always
+    ///      starts with, for both the recurring and non-recurring case).
+    /// Together these three facts can only ever match activities this
+    /// exact athlete+calendar combination created — never another
+    /// athlete's, never another calendar's, never a manually-created row.
+    @discardableResult
+    public func removeImportedActivities(for mapping: CalendarPlanningMapping, removedBy actorId: ActorId) throws -> ImportedActivityCleanupOutcome {
+        let athleteId = AthleteId(rawValue: mapping.athleteId)
+        let calendarPrefix = "\(mapping.calendarIdentifier)|"
+        let athlete = try athleteRepository.fetchAthlete(byId: athleteId)
+        let timeZoneId = athlete?.timeZoneId ?? TimeZoneId(rawValue: TimeZone.current.identifier)
+        let currentWeekStart = Self.localDateAndTime(for: dateProvider.now, in: timeZoneId).0.startOfWeek
+
+        let allLinked = try planningService.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: Self.externalSourceType)
+        let candidates = allLinked.filter { activity in
+            guard let sourceId = activity.externalSourceId else { return false }
+            return sourceId.hasPrefix(calendarPrefix)
+        }
+
+        var removed = 0
+        var preservedLogged = 0
+        var historicalWeeksSkipped = 0
+        var failed = 0
+
+        for activity in candidates {
+            // Planning proposes; Training proves. Proven training truth is
+            // never erased by this action, same rule
+            // `cancelDisappearedActivities` already enforces.
+            let logged = try trainingService.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+            guard logged.isEmpty else {
+                preservedLogged += 1
+                continue
+            }
+            let weekPlanId = WeekPlanId(rawValue: activity.weekPlanId)
+            guard let weekPlan = try planningService.fetchWeekPlan(byId: weekPlanId) else {
+                failed += 1
+                continue
+            }
+            if weekPlan.status == .committed {
+                guard weekPlan.weekStart >= currentWeekStart else {
+                    // Historical week — never reopened, by design. Left in
+                    // place; this is the one case this action cannot clean
+                    // up, reported honestly rather than silently skipped.
+                    historicalWeeksSkipped += 1
+                    continue
+                }
+                do {
+                    try planningService.reopenWeekPlan(
+                        weekPlanId, expectedRevision: weekPlan.revision, reopenedBy: actorId, currentWeekStart: currentWeekStart
+                    )
+                } catch {
+                    failed += 1
+                    continue
+                }
+            }
+            do {
+                try planningService.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlanId, deletedBy: actorId)
+                removed += 1
+            } catch {
+                failed += 1
+            }
+        }
+
+        return ImportedActivityCleanupOutcome(
+            removed: removed, preservedLogged: preservedLogged, historicalWeeksSkipped: historicalWeeksSkipped, failed: failed
+        )
     }
 
     // MARK: - Reconciliation

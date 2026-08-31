@@ -515,7 +515,7 @@ struct AthleteSettingsView: View {
             // this being genuinely multi-field.
             Section {
                 NavigationLink {
-                    AthleteCalendarPlanningView(viewModel: calendarPlanningViewModel)
+                    AthleteCalendarPlanningView(viewModel: calendarPlanningViewModel, athleteDisplayName: athlete.givenName)
                 } label: {
                     Text("Calendar")
                 }

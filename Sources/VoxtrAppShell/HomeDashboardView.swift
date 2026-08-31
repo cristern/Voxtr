@@ -308,7 +308,8 @@ public struct HomeDashboardView: View {
                         AthleteCalendarPlanningViewModel(
                             athleteId: athlete.athleteId,
                             calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                            sportRepository: sportRepository
+                            sportRepository: sportRepository,
+                            actorId: committedByActorId
                         )
                     }
                 )
