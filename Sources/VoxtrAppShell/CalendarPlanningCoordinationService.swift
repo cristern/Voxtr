@@ -631,7 +631,17 @@ public final class CalendarPlanningCoordinationService {
             startLocalTime: startLocalTime,
             plannedDurationMinutes: durationMinutes,
             externalSourceId: item.externalEventKey,
-            externalSourceType: Self.externalSourceType
+            externalSourceType: Self.externalSourceType,
+            // Creation-time preservation only: the external event owns
+            // this Vǫxtr row's schedule context at the moment of import,
+            // exactly as supplied by the provider — never fabricated,
+            // trimmed, or rewritten. Step 2's adoption path above and
+            // `applyReconciledEvent`'s own reconciliation UPDATE
+            // deliberately do NOT do this (see their own doc comments) —
+            // this is the ONE place notes/location are ever seeded from
+            // an `ExternalCalendarEvent`.
+            notes: item.event.notes,
+            location: item.event.location
         )
 
         try importDecisionRepository.insert(
