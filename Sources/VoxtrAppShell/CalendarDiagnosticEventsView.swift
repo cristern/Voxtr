@@ -7,10 +7,12 @@ import VoxtrCalendarPlanningDomain
 /// review UX (see `AthleteCalendarPlanningView`'s own doc comment on the
 /// row that pushes this screen). Shows exactly what
 /// `CalendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar:)`
-/// returns: title, date/time, notes, location, URL — plain display text
-/// a Product Owner can read to judge whether a real external source
-/// (e.g. Spond) provides a repeatable per-group signal, never used for
-/// identity or classification anywhere in this codebase. Deliberately
+/// returns: title, date/time, notes, location, URL, and — structured-
+/// location diagnostic round — the plain `location` string shown
+/// separately from `EKEvent.structuredLocation`'s own title and a
+/// presence-only "Coordinates available" indicator, so a Product Owner
+/// can tell which of the two EventKit exposes for a real event, never
+/// used for identity or classification anywhere in this codebase. Deliberately
 /// omits `eventIdentifier`/`occurrenceDate`/raw internal identifiers from
 /// this normal presentation — they did not materially help this
 /// investigation, so this stays the simplest useful surface rather than
@@ -57,6 +59,20 @@ struct CalendarDiagnosticEventsView: View {
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
             }
+            // Structured-location diagnostic round: shown separately from
+            // `Location` above — never merged/synthesized — so a Product
+            // Owner can tell exactly which of `EKEvent.location` and
+            // `EKEvent.structuredLocation` a real event actually
+            // populates. Coordinates themselves are never displayed, only
+            // whether EventKit reports them existing.
+            if let structuredLocationTitle = event.structuredLocationTitle, !structuredLocationTitle.isEmpty {
+                Text("Structured location: \(structuredLocationTitle)")
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+            Text("Coordinates available: \(event.hasStructuredLocationCoordinates ? "Yes" : "No")")
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
             if let url = event.url {
                 Text("URL: \(url.absoluteString)")
                     .font(VoxtrTypography.metadata)

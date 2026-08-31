@@ -1,3 +1,4 @@
+import CoreLocation
 import EventKit
 import Foundation
 
@@ -86,7 +87,20 @@ public final class EventKitCalendarEventProvider: CalendarEventProviding, @unche
                 // use anywhere in this codebase.
                 notes: event.notes,
                 location: event.location,
-                url: event.url
+                url: event.url,
+                // Structured-location diagnostic round: `event.location`
+                // above is left exactly as EventKit reports it — never
+                // touched, never synthesized from `structuredLocation`.
+                // These two fields are read independently, purely to
+                // determine whether a real external source (e.g. Spond)
+                // also exposes location through `EKEvent.structuredLocation`.
+                // `geoLocation` presence is reported as a plain boolean,
+                // never the raw `CLLocation` itself — this Alpha
+                // diagnostic surface has no need to display or retain
+                // precise coordinates, only to answer "does this
+                // structured geodata exist."
+                structuredLocationTitle: event.structuredLocation?.title,
+                hasStructuredLocationCoordinates: event.structuredLocation?.geoLocation != nil
             )
         }
     }
