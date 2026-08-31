@@ -8,6 +8,7 @@ import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrCalendarPlanningDomain
+import VoxtrCoreReferenceData
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -76,6 +77,10 @@ struct CalendarPlanningCoordinationServiceTests {
         let legacyMappingRepository: CalendarPlanningMappingRepository
         let calendarProvider: FakeCalendarEventProvider
         let coordinationService: CalendarPlanningCoordinationService
+        /// Family isolation test only — `CalendarImportReviewViewModel`'s
+        /// third constructor dependency; not used by any coordination-
+        /// service-level test in this file.
+        let sportRepository: SportRepository
         let workspaceId: WorkspaceId
         let athleteId: AthleteId
     }
@@ -89,6 +94,7 @@ struct CalendarPlanningCoordinationServiceTests {
         let sourceRepository = ExternalPlanningSourceRepository(modelContext: container.mainContext)
         let importDecisionRepository = CalendarImportDecisionRepository(modelContext: container.mainContext)
         let legacyMappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+        let sportRepository = SportRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
         let calendarProvider = FakeCalendarEventProvider()
@@ -119,6 +125,7 @@ struct CalendarPlanningCoordinationServiceTests {
             legacyMappingRepository: legacyMappingRepository,
             calendarProvider: calendarProvider,
             coordinationService: coordinationService,
+            sportRepository: sportRepository,
             workspaceId: workspaceId,
             athleteId: athlete.athleteId
         )
@@ -910,6 +917,114 @@ struct CalendarPlanningCoordinationServiceTests {
             )
         }
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+    }
+
+    // MARK: - Family isolation (Lead Review follow-up: classifyAndImport must never let a source's events become Planning for a different workspace's athlete)
+
+    @Test("classifyAndImport rejects an athlete belonging to a DIFFERENT workspace than the source, throwing athleteOutsideSourceWorkspace and creating neither a PlannedActivity nor a CalendarImportDecision")
+    @MainActor
+    func classifyAndImportRejectsAthleteOutsideSourceWorkspace() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let otherWorkspaceAthleteId = try addSecondAthlete(fixture, name: "Other Family Child", workspaceId: otherWorkspaceId)
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        #expect(throws: CalendarPlanningCoordinationError.athleteOutsideSourceWorkspace) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: otherWorkspaceAthleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+        // Still fully pending — the rejected attempt left nothing behind.
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).count == 1)
+    }
+
+    @Test("An existing same-key PlannedActivity owned by an athlete from a DIFFERENT workspace is never adopted — the workspace guard runs BEFORE the existing-activity adoption path")
+    @MainActor
+    func existingActivityFromDifferentWorkspaceIsNeverAdopted() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let otherWorkspaceAthleteId = try addSecondAthlete(fixture, name: "Other Family Child", workspaceId: otherWorkspaceId)
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        // An existing PlannedActivity already carries this exact external
+        // event key, but is owned by an athlete from the OTHER workspace
+        // — e.g. that OTHER family's own source happened to produce the
+        // same externalContainerIdentifier + eventIdentifier (see the
+        // "same calendar identifier in two workspaces" isolation test
+        // above for why this can genuinely occur).
+        let otherToday = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let otherWeekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: otherWorkspaceAthleteId, weekStart: otherToday)
+        let otherWorkspaceActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: otherWeekPlan.weekPlanId, athleteId: otherWorkspaceAthleteId, activityType: .individualTraining,
+            title: "Team Practice", localDate: otherToday, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        // The Parent explicitly classifies to that SAME (other-workspace)
+        // athlete — exactly what Step 2's adoption path would otherwise
+        // match on — but the workspace guard must reject this before
+        // Step 2 ever runs.
+        #expect(throws: CalendarPlanningCoordinationError.athleteOutsideSourceWorkspace) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: otherWorkspaceAthleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+
+        // The other workspace's activity was never touched, and no
+        // decision was created against THIS source for it.
+        let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(activities.count == 1)
+        #expect(activities.first?.plannedActivityId == otherWorkspaceActivity.plannedActivityId)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+    }
+
+    @Test("CalendarImportReviewViewModel.load() only exposes active athletes belonging to source.workspaceId, never every athlete in the local store")
+    @MainActor
+    func importReviewViewModelOnlyExposesSourceWorkspaceAthletes() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        _ = try addSecondAthlete(fixture, name: "Other Family Child", workspaceId: otherWorkspaceId)
+        let sameWorkspaceSecondAthleteId = try addSecondAthlete(fixture, name: "Sibling")
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+
+        let viewModel = CalendarImportReviewViewModel(
+            calendarPlanningCoordinationService: fixture.coordinationService,
+            athleteRepository: fixture.athleteRepository,
+            sportRepository: fixture.sportRepository,
+            source: source,
+            actorId: ActorId()
+        )
+        viewModel.load()
+
+        let athleteIds = Set(viewModel.athletes.map(\.athleteId))
+        #expect(athleteIds == Set([fixture.athleteId, sameWorkspaceSecondAthleteId]))
     }
 
     // MARK: - Recovery (adapted from Calendar Planning Source V1's PR #40)
