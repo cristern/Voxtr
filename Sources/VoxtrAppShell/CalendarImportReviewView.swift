@@ -4,13 +4,19 @@ import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
 import VoxtrCalendarPlanningDomain
 
-/// Family-Owned Calendar Sources V1 — Calendar Import Review: the list
-/// of external events awaiting an explicit Parent decision for ONE
-/// source. Tapping a row opens `CalendarImportReviewDetailView`, the
-/// ONE place classification (Athlete/Sport/Activity Type) plus
-/// Import/Ignore happen — this list itself never mutates anything.
+/// Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk
+/// Import + Remembered Exact Choices): the actual working surface for
+/// classifying many upcoming events efficiently, for ONE source. Two
+/// conceptual sections — NEEDS REVIEW (classify Athlete/Sport/Activity
+/// Type directly on this screen) and READY TO IMPORT (a compact summary
+/// row for every fully staged event) — plus one explicit bulk-import
+/// action. Classifying, editing, and ignoring all happen right here;
+/// `CalendarImportReviewDetailView` below is retained ONLY as an
+/// optional metadata inspection surface (notes/location), never required
+/// for normal classification.
 struct CalendarImportReviewView: View {
     @Bindable var viewModel: CalendarImportReviewViewModel
+    @State private var itemPendingIgnore: CalendarPlanningCoordinationService.CalendarReviewItem?
 
     var body: some View {
         List {
@@ -27,57 +33,181 @@ struct CalendarImportReviewView: View {
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
             } else {
-                Section {
-                    ForEach(viewModel.reviewQueue, id: \.externalEventKey) { item in
-                        NavigationLink {
-                            CalendarImportReviewDetailView(viewModel: viewModel, item: item)
-                        } label: {
-                            reviewRow(item)
+                if !viewModel.needsReviewItems.isEmpty {
+                    Section {
+                        ForEach(viewModel.needsReviewItems, id: \.externalEventKey) { item in
+                            needsReviewRow(item)
                         }
-                        .accessibilityIdentifier("calendarImportReview.reviewRow")
+                    } header: {
+                        VoxtrSectionHeading(CalendarPlanningStrings.needsReviewSectionTitle)
+                    } footer: {
+                        Text(CalendarPlanningStrings.reviewExplanation)
                     }
-                } footer: {
-                    Text(CalendarPlanningStrings.reviewExplanation)
+                }
+
+                if !viewModel.readyToImportItems.isEmpty {
+                    Section {
+                        ForEach(viewModel.readyToImportItems, id: \.externalEventKey) { item in
+                            readyToImportRow(item)
+                        }
+                        Button(CalendarPlanningStrings.bulkImportButton(readyCount: viewModel.readyToImportCount)) {
+                            viewModel.bulkImportReadyItems()
+                        }
+                        .accessibilityIdentifier("calendarImportReview.bulkImportButton")
+                    } header: {
+                        VoxtrSectionHeading(CalendarPlanningStrings.readyToImportSectionTitle)
+                    }
                 }
             }
         }
         .navigationTitle(CalendarPlanningStrings.reviewScreenTitle)
         .onAppear { viewModel.load() }
+        .confirmationDialog(
+            CalendarPlanningStrings.ignoreConfirmationTitle,
+            isPresented: Binding(
+                get: { itemPendingIgnore != nil },
+                set: { if !$0 { itemPendingIgnore = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(CalendarPlanningStrings.ignoreButton, role: .destructive) {
+                if let itemPendingIgnore {
+                    viewModel.ignore(itemPendingIgnore)
+                }
+                itemPendingIgnore = nil
+            }
+            .accessibilityIdentifier("calendarImportReview.confirmIgnoreButton")
+            Button("Cancel", role: .cancel) { itemPendingIgnore = nil }
+        } message: {
+            Text(CalendarPlanningStrings.ignoreConfirmationMessage)
+        }
+    }
+
+    // MARK: - NEEDS REVIEW: classify Athlete/Sport/Activity Type directly on this screen
+
+    @ViewBuilder
+    private func needsReviewRow(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            eventSummary(item)
+
+            Picker(CalendarPlanningStrings.chooseAthlete, selection: Binding(
+                get: { viewModel.stagedClassification(for: item.externalEventKey).athleteId },
+                set: { viewModel.setStagedAthlete($0, for: item.externalEventKey) }
+            )) {
+                Text(CalendarPlanningStrings.chooseAthlete).tag(AthleteId?.none)
+                ForEach(viewModel.athletes, id: \.athleteId) { athlete in
+                    Text(athlete.givenName).tag(AthleteId?.some(athlete.athleteId))
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("calendarImportReview.athletePicker")
+
+            Picker(CalendarPlanningStrings.chooseActivityType, selection: Binding(
+                get: { viewModel.stagedClassification(for: item.externalEventKey).activityType },
+                set: { viewModel.setStagedActivityType($0, for: item.externalEventKey) }
+            )) {
+                ForEach(ActivityType.selectableCases, id: \.self) { type in
+                    Text(type.displayName).tag(type)
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("calendarImportReview.activityTypePicker")
+
+            Picker(CalendarPlanningStrings.chooseSport, selection: Binding(
+                get: { viewModel.stagedClassification(for: item.externalEventKey).sportId },
+                set: { viewModel.setStagedSport($0, for: item.externalEventKey) }
+            )) {
+                Text("None").tag(SportId?.none)
+                ForEach(viewModel.sports, id: \.sportId) { sport in
+                    Text(sport.displayName).tag(SportId?.some(sport.sportId))
+                }
+            }
+            .pickerStyle(.menu)
+            .accessibilityIdentifier("calendarImportReview.sportPicker")
+
+            HStack {
+                // Optional metadata-only disclosure — never required for
+                // classification, which already happens above via the
+                // three pickers.
+                NavigationLink("Details") {
+                    CalendarImportReviewDetailView(item: item)
+                }
+                .font(VoxtrTypography.metadata)
+                .accessibilityIdentifier("calendarImportReview.detailLink")
+
+                Spacer()
+
+                Button(CalendarPlanningStrings.ignoreButton, role: .destructive) {
+                    itemPendingIgnore = item
+                }
+                .font(VoxtrTypography.metadata)
+                .accessibilityIdentifier("calendarImportReview.ignoreButton")
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityIdentifier("calendarImportReview.needsReviewRow")
+    }
+
+    // MARK: - READY TO IMPORT: compact summary, materially shorter than an editable row
+
+    @ViewBuilder
+    private func readyToImportRow(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) -> some View {
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
+                    .font(VoxtrTypography.cardTitle)
+                    .foregroundStyle(VoxtrColor.textPrimary)
+                Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                Text(readySummary(staged))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+            Spacer()
+            Text(CalendarPlanningStrings.readyBadge)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+            Button(CalendarPlanningStrings.editButton) {
+                viewModel.beginEditing(for: item.externalEventKey)
+            }
+            .accessibilityIdentifier("calendarImportReview.editButton")
+        }
+        .accessibilityIdentifier("calendarImportReview.readyRow")
+    }
+
+    private func readySummary(_ staged: CalendarImportReviewViewModel.StagedClassification) -> String {
+        var parts: [String] = []
+        if let athleteId = staged.athleteId, let athlete = viewModel.athletes.first(where: { $0.athleteId == athleteId }) {
+            parts.append(athlete.givenName)
+        }
+        if let sportId = staged.sportId, let sport = viewModel.sports.first(where: { $0.sportId == sportId }) {
+            parts.append(sport.displayName)
+        }
+        parts.append(staged.activityType.displayName)
+        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
-    private func reviewRow(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+    private func eventSummary(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
             Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
                 .font(VoxtrTypography.cardTitle)
                 .foregroundStyle(VoxtrColor.textPrimary)
             Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
                 .font(VoxtrTypography.metadata)
                 .foregroundStyle(VoxtrColor.textSecondary)
-            if let location = item.event.location, !location.isEmpty {
-                Text(location)
-                    .font(VoxtrTypography.metadata)
-                    .foregroundStyle(VoxtrColor.textSecondary)
-            }
         }
-        .padding(.vertical, 4)
     }
 }
 
-/// The actual classification form for ONE reviewed event — Athlete,
-/// Sport, Activity Type, then Import or Ignore. A genuinely multi-field
-/// decision, so this is a pushed screen, not an inline row (Simple
-/// Settings Rule, same rationale every other multi-field screen in this
-/// app already follows).
+/// Calendar Import Review V1.1: an OPTIONAL metadata inspection surface
+/// only — notes/location for one event, never required for normal
+/// classification (that now happens inline on `CalendarImportReviewView`
+/// itself). Read-only; no Import/Ignore action lives here.
 struct CalendarImportReviewDetailView: View {
-    @Bindable var viewModel: CalendarImportReviewViewModel
     let item: CalendarPlanningCoordinationService.CalendarReviewItem
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var selectedAthleteId: AthleteId?
-    @State private var selectedActivityType: ActivityType = .individualTraining
-    @State private var selectedSportId: SportId?
-    @State private var isShowingIgnoreConfirmation = false
 
     var body: some View {
         Form {
@@ -99,65 +229,7 @@ struct CalendarImportReviewDetailView: View {
                         .foregroundStyle(VoxtrColor.textSecondary)
                 }
             }
-
-            Section {
-                Picker(CalendarPlanningStrings.chooseAthlete, selection: $selectedAthleteId) {
-                    Text(CalendarPlanningStrings.chooseAthlete).tag(AthleteId?.none)
-                    ForEach(viewModel.athletes, id: \.athleteId) { athlete in
-                        Text(athlete.givenName).tag(AthleteId?.some(athlete.athleteId))
-                    }
-                }
-                .accessibilityIdentifier("calendarImportReviewDetail.athletePicker")
-
-                Picker(CalendarPlanningStrings.chooseActivityType, selection: $selectedActivityType) {
-                    ForEach(ActivityType.selectableCases, id: \.self) { type in
-                        Text(type.displayName).tag(type)
-                    }
-                }
-                .accessibilityIdentifier("calendarImportReviewDetail.activityTypePicker")
-
-                Picker(CalendarPlanningStrings.chooseSport, selection: $selectedSportId) {
-                    Text("None").tag(SportId?.none)
-                    ForEach(viewModel.sports, id: \.sportId) { sport in
-                        Text(sport.displayName).tag(SportId?.some(sport.sportId))
-                    }
-                }
-                .accessibilityIdentifier("calendarImportReviewDetail.sportPicker")
-            } header: {
-                VoxtrSectionHeading("This event belongs to")
-            }
-
-            Section {
-                Button(CalendarPlanningStrings.importButton) {
-                    guard let selectedAthleteId else { return }
-                    viewModel.classifyAndImport(
-                        item, athleteId: selectedAthleteId, sportId: selectedSportId, activityType: selectedActivityType
-                    )
-                    dismiss()
-                }
-                .disabled(selectedAthleteId == nil)
-                .accessibilityIdentifier("calendarImportReviewDetail.importButton")
-
-                Button(CalendarPlanningStrings.ignoreButton, role: .destructive) {
-                    isShowingIgnoreConfirmation = true
-                }
-                .accessibilityIdentifier("calendarImportReviewDetail.ignoreButton")
-            }
         }
         .navigationTitle(CalendarPlanningStrings.reviewDetailTitle)
-        .confirmationDialog(
-            CalendarPlanningStrings.ignoreConfirmationTitle,
-            isPresented: $isShowingIgnoreConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(CalendarPlanningStrings.ignoreButton, role: .destructive) {
-                viewModel.ignore(item)
-                dismiss()
-            }
-            .accessibilityIdentifier("calendarImportReviewDetail.confirmIgnoreButton")
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(CalendarPlanningStrings.ignoreConfirmationMessage)
-        }
     }
 }

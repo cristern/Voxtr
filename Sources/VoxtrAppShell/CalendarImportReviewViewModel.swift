@@ -4,13 +4,24 @@ import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
 import VoxtrCalendarPlanningDomain
 
-/// Family-Owned Calendar Sources V1 — Calendar Import Review: backs the
-/// "Review new events" screen for ONE `ExternalPlanningSource`. This is
-/// the ONE place an external event becomes a Vǫxtr `PlannedActivity` —
-/// no event is ever imported except through an explicit call this
-/// ViewModel makes on an explicit Parent tap. See
-/// `CalendarPlanningCoordinationService`'s own doc comment for the full
+/// Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk
+/// Import + Remembered Exact Choices): backs the "Review new events"
+/// screen for ONE `ExternalPlanningSource`. This is the ONE place an
+/// external event becomes a Vǫxtr `PlannedActivity` — no event is ever
+/// imported except through an explicit Parent "Import N ready
+/// activities" tap (`bulkImportReadyItems()`), which itself only ever
+/// calls `CalendarPlanningCoordinationService.classifyAndImport(...)`
+/// per staged event — see that method's own doc comment for the full
 /// product contract this enforces.
+///
+/// PRODUCT CONTRACT this type enforces: `Pending -> Ready (staged only)
+/// -> Imported / Ignored`. `Ready` is NOT persisted business truth — it
+/// is `stagedClassifications` below, a plain, ViewModel-owned,
+/// presentation/application-layer dictionary keyed by the event's own
+/// stable `externalEventKey`. Only `Imported`/`Ignored` are persisted
+/// `CalendarImportDecision` outcomes; a `Ready` (fully staged, not yet
+/// imported) event never creates a `PlannedActivity` and never touches
+/// `CalendarImportDecision`.
 @MainActor
 @Observable
 public final class CalendarImportReviewViewModel {
@@ -35,6 +46,39 @@ public final class CalendarImportReviewViewModel {
     public private(set) var sports: [Sport] = []
     public private(set) var errorMessage: String?
 
+    /// Calendar Import Review V1.1: the smallest presentation-layer model
+    /// that supports inline classification, per this feature's own
+    /// "READY STAGING MODEL" contract — deliberately NOT a persisted
+    /// entity, and `PlannedActivity` is never used as temporary staging.
+    /// Keyed by `CalendarReviewItem.externalEventKey` (the same stable
+    /// external identity `CalendarImportDecision`/`PlannedActivity`
+    /// already use) in `stagedClassifications` below.
+    public struct StagedClassification: Sendable, Equatable {
+        public var athleteId: AthleteId?
+        public var sportId: SportId?
+        public var activityType: ActivityType = .individualTraining
+        /// `true` while this event's row shows its editable inline form;
+        /// `false` once it has collapsed into its compact "Ready to
+        /// Import" summary. Only meaningful when `isReady` — a
+        /// not-yet-ready event is always shown editable regardless of
+        /// this flag. Tapping "Edit" on a Ready row sets this back to
+        /// `true` WITHOUT clearing any other field — see
+        /// `beginEditing(for:)`.
+        public var isEditing: Bool = true
+
+        /// Athlete is the one field this V1.1 slice truly requires —
+        /// `activityType` always carries a real default and `sportId` is
+        /// legitimately optional ("no specific Sport"), matching the
+        /// prior single-event review form's own `Import` button gating.
+        public var isReady: Bool { athleteId != nil }
+    }
+
+    /// Never persisted — presentation/application state only (see this
+    /// type's own doc comment). Rebuilt (preserving any Parent-in-
+    /// progress edit already present) every time `reviewQueue` refreshes,
+    /// via `refreshQueueAndStaging()`.
+    public private(set) var stagedClassifications: [String: StagedClassification] = [:]
+
     public init(
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         athleteRepository: AthleteRepository,
@@ -51,51 +95,142 @@ public final class CalendarImportReviewViewModel {
 
     public func load() {
         errorMessage = nil
-        do {
-            reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
-        } catch {
-            reviewQueue = []
-            errorMessage = CalendarPlanningStrings.genericError
-        }
         // Lead Review follow-up (family-isolation): scoped to source's OWN
-        // workspace, never every athlete in the local store — see
-        // `athletes`' own doc comment above.
+        // workspace, never every athlete in the local store.
         athletes = ((try? athleteRepository.fetchAthletes(forWorkspace: WorkspaceId(rawValue: source.workspaceId))) ?? []).filter { !$0.isArchived }
         sports = (try? sportRepository.fetchAllSports()) ?? []
+        refreshQueueAndStaging()
     }
 
-    /// The explicit Parent action that turns one reviewed event into a
-    /// canonical `PlannedActivity`, owned by `athleteId`, with the
-    /// Parent's own explicit Sport/Activity Type choice — never a
-    /// source-level default.
-    public func classifyAndImport(
-        _ item: CalendarPlanningCoordinationService.CalendarReviewItem,
-        athleteId: AthleteId,
-        sportId: SportId?,
-        activityType: ActivityType
-    ) {
+    // MARK: - Needs Review / Ready to Import (derived, never separately stored)
+
+    /// A pending event not yet `Ready`, OR a `Ready` event the Parent is
+    /// currently editing (`isEditing == true`) — the "NEEDS REVIEW"
+    /// section.
+    public var needsReviewItems: [CalendarPlanningCoordinationService.CalendarReviewItem] {
+        reviewQueue.filter { !isReadyToImport($0.externalEventKey) }
+    }
+
+    /// A fully staged event, currently collapsed to its compact summary
+    /// — the "READY TO IMPORT" section, and exactly the set
+    /// `bulkImportReadyItems()` acts on.
+    public var readyToImportItems: [CalendarPlanningCoordinationService.CalendarReviewItem] {
+        reviewQueue.filter { isReadyToImport($0.externalEventKey) }
+    }
+
+    public var readyToImportCount: Int { readyToImportItems.count }
+
+    private func isReadyToImport(_ externalEventKey: String) -> Bool {
+        guard let staged = stagedClassifications[externalEventKey] else { return false }
+        return staged.isReady && !staged.isEditing
+    }
+
+    // MARK: - Inline staging (no persistence — see `StagedClassification`'s own doc comment)
+
+    public func stagedClassification(for externalEventKey: String) -> StagedClassification {
+        stagedClassifications[externalEventKey] ?? StagedClassification()
+    }
+
+    public func setStagedAthlete(_ athleteId: AthleteId?, for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { $0.athleteId = athleteId }
+    }
+
+    public func setStagedSport(_ sportId: SportId?, for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { $0.sportId = sportId }
+    }
+
+    public func setStagedActivityType(_ activityType: ActivityType, for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { $0.activityType = activityType }
+    }
+
+    /// The explicit "Edit" action on a compact Ready row — restores the
+    /// editable inline form WITHOUT persisting or clearing anything;
+    /// every currently-staged field is left exactly as it was.
+    public func beginEditing(for externalEventKey: String) {
+        guard var staged = stagedClassifications[externalEventKey] else { return }
+        staged.isEditing = true
+        stagedClassifications[externalEventKey] = staged
+    }
+
+    /// Applies `mutate` to this event's current staging (or a fresh one),
+    /// then auto-collapses it into "Ready to Import" the moment it
+    /// becomes complete — see `StagedClassification.isReady`'s own doc
+    /// comment for exactly which field(s) that requires. This is the ONE
+    /// place a staged event transitions from editable to collapsed.
+    private func updateStaged(for externalEventKey: String, _ mutate: (inout StagedClassification) -> Void) {
+        var staged = stagedClassifications[externalEventKey] ?? StagedClassification()
+        mutate(&staged)
+        if staged.isReady { staged.isEditing = false }
+        stagedClassifications[externalEventKey] = staged
+    }
+
+    // MARK: - Bulk import
+
+    /// The explicit Parent action Calendar Import Review V1.1 exists for:
+    /// imports every currently Ready (staged, non-editing) event in one
+    /// action, through the SAME canonical
+    /// `CalendarPlanningCoordinationService.classifyAndImport(...)` path
+    /// a single-event import already used — never a bypass of its
+    /// guards, never a batch-level shortcut.
+    ///
+    /// Per-item outcome handling (never an arbitrary success score, never
+    /// a silent whole-batch report):
+    ///   - success: the item's staging is cleared; `reviewQueue`'s own
+    ///     refresh (via `fetchReviewQueue`, which excludes decided
+    ///     events) makes it disappear on its own;
+    ///   - `.existingActivityConflict`: staging is KEPT, restored to
+    ///     editable (`isEditing = true`) — the Parent's own values are
+    ///     preserved so they can see the conflict and adjust, matching
+    ///     the single-event form's own established handling;
+    ///   - `.sourceDisabled`: the source became disabled/disconnected
+    ///     mid-batch (stale UI) — the loop stops immediately, no further
+    ///     item in this batch is attempted, and the queue is refreshed
+    ///     (which will now correctly report empty);
+    ///   - any other error: staging is kept, restored to editable, so
+    ///     nothing is silently dropped.
+    /// A retry (calling this again after a partial failure) is safe and
+    /// never duplicates — `classifyAndImport` itself already guarantees
+    /// that (see its own doc comment); this method adds no additional
+    /// state that could break that guarantee.
+    public func bulkImportReadyItems() {
         errorMessage = nil
-        do {
-            _ = try calendarPlanningCoordinationService.classifyAndImport(
-                item, for: source, athleteId: athleteId, sportId: sportId, activityType: activityType, decidedBy: actorId
-            )
-            reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
-        } catch CalendarPlanningCoordinationError.existingActivityConflict {
-            // Lead Review follow-up (Blocker 4): a DIFFERENT
-            // classification already exists for this exact event —
-            // never silently duplicated or reassigned. Calm, specific
-            // copy so the Parent understands why Import didn't just
-            // work, and what to do about it (remove the existing import
-            // first, via this source's own recovery action).
-            errorMessage = CalendarPlanningStrings.existingActivityConflictError
-        } catch CalendarPlanningCoordinationError.sourceDisabled {
-            // The source was disabled/disconnected after this queue was
-            // loaded (stale UI) — refresh so the item disappears, rather
-            // than leaving a now-invalid row tappable again.
+        let readyItems = readyToImportItems
+        guard !readyItems.isEmpty else { return }
+
+        var importedCount = 0
+        var failedCount = 0
+        var sourceBecameUnavailable = false
+
+        for item in readyItems {
+            guard let staged = stagedClassifications[item.externalEventKey], let athleteId = staged.athleteId else { continue }
+            do {
+                _ = try calendarPlanningCoordinationService.classifyAndImport(
+                    item, for: source, athleteId: athleteId, sportId: staged.sportId, activityType: staged.activityType, decidedBy: actorId
+                )
+                stagedClassifications.removeValue(forKey: item.externalEventKey)
+                importedCount += 1
+            } catch CalendarPlanningCoordinationError.sourceDisabled {
+                // The source became disabled/disconnected mid-batch —
+                // stop immediately; refreshQueueAndStaging() below will
+                // correctly report an empty queue for a disabled source
+                // (see fetchReviewQueue's own Blocker 2 guard), so no
+                // further per-item bookkeeping is meaningful here.
+                sourceBecameUnavailable = true
+                break
+            } catch {
+                failedCount += 1
+                var kept = staged
+                kept.isEditing = true
+                stagedClassifications[item.externalEventKey] = kept
+            }
+        }
+
+        refreshQueueAndStaging()
+
+        if sourceBecameUnavailable {
             errorMessage = CalendarPlanningStrings.sourceDisabledError
-            reviewQueue = (try? calendarPlanningCoordinationService.fetchReviewQueue(for: source)) ?? []
-        } catch {
-            errorMessage = CalendarPlanningStrings.genericError
+        } else if failedCount > 0 {
+            errorMessage = CalendarPlanningStrings.bulkImportPartialResult(imported: importedCount, failed: failedCount)
         }
     }
 
@@ -106,9 +241,49 @@ public final class CalendarImportReviewViewModel {
         errorMessage = nil
         do {
             _ = try calendarPlanningCoordinationService.ignore(item, for: source, decidedBy: actorId)
-            reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
+            refreshQueueAndStaging()
         } catch {
             errorMessage = CalendarPlanningStrings.genericError
         }
+    }
+
+    // MARK: - Queue + staging refresh (shared by load(), ignore(), and bulkImportReadyItems())
+
+    /// Re-fetches the review queue and rebuilds `stagedClassifications`
+    /// to match it: an event already staged (a Parent's in-progress edit,
+    /// or a still-Ready item from an earlier partial bulk import) keeps
+    /// its EXACT existing staging untouched; a genuinely new event is
+    /// seeded from Remembered Exact Choices (V1.1) if one applies, or
+    /// left blank/editable otherwise; an event no longer in the queue
+    /// (imported, ignored, or disappeared from the source) is dropped so
+    /// this dictionary never leaks stale entries.
+    private func refreshQueueAndStaging() {
+        do {
+            reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
+        } catch {
+            reviewQueue = []
+            errorMessage = errorMessage ?? CalendarPlanningStrings.genericError
+        }
+
+        let remembered = (try? calendarPlanningCoordinationService.rememberedClassifications(for: source)) ?? [:]
+        var rebuilt: [String: StagedClassification] = [:]
+        for item in reviewQueue {
+            if let existing = stagedClassifications[item.externalEventKey] {
+                rebuilt[item.externalEventKey] = existing
+                continue
+            }
+            // Remembered Exact Choices (V1.1): PREFILL only — this never
+            // creates a CalendarImportDecision or PlannedActivity by
+            // itself; the Parent must still explicitly bulk-import.
+            if let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title),
+               let match = remembered[normalizedTitle] {
+                rebuilt[item.externalEventKey] = StagedClassification(
+                    athleteId: match.athleteId, sportId: match.sportId, activityType: match.activityType, isEditing: false
+                )
+            } else {
+                rebuilt[item.externalEventKey] = StagedClassification()
+            }
+        }
+        stagedClassifications = rebuilt
     }
 }
