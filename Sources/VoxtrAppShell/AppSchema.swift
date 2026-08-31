@@ -87,13 +87,30 @@ import VoxtrCalendarPlanningDomain
 /// `AppSchemaVersioning.swift`), purely additive: no existing entity or
 /// property is renamed, removed, or changed in place.
 ///
-/// Calendar Planning Source V1 adds `CalendarPlanningMapping.self`
+/// Calendar Planning Source V1 added `CalendarPlanningMapping.self`
 /// (`VoxtrCalendarPlanningDomain`) — the Parent's own persisted, trusted
 /// calendar-to-athlete mapping; imported schedule facts themselves are
 /// never a new entity, they are ordinary `PlannedActivity` rows (see
 /// that type's own pre-existing `externalSourceId`/`externalSourceType`
 /// fields). Genuine model-type addition (`AppSchemaV7`, see
 /// `AppSchemaVersioning.swift`), purely additive.
+///
+/// Family-Owned Calendar Sources V1 adds `ExternalPlanningSource.self`
+/// and `CalendarImportDecision.self` (`VoxtrCalendarPlanningDomain`) —
+/// real TestFlight evidence showed `CalendarPlanningMapping`'s one-
+/// calendar-to-one-athlete assumption cannot represent a real external
+/// calendar shared by multiple children (e.g. several Spond groups
+/// syncing into the same iOS "Familie" calendar). `ExternalPlanningSource`
+/// is the family-owned replacement (container/connection identity only,
+/// no athlete/sport/activity-type default); `CalendarImportDecision` is
+/// the Parent's explicit, per-event import-or-ignore record Calendar
+/// Import Review produces. `CalendarPlanningMapping` stays registered,
+/// UNCHANGED, purely so any already-persisted row remains readable for
+/// the one-time migration read (see
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`) —
+/// no live path creates new rows of that type anymore. Two genuine
+/// model-type additions, both purely additive (`AppSchemaV8`, see
+/// `AppSchemaVersioning.swift`).
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -117,6 +134,8 @@ public enum AppSchema {
             Sport.self,
             ActivityReminder.self,
             CalendarPlanningMapping.self,
+            ExternalPlanningSource.self,
+            CalendarImportDecision.self,
         ]
     }
 }

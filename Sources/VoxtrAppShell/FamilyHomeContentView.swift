@@ -407,19 +407,20 @@ public struct FamilyHomeContentView: View {
         // the app guaranteed to refire on every Family Home reappearance
         // regardless of navigation depth (see the comment above it), so
         // it is also the deterministic reconciliation trigger for every
-        // explicitly-enabled `CalendarPlanningMapping` — a Parent who
-        // never revisits an athlete's own Calendar screen after initial
-        // setup still gets external changes synced automatically. Best
-        // effort and silent: a Calendar/EventKit failure (e.g. permission
+        // explicitly-enabled `ExternalPlanningSource` (Family-Owned
+        // Calendar Sources V1) — a Parent who never revisits the Family
+        // Calendar Sources screen after initial setup still gets
+        // already-imported events' source-owned fields (title/time)
+        // synced automatically; it never creates a new `PlannedActivity`
+        // (only explicit Calendar Import Review does that). Best effort
+        // and silent: a Calendar/EventKit failure (e.g. permission
         // revoked in system Settings after setup) must never break
-        // Planning, so this is `try?`, not surfaced as an error here —
-        // exactly the same "denied permission must not break Planning"
-        // contract `AthleteCalendarPlanningViewModel` enforces on its own
-        // explicit actions. Runs before `viewModel.refresh()` so any
-        // newly created/updated `PlannedActivity` rows are already
-        // reflected in the same reappearance's read.
+        // Planning, so this is `try?`, not surfaced as an error here.
+        // Runs before `viewModel.refresh()` so any newly updated
+        // `PlannedActivity` rows are already reflected in the same
+        // reappearance's read.
         .onAppear {
-            try? calendarPlanningCoordinationService.reconcileAllEnabledMappings()
+            try? calendarPlanningCoordinationService.reconcileAllEnabledSources()
             viewModel.refresh()
         }
     }
@@ -898,7 +899,8 @@ public struct FamilyHomeContentView: View {
             sleepCoordinationService: sleepCoordinationService,
             sleepChangeBroadcaster: sleepChangeBroadcaster,
             calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-            sportRepository: sportRepository
+            sportRepository: sportRepository,
+            athleteRepository: athleteRepository
         )
     }
 

@@ -9,6 +9,7 @@ import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 /// CRITICAL PERSISTENCE RECOVERY (see this work's own root-cause
 /// writeup for the full investigation): this file previously declared
@@ -1050,19 +1051,73 @@ public enum AppSchemaV6: VersionedSchema {
     }
 }
 
-/// Calendar Planning Source V1: the current, live version. Adds ONE
-/// model type, `CalendarPlanningMapping.self` (`VoxtrCalendarPlanningDomain`)
-/// — the Parent's own trusted calendar-to-athlete mapping. Imported
-/// schedule facts are ordinary `PlannedActivity` rows (that type's own
-/// pre-existing `externalSourceId`/`externalSourceType` fields, already
+/// Calendar Planning Source V1: adds ONE model type,
+/// `CalendarPlanningMapping.self` (`VoxtrCalendarPlanningDomain`) — the
+/// Parent's own trusted calendar-to-athlete mapping. Imported schedule
+/// facts are ordinary `PlannedActivity` rows (that type's own pre-
+/// existing `externalSourceId`/`externalSourceType` fields, already
 /// established by Recurring Planned Activities — no shape change to
 /// `PlannedActivity` itself), so this is purely additive: no existing
 /// entity or property is renamed, removed, or changed in place, the
 /// same class of change as every prior "one new model type" version
 /// bump in this file's history.
+///
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V7
+/// was the latest version; Family-Owned Calendar Sources V1 now freezes
+/// it to the exact 20-entity literal V7 always actually had, following
+/// this file's own "HOW TO ADD A NEW VERSION" step 1, same as every
+/// version before it. See `AppSchemaV8` immediately below for the new
+/// latest version.
 public enum AppSchemaV7: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(7, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+            CalendarPlanningMapping.self,
+        ]
+    }
+}
+
+/// Family-Owned Calendar Sources V1: the current, live version. Adds
+/// TWO model types, `ExternalPlanningSource.self` and
+/// `CalendarImportDecision.self` (`VoxtrCalendarPlanningDomain`) —
+/// replacing `CalendarPlanningMapping`'s athlete-scoped calendar mapping
+/// with a family-owned source connection plus an explicit, per-event
+/// Parent import/ignore decision (see `AppSchema.modelTypes`'s own doc
+/// comment for the full product rationale). `CalendarPlanningMapping`
+/// itself is NOT removed from this version's `models` — see that type's
+/// own doc comment for why (existing rows must remain readable for the
+/// one-time migration read; removing a live entity/table is exactly the
+/// class of change this file's own history above warns is unverified
+/// and risky, and there is no need to attempt it here). This version is
+/// therefore purely additive: two new entity types, no existing entity
+/// or property renamed, removed, or changed in place — the same class
+/// of change as every prior "one new model type" version bump in this
+/// file's history.
+public enum AppSchemaV8: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(8, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1121,7 +1176,10 @@ public enum AppSchemaV7: VersionedSchema {
 /// store — it does not justify skipping the version bump itself.
 public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self, AppSchemaV6.self, AppSchemaV7.self]
+        [
+            AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self,
+            AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self,
+        ]
     }
 
     /// V1 ("1.0.0", 15 entities) → V2 ("2.0.0", 17 entities — adds
@@ -1194,6 +1252,30 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// store gains that new empty table with its existing 19 entities'
     /// data — including every existing `PlannedActivity` and
     /// `ActivityReminder` row — completely untouched.
+    ///
+    /// V7 ("7.0.0", 20 entities) → V8 ("8.0.0", 22 entities — adds
+    /// `ExternalPlanningSource.self` and `CalendarImportDecision.self`).
+    /// `.lightweight`: the only structural change SwiftData needs to
+    /// reason about is the two new entities/tables, purely additive —
+    /// same class of change as every prior "one (or two) new model
+    /// type(s)" stage above. `CalendarPlanningMapping` itself is
+    /// UNCHANGED at the SwiftData level (still listed, still the same
+    /// shape) — this migration never transforms its rows into the new
+    /// types; see `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`
+    /// for the deliberately separate, application-level, additive-only
+    /// migration that seeds `ExternalPlanningSource` rows from distinct
+    /// legacy `calendarIdentifier` values, run explicitly by the Family
+    /// Calendar Sources screen rather than as a SwiftData migration
+    /// stage — this project's own documented history of `.custom`
+    /// migration/legacy-type crashes (see this file's own opening doc
+    /// comment) is reason enough to keep this stage the same safe,
+    /// purely-additive shape as every one before it, and do the actual
+    /// interpretation of legacy data in ordinary, testable application
+    /// code instead. A fresh install starts directly under V8 with both
+    /// new tables empty; an existing V7 store gains them with its
+    /// existing 20 entities' data — including every existing
+    /// `CalendarPlanningMapping`, `PlannedActivity`, and
+    /// `ActivityReminder` row — completely untouched.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
@@ -1202,6 +1284,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: AppSchemaV4.self, toVersion: AppSchemaV5.self),
             .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
             .lightweight(fromVersion: AppSchemaV6.self, toVersion: AppSchemaV7.self),
+            .lightweight(fromVersion: AppSchemaV7.self, toVersion: AppSchemaV8.self),
         ]
     }
 }

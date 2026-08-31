@@ -72,17 +72,20 @@ public final class CompositionRoot {
     /// `ActivityReminder.self`). Activity Reminder What/When: `AppSchemaV5`
     /// was then FROZEN and this default targeted `AppSchemaV6` ("6.0.0",
     /// same 19 entities — adds `ActivityReminder.reminderText: String?`).
-    /// Calendar Planning Source V1: `AppSchemaV6` is now itself FROZEN
-    /// and this default targets `AppSchemaV7` ("7.0.0", 20 entities —
-    /// activates `CalendarPlanningMapping.self`), the current genuine
-    /// version.
+    /// Calendar Planning Source V1: `AppSchemaV6` was then FROZEN and
+    /// this default targeted `AppSchemaV7` ("7.0.0", 20 entities —
+    /// activates `CalendarPlanningMapping.self`). Family-Owned Calendar
+    /// Sources V1: `AppSchemaV7` is now itself FROZEN and this default
+    /// targets `AppSchemaV8` ("8.0.0", 22 entities — activates
+    /// `ExternalPlanningSource.self`/`CalendarImportDecision.self`), the
+    /// current genuine version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV7.self,
+            versionedSchema: AppSchemaV8.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
@@ -249,16 +252,20 @@ public final class CompositionRoot {
         container.register(NotificationsPlanningCoordinationService.self) { notificationsPlanningCoordinationService }
         notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
 
-        // Calendar Planning Source V1: the one place
-        // CalendarPlanningMappingRepository (Calendar Planning),
-        // PlanningService, TrainingService, and AthleteRepository are
-        // used together — same placement rationale as every other
-        // cross-domain coordinator above. No EventBus subscription (no
-        // Planning/Training event needs a Calendar Planning reaction);
-        // reconciliation is invoked explicitly from ParentApp lifecycle/
-        // configuration points, never automatically here.
+        // Family-Owned Calendar Sources V1: the one place
+        // ExternalPlanningSourceRepository/CalendarImportDecisionRepository
+        // (Calendar Planning), the legacy CalendarPlanningMappingRepository
+        // (read-only, for `migrateLegacySourcesIfNeeded()`), PlanningService,
+        // TrainingService, and AthleteRepository are used together — same
+        // placement rationale as every other cross-domain coordinator
+        // above. No EventBus subscription (no Planning/Training event
+        // needs a Calendar Planning reaction); reconciliation is invoked
+        // explicitly from ParentApp lifecycle/configuration points, never
+        // automatically here.
         let calendarPlanningCoordinationService = CalendarPlanningCoordinationService(
-            mappingRepository: container.resolve(CalendarPlanningMappingRepository.self),
+            sourceRepository: container.resolve(ExternalPlanningSourceRepository.self),
+            importDecisionRepository: container.resolve(CalendarImportDecisionRepository.self),
+            legacyMappingRepository: container.resolve(CalendarPlanningMappingRepository.self),
             calendarEventProvider: EventKitCalendarEventProvider(),
             planningService: container.resolve(PlanningService.self),
             trainingService: container.resolve(TrainingService.self),

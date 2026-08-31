@@ -4,7 +4,7 @@ import VoxtrCalendarPlanningDomain
 /// Calendar V1 metadata inspection round: an Alpha-only, clearly
 /// diagnostic list of a small, bounded number of real upcoming events
 /// from the connected calendar — never presented as the final import-
-/// review UX (see `AthleteCalendarPlanningView`'s own doc comment on the
+/// review UX (see `CalendarSourceDetailView`'s own doc comment on the
 /// row that pushes this screen). Shows exactly what
 /// `CalendarPlanningCoordinationService.fetchDiagnosticEvents(inCalendar:)`
 /// returns: title, date/time, notes, location, URL — plain display text
@@ -20,7 +20,8 @@ import VoxtrCalendarPlanningDomain
 /// fetched fresh every time this screen appears and discarded, like any
 /// other in-memory view state, the moment it is dismissed.
 struct CalendarDiagnosticEventsView: View {
-    @Bindable var viewModel: AthleteCalendarPlanningViewModel
+    @Bindable var viewModel: FamilyCalendarSourcesViewModel
+    let source: ExternalPlanningSource
 
     var body: some View {
         List {
@@ -35,7 +36,7 @@ struct CalendarDiagnosticEventsView: View {
             }
         }
         .navigationTitle("Calendar Events (Alpha)")
-        .onAppear { viewModel.loadDiagnosticEvents() }
+        .onAppear { viewModel.loadDiagnosticEvents(for: source) }
     }
 
     @ViewBuilder

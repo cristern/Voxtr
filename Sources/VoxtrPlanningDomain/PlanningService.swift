@@ -363,6 +363,15 @@ public final class PlanningService {
         try repository.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: externalSourceType)
     }
 
+    /// Family-Owned Calendar Sources V1: a thin passthrough, matching
+    /// this service's own established "reuse PlanningService" boundary
+    /// — see `PlanningRepository.fetchPlannedActivities(externalSourceType:)`
+    /// for why a family-owned source needs an athlete-LESS lookup,
+    /// unlike the sibling immediately above.
+    public func fetchPlannedActivities(externalSourceType: String) throws -> [PlannedActivity] {
+        try repository.fetchPlannedActivities(externalSourceType: externalSourceType)
+    }
+
     /// Runtime closeout (stale recurring preview fix): a purely
     /// read-only check — never creates a `WeekPlan` (unlike
     /// `getOrCreateWeekPlan`, used only by the actual "Log Activity"

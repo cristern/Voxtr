@@ -87,22 +87,24 @@ public struct AthleteFamilyManagementView: View {
     /// its inline Sleep tracking Toggle (round 10 — see that type's
     /// own doc comment: no dedicated Sleep Settings screen anymore).
     private let sleepSettingsViewModel: (AthleteProfile) -> AthleteSleepSettingsViewModel
-    /// Calendar Planning Source V1: same factory-closure shape as
-    /// `sleepSettingsViewModel` above — this view has no reason to know
-    /// how to construct `CalendarPlanningCoordinationService`/
-    /// `SportRepository` itself.
-    private let calendarPlanningViewModel: (AthleteProfile) -> AthleteCalendarPlanningViewModel
+    /// Family-Owned Calendar Sources V1: NOT per-athlete, unlike
+    /// `sleepSettingsViewModel` above — a source belongs to the family,
+    /// so this view holds ONE `FamilyCalendarSourcesViewModel`, not a
+    /// per-athlete factory closure (see `ExternalPlanningSource`'s own
+    /// doc comment for why Calendar Planning Source V1's athlete-scoped
+    /// mapping was retired).
+    private let familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
         presentationMode: PresentationMode,
         sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel,
-        calendarPlanningViewModel: @escaping (AthleteProfile) -> AthleteCalendarPlanningViewModel
+        familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
         self.sleepSettingsViewModel = sleepSettingsViewModel
-        self.calendarPlanningViewModel = calendarPlanningViewModel
+        self.familyCalendarSourcesViewModel = familyCalendarSourcesViewModel
     }
 
     public var body: some View {
@@ -218,6 +220,25 @@ public struct AthleteFamilyManagementView: View {
                 }
                 .voxtrRowSurface()
             }
+
+            // Family-Owned Calendar Sources V1: family-level, not per-
+            // athlete — deliberately its OWN section here, never nested
+            // under any one athlete's own configuration hub
+            // (`AthleteSettingsView`), matching this round's own product
+            // contract ("Calendar/source connection belongs to the
+            // family, not to one athlete"). Replaces the per-athlete
+            // "Calendar" row `AthleteSettingsView` used to show.
+            Section {
+                NavigationLink {
+                    FamilyCalendarSourcesView(viewModel: familyCalendarSourcesViewModel)
+                } label: {
+                    Text(CalendarPlanningStrings.screenTitle)
+                }
+                .accessibilityIdentifier("athleteManagement.calendarSourcesLink")
+            } header: {
+                VoxtrSectionHeading("Family configuration")
+            }
+            .voxtrRowSurface()
         }
         .accessibilityIdentifier("athleteManagement.athleteList")
     }
@@ -235,8 +256,7 @@ public struct AthleteFamilyManagementView: View {
             AthleteSettingsView(
                 viewModel: viewModel,
                 athlete: athlete,
-                sleepSettingsViewModel: sleepSettingsViewModel(athlete),
-                calendarPlanningViewModel: calendarPlanningViewModel(athlete)
+                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
             )
         } label: {
             HStack(spacing: 8) {
@@ -342,7 +362,6 @@ struct AthleteSettingsView: View {
     let athlete: AthleteProfile
     @State private var isPresentingForm: Bool = false
     @State private var sleepSettingsViewModel: AthleteSleepSettingsViewModel
-    @State private var calendarPlanningViewModel: AthleteCalendarPlanningViewModel
     /// Design Foundation V0.1 (Athlete Color canonical preference
     /// round): local presentation state for the inline Color control
     /// below — `AthleteSettings` isn't part of the `@Bindable` `viewModel`'s
@@ -367,13 +386,11 @@ struct AthleteSettingsView: View {
     init(
         viewModel: AthleteFamilyManagementViewModel,
         athlete: AthleteProfile,
-        sleepSettingsViewModel: AthleteSleepSettingsViewModel,
-        calendarPlanningViewModel: AthleteCalendarPlanningViewModel
+        sleepSettingsViewModel: AthleteSleepSettingsViewModel
     ) {
         self.viewModel = viewModel
         self.athlete = athlete
         _sleepSettingsViewModel = State(initialValue: sleepSettingsViewModel)
-        _calendarPlanningViewModel = State(initialValue: calendarPlanningViewModel)
         _selectedColor = State(initialValue: viewModel.resolvedColor(for: athlete))
     }
 
@@ -507,23 +524,13 @@ struct AthleteSettingsView: View {
             }
             .voxtrRowSurface()
 
-            // Calendar Planning Source V1: "needs more" per this hub's
-            // own Simple Settings Rule (calendar choice, permission
-            // state, Sport/Activity Type, enable/disable, disconnect) —
-            // a pushed destination, not an inline row, matching Sleep's
-            // OWN reasoning for why it stays inline (single Toggle) vs.
-            // this being genuinely multi-field.
-            Section {
-                NavigationLink {
-                    AthleteCalendarPlanningView(viewModel: calendarPlanningViewModel, athleteDisplayName: athlete.givenName)
-                } label: {
-                    Text("Calendar")
-                }
-                .accessibilityIdentifier("athleteSettings.calendarLink.\(athlete.id.uuidString)")
-            } header: {
-                VoxtrSectionHeading("Calendar")
-            }
-            .voxtrRowSurface()
+            // Family-Owned Calendar Sources V1: the per-athlete
+            // "Calendar" row Calendar Planning Source V1 showed here is
+            // RETIRED — Calendar setup is now family-level, reached from
+            // Manage Athletes' own top-level "Family configuration"
+            // section (`AthleteFamilyManagementView.athleteList`), never
+            // from one athlete's own configuration hub (see
+            // `ExternalPlanningSource`'s own doc comment for why).
 
             // ARCHIVE / REACTIVATE — the athlete's one lifecycle action,
             // visually separated in its own trailing Section, at the
