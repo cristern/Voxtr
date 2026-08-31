@@ -142,6 +142,17 @@ struct CalendarImportReviewView: View {
                 }
                 .font(VoxtrTypography.metadata)
                 .accessibilityIdentifier("calendarImportReview.ignoreButton")
+
+                // Lead Review follow-up: the ONE explicit action that
+                // collapses this row into "Ready to Import" — selecting
+                // Athlete/Sport/Activity Type above never does this on
+                // its own. Disabled until Athlete is actually selected,
+                // matching classifyAndImport's own canonical minimum.
+                Button(CalendarPlanningStrings.markReadyButton) {
+                    viewModel.markReady(for: item.externalEventKey)
+                }
+                .disabled(!viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+                .accessibilityIdentifier("calendarImportReview.markReadyButton")
             }
         }
         .padding(.vertical, 4)

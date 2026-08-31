@@ -150,7 +150,7 @@ struct CalendarImportReviewViewModelTests {
         fixture.calendarProvider.eventsByCalendar["cal-familie"] = existing
     }
 
-    // MARK: - 1, 2, 3: staging never persists; readiness is derived
+    // MARK: - 1, 2, 3, 4, 5: the Ready transition is an explicit Parent action, never a side effect of picking a value
 
     @Test("A pending event can hold a staged Athlete/Sport/Activity Type without creating a PlannedActivity or CalendarImportDecision")
     @MainActor
@@ -168,9 +168,9 @@ struct CalendarImportReviewViewModelTests {
         #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
     }
 
-    @Test("Complete staged classification (Athlete chosen) makes an event Ready — it moves from needsReviewItems to readyToImportItems")
+    @Test("Lead Review follow-up: selecting Athlete alone does NOT move a new event to Ready — only the explicit markReady action does, and only once an Athlete is staged")
     @MainActor
-    func completeStagedClassificationBecomesReady() throws {
+    func selectingAthleteAloneDoesNotAutoCollapseToReady() throws {
         let fixture = try makeFixture()
         addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
         let viewModel = makeViewModel(fixture)
@@ -179,11 +179,33 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.needsReviewItems.count == 1)
         #expect(viewModel.readyToImportItems.isEmpty)
 
-        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        // Item 5: markReady is a no-op without an Athlete — the row stays
+        // in Needs Review.
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.needsReviewItems.count == 1)
+        #expect(viewModel.readyToImportItems.isEmpty)
 
+        // Item 1: selecting Athlete alone never auto-collapses the row.
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        #expect(viewModel.needsReviewItems.count == 1)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).athleteId == fixture.athleteId)
+
+        // Item 2/3: changing Sport, then Activity Type, still never
+        // auto-collapses.
+        viewModel.setStagedSport(nil, for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        viewModel.setStagedActivityType(.teamTraining, for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+
+        // Item 4: only the explicit markReady action moves it to Ready
+        // to Import, now that an Athlete is staged.
+        viewModel.markReady(for: item.externalEventKey)
         #expect(viewModel.needsReviewItems.isEmpty)
         #expect(viewModel.readyToImportItems.count == 1)
         #expect(viewModel.readyToImportCount == 1)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).activityType == .teamTraining)
     }
 
     @Test("An event with only a partial staged classification (no Athlete chosen) is never included in bulk import")
@@ -197,12 +219,32 @@ struct CalendarImportReviewViewModelTests {
         // Sport/Activity Type touched, but never an Athlete.
         viewModel.setStagedSport(nil, for: item.externalEventKey)
         viewModel.setStagedActivityType(.teamTraining, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey) // no-op: no Athlete yet
 
         viewModel.bulkImportReadyItems()
 
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(viewModel.reviewQueue.count == 1)
         #expect(viewModel.needsReviewItems.count == 1)
+    }
+
+    @Test("Item 9: a staged event with an Athlete but never explicitly marked Ready is excluded from bulk import")
+    @MainActor
+    func stagedButUnconfirmedItemExcludedFromBulkImport() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        // Deliberately never calls markReady.
+
+        viewModel.bulkImportReadyItems()
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(viewModel.reviewQueue.count == 1)
+        #expect(viewModel.needsReviewItems.count == 1)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).athleteId == fixture.athleteId)
     }
 
     // MARK: - 4, 5, 6: bulk import
@@ -221,6 +263,7 @@ struct CalendarImportReviewViewModelTests {
         for item in viewModel.reviewQueue {
             let athleteId = item.event.title == "Oliver's Practice" ? fixture.athleteId : secondAthleteId
             viewModel.setStagedAthlete(athleteId, for: item.externalEventKey)
+            viewModel.markReady(for: item.externalEventKey)
         }
         #expect(viewModel.readyToImportCount == 2)
 
@@ -242,6 +285,7 @@ struct CalendarImportReviewViewModelTests {
         viewModel.load()
         let readyItem = try #require(viewModel.reviewQueue.first { $0.event.title == "Ready Event" })
         viewModel.setStagedAthlete(fixture.athleteId, for: readyItem.externalEventKey)
+        viewModel.markReady(for: readyItem.externalEventKey)
 
         viewModel.bulkImportReadyItems()
 
@@ -278,7 +322,9 @@ struct CalendarImportReviewViewModelTests {
         )
 
         viewModel.setStagedAthlete(fixture.athleteId, for: succeedItem.externalEventKey)
+        viewModel.markReady(for: succeedItem.externalEventKey)
         viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
         #expect(viewModel.readyToImportCount == 2)
 
         viewModel.bulkImportReadyItems()
@@ -291,17 +337,16 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.needsReviewItems.count == 1)
         let stagedAfterFailure = viewModel.stagedClassification(for: conflictItem.externalEventKey)
         #expect(stagedAfterFailure.athleteId == fixture.athleteId)
-        #expect(stagedAfterFailure.isEditing == true)
+        #expect(stagedAfterFailure.isConfirmedReady == false)
 
         let activitiesAfterFirstAttempt = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
         #expect(activitiesAfterFirstAttempt.count == 2) // the succeeded import + the pre-seeded legacy activity
 
-        // Parent re-confirms the SAME (still-conflicting) staged athlete —
-        // this re-collapses the item back to Ready, exactly as picking an
-        // athlete always does — and retries the batch. Must not duplicate
-        // the already-successful import, and must not create a second
-        // activity for the still-conflicting one.
-        viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        // Parent explicitly re-confirms Ready for the SAME (still-
+        // conflicting) staged athlete and retries the batch. Must not
+        // duplicate the already-successful import, and must not create a
+        // second activity for the still-conflicting one.
+        viewModel.markReady(for: conflictItem.externalEventKey)
         #expect(viewModel.readyToImportCount == 1)
         viewModel.bulkImportReadyItems()
 
@@ -311,9 +356,9 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.reviewQueue.first?.externalEventKey == conflictItem.externalEventKey)
     }
 
-    // MARK: - 8: Edit restores editable state without persisting
+    // MARK: - 6, 7: Edit restores editable state without persisting, and does not re-collapse until Ready is explicitly reconfirmed
 
-    @Test("Tapping Edit on a Ready item restores its editable classification state without persisting anything")
+    @Test("Tapping Edit on a Ready item restores its editable classification state without persisting anything, and changing a value afterward does not re-collapse it until Ready is explicitly confirmed again")
     @MainActor
     func editOnReadyItemRestoresEditableStateWithoutPersisting() throws {
         let fixture = try makeFixture()
@@ -322,6 +367,7 @@ struct CalendarImportReviewViewModelTests {
         viewModel.load()
         let item = try #require(viewModel.reviewQueue.first)
         viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey)
         #expect(viewModel.readyToImportItems.count == 1)
 
         viewModel.beginEditing(for: item.externalEventKey)
@@ -331,16 +377,27 @@ struct CalendarImportReviewViewModelTests {
         let staged = viewModel.stagedClassification(for: item.externalEventKey)
         // Values are preserved, not cleared.
         #expect(staged.athleteId == fixture.athleteId)
-        #expect(staged.isEditing == true)
+        #expect(staged.isConfirmedReady == false)
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+
+        // Item 7: changing a value after Edit must NOT re-collapse the
+        // row on its own — it stays in Needs Review until the Parent
+        // explicitly confirms Ready again.
+        viewModel.setStagedActivityType(.recovery, for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).activityType == .recovery)
     }
 
-    // MARK: - 13, 14: remembered prefill is presentation-only and overridable
+    // MARK: - 10, 11: remembered prefill may initialize as Ready, but is still presentation-only
 
-    @Test("A remembered prefill (from a prior exact-title import) never creates a PlannedActivity by itself — only an explicit bulk import does")
+    @Test("Item 10/11: a remembered exact-title prefill MAY initialize as Ready, but it never creates a PlannedActivity by itself — only an explicit bulk import does")
     @MainActor
-    func rememberedPrefillAloneNeverCreatesPlannedActivity() throws {
+    func rememberedPrefillMayInitializeAsReadyButNeverImportsAlone() throws {
         let fixture = try makeFixture()
         addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
         let firstViewModel = makeViewModel(fixture)
@@ -348,10 +405,15 @@ struct CalendarImportReviewViewModelTests {
         let firstItem = try #require(firstViewModel.reviewQueue.first)
         firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
         firstViewModel.setStagedActivityType(.teamTraining, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
         firstViewModel.bulkImportReadyItems()
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
 
-        // A NEW, later occurrence of the exact same normalized title.
+        // A NEW, later occurrence of the exact same normalized title —
+        // unlike a brand-new/unremembered event, this ONE MAY arrive
+        // already Parent-confirmed Ready (item 10), since the safe exact
+        // remembered classification already agrees on every prior
+        // explicit import.
         addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14", hoursFromReference: 48)
         let secondViewModel = makeViewModel(fixture)
         secondViewModel.load()
@@ -360,13 +422,14 @@ struct CalendarImportReviewViewModelTests {
         let staged = secondViewModel.stagedClassification(for: secondItem.externalEventKey)
         #expect(staged.athleteId == fixture.athleteId)
         #expect(staged.activityType == .teamTraining)
-        // Prefilled -> immediately Ready, but NOT imported — merely
-        // presentation assistance.
+        #expect(staged.isConfirmedReady == true)
         #expect(secondViewModel.readyToImportItems.count == 1)
+        // Item 11: still NOT imported — merely presentation assistance
+        // until the Parent's own explicit bulk import.
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
     }
 
-    @Test("The Parent can override a remembered prefill before bulk import, and the override (not the remembered value) is what gets imported")
+    @Test("Item 12: the Parent can Edit/override a remembered Ready item, then must explicitly mark it Ready again before the override is what gets bulk-imported")
     @MainActor
     func parentCanOverrideRememberedPrefillBeforeBulkImport() throws {
         let fixture = try makeFixture()
@@ -376,6 +439,7 @@ struct CalendarImportReviewViewModelTests {
         firstViewModel.load()
         let firstItem = try #require(firstViewModel.reviewQueue.first)
         firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
         firstViewModel.bulkImportReadyItems()
 
         addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14", hoursFromReference: 48)
@@ -383,9 +447,30 @@ struct CalendarImportReviewViewModelTests {
         secondViewModel.load()
         let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
         #expect(secondViewModel.stagedClassification(for: secondItem.externalEventKey).athleteId == fixture.athleteId)
+        #expect(secondViewModel.readyToImportItems.count == 1)
 
-        // Parent explicitly overrides to the sibling instead.
+        // Parent taps Edit to inspect/override the remembered value —
+        // this un-confirms it, so it is no longer in the Ready set even
+        // though its values are unchanged so far.
+        secondViewModel.beginEditing(for: secondItem.externalEventKey)
+        #expect(secondViewModel.readyToImportItems.isEmpty)
+        #expect(secondViewModel.needsReviewItems.count == 1)
+
+        // Parent explicitly overrides to the sibling instead. Per item 7,
+        // this does NOT auto-collapse it back to Ready on its own.
         secondViewModel.setStagedAthlete(secondAthleteId, for: secondItem.externalEventKey)
+        #expect(secondViewModel.readyToImportItems.isEmpty)
+
+        // A bulk import at this point (before explicit reconfirmation)
+        // must skip this still-unconfirmed item entirely.
+        secondViewModel.bulkImportReadyItems()
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+            .first { $0.externalSourceId == secondItem.externalEventKey } == nil)
+
+        // Only once the Parent explicitly marks it Ready again does bulk
+        // import act on the override.
+        secondViewModel.markReady(for: secondItem.externalEventKey)
+        #expect(secondViewModel.readyToImportItems.count == 1)
         secondViewModel.bulkImportReadyItems()
 
         let secondActivity = try #require(
@@ -429,6 +514,7 @@ struct CalendarImportReviewViewModelTests {
         viewModel.load()
         let item = try #require(viewModel.reviewQueue.first)
         viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey)
         #expect(viewModel.readyToImportCount == 1)
 
         try fixture.coordinationService.setSourceEnabled(fixture.source.externalPlanningSourceId, isEnabled: false)

@@ -240,6 +240,13 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.editButton", defaultValue: "Edit")
     }
 
+    /// Lead Review follow-up: the ONE explicit Parent action that
+    /// collapses a Needs Review row into Ready to Import — never an
+    /// automatic side effect of picking Athlete/Sport/Activity Type.
+    public static var markReadyButton: String {
+        String(localized: "calendarPlanning.markReadyButton", defaultValue: "Ready")
+    }
+
     public static func bulkImportButton(readyCount: Int) -> String {
         String(localized: "calendarPlanning.bulkImportButton", defaultValue: "Import \(readyCount) ready activities")
     }
