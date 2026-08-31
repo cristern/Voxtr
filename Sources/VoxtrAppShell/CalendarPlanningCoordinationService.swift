@@ -39,6 +39,17 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     /// the existing import needs to be removed/recovered first (see
     /// `removeImportedActivities`) before this event can be reclassified.
     case existingActivityConflict
+    /// Lead Review follow-up (family isolation): `classifyAndImport`
+    /// guard — `athleteId` resolves to a real athlete, but that athlete's
+    /// `workspaceId` does not match `source.workspaceId`. A source
+    /// belongs to exactly ONE family (see `ExternalPlanningSource`'s own
+    /// doc comment); its events must never become Planning for a
+    /// DIFFERENT family's athlete, even if both happen to exist in the
+    /// same local store. Deliberately a distinct case from
+    /// `athleteNotFound` — the athlete DOES exist, just not in this
+    /// source's workspace, which is a genuinely different failure a
+    /// caller/UI may want to explain differently.
+    case athleteOutsideSourceWorkspace
 }
 
 /// Family-Owned Calendar Sources V1: the one place
@@ -431,6 +442,17 @@ public final class CalendarPlanningCoordinationService {
 
         guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
             throw CalendarPlanningCoordinationError.athleteNotFound
+        }
+
+        // Lead Review follow-up (family isolation): `athlete` exists, but
+        // must belong to THIS source's own workspace — checked before
+        // Step 2's existing-activity lookup below, so a legacy/existing
+        // activity from a DIFFERENT workspace can never be adopted just
+        // because its external event key happens to match, and no
+        // PlannedActivity/CalendarImportDecision is created or mutated
+        // for a cross-workspace request.
+        guard athlete.workspaceId == source.workspaceId else {
+            throw CalendarPlanningCoordinationError.athleteOutsideSourceWorkspace
         }
 
         // Step 2: an existing PlannedActivity with this exact external

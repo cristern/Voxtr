@@ -23,9 +23,14 @@ public final class CalendarImportReviewViewModel {
     private let actorId: ActorId
 
     public private(set) var reviewQueue: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
-    /// Active (non-archived) athletes only — Calendar Import Review
-    /// classifies events into an athlete's CURRENT plan, matching every
-    /// other Planning creation surface's own athlete scoping.
+    /// Active (non-archived) athletes, scoped to `source`'s OWN canonical
+    /// workspace only — Lead Review follow-up (family-isolation): a
+    /// source belongs to exactly one family (see `ExternalPlanningSource`'s
+    /// own doc comment), and Calendar Import Review must never let a
+    /// Parent pick an athlete from a DIFFERENT family/workspace, even if
+    /// both happen to exist in the same local store. Classifies events
+    /// into an athlete's CURRENT plan, matching every other Planning
+    /// creation surface's own athlete scoping.
     public private(set) var athletes: [AthleteProfile] = []
     public private(set) var sports: [Sport] = []
     public private(set) var errorMessage: String?
@@ -52,7 +57,10 @@ public final class CalendarImportReviewViewModel {
             reviewQueue = []
             errorMessage = CalendarPlanningStrings.genericError
         }
-        athletes = ((try? athleteRepository.fetchAllAthletes()) ?? []).filter { !$0.isArchived }
+        // Lead Review follow-up (family-isolation): scoped to source's OWN
+        // workspace, never every athlete in the local store — see
+        // `athletes`' own doc comment above.
+        athletes = ((try? athleteRepository.fetchAthletes(forWorkspace: WorkspaceId(rawValue: source.workspaceId))) ?? []).filter { !$0.isArchived }
         sports = (try? sportRepository.fetchAllSports()) ?? []
     }
 
