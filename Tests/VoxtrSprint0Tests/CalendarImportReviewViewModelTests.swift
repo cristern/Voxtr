@@ -503,6 +503,71 @@ struct CalendarImportReviewViewModelTests {
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
     }
 
+    // MARK: - Runtime fix, item 1: Ignore never mutates until the confirmation-driven ignore(_:) call
+
+    @Test("Item 1: nothing is persisted for a pending event until ignore(_:) is explicitly called — staging it, or merely having it selectable, never mutates anything")
+    @MainActor
+    func ignoreDoesNotMutateUntilExplicitlyCalled() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        // Merely being present, staged, or displayed never mutates —
+        // only an explicit ignore(_:) call (itself only ever reached
+        // through the View's own confirmation dialog) does.
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+
+        viewModel.ignore(item)
+
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == 1)
+    }
+
+    // MARK: - Runtime fix, items 3, 4: ignored events are excluded from Needs Review and appear in the Ignored section (current provider horizon)
+
+    @Test("Item 3/4: an ignored event is excluded from needsReviewItems/readyToImportItems and instead appears in ignoredItems")
+    @MainActor
+    func ignoredEventExcludedFromReviewAndAppearsInIgnoredItems() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        #expect(viewModel.ignoredItems.isEmpty)
+
+        viewModel.ignore(item)
+
+        #expect(viewModel.needsReviewItems.isEmpty)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.ignoredItems.count == 1)
+        #expect(viewModel.ignoredItems.first?.externalEventKey == item.externalEventKey)
+    }
+
+    // MARK: - Runtime fix, items 6, 7, 8: Review again restores exactly the ignored event, without creating Planning truth
+
+    @Test("Item 6/7/8: restore(_:) removes the event from ignoredItems, creates no PlannedActivity, and the event naturally reappears in needsReviewItems")
+    @MainActor
+    func restoreReturnsIgnoredEventToNeedsReview() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        viewModel.ignore(item)
+        #expect(viewModel.ignoredItems.count == 1)
+
+        viewModel.restore(item)
+
+        #expect(viewModel.ignoredItems.isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+        #expect(viewModel.needsReviewItems.first?.externalEventKey == item.externalEventKey)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+    }
+
     // MARK: - 16: disabled/disconnected source blocks bulk import of stale staged events
 
     @Test("A source disabled after events were staged Ready cannot bulk import them — the stale staged batch is rejected at the canonical boundary")

@@ -302,12 +302,198 @@ struct CalendarPlanningCoordinationServiceTests {
 
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
+        // Item 2 (runtime fix): exactly one .ignored decision was
+        // persisted — never more, never an .imported one.
+        let allDecisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(allDecisions.count == 1)
+        #expect(allDecisions.first?.status == .ignored)
 
         // Even a fresh fetch (simulating the Parent reopening Review
         // later) never resurfaces an ignored event.
         let outcome = try fixture.coordinationService.reconcile(source)
         #expect(outcome.updated == 0)
         #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
+    }
+
+    // MARK: - Runtime fix: Ignored section read model + restore ("Review again")
+
+    @Test("Item 4: fetchIgnoredReviewItems returns an ignored event that is still within the current external provider horizon")
+    @MainActor
+    func fetchIgnoredReviewItemsReturnsCurrentHorizonIgnoredEvents() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+
+        let ignoredItems = try fixture.coordinationService.fetchIgnoredReviewItems(for: source)
+
+        #expect(ignoredItems.count == 1)
+        #expect(ignoredItems.first?.externalEventKey == item.externalEventKey)
+        // Never shown as pending — the two read models are disjoint.
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
+    }
+
+    @Test("Item 5: an ignored event whose external event has since disappeared from the provider horizon is no longer returned by fetchIgnoredReviewItems")
+    @MainActor
+    func fetchIgnoredReviewItemsExcludesEventsNoLongerInHorizon() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+        #expect(try fixture.coordinationService.fetchIgnoredReviewItems(for: source).count == 1)
+
+        // The event itself disappears from the source's calendar (e.g.
+        // it was deleted or moved outside the review window) — the
+        // decision row still exists, but it must never be surfaced as
+        // an active ignored row without a corresponding real event.
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = []
+
+        #expect(try fixture.coordinationService.fetchIgnoredReviewItems(for: source).isEmpty)
+    }
+
+    @Test("Item 6/7/8: restoreIgnoredEvent removes only the matching .ignored decision, creates no PlannedActivity, and the event naturally reappears in Needs Review")
+    @MainActor
+    func restoreIgnoredEventReturnsEventToNeedsReview() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 1)
+
+        try fixture.coordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
+
+        // Item 6: the matching decision is gone — no decision at all
+        // remains for this source.
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
+        // Item 7: no PlannedActivity was ever created by restoring.
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        // Item 8: the event naturally reappears as pending, and no
+        // longer shows as an active ignored row.
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        #expect(queue.count == 1)
+        #expect(queue.first?.externalEventKey == item.externalEventKey)
+        #expect(try fixture.coordinationService.fetchIgnoredReviewItems(for: source).isEmpty)
+    }
+
+    @Test("Item 9: restoreIgnoredEvent cannot remove an .imported decision — it throws decisionNotIgnored and leaves the decision and its PlannedActivity untouched")
+    @MainActor
+    func restoreCannotRemoveImportedDecision() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.decisionNotIgnored) {
+            try fixture.coordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
+        }
+
+        let decisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(decisions.count == 1)
+        #expect(decisions.first?.status == .imported)
+        #expect(try fixture.planningService.fetchPlannedActivity(byId: imported.plannedActivityId) != nil)
+    }
+
+    @Test("Item 10: restoreIgnoredEvent is source-scoped — an ignored decision on a DIFFERENT source (even sharing the same externalEventKey text) is never restored by a call scoped to this source")
+    @MainActor
+    func restoreIsSourceScoped() throws {
+        let fixture = try makeFixture()
+        let sourceA = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-a", displayName: "Calendar A"
+        )
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-b", displayName: "Calendar B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceA.externalPlanningSourceId, isEnabled: true)
+        try fixture.coordinationService.setSourceEnabled(sourceB.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-b"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-b", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let itemB = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceB).first)
+        try fixture.coordinationService.ignore(itemB, for: sourceB, decidedBy: ActorId())
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: sourceB.externalPlanningSourceId).count == 1)
+
+        // A restore call scoped to sourceA, using sourceB's own event
+        // key, must find nothing for sourceA and leave sourceB's
+        // decision completely untouched.
+        try fixture.coordinationService.restoreIgnoredEvent(itemB.externalEventKey, for: sourceA)
+
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: sourceB.externalPlanningSourceId).count == 1)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: sourceB.externalPlanningSourceId).first?.status == .ignored)
+    }
+
+    @Test("Item 10: restoreIgnoredEvent respects the disabled/disconnected source boundary, failing calmly rather than acting on a stale source")
+    @MainActor
+    func restoreRespectsDisabledSourceBoundary() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: false)
+
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
+        }
+        // The ignored decision survives the rejected restore attempt.
+        let decisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(decisions.count == 1)
+        #expect(decisions.first?.status == .ignored)
     }
 
     @Test("Calling reconcile() repeatedly after an event is imported never creates a second PlannedActivity")
