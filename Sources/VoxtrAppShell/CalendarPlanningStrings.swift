@@ -221,4 +221,37 @@ public enum CalendarPlanningStrings {
             defaultValue: "This event will never be suggested for import again. It will never become part of anyone's plan."
         )
     }
+
+    // MARK: - Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk Import)
+
+    public static var needsReviewSectionTitle: String {
+        String(localized: "calendarPlanning.needsReviewSectionTitle", defaultValue: "Needs Review")
+    }
+
+    public static var readyToImportSectionTitle: String {
+        String(localized: "calendarPlanning.readyToImportSectionTitle", defaultValue: "Ready to Import")
+    }
+
+    public static var readyBadge: String {
+        String(localized: "calendarPlanning.readyBadge", defaultValue: "Ready")
+    }
+
+    public static var editButton: String {
+        String(localized: "calendarPlanning.editButton", defaultValue: "Edit")
+    }
+
+    public static func bulkImportButton(readyCount: Int) -> String {
+        String(localized: "calendarPlanning.bulkImportButton", defaultValue: "Import \(readyCount) ready activities")
+    }
+
+    /// Shown after `bulkImportReadyItems()` completes with at least one
+    /// per-item failure — a calm, concrete count, never a silent
+    /// whole-batch success/failure claim. Successfully imported items
+    /// already disappeared from the queue; this only explains the rest.
+    public static func bulkImportPartialResult(imported: Int, failed: Int) -> String {
+        String(
+            localized: "calendarPlanning.bulkImportPartialResult",
+            defaultValue: "\(imported) imported. \(failed) could not be imported — review and try again."
+        )
+    }
 }

@@ -1027,6 +1027,143 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(athleteIds == Set([fixture.athleteId, sameWorkspaceSecondAthleteId]))
     }
 
+    // MARK: - Remembered Exact Choices (Calendar Import Review V1.1)
+
+    @Test("rememberedClassifications prefills Athlete/Sport/Activity Type when every prior explicit import of an exact normalized title agrees")
+    @MainActor
+    func rememberedClassificationsPrefillsConsistentPriorClassification() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let firstStart = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "  Hockeytrening   U14 ",
+                startDate: firstStart, endDate: firstStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let firstItem = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImport(
+            firstItem, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let candidates = try fixture.coordinationService.rememberedClassifications(for: source)
+
+        // The stored title has irregular internal whitespace and mixed
+        // case; the lookup key must be the SAME normalized form
+        // `ExternalEventTitleNormalization.normalize(_:)` itself produces.
+        let normalizedTitle = try #require(ExternalEventTitleNormalization.normalize("Hockeytrening U14"))
+        let match = try #require(candidates[normalizedTitle])
+        #expect(match.athleteId == fixture.athleteId)
+        #expect(match.sportId == nil)
+        #expect(match.activityType == .teamTraining)
+    }
+
+    @Test("Remembered classifications are scoped to the SAME ExternalPlanningSource — a different source (even in the same workspace) never sees another source's history")
+    @MainActor
+    func rememberedClassificationsScopedToSameSource() throws {
+        let fixture = try makeFixture()
+        let sourceA = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-a", displayName: "Calendar A"
+        )
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-b", displayName: "Calendar B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceA.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-a"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-a", title: "Weekly Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceA).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: sourceA, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        let candidatesForA = try fixture.coordinationService.rememberedClassifications(for: sourceA)
+        let candidatesForB = try fixture.coordinationService.rememberedClassifications(for: sourceB)
+
+        #expect(!candidatesForA.isEmpty)
+        #expect(candidatesForB.isEmpty)
+    }
+
+    @Test("Conflicting prior classifications for the same exact normalized title produce NO remembered candidate — human judgement wins over guessing")
+    @MainActor
+    func rememberedClassificationsProduceNoCandidateWhenPriorClassificationsConflict() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let firstStart = Self.referenceDate.addingTimeInterval(3600)
+        let secondStart = firstStart.addingTimeInterval(7 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: firstStart, endDate: firstStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let firstItem = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImport(
+            firstItem, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        // A SECOND explicit import of the exact same normalized title,
+        // this time to a DIFFERENT athlete — a genuine, real disagreement
+        // (e.g. two different children both have events historically
+        // titled "Hockeytrening U14").
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-2", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: secondStart, endDate: secondStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let secondItem = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first { $0.event.eventIdentifier == "evt-2" })
+        try fixture.coordinationService.classifyAndImport(
+            secondItem, for: source, athleteId: secondAthleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let candidates = try fixture.coordinationService.rememberedClassifications(for: source)
+
+        let normalizedTitle = try #require(ExternalEventTitleNormalization.normalize("Hockeytrening U14"))
+        #expect(candidates[normalizedTitle] == nil)
+    }
+
+    @Test("A remembered classification whose athlete is archived produces NO candidate — the event is left requiring normal Parent review")
+    @MainActor
+    func rememberedClassificationsExcludeArchivedAthlete() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Weekly Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        let athlete = try #require(try fixture.athleteRepository.fetchAthlete(byId: fixture.athleteId))
+        athlete.isArchived = true
+        try fixture.athleteRepository.save()
+
+        let candidates = try fixture.coordinationService.rememberedClassifications(for: source)
+
+        let normalizedTitle = try #require(ExternalEventTitleNormalization.normalize("Weekly Practice"))
+        #expect(candidates[normalizedTitle] == nil)
+    }
+
     // MARK: - Recovery (adapted from Calendar Planning Source V1's PR #40)
 
     @Test("removeImportedActivities never touches a manually-created PlannedActivity (no externalSourceType)")

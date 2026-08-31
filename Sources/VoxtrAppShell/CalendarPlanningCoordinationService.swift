@@ -381,6 +381,94 @@ public final class CalendarPlanningCoordinationService {
         return pending.sorted { $0.event.startDate < $1.event.startDate }
     }
 
+    // MARK: - Remembered Exact Choices (V1.1 — prefill only, never auto-import)
+
+    /// Calendar Import Review V1.1: a Parent-approved classification this
+    /// EXACT `source` has used before for an external event whose
+    /// normalized title matches — see `rememberedClassifications(for:)`'s
+    /// own doc comment for the full algorithm. Presentation assistance
+    /// ONLY: a caller may use this to PREFILL a still-`Ready`, still-
+    /// unpersisted staging value; it is never itself imported, and never
+    /// bypasses `classifyAndImport`'s own canonical guards.
+    public struct RememberedClassification: Sendable, Equatable {
+        public let athleteId: AthleteId
+        public let sportId: SportId?
+        public let activityType: ActivityType
+    }
+
+    /// Builds the exact-title remembered-classification candidates for
+    /// ONE source, from EXISTING persisted truth only — no new
+    /// preference/rule entity. Source data:
+    ///   - every `CalendarImportDecision(status: .imported)` already
+    ///     recorded for THIS `source` (never another source — see this
+    ///     type's own "SOURCE SCOPE" contract: matching does not
+    ///     generalize across calendars/providers in V1.1). A decision is
+    ///     immutable once created (see `CalendarImportDecisionRepository`'s
+    ///     own doc comment), so its `athleteId`/`sportId`/`activityType`
+    ///     is exactly the Parent's own original explicit choice, never a
+    ///     value that could have silently drifted from a later manual
+    ///     Planning edit;
+    ///   - the linked `PlannedActivity.title` — the actual imported
+    ///     event's title, normalized via `ExternalEventTitleNormalization.normalize(_:)`.
+    ///
+    /// AMBIGUITY RULE: if the SAME normalized title has been explicitly
+    /// imported before with more than one DISTINCT (athlete, sport,
+    /// activity type) combination, NO candidate is produced for that
+    /// title at all — human judgement wins over guessing; a remembered
+    /// prefill is only ever produced when every prior explicit import of
+    /// that exact normalized title agrees.
+    ///
+    /// WORKSPACE/PRIVACY: a candidate is discarded (never returned) if
+    /// its remembered athlete no longer resolves, is archived, or no
+    /// longer belongs to THIS `source`'s own `workspaceId` — a remembered
+    /// choice must never cross a workspace boundary, and an archived/
+    /// missing athlete must never be silently prefilled; the caller is
+    /// left with an event that still requires normal Parent review.
+    ///
+    /// Never creates, mutates, or persists anything — a pure read.
+    public func rememberedClassifications(for source: ExternalPlanningSource) throws -> [String: RememberedClassification] {
+        let importedDecisions = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+            .filter { $0.status == .imported }
+        guard !importedDecisions.isEmpty else { return [:] }
+
+        struct Candidate: Hashable {
+            let athleteId: UUID
+            let sportId: UUID?
+            let activityType: ActivityType
+        }
+
+        var candidatesByTitle: [String: Set<Candidate>] = [:]
+        for decision in importedDecisions {
+            guard let plannedActivityId = decision.plannedActivityId,
+                  let activity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)),
+                  let normalizedTitle = ExternalEventTitleNormalization.normalize(activity.title),
+                  let decisionAthleteId = decision.athleteId,
+                  let decisionActivityType = decision.activityType else {
+                continue
+            }
+            let candidate = Candidate(athleteId: decisionAthleteId, sportId: decision.sportId, activityType: decisionActivityType)
+            candidatesByTitle[normalizedTitle, default: []].insert(candidate)
+        }
+
+        var result: [String: RememberedClassification] = [:]
+        for (normalizedTitle, candidates) in candidatesByTitle {
+            // Ambiguity rule: more than one distinct prior classification
+            // for this exact normalized title -> no prefill.
+            guard candidates.count == 1, let onlyCandidate = candidates.first else { continue }
+            guard let athlete = try athleteRepository.fetchAthlete(byId: AthleteId(rawValue: onlyCandidate.athleteId)),
+                  !athlete.isArchived,
+                  athlete.workspaceId == source.workspaceId else {
+                continue
+            }
+            result[normalizedTitle] = RememberedClassification(
+                athleteId: athlete.athleteId,
+                sportId: onlyCandidate.sportId.map { SportId(rawValue: $0) },
+                activityType: onlyCandidate.activityType
+            )
+        }
+        return result
+    }
+
     /// The explicit Parent action Calendar Import Review exists for:
     /// creates (or safely adopts an existing, matching) canonical
     /// `PlannedActivity` for `item`, with the Parent-approved
