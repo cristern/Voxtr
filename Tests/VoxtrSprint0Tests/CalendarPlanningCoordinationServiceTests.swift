@@ -948,7 +948,8 @@ struct CalendarPlanningCoordinationServiceTests {
         fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
             ExternalCalendarEvent(
                 eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
-                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "External notes that must never overwrite the existing row", location: "External Field"
             )
         ]
         let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
@@ -956,12 +957,15 @@ struct CalendarPlanningCoordinationServiceTests {
         // Simulate a Calendar Planning Source V1 legacy auto-import: a
         // PlannedActivity already exists carrying the exact same
         // externalSourceId/externalSourceType, but no CalendarImportDecision.
+        // Its own notes/location are Vǫxtr-owned (e.g. manually entered),
+        // and must survive adoption untouched.
         let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
         let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
         let legacyActivity = try fixture.planningService.addPlannedActivity(
             toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
             title: "Team Practice", localDate: today, timeZoneId: Self.timeZoneId,
-            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType,
+            notes: "Existing Vǫxtr-owned notes", location: "Existing Vǫxtr-owned location"
         )
 
         let result = try fixture.coordinationService.classifyAndImport(
@@ -971,9 +975,125 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(result.plannedActivityId == legacyActivity.plannedActivityId)
         let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
         #expect(activities.count == 1)
+        // Required test 5: adoption must NEVER overwrite the existing
+        // activity's own notes/location with the external event's.
+        #expect(result.notes == "Existing Vǫxtr-owned notes")
+        #expect(result.location == "Existing Vǫxtr-owned location")
         let decision = try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey)
         #expect(decision?.status == .imported)
         #expect(decision?.plannedActivityId == legacyActivity.plannedActivityId.rawValue)
+    }
+
+    // MARK: - Creation-time notes/location preservation
+
+    @Test("Required test 1: a newly imported event with notes and location creates a PlannedActivity with exactly those notes/location values")
+    @MainActor
+    func freshClassifyAndImportPreservesNotesAndLocation() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "Bring shin guards and a water bottle", location: "Community Sports Hall, Court 2"
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(imported.notes == "Bring shin guards and a water bottle")
+        #expect(imported.location == "Community Sports Hall, Court 2")
+        // Required test 3: existing title/start/duration behavior remains
+        // unchanged alongside the new notes/location.
+        #expect(imported.title == "Team Practice")
+        #expect(imported.startLocalTime != nil)
+        #expect(imported.plannedDurationMinutes == 60)
+        // Required test 4: existing Athlete/Sport/Activity Type
+        // classification behavior remains unchanged.
+        #expect(imported.athleteId == fixture.athleteId.rawValue)
+        #expect(imported.sportId == nil)
+        #expect(imported.activityType == .individualTraining)
+    }
+
+    @Test("Required test 2: a newly imported event with nil notes/location leaves PlannedActivity notes/location nil")
+    @MainActor
+    func freshClassifyAndImportWithNilMetadataLeavesNotesLocationNil() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(imported.notes == nil)
+        #expect(imported.location == nil)
+    }
+
+    @Test("Required test 6: reconcile() continues preserving an already-imported activity's existing notes/location rather than replacing them from the external event")
+    @MainActor
+    func reconcilePreservesExistingNotesAndLocationRatherThanReplacing() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "Original external notes", location: "Original external location"
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        #expect(imported.notes == "Original external notes")
+
+        // The Parent edits the Vǫxtr copy directly after import.
+        let editedWeekPlanId = WeekPlanId(rawValue: imported.weekPlanId)
+        _ = try fixture.planningService.editPlannedActivity(
+            imported.plannedActivityId, expectedWeekPlanId: editedWeekPlanId, activityType: imported.activityType,
+            title: imported.title, localDate: imported.localDate, timeZoneId: Self.timeZoneId,
+            notes: "Parent's own edited notes", location: "Parent's own edited location"
+        )
+
+        // The external event's title changes (source-owned fact) and its
+        // notes/location also change — reconciliation must refresh the
+        // former and leave the latter alone.
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice (Renamed)",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: "Changed external notes", location: "Changed external location"
+            )
+        ]
+        let outcome = try fixture.coordinationService.reconcile(source)
+        #expect(outcome.updated == 1)
+
+        let refreshed = try #require(try fixture.planningService.fetchPlannedActivity(byId: imported.plannedActivityId))
+        #expect(refreshed.title == "Team Practice (Renamed)")
+        #expect(refreshed.notes == "Parent's own edited notes")
+        #expect(refreshed.location == "Parent's own edited location")
     }
 
     @Test("A pre-existing PlannedActivity with the same externalSourceId but a DIFFERENT athlete/sport/activityType than the Parent's explicit selection throws existingActivityConflict, never duplicating or silently reassigning")
