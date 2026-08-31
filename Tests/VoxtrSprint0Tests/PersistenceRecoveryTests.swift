@@ -507,7 +507,7 @@ struct PersistenceRecoveryTests {
     /// NOT silently auto-classify anything: the plain SwiftData
     /// `.lightweight` migration stage creates the two new EMPTY tables
     /// and nothing else. Only an explicit, separate call to
-    /// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`
+    /// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`
     /// (exercised in `CalendarPlanningCoordinationServiceTests`, not
     /// here) ever turns a legacy mapping into an `ExternalPlanningSource`
     /// — and even that call never invents a `CalendarImportDecision`
@@ -592,7 +592,7 @@ struct PersistenceRecoveryTests {
         // merely that the container opened.
         let sourceRepository = ExternalPlanningSourceRepository(modelContext: v8Container.mainContext)
         let source = try sourceRepository.insert(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            workspaceId: WorkspaceId(), providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         #expect(source.externalContainerIdentifier == "cal-familie")
         #expect(try v8Container.mainContext.fetch(FetchDescriptor<ExternalPlanningSource>()).count == 1)

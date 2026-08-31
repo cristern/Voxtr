@@ -78,6 +78,26 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.genericError", defaultValue: "Something went wrong. Please try again.")
     }
 
+    /// Lead Review follow-up (Blocker 4): shown when the Parent's
+    /// chosen Athlete/Sport/Activity Type conflicts with an existing
+    /// import for this exact event — calm, specific, and points at the
+    /// actual recovery action rather than a generic failure.
+    public static var existingActivityConflictError: String {
+        String(
+            localized: "calendarPlanning.existingActivityConflictError",
+            defaultValue: "This event was already imported with a different athlete or sport. Remove the existing import from this calendar's recovery action, then try again."
+        )
+    }
+
+    /// Lead Review follow-up (Blocker 2): shown if a source was
+    /// disabled/disconnected after Import Review was opened.
+    public static var sourceDisabledError: String {
+        String(
+            localized: "calendarPlanning.sourceDisabledError",
+            defaultValue: "This calendar is no longer active. Turn it back on to review and import its events."
+        )
+    }
+
     public static func lastSynced(_ outcome: (updated: Int, cancelled: Int, skipped: Int)) -> String {
         String(
             localized: "calendarPlanning.lastSynced",

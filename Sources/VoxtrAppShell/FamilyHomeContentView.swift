@@ -420,7 +420,7 @@ public struct FamilyHomeContentView: View {
         // `PlannedActivity` rows are already reflected in the same
         // reappearance's read.
         .onAppear {
-            try? calendarPlanningCoordinationService.reconcileAllEnabledSources()
+            try? calendarPlanningCoordinationService.reconcileAllEnabledSources(forWorkspace: WorkspaceId(rawValue: family.workspace.id))
             viewModel.refresh()
         }
     }
@@ -900,7 +900,8 @@ public struct FamilyHomeContentView: View {
             sleepChangeBroadcaster: sleepChangeBroadcaster,
             calendarPlanningCoordinationService: calendarPlanningCoordinationService,
             sportRepository: sportRepository,
-            athleteRepository: athleteRepository
+            athleteRepository: athleteRepository,
+            workspaceId: WorkspaceId(rawValue: family.workspace.id)
         )
     }
 

@@ -13,7 +13,7 @@ import VoxtrCoreContracts
 /// type is RETAINED, unchanged, ONLY so any already-persisted row
 /// remains readable and can seed a one-time, additive migration to
 /// `ExternalPlanningSource` (see
-/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`'s
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`'s
 /// own doc comment for exactly what that migration does and does not
 /// do). No live repository/service/UI creates, updates, or reads a
 /// `CalendarPlanningMapping` for any other purpose — do not add new

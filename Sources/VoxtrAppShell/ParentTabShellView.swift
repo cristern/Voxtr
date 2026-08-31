@@ -232,6 +232,7 @@ public struct ParentTabShellView: View {
                         calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                         athleteRepository: athleteRepository,
                         sportRepository: sportRepository,
+                        workspaceId: WorkspaceId(rawValue: family.workspace.id),
                         actorId: ActorId(rawValue: family.participant.id)
                     )
                 )

@@ -1261,7 +1261,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// type(s)" stage above. `CalendarPlanningMapping` itself is
     /// UNCHANGED at the SwiftData level (still listed, still the same
     /// shape) — this migration never transforms its rows into the new
-    /// types; see `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`
+    /// types; see `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`
     /// for the deliberately separate, application-level, additive-only
     /// migration that seeds `ExternalPlanningSource` rows from distinct
     /// legacy `calendarIdentifier` values, run explicitly by the Family

@@ -72,6 +72,20 @@ public final class CalendarImportReviewViewModel {
                 item, for: source, athleteId: athleteId, sportId: sportId, activityType: activityType, decidedBy: actorId
             )
             reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
+        } catch CalendarPlanningCoordinationError.existingActivityConflict {
+            // Lead Review follow-up (Blocker 4): a DIFFERENT
+            // classification already exists for this exact event —
+            // never silently duplicated or reassigned. Calm, specific
+            // copy so the Parent understands why Import didn't just
+            // work, and what to do about it (remove the existing import
+            // first, via this source's own recovery action).
+            errorMessage = CalendarPlanningStrings.existingActivityConflictError
+        } catch CalendarPlanningCoordinationError.sourceDisabled {
+            // The source was disabled/disconnected after this queue was
+            // loaded (stale UI) — refresh so the item disappears, rather
+            // than leaving a now-invalid row tappable again.
+            errorMessage = CalendarPlanningStrings.sourceDisabledError
+            reviewQueue = (try? calendarPlanningCoordinationService.fetchReviewQueue(for: source)) ?? []
         } catch {
             errorMessage = CalendarPlanningStrings.genericError
         }

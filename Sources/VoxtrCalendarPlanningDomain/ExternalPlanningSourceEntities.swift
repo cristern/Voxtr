@@ -12,15 +12,33 @@ public enum ExternalPlanningSourceProviderKind: String, Codable, Sendable {
     case eventKit
 }
 
+/// Lead Review follow-up (Blocker 3): whether this source is currently
+/// presented to the Parent as "connected." `disconnect` never deletes
+/// the row (see `ExternalPlanningSource`'s own doc comment on why) — it
+/// sets this to `.disconnected`, which is what actually stops
+/// discovery/reconciliation from the source-list side and hides it from
+/// the normal connected-source list. `disable`/`enable`
+/// (`ExternalPlanningSource.isEnabled`) is a SEPARATE axis — a
+/// `.connected` source can still be `isEnabled == false` ("keep
+/// configured but inactive"); a `.disconnected` source is never
+/// discoverable regardless of `isEnabled`.
+public enum ExternalPlanningSourceLifecycleStatus: String, Codable, Sendable {
+    case connected
+    case disconnected
+}
+
 /// Family-Owned Calendar Sources V1: a Parent's explicit, trusted
 /// connection to ONE external calendar/container — owned by the
-/// FAMILY, never by one athlete. Replaces `CalendarPlanningMapping`
-/// (Calendar Planning Source V1, now legacy/Alpha — see that type's own
-/// doc comment): real TestFlight evidence showed multiple children's
-/// Spond groups syncing into the SAME iOS calendar, so forcing one
-/// calendar to map to exactly one athlete/sport/activity type
-/// misattributed every child's events to whichever athlete the mapping
-/// happened to name.
+/// FAMILY (this workspace's `WorkspaceId`, the same canonical family
+/// identity `AthleteProfile.workspaceId` already uses — see
+/// `AthleteRepository.fetchAthletes(forWorkspace:)` for the established
+/// pattern this type mirrors), never by one athlete. Replaces
+/// `CalendarPlanningMapping` (Calendar Planning Source V1, now legacy/
+/// Alpha — see that type's own doc comment): real TestFlight evidence
+/// showed multiple children's Spond groups syncing into the SAME iOS
+/// calendar, so forcing one calendar to map to exactly one athlete/
+/// sport/activity type misattributed every child's events to whichever
+/// athlete the mapping happened to name.
 ///
 /// This row is configuration/container identity only — it never stores
 /// athlete, sport, or activity type. Those are Parent-approved, PER-
@@ -32,15 +50,34 @@ public enum ExternalPlanningSourceProviderKind: String, Codable, Sendable {
 /// time/etc) — those live on the `PlannedActivity` created for each
 /// classified event, through the normal Planning mutation path.
 ///
-/// One row per external container/calendar is this V1's product
-/// contract — not enforced by a uniqueness constraint here (same
+/// One row per (workspace, provider, external container) is this V1's
+/// product contract — not enforced by a uniqueness constraint here (same
 /// "persistence infrastructure only" boundary every other repository in
 /// this project already follows); the coordination service is
 /// responsible for not creating a second source for the same
-/// container.
+/// (workspace, provider, container) tuple. A DIFFERENT workspace may
+/// freely have its own source referencing the SAME `externalContainerIdentifier`
+/// (e.g. two unrelated families that each happen to use a calendar named
+/// "Familie") — these must never collapse into one row; see this
+/// domain's own family-isolation tests.
+///
+/// Lead Review follow-up (Blocker 3): `disconnect` never deletes this
+/// row — it flips `lifecycleStatus` to `.disconnected` instead, so the
+/// row's stable `ExternalPlanningSourceId` (and every
+/// `CalendarImportDecision` that already references it) survives a
+/// disconnect/reconnect cycle. Reconnecting the SAME (workspace,
+/// provider, externalContainerIdentifier) tuple therefore REUSES this
+/// exact row (flips it back to `.connected`) rather than creating a new
+/// one with a new ID.
 @Model
 public final class ExternalPlanningSource {
     @Attribute(.unique) public var id: UUID
+    /// The canonical family/workspace this source belongs to — the same
+    /// stable ID `AthleteProfile.workspaceId` already uses. Every fetch/
+    /// create/duplicate-check this domain performs is scoped by this
+    /// field; a source can never appear in another workspace's source
+    /// list.
+    public var workspaceId: UUID
     public var providerKind: ExternalPlanningSourceProviderKind
     /// The provider's own stable container identifier — EventKit's
     /// `EKCalendar.calendarIdentifier` for `providerKind == .eventKit`.
@@ -53,8 +90,14 @@ public final class ExternalPlanningSource {
     /// Parent already recognizes by its original name.
     public var displayName: String
     /// Off by default even after creation — the Parent must explicitly
-    /// enable a source before anything is discoverable for review.
+    /// enable a source before anything is discoverable for review. A
+    /// SEPARATE axis from `lifecycleStatus`; see that type's own doc
+    /// comment.
     public var isEnabled: Bool
+    /// See `ExternalPlanningSourceLifecycleStatus`'s own doc comment.
+    /// Defaults to `.connected` — a source only ever becomes
+    /// `.disconnected` through an explicit Parent action.
+    public var lifecycleStatus: ExternalPlanningSourceLifecycleStatus
     public var createdAt: Date
     public var updatedAt: Date
     /// Set after every reconciliation attempt for this source,
@@ -65,10 +108,12 @@ public final class ExternalPlanningSource {
 
     public init(
         id: ExternalPlanningSourceId = ExternalPlanningSourceId(),
+        workspaceId: WorkspaceId,
         providerKind: ExternalPlanningSourceProviderKind,
         externalContainerIdentifier: String,
         displayName: String,
         isEnabled: Bool = false,
+        lifecycleStatus: ExternalPlanningSourceLifecycleStatus = .connected,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         lastReconciledAt: Date? = nil,
@@ -76,10 +121,12 @@ public final class ExternalPlanningSource {
     ) {
         precondition(!externalContainerIdentifier.isEmpty, "externalContainerIdentifier must not be empty")
         self.id = id.rawValue
+        self.workspaceId = workspaceId.rawValue
         self.providerKind = providerKind
         self.externalContainerIdentifier = externalContainerIdentifier
         self.displayName = displayName
         self.isEnabled = isEnabled
+        self.lifecycleStatus = lifecycleStatus
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastReconciledAt = lastReconciledAt
