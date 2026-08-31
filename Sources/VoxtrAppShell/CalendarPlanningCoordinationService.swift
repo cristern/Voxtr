@@ -238,6 +238,16 @@ public final class CalendarPlanningCoordinationService {
         /// never be cleaned up automatically" from "something went wrong,
         /// try again."
         public let failed: Int
+        /// Review follow-up: count of WeekPlans that WERE originally
+        /// `.committed`, were reopened to allow cleanup, and had at least
+        /// one activity removed — but whose committed status could NOT be
+        /// restored afterward (`PlanningService.commitWeekPlan` failed, or
+        /// the WeekPlan could not be re-fetched). Reported separately so
+        /// this is never silently reported as full success: a caller
+        /// (and the Parent-facing result message) can tell "cleanup
+        /// finished and the week is back the way it was" from "cleanup
+        /// finished but this week is still in draft and needs attention."
+        public let lifecycleRestoreFailed: Int
     }
 
     /// Calendar V1 recovery: removes every currently-linked, not-yet-
@@ -289,11 +299,15 @@ public final class CalendarPlanningCoordinationService {
             return sourceId.hasPrefix(calendarPrefix)
         }
 
-        var removed = 0
         var preservedLogged = 0
-        var historicalWeeksSkipped = 0
-        var failed = 0
 
+        // Review follow-up: grouped by WeekPlanId BEFORE any reopen/delete
+        // happens, so a committed week containing several imported
+        // activities is reopened and (if eligible) recommitted exactly
+        // ONCE, never per-activity. `removeImportedActivities` must never
+        // silently change a WeekPlan's lifecycle state — see this method's
+        // per-week handling below.
+        var eligibleByWeek: [WeekPlanId: [PlannedActivity]] = [:]
         for activity in candidates {
             // Planning proposes; Training proves. Proven training truth is
             // never erased by this action, same rule
@@ -303,38 +317,88 @@ public final class CalendarPlanningCoordinationService {
                 preservedLogged += 1
                 continue
             }
-            let weekPlanId = WeekPlanId(rawValue: activity.weekPlanId)
+            eligibleByWeek[WeekPlanId(rawValue: activity.weekPlanId), default: []].append(activity)
+        }
+
+        var removed = 0
+        var historicalWeeksSkipped = 0
+        var failed = 0
+        var lifecycleRestoreFailed = 0
+
+        for (weekPlanId, activities) in eligibleByWeek {
+            // 1. Fetch the canonical WeekPlan.
             guard let weekPlan = try planningService.fetchWeekPlan(byId: weekPlanId) else {
-                failed += 1
+                failed += activities.count
                 continue
             }
-            if weekPlan.status == .committed {
+            // 2. Remember whether it was originally committed.
+            let wasOriginallyCommitted = weekPlan.status == .committed
+
+            if wasOriginallyCommitted {
+                // 3. Historical committed weeks are never reopened, by
+                // design — this action cannot clean these up, reported
+                // honestly rather than silently skipped.
                 guard weekPlan.weekStart >= currentWeekStart else {
-                    // Historical week — never reopened, by design. Left in
-                    // place; this is the one case this action cannot clean
-                    // up, reported honestly rather than silently skipped.
-                    historicalWeeksSkipped += 1
+                    historicalWeeksSkipped += activities.count
                     continue
                 }
+                // 4. Current/future committed: reopen ONCE for this week.
                 do {
                     try planningService.reopenWeekPlan(
                         weekPlanId, expectedRevision: weekPlan.revision, reopenedBy: actorId, currentWeekStart: currentWeekStart
                     )
                 } catch {
-                    failed += 1
+                    failed += activities.count
                     continue
                 }
             }
+
+            // 5. Process all eligible deletes for this week.
+            var weekRemoved = 0
+            for activity in activities {
+                do {
+                    try planningService.deletePlannedActivity(
+                        activity.plannedActivityId, expectedWeekPlanId: weekPlanId, deletedBy: actorId
+                    )
+                    weekRemoved += 1
+                } catch {
+                    failed += 1
+                }
+            }
+            removed += weekRemoved
+
+            guard wasOriginallyCommitted else { continue }
+            // 6. Restore the week's original committed state through the
+            // canonical PlanningService — never left silently in `.draft`.
+            // The revision after reopen + N deletes is never assumed here:
+            // `deletePlannedActivity` does not itself advance
+            // `WeekPlan.revision`, but re-reading canonical state (rather
+            // than reusing the pre-delete `weekPlan.revision`, or the
+            // reopen call's return value) keeps this correct even if that
+            // ever changes. If the WeekPlan can no longer be found, or
+            // `commitWeekPlan` fails (e.g. a concurrent revision
+            // conflict), this is reported via `lifecycleRestoreFailed`
+            // rather than folded into `removed`/`failed` as a silent
+            // success.
             do {
-                try planningService.deletePlannedActivity(activity.plannedActivityId, expectedWeekPlanId: weekPlanId, deletedBy: actorId)
-                removed += 1
+                guard let currentWeekPlan = try planningService.fetchWeekPlan(byId: weekPlanId) else {
+                    lifecycleRestoreFailed += 1
+                    continue
+                }
+                try planningService.commitWeekPlan(
+                    weekPlanId, expectedRevision: currentWeekPlan.revision, committedBy: actorId
+                )
             } catch {
-                failed += 1
+                lifecycleRestoreFailed += 1
             }
         }
 
         return ImportedActivityCleanupOutcome(
-            removed: removed, preservedLogged: preservedLogged, historicalWeeksSkipped: historicalWeeksSkipped, failed: failed
+            removed: removed,
+            preservedLogged: preservedLogged,
+            historicalWeeksSkipped: historicalWeeksSkipped,
+            failed: failed,
+            lifecycleRestoreFailed: lifecycleRestoreFailed
         )
     }
 
