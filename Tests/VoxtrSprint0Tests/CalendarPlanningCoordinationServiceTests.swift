@@ -61,7 +61,7 @@ private struct FixedDateProvider: DateProvider {
     let now: Date
 }
 
-@Suite("CalendarPlanningCoordinationService (Family-Owned Calendar Sources V1)", .serialized)
+@Suite("CalendarPlanningCoordinationService (Family-Owned Calendar Sources V1, Lead Review follow-up)", .serialized)
 struct CalendarPlanningCoordinationServiceTests {
 
     private static let referenceDate = Date(timeIntervalSince1970: 1_767_312_000)
@@ -76,6 +76,7 @@ struct CalendarPlanningCoordinationServiceTests {
         let legacyMappingRepository: CalendarPlanningMappingRepository
         let calendarProvider: FakeCalendarEventProvider
         let coordinationService: CalendarPlanningCoordinationService
+        let workspaceId: WorkspaceId
         let athleteId: AthleteId
     }
 
@@ -101,8 +102,9 @@ struct CalendarPlanningCoordinationServiceTests {
             athleteRepository: athleteRepository,
             dateProvider: FixedDateProvider(now: referenceDate)
         )
+        let workspaceId = WorkspaceId()
         let athlete = try athleteRepository.createAthlete(
-            workspaceId: WorkspaceId(),
+            workspaceId: workspaceId,
             givenName: "Runner",
             birthDate: LocalDate(year: 2012, month: 3, day: 1),
             timeZoneId: Self.timeZoneId,
@@ -117,14 +119,15 @@ struct CalendarPlanningCoordinationServiceTests {
             legacyMappingRepository: legacyMappingRepository,
             calendarProvider: calendarProvider,
             coordinationService: coordinationService,
+            workspaceId: workspaceId,
             athleteId: athlete.athleteId
         )
     }
 
     @discardableResult
-    private func addSecondAthlete(_ fixture: Fixture, name: String = "Sibling") throws -> AthleteId {
+    private func addSecondAthlete(_ fixture: Fixture, name: String = "Sibling", workspaceId: WorkspaceId? = nil) throws -> AthleteId {
         let athlete = try fixture.athleteRepository.createAthlete(
-            workspaceId: WorkspaceId(),
+            workspaceId: workspaceId ?? fixture.workspaceId,
             givenName: name,
             birthDate: LocalDate(year: 2014, month: 5, day: 12),
             timeZoneId: Self.timeZoneId,
@@ -133,55 +136,80 @@ struct CalendarPlanningCoordinationServiceTests {
         return athlete.athleteId
     }
 
-    // 1. external calendar/source is family-owned, not athlete-owned
-    @Test("ExternalPlanningSource carries no athleteId — creating one requires no athlete at all, and the same source works for every athlete")
+    // MARK: - Blocker 1: family/workspace ownership
+
+    // Required test 1: source belongs to one canonical family/workspace.
+    @Test("A created source carries its owning workspace, and fetchSources(forWorkspace:) returns it")
     @MainActor
-    func sourceIsFamilyOwnedNotAthleteOwned() throws {
+    func sourceBelongsToOneCanonicalWorkspace() throws {
         let fixture = try makeFixture()
-        // No athleteId parameter exists on createSource at all — this
-        // compiling is itself part of the proof; the runtime assertions
-        // below confirm the created row carries no per-athlete default.
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         #expect(source.externalContainerIdentifier == "cal-familie")
         #expect(source.isEnabled == false)
 
-        let sources = try fixture.coordinationService.fetchSources()
+        let sources = try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId)
         #expect(sources.count == 1)
         #expect(sources.first?.externalPlanningSourceId == source.externalPlanningSourceId)
     }
 
-    // 12. one family source setup replaces duplicate per-athlete setup
-    // semantics — connecting the SAME calendar a second time is rejected
-    // regardless of athlete, since there is no athlete dimension to the
-    // uniqueness check at all (unlike the legacy per-(calendar,athlete)
-    // mapping, which allowed the same calendar to be configured
-    // separately for each athlete).
-    @Test("Creating a source for an already-connected calendar throws duplicateSource — one connection covers every athlete, never one per athlete")
+    // Required test 2: source lists are family-isolated.
+    @Test("A source created for one workspace never appears in a different workspace's fetchSources(forWorkspace:)")
     @MainActor
-    func duplicateSourceRejected() throws {
+    func sourceListsAreFamilyIsolated() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        _ = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+
+        let ownSources = try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId)
+        let otherSources = try fixture.coordinationService.fetchSources(forWorkspace: otherWorkspaceId)
+        #expect(ownSources.count == 1)
+        #expect(otherSources.isEmpty)
+    }
+
+    // Required test 3: same external calendar identifier in two
+    // workspaces does not collapse.
+    @Test("Two different workspaces can each connect a calendar sharing the same externalContainerIdentifier without colliding or collapsing")
+    @MainActor
+    func sameCalendarIdentifierInTwoWorkspacesDoesNotCollapse() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let ownSource = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        let otherSource = try fixture.coordinationService.createSource(
+            forWorkspace: otherWorkspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie (other family)"
+        )
+
+        #expect(ownSource.externalPlanningSourceId != otherSource.externalPlanningSourceId)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).count == 1)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: otherWorkspaceId).count == 1)
+    }
+
+    @Test("Creating a source for an already-CONNECTED calendar in the SAME workspace throws duplicateSource")
+    @MainActor
+    func duplicateSourceRejectedWithinSameWorkspace() throws {
         let fixture = try makeFixture()
         _ = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         #expect(throws: CalendarPlanningCoordinationError.duplicateSource) {
             try fixture.coordinationService.createSource(
-                providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie (renamed)"
+                forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie (renamed)"
             )
         }
     }
 
-    // 2. same source can provide events that are classified to different
-    // athletes; 4. Parent-classified event creates PlannedActivity with
-    // selected athlete/sport/type
-    @Test("The SAME source's events can be classified to different athletes, each with its own explicit Sport/Activity Type")
+    @Test("The SAME source's events can be classified to different athletes in the same workspace, each with its own explicit Sport/Activity Type")
     @MainActor
     func sameSourceClassifiesToDifferentAthletes() throws {
         let fixture = try makeFixture()
         let secondAthleteId = try addSecondAthlete(fixture)
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -220,13 +248,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
     }
 
-    // 3. unclassified event does not create PlannedActivity
     @Test("An unclassified event never becomes a PlannedActivity — reconcile() never creates, only fetchReviewQueue() surfaces it")
     @MainActor
     func unclassifiedEventNeverBecomesPlannedActivity() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -247,13 +274,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(queue.first?.event.eventIdentifier == "evt-1")
     }
 
-    // 5. ignored event does not create PlannedActivity
     @Test("Ignoring an event never creates a PlannedActivity, and it never reappears in the review queue")
     @MainActor
     func ignoredEventNeverBecomesPlannedActivityAndNeverResurfaces() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -277,13 +303,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
     }
 
-    // 6. repeated sync does not duplicate imported activity
     @Test("Calling reconcile() repeatedly after an event is imported never creates a second PlannedActivity")
     @MainActor
     func repeatedSyncNeverDuplicatesImportedActivity() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -306,14 +331,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(activities.count == 1)
     }
 
-    // 7. previously classified/imported event reconciles source-owned
-    // title/time changes
     @Test("reconcile() refreshes an already-imported PlannedActivity's source-owned title/time, preserving its identity and Parent-chosen Sport/Activity Type")
     @MainActor
     func reconcileRefreshesSourceOwnedFieldsOnAlreadyImportedActivity() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -346,13 +369,165 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(refreshed.athleteId == fixture.athleteId.rawValue)
     }
 
-    // 8. source deletion preserves LoggedActivity truth
-    @Test("Deleting a source never touches its already-imported PlannedActivity or LoggedActivity truth")
+    // MARK: - Blocker 2: disabled source cannot discover/classify
+
+    // Required test 4: disabled source returns no review queue.
+    @Test("A disabled source's fetchReviewQueue(for:) returns [] even though it has qualifying upcoming events")
     @MainActor
-    func sourceDeletionPreservesLoggedActivityTruth() throws {
+    func disabledSourceReturnsNoReviewQueue() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        // Deliberately left isEnabled == false (the default).
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
+
+        let outcome = try fixture.coordinationService.reconcile(source)
+        #expect(outcome.updated == 0)
+        #expect(outcome.cancelled == 0)
+        #expect(outcome.skipped == 0)
+    }
+
+    // Required test 5: disabled source cannot classify/import through a
+    // stale item.
+    @Test("classifyAndImport throws sourceDisabled for a stale CalendarReviewItem captured before the source was disabled")
+    @MainActor
+    func disabledSourceCannotClassifyThroughStaleItem() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        // Capture the item, and the SOURCE VALUE, while still enabled —
+        // exactly what a stale UI would be holding.
+        let staleItem = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let staleSource = source
+
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: false)
+
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.classifyAndImport(
+                staleItem, for: staleSource, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+
+        // Re-enabling makes discovery (and classification) available
+        // again.
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).count == 1)
+    }
+
+    // MARK: - Blocker 3: disconnect/reconnect preserves stable identity
+
+    // Required test 6: disconnected migrated source is not recreated on
+    // next load.
+    @Test("A disconnected source is never recreated by migrateLegacySourcesIfNeeded on a later load")
+    @MainActor
+    func disconnectedMigratedSourceIsNotRecreatedOnNextLoad() throws {
+        let fixture = try makeFixture()
+        _ = try fixture.legacyMappingRepository.insert(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-familie",
+            calendarTitle: "Familie", activityType: .individualTraining, sportId: nil
+        )
+
+        let firstRun = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: fixture.workspaceId)
+        #expect(firstRun.count == 1)
+        let migratedId = try #require(firstRun.first?.externalPlanningSourceId)
+
+        try fixture.coordinationService.disconnectSource(migratedId)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).isEmpty)
+
+        // Simulate the Parent reopening the app / reloading the source
+        // list — migration runs again against the SAME legacy mapping.
+        let secondRun = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: fixture.workspaceId)
+        #expect(secondRun.isEmpty)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).isEmpty)
+    }
+
+    // Required test 7: reconnecting the same family/provider/calendar
+    // preserves source ID.
+    @Test("Reconnecting the same (workspace, provider, container) tuple after disconnect reuses the existing ExternalPlanningSourceId")
+    @MainActor
+    func reconnectingSameSourcePreservesId() throws {
+        let fixture = try makeFixture()
+        let original = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.disconnectSource(original.externalPlanningSourceId)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).isEmpty)
+
+        let reconnected = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie (renamed)"
+        )
+
+        #expect(reconnected.externalPlanningSourceId == original.externalPlanningSourceId)
+        #expect(reconnected.displayName == "Familie (renamed)")
+        let sources = try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId)
+        #expect(sources.count == 1)
+    }
+
+    // Required test 8: decisions remain associated after reconnect.
+    @Test("A CalendarImportDecision made before disconnect is still found (and the resulting PlannedActivity unchanged) after reconnect")
+    @MainActor
+    func decisionsRemainAssociatedAfterReconnect() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        try fixture.coordinationService.disconnectSource(source.externalPlanningSourceId)
+        let reconnected = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        #expect(reconnected.externalPlanningSourceId == source.externalPlanningSourceId)
+
+        let decision = try fixture.importDecisionRepository.fetch(
+            sourceId: reconnected.externalPlanningSourceId, externalEventKey: item.externalEventKey
+        )
+        #expect(decision != nil)
+        #expect(decision?.plannedActivityId == imported.plannedActivityId.rawValue)
+        #expect(try fixture.planningService.fetchPlannedActivity(byId: imported.plannedActivityId) != nil)
+
+        // The already-decided event does not resurface as pending after
+        // reconnect.
+        try fixture.coordinationService.setSourceEnabled(reconnected.externalPlanningSourceId, isEnabled: true)
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: reconnected).isEmpty)
+    }
+
+    @Test("Disconnecting a source never touches its already-imported PlannedActivity or LoggedActivity truth")
+    @MainActor
+    func disconnectingSourcePreservesLoggedActivityTruth() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -371,20 +546,19 @@ struct CalendarPlanningCoordinationServiceTests {
             activityType: .individualTraining, title: "Team Practice", startedAt: start
         )
 
-        try fixture.coordinationService.deleteSource(source.externalPlanningSourceId)
+        try fixture.coordinationService.disconnectSource(source.externalPlanningSourceId)
 
-        #expect(try fixture.coordinationService.fetchSources().isEmpty)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).isEmpty)
         #expect(try fixture.planningService.fetchPlannedActivity(byId: imported.plannedActivityId) != nil)
         #expect(try fixture.trainingService.fetchLoggedActivities(forPlannedActivity: imported.plannedActivityId).count == 1)
     }
 
-    // 14. unavailable EventKit calendar cannot mass-delete
     @Test("An UNAVAILABLE calendar does NOT cancel a previously-imported unperformed future PlannedActivity")
     @MainActor
     func unavailableCalendarCannotMassDelete() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -410,13 +584,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.planningService.fetchPlannedActivity(byId: imported.plannedActivityId) != nil)
     }
 
-    // 15. recurring/detached identity behavior remains covered
     @Test("Recurring occurrences sharing one eventIdentifier are classified as distinct PlannedActivities, and moving one occurrence updates only that occurrence")
     @MainActor
     func recurringOccurrenceIdentityRemainsCorrect() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let firstOccurrence = Self.referenceDate.addingTimeInterval(3600)
@@ -465,18 +638,16 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
     }
 
-    // 13. migration from current schema opens safely and does not
-    // silently auto-classify future events using legacy athlete/sport/
-    // type values
-    @Test("migrateLegacySourcesIfNeeded() creates one disabled ExternalPlanningSource per distinct legacy calendarIdentifier, dropping athlete/sport/activityType, and creates no CalendarImportDecision")
+    @Test("migrateLegacySourcesIfNeeded(forWorkspace:) creates one disabled ExternalPlanningSource per distinct legacy calendarIdentifier owned by that workspace, dropping athlete/sport/activityType, and creates no CalendarImportDecision")
     @MainActor
     func migrateLegacySourcesIfNeededDropsClassificationDefaults() throws {
         let fixture = try makeFixture()
         let secondAthleteId = try addSecondAthlete(fixture)
         // Two legacy mappings for the SAME calendar, two different
-        // athletes/sports/activity types — simulating exactly the real
-        // evidence this migration exists for (one Spond "Familie"
-        // calendar, previously mapped once per child).
+        // athletes/sports/activity types, BOTH in the same workspace —
+        // simulating exactly the real evidence this migration exists for
+        // (one Spond "Familie" calendar, previously mapped once per
+        // child).
         _ = try fixture.legacyMappingRepository.insert(
             athleteId: fixture.athleteId, calendarIdentifier: "cal-familie",
             calendarTitle: "Familie", activityType: .individualTraining, sportId: nil
@@ -486,13 +657,13 @@ struct CalendarPlanningCoordinationServiceTests {
             calendarTitle: "Familie", activityType: .teamTraining, sportId: nil
         )
 
-        let created = try fixture.coordinationService.migrateLegacySourcesIfNeeded()
+        let created = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: fixture.workspaceId)
         #expect(created.count == 1)
         #expect(created.first?.externalContainerIdentifier == "cal-familie")
         #expect(created.first?.displayName == "Familie")
         #expect(created.first?.isEnabled == false)
 
-        let sources = try fixture.coordinationService.fetchSources()
+        let sources = try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId)
         #expect(sources.count == 1)
         // No CalendarImportDecision was fabricated from the legacy
         // athlete/sport/activityType values — migration seeds ONLY the
@@ -501,20 +672,254 @@ struct CalendarPlanningCoordinationServiceTests {
 
         // Idempotent: calling again is a safe no-op, never a second
         // source for the same calendar.
-        let secondRun = try fixture.coordinationService.migrateLegacySourcesIfNeeded()
+        let secondRun = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: fixture.workspaceId)
         #expect(secondRun.isEmpty)
-        #expect(try fixture.coordinationService.fetchSources().count == 1)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).count == 1)
+    }
+
+    @Test("A legacy mapping whose athlete belongs to a DIFFERENT workspace is never migrated into this workspace's sources, even sharing the same calendarIdentifier")
+    @MainActor
+    func migrationRespectsWorkspaceIsolation() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let otherAthlete = try fixture.athleteRepository.createAthlete(
+            workspaceId: otherWorkspaceId, givenName: "Other Family Child",
+            birthDate: LocalDate(year: 2013, month: 6, day: 1), timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+        )
+        _ = try fixture.legacyMappingRepository.insert(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-familie",
+            calendarTitle: "Familie", activityType: .individualTraining, sportId: nil
+        )
+        _ = try fixture.legacyMappingRepository.insert(
+            athleteId: otherAthlete.athleteId, calendarIdentifier: "cal-familie",
+            calendarTitle: "Familie (other family)", activityType: .teamTraining, sportId: nil
+        )
+
+        let ownMigrated = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: fixture.workspaceId)
+        let otherMigrated = try fixture.coordinationService.migrateLegacySourcesIfNeeded(forWorkspace: otherWorkspaceId)
+
+        #expect(ownMigrated.count == 1)
+        #expect(otherMigrated.count == 1)
+        #expect(ownMigrated.first?.externalPlanningSourceId != otherMigrated.first?.externalPlanningSourceId)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: fixture.workspaceId).count == 1)
+        #expect(try fixture.coordinationService.fetchSources(forWorkspace: otherWorkspaceId).count == 1)
+    }
+
+    // MARK: - Blocker 4: existing-activity duplicate prevention
+
+    // Required test 9 & 13: fresh classify/import creates exactly one
+    // PlannedActivity + one decision; a pre-existing legacy
+    // PlannedActivity carrying the same externalSourceId is adopted, not
+    // duplicated (test 10), and a conflicting one is neither duplicated
+    // nor silently reassigned (test 11); retry after a partial decision
+    // failure is safe (test 12).
+
+    @Test("A normal fresh classifyAndImport creates exactly one PlannedActivity and one CalendarImportDecision")
+    @MainActor
+    func freshClassifyAndImportCreatesExactlyOneActivityAndDecision() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(activities.count == 1)
+        #expect(activities.first?.plannedActivityId == imported.plannedActivityId)
+        let decision = try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey)
+        #expect(decision?.status == .imported)
+        #expect(decision?.plannedActivityId == imported.plannedActivityId.rawValue)
+    }
+
+    @Test("A pre-existing legacy PlannedActivity carrying the same externalSourceId, with no decision yet, is ADOPTED (linked) rather than duplicated when the Parent's explicit classification matches it exactly")
+    @MainActor
+    func explicitClassificationMatchingExistingActivityAdoptsIt() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        // Simulate a Calendar Planning Source V1 legacy auto-import: a
+        // PlannedActivity already exists carrying the exact same
+        // externalSourceId/externalSourceType, but no CalendarImportDecision.
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
+        let legacyActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Team Practice", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        let result = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(result.plannedActivityId == legacyActivity.plannedActivityId)
+        let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(activities.count == 1)
+        let decision = try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey)
+        #expect(decision?.status == .imported)
+        #expect(decision?.plannedActivityId == legacyActivity.plannedActivityId.rawValue)
+    }
+
+    @Test("A pre-existing PlannedActivity with the same externalSourceId but a DIFFERENT athlete/sport/activityType than the Parent's explicit selection throws existingActivityConflict, never duplicating or silently reassigning")
+    @MainActor
+    func conflictingExistingActivityIsNotDuplicatedOrReassigned() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        // Legacy activity attributed to the FIRST athlete.
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
+        let legacyActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Team Practice", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        // Parent now explicitly classifies it to the SECOND athlete —
+        // a conflicting selection.
+        #expect(throws: CalendarPlanningCoordinationError.existingActivityConflict) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: secondAthleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+
+        // No duplicate was created, and the legacy activity was never
+        // silently reassigned.
+        let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(activities.count == 1)
+        #expect(activities.first?.plannedActivityId == legacyActivity.plannedActivityId)
+        #expect(activities.first?.athleteId == fixture.athleteId.rawValue)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+    }
+
+    @Test("Retrying classifyAndImport after a PlannedActivity was created but the CalendarImportDecision write failed creates no duplicate — the retry adopts the existing activity")
+    @MainActor
+    func retryAfterPartialDecisionFailureCreatesNoDuplicate() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        // Simulate the FIRST attempt's PlannedActivity write having
+        // succeeded but its CalendarImportDecision write NOT (e.g. a
+        // crash between the two steps) — a PlannedActivity now carries
+        // this exact externalSourceId, but no decision exists yet.
+        let (localDate, _) = (Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId), 0)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: localDate)
+        let firstAttemptActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: item.event.title, localDate: localDate, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        // The retry — same Parent-chosen classification as before.
+        let retried = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(retried.plannedActivityId == firstAttemptActivity.plannedActivityId)
+        let activities = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(activities.count == 1)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) != nil)
+
+        // A further retry (now with a decision present) is a pure
+        // idempotent no-op, still no duplicate.
+        let secondRetry = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        #expect(secondRetry.plannedActivityId == firstAttemptActivity.plannedActivityId)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
+    }
+
+    @Test("classifyAndImport throws alreadyDecided, never creating a duplicate, when a decision exists but its PlannedActivity no longer resolves")
+    @MainActor
+    func decisionReferencingMissingPlannedActivityThrowsRatherThanDuplicating() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        // Delete the PlannedActivity through a path OTHER than
+        // removeImportedActivities, leaving the decision dangling —
+        // an inconsistency this method must never paper over by quietly
+        // creating a replacement.
+        let weekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: WeekPlanId(rawValue: imported.weekPlanId)))
+        try fixture.planningService.deletePlannedActivity(
+            imported.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId()
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.alreadyDecided) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
     }
 
     // MARK: - Recovery (adapted from Calendar Planning Source V1's PR #40)
 
-    // 9. cleanup still preserves manual activities
     @Test("removeImportedActivities never touches a manually-created PlannedActivity (no externalSourceType)")
     @MainActor
     func cleanupPreservesManuallyCreatedActivity() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
         let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
@@ -530,13 +935,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(stillThere != nil)
     }
 
-    // 10. cleanup still preserves historical Planning
     @Test("removeImportedActivities never reopens or deletes activities in a historical week, committed or draft")
     @MainActor
     func cleanupPreservesHistoricalPlanning() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         let historicalWeekStart = LocalDate(year: 2025, month: 12, day: 1)
         let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: historicalWeekStart)
@@ -558,13 +962,12 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(remaining.first?.plannedActivityId == activity.plannedActivityId)
     }
 
-    // 11. cleanup still preserves LoggedActivity
     @Test("removeImportedActivities never removes an imported activity that already has a LoggedActivity")
     @MainActor
     func cleanupPreservesLoggedActivity() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -597,7 +1000,7 @@ struct CalendarPlanningCoordinationServiceTests {
     func cleanupReopensCommittedWeekAndReenablesReview() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -633,7 +1036,7 @@ struct CalendarPlanningCoordinationServiceTests {
     func cleanupIsIdempotent() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
         let start = Self.referenceDate.addingTimeInterval(3600)
@@ -663,7 +1066,7 @@ struct CalendarPlanningCoordinationServiceTests {
     func diagnosticEventsCarryMetadata() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         let start = Self.referenceDate.addingTimeInterval(3600)
         let sampleURL = try #require(URL(string: "https://spond.com/group/abc123"))
@@ -688,7 +1091,7 @@ struct CalendarPlanningCoordinationServiceTests {
     func diagnosticEventsHandleMissingMetadataAndBounding() throws {
         let fixture = try makeFixture()
         let source = try fixture.coordinationService.createSource(
-            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
         )
         let start = Self.referenceDate.addingTimeInterval(3600)
         fixture.calendarProvider.eventsByCalendar["cal-familie"] = (0..<12).map { index in

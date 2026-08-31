@@ -10,7 +10,7 @@ import VoxtrCoreContracts
 /// `update`/`setEnabled` remain here only because deleting them would
 /// be an unrelated cleanup this round doesn't need; nothing calls them
 /// anymore — the only live caller is
-/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`,
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`,
 /// which calls `fetchAll()` (read-only) once.
 @MainActor
 public final class CalendarPlanningMappingRepository {

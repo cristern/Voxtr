@@ -25,6 +25,14 @@ public final class FamilyCalendarSourcesViewModel {
     /// reads athlete/Sport data directly.
     private let athleteRepository: AthleteRepository
     private let sportRepository: SportRepository
+    /// Lead Review follow-up (Blocker 1): the actual, canonical
+    /// workspace this screen is scoped to — passed explicitly by the
+    /// caller (never inferred/global), the same `WorkspaceId` every
+    /// other family-scoped screen in this app already threads through
+    /// (see `AthleteFamilyManagementViewModel`'s own `workspaceId`).
+    /// Every source list/create/migration call below is scoped by this
+    /// exact value.
+    private let workspaceId: WorkspaceId
     /// The real, human Parent this screen's destructive actions
     /// (removing imported activities, reopening a committed week to do
     /// so) are attributed to — never `.system`, matching this app's own
@@ -63,11 +71,13 @@ public final class FamilyCalendarSourcesViewModel {
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         athleteRepository: AthleteRepository,
         sportRepository: SportRepository,
+        workspaceId: WorkspaceId,
         actorId: ActorId
     ) {
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.athleteRepository = athleteRepository
         self.sportRepository = sportRepository
+        self.workspaceId = workspaceId
         self.actorId = actorId
     }
 
@@ -100,15 +110,28 @@ public final class FamilyCalendarSourcesViewModel {
         // as this screen's own reconciliation calls elsewhere; a
         // migration failure must never block the screen from showing
         // whatever sources already exist. See
-        // `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`'s
-        // own doc comment for exactly what this does and does not do.
-        try? calendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()
+        // `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`'s
+        // own doc comment for exactly what this does and does not do —
+        // including why it can never resurrect a source this workspace's
+        // own Parent already disconnected.
+        try? calendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace: workspaceId)
         refreshSources()
     }
 
     private func refreshSources() {
-        sources = (try? calendarPlanningCoordinationService.fetchSources()) ?? []
+        sources = (try? calendarPlanningCoordinationService.fetchSources(forWorkspace: workspaceId)) ?? []
         for source in sources {
+            // Lead Review follow-up (Blocker 2): a disabled source's
+            // review count is never requested at all — not merely
+            // displayed as zero. `fetchReviewQueue(for:)` already
+            // returns `[]` for a disabled/disconnected source at the
+            // canonical boundary, but skipping the call entirely here
+            // avoids a wasted EventKit read for a source the Parent
+            // turned off.
+            guard source.isEnabled else {
+                reviewCounts[source.externalPlanningSourceId] = 0
+                continue
+            }
             reviewCounts[source.externalPlanningSourceId] = (try? calendarPlanningCoordinationService.fetchReviewQueue(for: source).count) ?? 0
         }
     }
@@ -148,6 +171,7 @@ public final class FamilyCalendarSourcesViewModel {
         guard let calendar = availableCalendars.first(where: { $0.id == selectedCalendarId }) else { return }
         do {
             let created = try calendarPlanningCoordinationService.createSource(
+                forWorkspace: workspaceId,
                 providerKind: .eventKit,
                 externalContainerIdentifier: calendar.id,
                 displayName: calendar.title
@@ -175,7 +199,7 @@ public final class FamilyCalendarSourcesViewModel {
     public func disconnect(_ source: ExternalPlanningSource) {
         errorMessage = nil
         do {
-            try calendarPlanningCoordinationService.deleteSource(source.externalPlanningSourceId)
+            try calendarPlanningCoordinationService.disconnectSource(source.externalPlanningSourceId)
             lastCleanupOutcome[source.externalPlanningSourceId] = nil
             lastSyncOutcome[source.externalPlanningSourceId] = nil
             reviewCounts[source.externalPlanningSourceId] = nil

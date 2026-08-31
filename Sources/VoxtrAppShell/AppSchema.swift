@@ -107,7 +107,7 @@ import VoxtrCalendarPlanningDomain
 /// Import Review produces. `CalendarPlanningMapping` stays registered,
 /// UNCHANGED, purely so any already-persisted row remains readable for
 /// the one-time migration read (see
-/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`) —
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded(forWorkspace:)`) —
 /// no live path creates new rows of that type anymore. Two genuine
 /// model-type additions, both purely additive (`AppSchemaV8`, see
 /// `AppSchemaVersioning.swift`).

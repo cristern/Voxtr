@@ -200,6 +200,11 @@ public struct HomeDashboardView: View {
     /// `sportRepository` immediately above — needed only to build the
     /// "Manage Athletes" sheet's own `FamilyCalendarSourcesViewModel`.
     private let athleteRepository: AthleteRepository
+    /// Lead Review follow-up (Blocker 1): the canonical family/workspace
+    /// this athlete belongs to — threaded through only to pass to the
+    /// "Manage Athletes" sheet's own `FamilyCalendarSourcesViewModel`,
+    /// same rationale as `athleteRepository` immediately above.
+    private let workspaceId: WorkspaceId
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -221,7 +226,8 @@ public struct HomeDashboardView: View {
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         sportRepository: SportRepository,
-        athleteRepository: AthleteRepository
+        athleteRepository: AthleteRepository,
+        workspaceId: WorkspaceId
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -242,6 +248,7 @@ public struct HomeDashboardView: View {
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
         self.athleteRepository = athleteRepository
+        self.workspaceId = workspaceId
     }
 
     public var body: some View {
@@ -314,6 +321,7 @@ public struct HomeDashboardView: View {
                         calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                         athleteRepository: athleteRepository,
                         sportRepository: sportRepository,
+                        workspaceId: workspaceId,
                         actorId: committedByActorId
                     )
                 )

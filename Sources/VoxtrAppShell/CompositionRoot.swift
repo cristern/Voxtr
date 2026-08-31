@@ -255,7 +255,7 @@ public final class CompositionRoot {
         // Family-Owned Calendar Sources V1: the one place
         // ExternalPlanningSourceRepository/CalendarImportDecisionRepository
         // (Calendar Planning), the legacy CalendarPlanningMappingRepository
-        // (read-only, for `migrateLegacySourcesIfNeeded()`), PlanningService,
+        // (read-only, for `migrateLegacySourcesIfNeeded(forWorkspace:)`), PlanningService,
         // TrainingService, and AthleteRepository are used together — same
         // placement rationale as every other cross-domain coordinator
         // above. No EventBus subscription (no Planning/Training event

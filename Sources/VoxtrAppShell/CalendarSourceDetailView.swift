@@ -34,15 +34,23 @@ struct CalendarSourceDetailView: View {
                 VoxtrSectionHeading("Connected calendar")
             }
 
-            Section {
-                NavigationLink {
-                    CalendarImportReviewView(viewModel: viewModel.makeImportReviewViewModel(for: source))
-                } label: {
-                    Text(CalendarPlanningStrings.reviewEventsButtonWithCount(viewModel.reviewCounts[source.externalPlanningSourceId] ?? 0))
+            // Lead Review follow-up (Blocker 2): shown ONLY while
+            // enabled — a disabled source can never actually produce a
+            // review queue (enforced at the canonical service boundary
+            // in `CalendarPlanningCoordinationService.fetchReviewQueue(for:)`),
+            // so this row must never imply there's something pending to
+            // act on while disabled.
+            if source.isEnabled {
+                Section {
+                    NavigationLink {
+                        CalendarImportReviewView(viewModel: viewModel.makeImportReviewViewModel(for: source))
+                    } label: {
+                        Text(CalendarPlanningStrings.reviewEventsButtonWithCount(viewModel.reviewCounts[source.externalPlanningSourceId] ?? 0))
+                    }
+                    .accessibilityIdentifier("calendarSourceDetail.reviewLink")
+                } footer: {
+                    Text(CalendarPlanningStrings.reviewExplanation)
                 }
-                .accessibilityIdentifier("calendarSourceDetail.reviewLink")
-            } footer: {
-                Text(CalendarPlanningStrings.reviewExplanation)
             }
 
             // Calendar V1 metadata inspection round precedent: Alpha-

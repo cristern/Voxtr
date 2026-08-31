@@ -13,12 +13,32 @@ import VoxtrCalendarPlanningDomain
 public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     case athleteNotFound
     case sourceNotFound
-    /// V1 product contract: one source per external container/calendar.
+    /// V1 product contract: one CONNECTED source per (workspace,
+    /// provider, external container) tuple. Never thrown for a
+    /// `.disconnected` match — that case reconnects the existing row
+    /// instead (see `createSource`'s own doc comment).
     case duplicateSource
     /// `classifyAndImport`/`ignore` guard: this exact external event
     /// already has a decision recorded (defensive — the Import Review
-    /// queue should already exclude it).
+    /// queue should already exclude it), OR that decision's own
+    /// `PlannedActivity` no longer resolves (deleted through a path
+    /// other than `removeImportedActivities`) — either way, never
+    /// silently create a second `PlannedActivity`.
     case alreadyDecided
+    /// Lead Review follow-up (Blocker 2): `classifyAndImport` guard — the
+    /// source is disabled (or disconnected); stale UI holding an older
+    /// `CalendarReviewItem` from before the source was disabled cannot
+    /// import through it.
+    case sourceDisabled
+    /// Lead Review follow-up (Blocker 4): a `PlannedActivity` already
+    /// exists for this exact external event identity (a prior Calendar
+    /// Planning Source V1 auto-import, or an earlier `classifyAndImport`
+    /// whose decision write failed), but its athlete/sport/activityType
+    /// does NOT match the Parent's current explicit selection. Never
+    /// duplicated, never silently reassigned — the UI must explain that
+    /// the existing import needs to be removed/recovered first (see
+    /// `removeImportedActivities`) before this event can be reclassified.
+    case existingActivityConflict
 }
 
 /// Family-Owned Calendar Sources V1: the one place
@@ -27,7 +47,7 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
 /// `AthleteRepository` are used together — same placement rationale
 /// `NotificationsPlanningCoordinationService` already established for
 /// its own cross-domain concern. Owns source configuration (create/
-/// enable/disable/delete), the one-time legacy-mapping migration, the
+/// enable/disable/disconnect), the one-time legacy-mapping migration, the
 /// Calendar Import Review queue (discover/classify-and-import/ignore),
 /// reconciliation of already-imported events, and safe recovery/cleanup
 /// of wrongly-imported activities.
@@ -47,6 +67,15 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
 /// this type never touches `PlanningRepository` or SwiftData directly,
 /// so every existing lifecycle invariant/event fires exactly as it does
 /// for a Parent's own manual edit.
+///
+/// Lead Review follow-up (Blocker 1): every method that lists or creates
+/// a source takes an explicit `WorkspaceId` — the same canonical family
+/// identity `AthleteRepository.fetchAthletes(forWorkspace:)` already
+/// scopes by — never inferred globally. A source (and every
+/// `CalendarImportDecision` reachable through it) can never be visible
+/// to, or collide with, a different workspace's own source. See
+/// `ExternalPlanningSourceRepository`'s own doc comment for the exact
+/// scoping boundary.
 ///
 /// Recurring calendar events / occurrence identity: unchanged from
 /// Calendar Planning Source V1 — see `ExternalCalendarEventIdentity`
@@ -75,8 +104,8 @@ public final class CalendarPlanningCoordinationService {
     private let importDecisionRepository: CalendarImportDecisionRepository
     /// Family-Owned Calendar Sources V1: read-only access to the legacy
     /// Calendar Planning Source V1 mapping table — used ONLY by
-    /// `migrateLegacySourcesIfNeeded()`. No other method in this type
-    /// reads or writes through this repository.
+    /// `migrateLegacySourcesIfNeeded(forWorkspace:)`. No other method in
+    /// this type reads or writes through this repository.
     private let legacyMappingRepository: CalendarPlanningMappingRepository
     private let calendarEventProvider: CalendarEventProviding
     private let planningService: PlanningService
@@ -150,20 +179,41 @@ public final class CalendarPlanningCoordinationService {
 
     // MARK: - Source configuration
 
-    public func fetchSources() throws -> [ExternalPlanningSource] {
-        try sourceRepository.fetchAll()
+    /// Every CONNECTED source belonging to `workspaceId` — never another
+    /// workspace's, and never a `.disconnected` one (see
+    /// `ExternalPlanningSourceRepository.fetchAllConnected(forWorkspace:)`).
+    public func fetchSources(forWorkspace workspaceId: WorkspaceId) throws -> [ExternalPlanningSource] {
+        try sourceRepository.fetchAllConnected(forWorkspace: workspaceId)
     }
 
+    /// Connects a calendar for `workspaceId`. If this EXACT (workspace,
+    /// provider, externalContainerIdentifier) tuple already has a
+    /// `.disconnected` row (the Parent disconnected it before, or legacy
+    /// migration never created a fresh one because this exact row
+    /// already existed), that row is REVIVED — `lifecycleStatus` flips
+    /// back to `.connected` and `displayName` is refreshed, but its
+    /// stable `ExternalPlanningSourceId` (and every `CalendarImportDecision`
+    /// already referencing it) is preserved. Throws `.duplicateSource`
+    /// only when a `.connected` row already exists for this tuple —
+    /// never for a `.disconnected` one.
     @discardableResult
     public func createSource(
+        forWorkspace workspaceId: WorkspaceId,
         providerKind: ExternalPlanningSourceProviderKind,
         externalContainerIdentifier: String,
         displayName: String
     ) throws -> ExternalPlanningSource {
-        guard try sourceRepository.fetch(byExternalContainerIdentifier: externalContainerIdentifier) == nil else {
-            throw CalendarPlanningCoordinationError.duplicateSource
+        if let existing = try sourceRepository.fetch(
+            forWorkspace: workspaceId, providerKind: providerKind, externalContainerIdentifier: externalContainerIdentifier
+        ) {
+            guard existing.lifecycleStatus == .disconnected else {
+                throw CalendarPlanningCoordinationError.duplicateSource
+            }
+            try sourceRepository.setLifecycleStatus(existing, .connected, displayName: displayName)
+            return existing
         }
         return try sourceRepository.insert(
+            workspaceId: workspaceId,
             providerKind: providerKind,
             externalContainerIdentifier: externalContainerIdentifier,
             displayName: displayName
@@ -177,19 +227,21 @@ public final class CalendarPlanningCoordinationService {
         try sourceRepository.setEnabled(source, isEnabled: isEnabled)
     }
 
-    /// Deletes the source (stops future reconciliation/review discovery
-    /// for this calendar) — never touches any `PlannedActivity` or
-    /// `CalendarImportDecision` already created through it. Those remain
-    /// normal Planning data / decision history, editable/deletable
-    /// through their own normal paths; disconnecting a source never
-    /// retroactively erases what it already produced. To also remove
-    /// what it already imported, see
-    /// `removeImportedActivities(for:removedBy:)` below — a
-    /// deliberately separate, explicit action, never implied by
-    /// disconnecting or disabling.
-    public func deleteSource(_ sourceId: ExternalPlanningSourceId) throws {
+    /// Lead Review follow-up (Blocker 3): disconnects the source —
+    /// stops future reconciliation/review discovery and removes it from
+    /// the normal connected-source list — WITHOUT deleting the row.
+    /// Never touches any `PlannedActivity` or `CalendarImportDecision`
+    /// already created through it; those remain normal Planning data /
+    /// decision history. To also remove what it already imported, see
+    /// `removeImportedActivities(for:removedBy:)` below — a deliberately
+    /// separate, explicit action, never implied by disconnecting or
+    /// disabling. Reconnecting the SAME (workspace, provider, container)
+    /// tuple later reuses this exact row (see `createSource`'s own doc
+    /// comment) — the stable ID and every decision referencing it
+    /// survive the round trip.
+    public func disconnectSource(_ sourceId: ExternalPlanningSourceId) throws {
         guard let source = try sourceRepository.fetch(byId: sourceId) else { return }
-        try sourceRepository.delete(source)
+        try sourceRepository.setLifecycleStatus(source, .disconnected)
     }
 
     // MARK: - Legacy migration (Calendar Planning Source V1 -> Family-Owned Calendar Sources V1)
@@ -203,42 +255,62 @@ public final class CalendarPlanningCoordinationService {
     /// crashes for why that pattern is avoided here).
     ///
     /// For every DISTINCT `calendarIdentifier` found among existing
-    /// `CalendarPlanningMapping` rows (across every athlete — a
-    /// calendar previously mapped to two different athletes is ONE
-    /// external container, so it becomes exactly ONE `ExternalPlanningSource`),
-    /// creates a new `ExternalPlanningSource` — disabled by default,
-    /// same "Parent must explicitly enable" contract every new source
-    /// already has — UNLESS a source for that exact `externalContainerIdentifier`
-    /// already exists (idempotent: safe to call on every launch/screen
-    /// load, a no-op after the first successful run, and safe even if a
-    /// Parent later deletes the migrated source — it is never recreated
-    /// once its `calendarIdentifier` has ever had a source).
+    /// `CalendarPlanningMapping` rows WHOSE OWNING ATHLETE BELONGS TO
+    /// `workspaceId` (resolved via `AthleteRepository.fetchAthlete(byId:)`
+    /// — `CalendarPlanningMapping` itself carries no workspace field of
+    /// its own, only `athleteId`), creates a new `ExternalPlanningSource`
+    /// for THIS workspace — disabled by default, same "Parent must
+    /// explicitly enable" contract every new source already has —
+    /// UNLESS a source for that exact (workspace, provider, container)
+    /// tuple already exists, CONNECTED or `.disconnected` (idempotent:
+    /// safe to call on every launch/screen load, a no-op after the first
+    /// successful run; and — Lead Review follow-up, Blocker 3 — a
+    /// Parent-disconnected source is NEVER resurrected as a new row,
+    /// since `ExternalPlanningSourceRepository.fetch(forWorkspace:providerKind:externalContainerIdentifier:)`
+    /// deliberately matches `.disconnected` rows too, not only
+    /// `.connected` ones).
+    ///
+    /// Lead Review follow-up (Blocker 1): a legacy mapping whose athlete
+    /// belongs to a DIFFERENT workspace is simply never considered by
+    /// this call — a second call with that OTHER workspace's ID creates
+    /// its own, separate `ExternalPlanningSource`, even if both legacy
+    /// mappings happen to share the same `calendarIdentifier` string.
+    /// Two workspaces' calendars sharing an identifier by coincidence
+    /// must never collapse into one cross-family source.
     ///
     /// Deliberately does NOT read `CalendarPlanningMapping.athleteId`/
-    /// `.sportId`/`.activityType` for anything — those legacy per-
-    /// mapping defaults are dropped, never carried forward as a
-    /// classification rule, matching this round's own explicit
-    /// contract: "do not silently reinterpret an old athlete mapping as
-    /// a permanent event-classification rule." No `CalendarImportDecision`
-    /// is ever created here, and no `PlannedActivity` is ever created or
-    /// touched here — this method's ONLY effect is seeding
-    /// `ExternalPlanningSource` container rows so a Parent doesn't have
-    /// to remember and manually reconnect a calendar they already
-    /// connected once.
+    /// `.sportId`/`.activityType` for anything beyond resolving the
+    /// OWNING WORKSPACE — those legacy per-mapping classification
+    /// defaults are dropped, never carried forward as a classification
+    /// rule, matching this round's own explicit contract: "do not
+    /// silently reinterpret an old athlete mapping as a permanent
+    /// event-classification rule." No `CalendarImportDecision` is ever
+    /// created here, and no `PlannedActivity` is ever created or touched
+    /// here — this method's ONLY effect is seeding `ExternalPlanningSource`
+    /// container rows so a Parent doesn't have to remember and manually
+    /// reconnect a calendar they already connected once.
     @discardableResult
-    public func migrateLegacySourcesIfNeeded() throws -> [ExternalPlanningSource] {
+    public func migrateLegacySourcesIfNeeded(forWorkspace workspaceId: WorkspaceId) throws -> [ExternalPlanningSource] {
         let legacyMappings = try legacyMappingRepository.fetchAll()
         guard !legacyMappings.isEmpty else { return [] }
 
         var seenCalendarIdentifiers: [String: String] = [:]
-        for mapping in legacyMappings where seenCalendarIdentifiers[mapping.calendarIdentifier] == nil {
+        for mapping in legacyMappings {
+            guard seenCalendarIdentifiers[mapping.calendarIdentifier] == nil else { continue }
+            guard let owningAthlete = try athleteRepository.fetchAthlete(byId: AthleteId(rawValue: mapping.athleteId)),
+                  owningAthlete.workspaceId == workspaceId.rawValue else {
+                continue
+            }
             seenCalendarIdentifiers[mapping.calendarIdentifier] = mapping.calendarTitle
         }
 
         var created: [ExternalPlanningSource] = []
         for (calendarIdentifier, calendarTitle) in seenCalendarIdentifiers.sorted(by: { $0.key < $1.key }) {
-            guard try sourceRepository.fetch(byExternalContainerIdentifier: calendarIdentifier) == nil else { continue }
+            guard try sourceRepository.fetch(
+                forWorkspace: workspaceId, providerKind: .eventKit, externalContainerIdentifier: calendarIdentifier
+            ) == nil else { continue }
             let source = try sourceRepository.insert(
+                workspaceId: workspaceId,
                 providerKind: .eventKit,
                 externalContainerIdentifier: calendarIdentifier,
                 displayName: calendarTitle
@@ -269,7 +341,15 @@ public final class CalendarPlanningCoordinationService {
     /// queue. All-day events are excluded, same rule
     /// `reconcile(_:)` already applies (no meaningful start TIME to plan
     /// around). Sorted by start time.
+    ///
+    /// Lead Review follow-up (Blocker 2): a disabled (or disconnected)
+    /// source can never produce a review queue — enforced HERE, at the
+    /// canonical service boundary, not only by hiding the Review row in
+    /// the UI. Returns `[]` immediately, before ever calling the
+    /// calendar provider or reading decisions.
     public func fetchReviewQueue(for source: ExternalPlanningSource) throws -> [CalendarReviewItem] {
+        guard source.isEnabled, source.lifecycleStatus == .connected else { return [] }
+
         let now = dateProvider.now
         guard let windowEnd = Calendar(identifier: .gregorian).date(
             byAdding: .day, value: Self.reconciliationWindowDays, to: now
@@ -291,23 +371,42 @@ public final class CalendarPlanningCoordinationService {
     }
 
     /// The explicit Parent action Calendar Import Review exists for:
-    /// creates the canonical `PlannedActivity` for `item`, with the
-    /// Parent-approved `athleteId`/`sportId`/`activityType` — never a
-    /// source-level default, since `ExternalPlanningSource` carries
-    /// none — through the normal `PlanningService.addPlannedActivity`
-    /// path (same `getOrCreateWeekPlan` + create sequence Calendar
-    /// Planning Source V1's own `applyEvent` CREATE branch used), then
-    /// records a `CalendarImportDecision(status: .imported)` keyed by
-    /// `item.externalEventKey`.
+    /// creates (or safely adopts an existing, matching) canonical
+    /// `PlannedActivity` for `item`, with the Parent-approved
+    /// `athleteId`/`sportId`/`activityType` — never a source-level
+    /// default, since `ExternalPlanningSource` carries none.
     ///
-    /// Idempotent: if this exact event already has a decision, no
-    /// second `PlannedActivity` is created — an already-`.imported`
-    /// decision's existing `PlannedActivity` is returned unchanged (a
-    /// caller retrying after e.g. a UI double-tap sees the same result,
-    /// never a duplicate); an already-`.ignored` decision throws
-    /// `.alreadyDecided` (Import Review's own queue already excludes a
-    /// decided event, so this is a defensive guard, not an expected
-    /// path).
+    /// Lead Review follow-up (Blocker 2): throws `.sourceDisabled` if
+    /// `source` is disabled or disconnected — stale UI holding an older
+    /// `CalendarReviewItem` from before the source was disabled cannot
+    /// import through it.
+    ///
+    /// Lead Review follow-up (Blocker 4): resolved in three steps, in
+    /// order, so a retry after any partial failure is always safe and
+    /// never duplicates:
+    ///   1. an existing `CalendarImportDecision` for this exact
+    ///      `externalEventKey` — if `.imported` and its `PlannedActivity`
+    ///      still resolves, returns it UNCHANGED (idempotent repeat
+    ///      call); if that `PlannedActivity` no longer resolves (deleted
+    ///      through some other path) or the decision is `.ignored`,
+    ///      throws `.alreadyDecided` rather than silently creating a
+    ///      replacement;
+    ///   2. no decision yet, but a `PlannedActivity` already carries this
+    ///      exact `externalSourceId` (a Calendar Planning Source V1
+    ///      legacy auto-import, OR this exact call having created the
+    ///      activity on a prior attempt whose decision write then
+    ///      failed) — if its athlete/sport/activityType EXACTLY matches
+    ///      the Parent's current explicit selection, ADOPTS it (creates
+    ///      only the missing `CalendarImportDecision`, no new activity);
+    ///      if it does NOT match, throws `.existingActivityConflict` —
+    ///      never duplicated, never silently reassigned to a different
+    ///      athlete;
+    ///   3. genuinely new — creates the `PlannedActivity` and its
+    ///      `CalendarImportDecision` through the normal path.
+    /// This lookup never reads `CalendarPlanningMapping` — the legacy
+    /// athlete/sport/activityType DEFAULTS never become a classification
+    /// rule here; only the Parent's OWN current explicit selection is
+    /// ever compared against.
     @discardableResult
     public func classifyAndImport(
         _ item: CalendarReviewItem,
@@ -317,19 +416,47 @@ public final class CalendarPlanningCoordinationService {
         activityType: ActivityType,
         decidedBy: ActorId
     ) throws -> PlannedActivity {
-        if let existing = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
-            guard existing.status == .imported, let plannedActivityId = existing.plannedActivityId else {
-                throw CalendarPlanningCoordinationError.alreadyDecided
-            }
-            guard let plannedActivity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)) else {
+        guard source.isEnabled, source.lifecycleStatus == .connected else {
+            throw CalendarPlanningCoordinationError.sourceDisabled
+        }
+
+        // Step 1: an existing decision for this exact event.
+        if let existingDecision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
+            guard existingDecision.status == .imported, let plannedActivityId = existingDecision.plannedActivityId,
+                  let plannedActivity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)) else {
                 throw CalendarPlanningCoordinationError.alreadyDecided
             }
             return plannedActivity
         }
+
         guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
             throw CalendarPlanningCoordinationError.athleteNotFound
         }
 
+        // Step 2: an existing PlannedActivity with this exact external
+        // identity but no decision yet (legacy V1 import, or a prior
+        // partially-failed classifyAndImport).
+        let existingActivities = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
+        if let existingActivity = existingActivities.first(where: { $0.externalSourceId == item.externalEventKey }) {
+            guard existingActivity.athleteId == athleteId.rawValue,
+                  existingActivity.sportId == sportId?.rawValue,
+                  existingActivity.activityType == activityType else {
+                throw CalendarPlanningCoordinationError.existingActivityConflict
+            }
+            try importDecisionRepository.insert(
+                sourceId: source.externalPlanningSourceId,
+                externalEventKey: item.externalEventKey,
+                status: .imported,
+                athleteId: athleteId,
+                sportId: sportId,
+                activityType: activityType,
+                plannedActivityId: existingActivity.plannedActivityId,
+                decidedBy: decidedBy
+            )
+            return existingActivity
+        }
+
+        // Step 3: genuinely new.
         let (localDate, startLocalTime) = Self.localDateAndTime(for: item.event.startDate, in: athlete.timeZoneId)
         let durationMinutes = Self.durationMinutes(start: item.event.startDate, end: item.event.endDate)
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: localDate.startOfWeek)
@@ -425,8 +552,11 @@ public final class CalendarPlanningCoordinationService {
     /// this ONE `source` has ever imported — across EVERY athlete, since
     /// a family-owned source is not athlete-scoped (unlike Calendar
     /// Planning Source V1's per-mapping cleanup, which scoped by one
-    /// athlete + one calendar). Does not disable or delete the source
-    /// itself — call `setSourceEnabled`/`deleteSource` separately.
+    /// athlete + one calendar). Does not disable, disconnect, or delete
+    /// the source itself — call `setSourceEnabled`/`disconnectSource`
+    /// separately. Works regardless of the source's current
+    /// enabled/lifecycle state — recovery must remain possible even
+    /// after disconnecting.
     ///
     /// SCOPING: `PlannedActivity` has no persisted `ExternalPlanningSourceId`
     /// of its own — provenance is only ever the generic
@@ -586,16 +716,17 @@ public final class CalendarPlanningCoordinationService {
         public let skipped: Int
     }
 
-    /// Reconciles every currently-enabled source, in deterministic
-    /// order. A disabled source is skipped entirely; safe and idempotent
-    /// to call repeatedly. A single source's failure (e.g. its calendar
-    /// was removed) does not prevent the others from reconciling — same
+    /// Reconciles every currently-enabled, CONNECTED source for
+    /// `workspaceId`, in deterministic order. A disabled or disconnected
+    /// source is skipped entirely; safe and idempotent to call
+    /// repeatedly. A single source's failure (e.g. its calendar was
+    /// removed) does not prevent the others from reconciling — same
     /// per-source isolation Calendar Planning Source V1 already
     /// established.
     @discardableResult
-    public func reconcileAllEnabledSources() throws -> [ExternalPlanningSourceId: ReconciliationOutcome] {
+    public func reconcileAllEnabledSources(forWorkspace workspaceId: WorkspaceId) throws -> [ExternalPlanningSourceId: ReconciliationOutcome] {
         var results: [ExternalPlanningSourceId: ReconciliationOutcome] = [:]
-        for source in try sourceRepository.fetchAllEnabled() {
+        for source in try sourceRepository.fetchAllEnabled(forWorkspace: workspaceId) {
             do {
                 results[source.externalPlanningSourceId] = try reconcile(source)
             } catch {
@@ -605,6 +736,13 @@ public final class CalendarPlanningCoordinationService {
         return results
     }
 
+    /// Lead Review follow-up (Blocker 2): a disabled or disconnected
+    /// `source` is never reconciled — enforced HERE too (not only by
+    /// `reconcileAllEnabledSources`'s own `fetchAllEnabled` filtering),
+    /// so a direct call (e.g. a "Sync now" button) can never bypass the
+    /// canonical boundary. Returns a zero outcome immediately, before
+    /// ever calling the calendar provider.
+    ///
     /// `calendarEventProvider.events(...)` below is a plain `try` — if
     /// the provider throws `CalendarEventProviderError.calendarUnavailable`
     /// (calendar removed/unresolvable), this method throws immediately
@@ -616,6 +754,10 @@ public final class CalendarPlanningCoordinationService {
     /// can ever reach the cancellation step below.
     @discardableResult
     public func reconcile(_ source: ExternalPlanningSource) throws -> ReconciliationOutcome {
+        guard source.isEnabled, source.lifecycleStatus == .connected else {
+            return ReconciliationOutcome(updated: 0, cancelled: 0, skipped: 0)
+        }
+
         let now = dateProvider.now
         guard let windowEnd = Calendar(identifier: .gregorian).date(
             byAdding: .day, value: Self.reconciliationWindowDays, to: now
