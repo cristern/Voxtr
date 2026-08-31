@@ -50,6 +50,14 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     /// source's workspace, which is a genuinely different failure a
     /// caller/UI may want to explain differently.
     case athleteOutsideSourceWorkspace
+    /// Calendar Import Review runtime fix: `restoreIgnoredEvent` guard —
+    /// a `CalendarImportDecision` exists for this (source,
+    /// externalEventKey), but its status is `.imported`, not `.ignored`.
+    /// Restoring is a strict reversal of an explicit Ignore only; it
+    /// must never delete/undo an actual Planning import — see
+    /// `removeImportedActivities(for:removedBy:)` for that separate,
+    /// explicit action.
+    case decisionNotIgnored
 }
 
 /// Family-Owned Calendar Sources V1: the one place
@@ -358,17 +366,16 @@ public final class CalendarPlanningCoordinationService {
     /// canonical service boundary, not only by hiding the Review row in
     /// the UI. Returns `[]` immediately, before ever calling the
     /// calendar provider or reading decisions.
+    ///
+    /// Unchanged pending semantics (Calendar Import Review runtime fix:
+    /// this method's own contract is deliberately untouched) — reuses
+    /// `qualifyingEvents(for:)` below, the SAME window/all-day-exclusion/
+    /// disabled-source guard `fetchIgnoredReviewItems(for:)` also shares,
+    /// so there is exactly one place that logic lives, never two
+    /// divergent copies.
     public func fetchReviewQueue(for source: ExternalPlanningSource) throws -> [CalendarReviewItem] {
-        guard source.isEnabled, source.lifecycleStatus == .connected else { return [] }
-
-        let now = dateProvider.now
-        guard let windowEnd = Calendar(identifier: .gregorian).date(
-            byAdding: .day, value: Self.reconciliationWindowDays, to: now
-        ) else {
-            return []
-        }
-        let events = try calendarEventProvider.events(inCalendar: source.externalContainerIdentifier, from: now, to: windowEnd)
-        let qualifying = events.filter { !$0.isAllDay }
+        let qualifying = try qualifyingEvents(for: source)
+        guard !qualifying.isEmpty else { return [] }
 
         let decided = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
         let decidedKeys = Set(decided.map(\.externalEventKey))
@@ -379,6 +386,49 @@ public final class CalendarPlanningCoordinationService {
             return CalendarReviewItem(event: event, externalEventKey: key)
         }
         return pending.sorted { $0.event.startDate < $1.event.startDate }
+    }
+
+    /// Calendar Import Review runtime fix: every event STILL within the
+    /// current external provider horizon (same window/all-day-exclusion/
+    /// disabled-source guard as `fetchReviewQueue(for:)`) whose
+    /// `CalendarImportDecision` for this source is `.ignored` — the
+    /// Ignored section's own read model. Deliberately does NOT read a
+    /// stale decision row whose external event has since fallen outside
+    /// the current window/disappeared from the source — this is a
+    /// current-horizon view, never a historical decision log, and it
+    /// never infers/fabricates external event content from an old
+    /// decision.
+    public func fetchIgnoredReviewItems(for source: ExternalPlanningSource) throws -> [CalendarReviewItem] {
+        let qualifying = try qualifyingEvents(for: source)
+        guard !qualifying.isEmpty else { return [] }
+
+        let decided = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        let ignoredKeys = Set(decided.filter { $0.status == .ignored }.map(\.externalEventKey))
+        guard !ignoredKeys.isEmpty else { return [] }
+
+        let ignored = qualifying.compactMap { event -> CalendarReviewItem? in
+            let key = ExternalCalendarEventIdentity.externalSourceId(calendarIdentifier: source.externalContainerIdentifier, event: event)
+            guard ignoredKeys.contains(key) else { return nil }
+            return CalendarReviewItem(event: event, externalEventKey: key)
+        }
+        return ignored.sorted { $0.event.startDate < $1.event.startDate }
+    }
+
+    /// Shared by `fetchReviewQueue(for:)` and `fetchIgnoredReviewItems(for:)`:
+    /// every all-day-excluded event in `source`'s calendar within the
+    /// reconciliation window, or `[]` immediately (never calling the
+    /// calendar provider) for a disabled/disconnected source.
+    private func qualifyingEvents(for source: ExternalPlanningSource) throws -> [ExternalCalendarEvent] {
+        guard source.isEnabled, source.lifecycleStatus == .connected else { return [] }
+
+        let now = dateProvider.now
+        guard let windowEnd = Calendar(identifier: .gregorian).date(
+            byAdding: .day, value: Self.reconciliationWindowDays, to: now
+        ) else {
+            return []
+        }
+        let events = try calendarEventProvider.events(inCalendar: source.externalContainerIdentifier, from: now, to: windowEnd)
+        return events.filter { !$0.isAllDay }
     }
 
     // MARK: - Remembered Exact Choices (V1.1 — prefill only, never auto-import)
@@ -619,6 +669,48 @@ public final class CalendarPlanningCoordinationService {
             plannedActivityId: nil,
             decidedBy: decidedBy
         )
+    }
+
+    /// Calendar Import Review runtime fix: reverses a Parent's explicit
+    /// Ignore — the ONLY way an `.ignored` `CalendarImportDecision` is
+    /// ever removed. Deletes ONLY that exact decision (scoped by
+    /// `source`'s own `ExternalPlanningSourceId` + `externalEventKey`,
+    /// the same stable identity every other method here uses); the
+    /// underlying external event is never touched, no `PlannedActivity`
+    /// is ever created or deleted, and no replacement decision is ever
+    /// written. Once deleted, the event naturally becomes pending again
+    /// purely through the existing "absence of a decision = pending"
+    /// model `fetchReviewQueue(for:)` already implements — there is no
+    /// separate "restored" state to invent.
+    ///
+    /// A no-op (silently returns) if no decision exists at all for this
+    /// key — matching `disconnectSource`'s own "nothing to act on"
+    /// precedent. Throws `.decisionNotIgnored` if a decision DOES exist
+    /// but is `.imported` — restoring is a strict reversal of Ignore
+    /// only; it must never delete/undo an actual Planning import (see
+    /// `removeImportedActivities(for:removedBy:)` for that separate,
+    /// explicit action). Throws `.sourceDisabled` for a disabled/
+    /// disconnected source, matching every other mutating action's own
+    /// boundary — restoring must fail calmly rather than presenting a
+    /// stale action as successful.
+    ///
+    /// Deliberately takes no actor parameter: deleting a decision record
+    /// carries no attribution field of its own (a `CalendarImportDecision`
+    /// is immutable once made — see `CalendarImportDecisionRepository`'s
+    /// own doc comment — and its `decidedBy` records only the ORIGINAL
+    /// decision, never a later reversal), matching `disconnectSource`'s
+    /// own precedent for a similarly non-content-creating mutation.
+    public func restoreIgnoredEvent(_ externalEventKey: String, for source: ExternalPlanningSource) throws {
+        guard source.isEnabled, source.lifecycleStatus == .connected else {
+            throw CalendarPlanningCoordinationError.sourceDisabled
+        }
+        guard let decision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: externalEventKey) else {
+            return
+        }
+        guard decision.status == .ignored else {
+            throw CalendarPlanningCoordinationError.decisionNotIgnored
+        }
+        try importDecisionRepository.delete(decision)
     }
 
     // MARK: - Recovery

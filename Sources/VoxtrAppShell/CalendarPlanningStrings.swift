@@ -187,10 +187,6 @@ public enum CalendarPlanningStrings {
         )
     }
 
-    public static var reviewDetailTitle: String {
-        String(localized: "calendarPlanning.reviewDetailTitle", defaultValue: "Classify Event")
-    }
-
     public static var chooseAthlete: String {
         String(localized: "calendarPlanning.chooseAthlete", defaultValue: "Athlete")
     }
@@ -215,10 +211,13 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.ignoreConfirmationTitle", defaultValue: "Ignore this event?")
     }
 
+    /// Calendar Import Review runtime fix: Ignore is reversible (see
+    /// `reviewAgainButton`/`ignoredSectionTitle` below) — this copy no
+    /// longer claims it is permanent.
     public static var ignoreConfirmationMessage: String {
         String(
             localized: "calendarPlanning.ignoreConfirmationMessage",
-            defaultValue: "This event will never be suggested for import again. It will never become part of anyone's plan."
+            defaultValue: "This event will not be added to Planning. You can restore it later."
         )
     }
 
@@ -260,5 +259,29 @@ public enum CalendarPlanningStrings {
             localized: "calendarPlanning.bulkImportPartialResult",
             defaultValue: "\(imported) imported. \(failed) could not be imported — review and try again."
         )
+    }
+
+    // MARK: - Calendar Import Review runtime fix (inline details, reversible Ignore)
+
+    /// The same-row progressive-disclosure toggle for an event's
+    /// notes/location — replaces the prior separate pushed detail
+    /// screen; never required for classification.
+    public static var detailsDisclosureLabel: String {
+        String(localized: "calendarPlanning.detailsDisclosureLabel", defaultValue: "Details")
+    }
+
+    public static var ignoredSectionTitle: String {
+        String(localized: "calendarPlanning.ignoredSectionTitle", defaultValue: "Ignored")
+    }
+
+    public static var ignoredBadge: String {
+        String(localized: "calendarPlanning.ignoredBadge", defaultValue: "Ignored")
+    }
+
+    /// The explicit reverse-Ignore action — restores one event to Needs
+    /// Review by deleting its `.ignored` decision only; never creates a
+    /// `PlannedActivity`.
+    public static var reviewAgainButton: String {
+        String(localized: "calendarPlanning.reviewAgainButton", defaultValue: "Review again")
     }
 }

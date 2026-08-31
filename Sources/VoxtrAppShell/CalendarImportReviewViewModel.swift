@@ -34,6 +34,14 @@ public final class CalendarImportReviewViewModel {
     private let actorId: ActorId
 
     public private(set) var reviewQueue: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
+    /// Calendar Import Review runtime fix: every event still within the
+    /// current external provider horizon whose decision for `source` is
+    /// `.ignored` — the Ignored section's own read model (see
+    /// `CalendarPlanningCoordinationService.fetchIgnoredReviewItems(for:)`'s
+    /// own doc comment). Refreshed alongside `reviewQueue` by
+    /// `refreshQueueAndStaging()`, so Ignore/Restore/bulk-import all keep
+    /// both lists consistent with each other.
+    public private(set) var ignoredItems: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
     /// Active (non-archived) athletes, scoped to `source`'s OWN canonical
     /// workspace only — Lead Review follow-up (family-isolation): a
     /// source belongs to exactly one family (see `ExternalPlanningSource`'s
@@ -273,7 +281,8 @@ public final class CalendarImportReviewViewModel {
 
     /// The explicit Parent action for "this should never become
     /// Planning" — the View is responsible for the actual confirmation
-    /// prompt before calling this.
+    /// prompt before calling this. Only the confirmed call reaches here;
+    /// nothing mutates before that.
     public func ignore(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) {
         errorMessage = nil
         do {
@@ -284,14 +293,39 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
-    // MARK: - Queue + staging refresh (shared by load(), ignore(), and bulkImportReadyItems())
+    /// Calendar Import Review runtime fix ("Review again"): reverses an
+    /// Ignore for one event in the Ignored section, through the
+    /// canonical `restoreIgnoredEvent(_:for:)` — deletes ONLY that exact
+    /// `.ignored` decision; never creates a `PlannedActivity` or any
+    /// other Planning truth. The restored event then reappears in Needs
+    /// Review purely because `reviewQueue`'s own refresh below now finds
+    /// no decision for it — the same "absence of decision = pending"
+    /// model every other pending event already uses, including a fresh
+    /// Remembered Exact Choices prefill if one applies (no special
+    /// hidden behavior for a restored item).
+    public func restore(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) {
+        errorMessage = nil
+        do {
+            try calendarPlanningCoordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
+            refreshQueueAndStaging()
+        } catch CalendarPlanningCoordinationError.sourceDisabled {
+            errorMessage = CalendarPlanningStrings.sourceDisabledError
+            refreshQueueAndStaging()
+        } catch {
+            errorMessage = CalendarPlanningStrings.genericError
+        }
+    }
 
-    /// Re-fetches the review queue and rebuilds `stagedClassifications`
-    /// to match it: an event already staged (a Parent's in-progress edit,
-    /// or a still-Ready item from an earlier partial bulk import) keeps
-    /// its EXACT existing staging untouched; a genuinely new event is
-    /// seeded from Remembered Exact Choices (V1.1) if one applies, or
-    /// left blank/editable otherwise; an event no longer in the queue
+    // MARK: - Queue + staging refresh (shared by load(), ignore(), restore(), and bulkImportReadyItems())
+
+    /// Re-fetches the review queue (and the Ignored section's own
+    /// current-horizon list) and rebuilds `stagedClassifications` to
+    /// match `reviewQueue`: an event already staged (a Parent's in-
+    /// progress edit, or a still-Ready item from an earlier partial bulk
+    /// import) keeps its EXACT existing staging untouched; a genuinely
+    /// new event (including one just restored from Ignored) is seeded
+    /// from Remembered Exact Choices (V1.1) if one applies, or left
+    /// blank/editable otherwise; an event no longer in the queue
     /// (imported, ignored, or disappeared from the source) is dropped so
     /// this dictionary never leaks stale entries.
     private func refreshQueueAndStaging() {
@@ -301,6 +335,7 @@ public final class CalendarImportReviewViewModel {
             reviewQueue = []
             errorMessage = errorMessage ?? CalendarPlanningStrings.genericError
         }
+        ignoredItems = (try? calendarPlanningCoordinationService.fetchIgnoredReviewItems(for: source)) ?? []
 
         let remembered = (try? calendarPlanningCoordinationService.rememberedClassifications(for: source)) ?? [:]
         var rebuilt: [String: StagedClassification] = [:]
