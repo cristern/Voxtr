@@ -1398,6 +1398,50 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(remaining.first?.plannedActivityId == activity.plannedActivityId)
     }
 
+    // 7b. BLOCKER regression: a historical week that is still `.draft`
+    // (never committed) must be equally protected — `weekStart <
+    // currentWeekStart` alone must gate this action, never only the
+    // committed branch. Before this fix, a historical `.draft` week fell
+    // straight through to the delete loop because the historical guard
+    // only existed inside the `wasOriginallyCommitted` branch.
+    @Test("removeImportedActivities never deletes an eligible imported activity in a historical DRAFT week — counted as historicalWeeksSkipped, not removed")
+    @MainActor
+    func cleanupNeverDeletesHistoricalDraftWeek() throws {
+        let fixture = try makeFixture()
+        let mapping = try fixture.coordinationService.createMapping(
+            athleteId: fixture.athleteId, calendarIdentifier: "cal-1", calendarTitle: "Familie",
+            activityType: .individualTraining, sportId: nil
+        )
+        // A historical week, seeded directly via the normal Planning
+        // mutation path and tagged with this mapping's own
+        // calendarIdentifier prefix, exactly like
+        // `cleanupNeverReopensHistoricalWeek` above — but deliberately
+        // LEFT `.draft`, never committed, to exercise the gap this round
+        // fixes.
+        let historicalWeekStart = LocalDate(year: 2025, month: 12, day: 1)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: historicalWeekStart)
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Old Draft Practice", localDate: historicalWeekStart, timeZoneId: Self.timeZoneId,
+            externalSourceId: "cal-1|evt-old-draft", externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(try #require(fixture.planningService.fetchWeekPlan(byId: weekPlan.weekPlanId)).status == .draft)
+
+        let outcome = try fixture.coordinationService.removeImportedActivities(for: mapping, removedBy: ActorId())
+
+        #expect(outcome.removed == 0)
+        #expect(outcome.historicalWeeksSkipped == 1)
+        #expect(outcome.failed == 0)
+        #expect(outcome.lifecycleRestoreFailed == 0)
+        let stillDraft = try #require(try fixture.planningService.fetchWeekPlan(byId: weekPlan.weekPlanId))
+        #expect(stillDraft.status == .draft)
+        let remaining = try fixture.planningService.fetchPlannedActivities(
+            forAthlete: fixture.athleteId, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(remaining.count == 1)
+        #expect(remaining.first?.plannedActivityId == activity.plannedActivityId)
+    }
+
     // 8. repeated cleanup is safe/idempotent
     @Test("Calling removeImportedActivities a second time is a safe no-op once everything eligible has already been removed")
     @MainActor
