@@ -2,16 +2,31 @@ import Foundation
 import SwiftData
 import VoxtrCoreContracts
 
-/// Calendar Planning Source V1: insert/fetch/update/delete
-/// `CalendarPlanningMapping` only — pure persistence, matching every
-/// other repository in this project ("no `#Predicate`, fetch-then-
-/// filter"; no cross-domain SwiftData relationships).
+/// Calendar Planning Source V1 (LEGACY/ALPHA — see
+/// `CalendarPlanningMapping`'s own doc comment): insert/fetch/update/
+/// delete `CalendarPlanningMapping` only — pure persistence, matching
+/// every other repository in this project ("no `#Predicate`, fetch-
+/// then-filter"; no cross-domain SwiftData relationships). `insert`/
+/// `update`/`setEnabled` remain here only because deleting them would
+/// be an unrelated cleanup this round doesn't need; nothing calls them
+/// anymore — the only live caller is
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`,
+/// which calls `fetchAll()` (read-only) once.
 @MainActor
 public final class CalendarPlanningMappingRepository {
     private let modelContext: ModelContext
 
     public init(modelContext: ModelContext) {
         self.modelContext = modelContext
+    }
+
+    /// Every legacy mapping, across every athlete — needed by the one-
+    /// time migration to discover every DISTINCT `calendarIdentifier` a
+    /// Parent had previously connected, regardless of which athlete(s)
+    /// it was mapped to.
+    public func fetchAll() throws -> [CalendarPlanningMapping] {
+        try modelContext.fetch(FetchDescriptor<CalendarPlanningMapping>())
+            .sorted { $0.createdAt < $1.createdAt }
     }
 
     public func insert(

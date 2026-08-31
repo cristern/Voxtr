@@ -242,6 +242,24 @@ public final class PlanningRepository {
             }
     }
 
+    /// Family-Owned Calendar Sources V1: every `PlannedActivity` stamped
+    /// with a given `externalSourceType`, ACROSS EVERY ATHLETE — needed
+    /// because an `ExternalPlanningSource` is family-owned, not athlete-
+    /// scoped, unlike the legacy `CalendarPlanningMapping` the
+    /// `forAthlete:` sibling above was built for. Same ordering
+    /// convention as that sibling.
+    public func fetchPlannedActivities(externalSourceType: String) throws -> [PlannedActivity] {
+        let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
+        return all
+            .filter { $0.externalSourceType == externalSourceType }
+            .sorted { lhs, rhs in
+                if lhs.localDate != rhs.localDate {
+                    return lhs.localDate < rhs.localDate
+                }
+                return lhs.id.uuidString < rhs.id.uuidString
+            }
+    }
+
     // MARK: - RecurringPlannedActivity
 
     /// Inserts a new `RecurringPlannedActivity` definition.

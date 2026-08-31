@@ -6,77 +6,78 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrCalendarPlanningDomain
 
-/// Calendar Planning Source V1: thrown by mapping-configuration methods
-/// below — genuine request problems, distinct from a reconciliation
-/// outcome (which never throws per-event; see `reconcileAllEnabledMappings`).
+/// Family-Owned Calendar Sources V1: thrown by source-configuration and
+/// review/import methods below — genuine request problems, distinct
+/// from a reconciliation outcome (which never throws per-event; see
+/// `reconcileAllEnabledSources`).
 public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     case athleteNotFound
-    case mappingNotFound
-    /// V1 product contract: one mapping per (calendar, athlete) pair.
-    case duplicateMapping
+    case sourceNotFound
+    /// V1 product contract: one source per external container/calendar.
+    case duplicateSource
+    /// `classifyAndImport`/`ignore` guard: this exact external event
+    /// already has a decision recorded (defensive — the Import Review
+    /// queue should already exclude it).
+    case alreadyDecided
 }
 
-/// Calendar Planning Source V1: the one place `CalendarPlanningMappingRepository`
+/// Family-Owned Calendar Sources V1: the one place
+/// `ExternalPlanningSourceRepository`/`CalendarImportDecisionRepository`
 /// (Calendar Planning domain), `PlanningService`, `TrainingService`, and
 /// `AthleteRepository` are used together — same placement rationale
-/// `NotificationsPlanningCoordinationService`/`TrainingPlanningCoordinationService`
-/// already established for their own cross-domain concerns. Owns mapping
-/// configuration (create/update/enable/disable/delete) and the actual
-/// reconciliation operation.
+/// `NotificationsPlanningCoordinationService` already established for
+/// its own cross-domain concern. Owns source configuration (create/
+/// enable/disable/delete), the one-time legacy-mapping migration, the
+/// Calendar Import Review queue (discover/classify-and-import/ignore),
+/// reconciliation of already-imported events, and safe recovery/cleanup
+/// of wrongly-imported activities.
 ///
-/// External calendar data PROPOSES schedule facts; Planning remains
-/// canonical. Every mutation below goes through `PlanningService`'s own
-/// normal create/edit/delete methods — this type never touches
-/// `PlanningRepository` or SwiftData directly, so every existing
-/// lifecycle invariant/event (`PlannedActivityChanged`/`Deleted`, and
-/// therefore Activity Reminder reconciliation) fires exactly as it does
+/// PRODUCT CONTRACT this type enforces throughout: an external
+/// calendar/source PROPOSES schedule facts; Planning remains canonical.
+/// A source is a trusted CONTAINER only — it never carries an athlete,
+/// Sport, or Activity Type default (see `ExternalPlanningSource`'s own
+/// doc comment for why: real evidence showed one calendar can carry
+/// multiple children's events). Every event becomes a `PlannedActivity`
+/// ONLY through an explicit Parent classification
+/// (`classifyAndImport(_:for:athleteId:sportId:activityType:decidedBy:)`)
+/// — reconciliation (`reconcile(_:)`) NEVER creates a `PlannedActivity`,
+/// it only keeps an ALREADY-classified one's source-owned schedule
+/// fields (title/start/duration) up to date. Every mutation below goes
+/// through `PlanningService`'s own normal create/edit/delete methods —
+/// this type never touches `PlanningRepository` or SwiftData directly,
+/// so every existing lifecycle invariant/event fires exactly as it does
 /// for a Parent's own manual edit.
 ///
-/// Recurring calendar events: EventKit reports each occurrence of a
-/// recurring series as its own `ExternalCalendarEvent`, but occurrences
-/// of the SAME series share the SAME `eventIdentifier` — see
-/// `ExternalCalendarEvent`'s own doc comment (PR #39 review follow-up,
-/// Blocker 2: an earlier version of this comment incorrectly claimed
-/// each occurrence had its own `eventIdentifier`; verified against
-/// Apple's actual documented behavior and corrected). This type imports
-/// each concrete occurrence independently, like any other event.
-///
-/// PR #39 review follow-up (second round): identity is NOT one uniform
-/// shape for both cases. An ordinary, non-recurring event is identified
-/// by `calendarIdentifier + eventIdentifier` alone — its `eventIdentifier`
-/// is already stable for that event's whole lifetime, including after a
-/// Parent edits its title or start time in Calendar, so folding a
-/// TIME-DERIVED value into its identity would be wrong (an earlier
-/// version of this fix did exactly that, unconditionally including
-/// `occurrenceDate` — which defaults to `startDate` for a non-recurring
-/// event — in every event's identity; this meant simply moving an
-/// ordinary event's start time changed its own external identity and
-/// caused reconciliation to create a SECOND `PlannedActivity` instead of
-/// updating the first, a genuine regression this round fixes). Only a
-/// RECURRING occurrence (`isRecurring == true`) additionally folds in
-/// `occurrenceDate` — see
-/// `externalSourceId(calendarIdentifier:event:)` below for the exact
-/// gated rule. It never creates or infers a Vǫxtr `RecurringPlannedActivity`
-/// rule from Calendar recurrence, and never touches that type at all.
+/// Recurring calendar events / occurrence identity: unchanged from
+/// Calendar Planning Source V1 — see `ExternalCalendarEventIdentity`
+/// (`VoxtrCalendarPlanningDomain`, where this rule now lives) for the
+/// exact `(eventIdentifier, occurrenceDate)` rule this type reuses for
+/// BOTH `PlannedActivity.externalSourceId` AND
+/// `CalendarImportDecision.externalEventKey` — one shared computation,
+/// never two divergent copies.
 @MainActor
 public final class CalendarPlanningCoordinationService {
     /// The generic provenance-pair `type` half stamped on every
-    /// `PlannedActivity` this coordinator creates — see
+    /// `PlannedActivity` this coordinator creates — unchanged from
+    /// Calendar Planning Source V1, see
     /// `RecurringPlannedActivity.externalSourceType`'s own doc comment
     /// for why this field is deliberately generic, not EventKit-specific.
     public static let externalSourceType = "calendarPlanningSource"
 
-    /// V1 Alpha reconciliation window, in days FORWARD from today (no
-    /// historical lookback — "prefer future/current planning usefulness
-    /// over historical ingestion"). 21 days = the current week plus two
-    /// weeks of lookahead, so Weekly Planning has next week's imported
-    /// activities ready before a Parent opens it. A named, explicit
-    /// policy rather than a scattered magic number — see this type's own
-    /// delivery-report rationale for why 21 was chosen over, e.g.,
-    /// Family Schedule's unrelated 7-day "upcoming" presentation window.
+    /// V1 Alpha reconciliation/review window, in days FORWARD from today
+    /// (no historical lookback). Used both by `reconcile(_:)` (updating
+    /// already-imported events) and `fetchReviewQueue(for:)` (discovering
+    /// new ones) — the same window, since both read the same forward-
+    /// looking slice of the source's calendar.
     public static let reconciliationWindowDays = 21
 
-    private let mappingRepository: CalendarPlanningMappingRepository
+    private let sourceRepository: ExternalPlanningSourceRepository
+    private let importDecisionRepository: CalendarImportDecisionRepository
+    /// Family-Owned Calendar Sources V1: read-only access to the legacy
+    /// Calendar Planning Source V1 mapping table — used ONLY by
+    /// `migrateLegacySourcesIfNeeded()`. No other method in this type
+    /// reads or writes through this repository.
+    private let legacyMappingRepository: CalendarPlanningMappingRepository
     private let calendarEventProvider: CalendarEventProviding
     private let planningService: PlanningService
     private let trainingService: TrainingService
@@ -84,14 +85,18 @@ public final class CalendarPlanningCoordinationService {
     private let dateProvider: any DateProvider
 
     public init(
-        mappingRepository: CalendarPlanningMappingRepository,
+        sourceRepository: ExternalPlanningSourceRepository,
+        importDecisionRepository: CalendarImportDecisionRepository,
+        legacyMappingRepository: CalendarPlanningMappingRepository,
         calendarEventProvider: CalendarEventProviding,
         planningService: PlanningService,
         trainingService: TrainingService,
         athleteRepository: AthleteRepository,
         dateProvider: any DateProvider = SystemDateProvider()
     ) {
-        self.mappingRepository = mappingRepository
+        self.sourceRepository = sourceRepository
+        self.importDecisionRepository = importDecisionRepository
+        self.legacyMappingRepository = legacyMappingRepository
         self.calendarEventProvider = calendarEventProvider
         self.planningService = planningService
         self.trainingService = trainingService
@@ -127,14 +132,11 @@ public final class CalendarPlanningCoordinationService {
     /// Calendar V1 metadata inspection: a small, bounded, READ-ONLY look
     /// at real upcoming events in `calendarIdentifier` — never persisted
     /// anywhere by this method or its caller, never used for identity or
-    /// classification, and never itself a Planning mutation. Exists
-    /// solely so a Product Owner can see what metadata a real external
-    /// source (e.g. Spond, via a subscribed iOS calendar) actually
-    /// populates per event — notes/location/URL in particular — before
-    /// any event-classification/matching-rule model is designed. Reuses
-    /// the exact same `CalendarEventProviding.events(inCalendar:from:to:)`
-    /// call reconciliation itself uses; this is not a second read path,
-    /// only a smaller, bounded window over the same provider boundary.
+    /// classification, and never itself a Planning mutation. Unchanged
+    /// in shape from Calendar Planning Source V1 — takes a plain
+    /// `calendarIdentifier` string (the caller passes
+    /// `source.externalContainerIdentifier`), so no signature change was
+    /// needed for the source-ownership move.
     public func fetchDiagnosticEvents(inCalendar calendarIdentifier: String) throws -> [ExternalCalendarEvent] {
         let now = dateProvider.now
         guard let windowEnd = Calendar(identifier: .gregorian).date(
@@ -146,158 +148,311 @@ public final class CalendarPlanningCoordinationService {
         return Array(events.sorted { $0.startDate < $1.startDate }.prefix(Self.diagnosticEventLimit))
     }
 
-    // MARK: - Mapping configuration
+    // MARK: - Source configuration
 
-    public func fetchMappings(forAthlete athleteId: AthleteId) throws -> [CalendarPlanningMapping] {
-        try mappingRepository.fetchAll(forAthlete: athleteId)
+    public func fetchSources() throws -> [ExternalPlanningSource] {
+        try sourceRepository.fetchAll()
     }
 
     @discardableResult
-    public func createMapping(
-        athleteId: AthleteId,
-        calendarIdentifier: String,
-        calendarTitle: String,
-        activityType: ActivityType,
-        sportId: SportId?
-    ) throws -> CalendarPlanningMapping {
-        guard try athleteRepository.fetchAthlete(byId: athleteId) != nil else {
-            throw CalendarPlanningCoordinationError.athleteNotFound
+    public func createSource(
+        providerKind: ExternalPlanningSourceProviderKind,
+        externalContainerIdentifier: String,
+        displayName: String
+    ) throws -> ExternalPlanningSource {
+        guard try sourceRepository.fetch(byExternalContainerIdentifier: externalContainerIdentifier) == nil else {
+            throw CalendarPlanningCoordinationError.duplicateSource
         }
-        let existing = try mappingRepository.fetchAll(forAthlete: athleteId)
-        guard !existing.contains(where: { $0.calendarIdentifier == calendarIdentifier }) else {
-            throw CalendarPlanningCoordinationError.duplicateMapping
-        }
-        return try mappingRepository.insert(
-            athleteId: athleteId,
-            calendarIdentifier: calendarIdentifier,
-            calendarTitle: calendarTitle,
-            activityType: activityType,
-            sportId: sportId
+        return try sourceRepository.insert(
+            providerKind: providerKind,
+            externalContainerIdentifier: externalContainerIdentifier,
+            displayName: displayName
         )
     }
 
+    public func setSourceEnabled(_ sourceId: ExternalPlanningSourceId, isEnabled: Bool) throws {
+        guard let source = try sourceRepository.fetch(byId: sourceId) else {
+            throw CalendarPlanningCoordinationError.sourceNotFound
+        }
+        try sourceRepository.setEnabled(source, isEnabled: isEnabled)
+    }
+
+    /// Deletes the source (stops future reconciliation/review discovery
+    /// for this calendar) — never touches any `PlannedActivity` or
+    /// `CalendarImportDecision` already created through it. Those remain
+    /// normal Planning data / decision history, editable/deletable
+    /// through their own normal paths; disconnecting a source never
+    /// retroactively erases what it already produced. To also remove
+    /// what it already imported, see
+    /// `removeImportedActivities(for:removedBy:)` below — a
+    /// deliberately separate, explicit action, never implied by
+    /// disconnecting or disabling.
+    public func deleteSource(_ sourceId: ExternalPlanningSourceId) throws {
+        guard let source = try sourceRepository.fetch(byId: sourceId) else { return }
+        try sourceRepository.delete(source)
+    }
+
+    // MARK: - Legacy migration (Calendar Planning Source V1 -> Family-Owned Calendar Sources V1)
+
+    /// Family-Owned Calendar Sources V1: the smallest SAFE migration
+    /// from the retired, athlete-scoped `CalendarPlanningMapping` model
+    /// to the new family-owned `ExternalPlanningSource` model —
+    /// deliberately ordinary, testable APPLICATION code, never a
+    /// SwiftData `.custom` migration stage (see `AppSchemaVersioning.swift`'s
+    /// own documented history of `.custom`-migration/legacy-type
+    /// crashes for why that pattern is avoided here).
+    ///
+    /// For every DISTINCT `calendarIdentifier` found among existing
+    /// `CalendarPlanningMapping` rows (across every athlete — a
+    /// calendar previously mapped to two different athletes is ONE
+    /// external container, so it becomes exactly ONE `ExternalPlanningSource`),
+    /// creates a new `ExternalPlanningSource` — disabled by default,
+    /// same "Parent must explicitly enable" contract every new source
+    /// already has — UNLESS a source for that exact `externalContainerIdentifier`
+    /// already exists (idempotent: safe to call on every launch/screen
+    /// load, a no-op after the first successful run, and safe even if a
+    /// Parent later deletes the migrated source — it is never recreated
+    /// once its `calendarIdentifier` has ever had a source).
+    ///
+    /// Deliberately does NOT read `CalendarPlanningMapping.athleteId`/
+    /// `.sportId`/`.activityType` for anything — those legacy per-
+    /// mapping defaults are dropped, never carried forward as a
+    /// classification rule, matching this round's own explicit
+    /// contract: "do not silently reinterpret an old athlete mapping as
+    /// a permanent event-classification rule." No `CalendarImportDecision`
+    /// is ever created here, and no `PlannedActivity` is ever created or
+    /// touched here — this method's ONLY effect is seeding
+    /// `ExternalPlanningSource` container rows so a Parent doesn't have
+    /// to remember and manually reconnect a calendar they already
+    /// connected once.
     @discardableResult
-    public func updateMapping(
-        _ mappingId: CalendarPlanningMappingId,
+    public func migrateLegacySourcesIfNeeded() throws -> [ExternalPlanningSource] {
+        let legacyMappings = try legacyMappingRepository.fetchAll()
+        guard !legacyMappings.isEmpty else { return [] }
+
+        var seenCalendarIdentifiers: [String: String] = [:]
+        for mapping in legacyMappings where seenCalendarIdentifiers[mapping.calendarIdentifier] == nil {
+            seenCalendarIdentifiers[mapping.calendarIdentifier] = mapping.calendarTitle
+        }
+
+        var created: [ExternalPlanningSource] = []
+        for (calendarIdentifier, calendarTitle) in seenCalendarIdentifiers.sorted(by: { $0.key < $1.key }) {
+            guard try sourceRepository.fetch(byExternalContainerIdentifier: calendarIdentifier) == nil else { continue }
+            let source = try sourceRepository.insert(
+                providerKind: .eventKit,
+                externalContainerIdentifier: calendarIdentifier,
+                displayName: calendarTitle
+            )
+            created.append(source)
+        }
+        return created
+    }
+
+    // MARK: - Calendar Import Review (discover / classify-and-import / ignore)
+
+    /// Family-Owned Calendar Sources V1: one candidate external event
+    /// awaiting an explicit Parent decision — never persisted itself
+    /// (see `CalendarImportDecisionStatus`'s own doc comment: "pending"
+    /// is represented purely by the ABSENCE of a `CalendarImportDecision`
+    /// row, not a stored state).
+    public struct CalendarReviewItem: Sendable, Equatable {
+        public let event: ExternalCalendarEvent
+        /// The exact same stable identity that will become
+        /// `PlannedActivity.externalSourceId` if this item is imported,
+        /// and `CalendarImportDecision.externalEventKey` either way.
+        public let externalEventKey: String
+    }
+
+    /// Every event in `source`'s calendar, within the reconciliation
+    /// window, that has NO existing `CalendarImportDecision` yet (never
+    /// imported, never ignored) — the actual Calendar Import Review
+    /// queue. All-day events are excluded, same rule
+    /// `reconcile(_:)` already applies (no meaningful start TIME to plan
+    /// around). Sorted by start time.
+    public func fetchReviewQueue(for source: ExternalPlanningSource) throws -> [CalendarReviewItem] {
+        let now = dateProvider.now
+        guard let windowEnd = Calendar(identifier: .gregorian).date(
+            byAdding: .day, value: Self.reconciliationWindowDays, to: now
+        ) else {
+            return []
+        }
+        let events = try calendarEventProvider.events(inCalendar: source.externalContainerIdentifier, from: now, to: windowEnd)
+        let qualifying = events.filter { !$0.isAllDay }
+
+        let decided = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        let decidedKeys = Set(decided.map(\.externalEventKey))
+
+        let pending = qualifying.compactMap { event -> CalendarReviewItem? in
+            let key = ExternalCalendarEventIdentity.externalSourceId(calendarIdentifier: source.externalContainerIdentifier, event: event)
+            guard !decidedKeys.contains(key) else { return nil }
+            return CalendarReviewItem(event: event, externalEventKey: key)
+        }
+        return pending.sorted { $0.event.startDate < $1.event.startDate }
+    }
+
+    /// The explicit Parent action Calendar Import Review exists for:
+    /// creates the canonical `PlannedActivity` for `item`, with the
+    /// Parent-approved `athleteId`/`sportId`/`activityType` — never a
+    /// source-level default, since `ExternalPlanningSource` carries
+    /// none — through the normal `PlanningService.addPlannedActivity`
+    /// path (same `getOrCreateWeekPlan` + create sequence Calendar
+    /// Planning Source V1's own `applyEvent` CREATE branch used), then
+    /// records a `CalendarImportDecision(status: .imported)` keyed by
+    /// `item.externalEventKey`.
+    ///
+    /// Idempotent: if this exact event already has a decision, no
+    /// second `PlannedActivity` is created — an already-`.imported`
+    /// decision's existing `PlannedActivity` is returned unchanged (a
+    /// caller retrying after e.g. a UI double-tap sees the same result,
+    /// never a duplicate); an already-`.ignored` decision throws
+    /// `.alreadyDecided` (Import Review's own queue already excludes a
+    /// decided event, so this is a defensive guard, not an expected
+    /// path).
+    @discardableResult
+    public func classifyAndImport(
+        _ item: CalendarReviewItem,
+        for source: ExternalPlanningSource,
+        athleteId: AthleteId,
+        sportId: SportId?,
         activityType: ActivityType,
-        sportId: SportId?
-    ) throws -> CalendarPlanningMapping {
-        guard let mapping = try mappingRepository.fetch(byId: mappingId) else {
-            throw CalendarPlanningCoordinationError.mappingNotFound
+        decidedBy: ActorId
+    ) throws -> PlannedActivity {
+        if let existing = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
+            guard existing.status == .imported, let plannedActivityId = existing.plannedActivityId else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            guard let plannedActivity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)) else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            return plannedActivity
         }
-        return try mappingRepository.update(mapping, activityType: activityType, sportId: sportId)
+        guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
+            throw CalendarPlanningCoordinationError.athleteNotFound
+        }
+
+        let (localDate, startLocalTime) = Self.localDateAndTime(for: item.event.startDate, in: athlete.timeZoneId)
+        let durationMinutes = Self.durationMinutes(start: item.event.startDate, end: item.event.endDate)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: localDate.startOfWeek)
+        let plannedActivity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: activityType,
+            title: item.event.title,
+            localDate: localDate,
+            timeZoneId: athlete.timeZoneId,
+            sportId: sportId,
+            startLocalTime: startLocalTime,
+            plannedDurationMinutes: durationMinutes,
+            externalSourceId: item.externalEventKey,
+            externalSourceType: Self.externalSourceType
+        )
+
+        try importDecisionRepository.insert(
+            sourceId: source.externalPlanningSourceId,
+            externalEventKey: item.externalEventKey,
+            status: .imported,
+            athleteId: athleteId,
+            sportId: sportId,
+            activityType: activityType,
+            plannedActivityId: plannedActivity.plannedActivityId,
+            decidedBy: decidedBy
+        )
+        return plannedActivity
     }
 
-    public func setMappingEnabled(_ mappingId: CalendarPlanningMappingId, isEnabled: Bool) throws {
-        guard let mapping = try mappingRepository.fetch(byId: mappingId) else {
-            throw CalendarPlanningCoordinationError.mappingNotFound
+    /// The explicit Parent action for "this event should never become
+    /// Planning" — records a `CalendarImportDecision(status: .ignored)`
+    /// with no athlete/sport/activityType/plannedActivityId, so
+    /// `fetchReviewQueue(for:)` never presents this exact event again.
+    /// Never creates or touches a `PlannedActivity`. Idempotent: ignoring
+    /// an already-decided event is a safe no-op (returns the existing
+    /// decision unchanged) rather than a duplicate row.
+    @discardableResult
+    public func ignore(_ item: CalendarReviewItem, for source: ExternalPlanningSource, decidedBy: ActorId) throws -> CalendarImportDecision {
+        if let existing = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
+            return existing
         }
-        try mappingRepository.setEnabled(mapping, isEnabled: isEnabled)
-    }
-
-    /// Deletes the mapping (stops future reconciliation for this
-    /// calendar) — never touches any `PlannedActivity` already imported
-    /// through it. Those remain normal Planning data, editable/deletable
-    /// through the normal Planning UI like anything else; disconnecting
-    /// a source never retroactively erases what it already created. To
-    /// also remove what it already created, see
-    /// `removeImportedActivities(for:removedBy:)` below — a deliberately
-    /// separate, explicit action, never implied by disconnecting or
-    /// disabling.
-    public func deleteMapping(_ mappingId: CalendarPlanningMappingId) throws {
-        guard let mapping = try mappingRepository.fetch(byId: mappingId) else { return }
-        try mappingRepository.delete(mapping)
+        return try importDecisionRepository.insert(
+            sourceId: source.externalPlanningSourceId,
+            externalEventKey: item.externalEventKey,
+            status: .ignored,
+            athleteId: nil,
+            sportId: nil,
+            activityType: nil,
+            plannedActivityId: nil,
+            decidedBy: decidedBy
+        )
     }
 
     // MARK: - Recovery
 
-    /// Calendar V1 recovery: outcome of an explicit, Parent-triggered
-    /// "remove everything this mapping imported" action — distinct from
-    /// `ReconciliationOutcome`, which reports what an automatic
-    /// reconciliation run did. Never a silent success: every candidate
-    /// activity ends up in exactly one bucket below, so a caller can
-    /// always tell partial completion from full completion.
+    /// Family-Owned Calendar Sources V1 (adapted from Calendar Planning
+    /// Source V1's PR #40 recovery round): outcome of an explicit,
+    /// Parent-triggered "remove everything this source imported" action
+    /// — distinct from `ReconciliationOutcome`, which reports what an
+    /// automatic reconciliation run did. Never a silent success: every
+    /// candidate activity ends up in exactly one bucket below, so a
+    /// caller can always tell partial completion from full completion.
     public struct ImportedActivityCleanupOutcome: Sendable, Equatable {
         /// Deleted through the normal `PlanningService.deletePlannedActivity`
         /// path.
         public let removed: Int
         /// Left untouched because it already has a `LoggedActivity` —
-        /// proven Training truth is never erased by this action, exactly
-        /// like automatic reconciliation's own `cancelDisappearedActivities`.
+        /// proven Training truth is never erased by this action.
         public let preservedLogged: Int
-        /// Left untouched because its `WeekPlan` is historical (`weekStart`
-        /// before the current week) — regardless of whether that historical
-        /// week is `.committed` or `.draft`. This action operates only on
-        /// current/future Planning; a historical `.committed` week is never
-        /// reopened (see `WeekPlan.reopen`'s own `.historicalWeekNotReopenable`
-        /// guard), and a historical `.draft` week is left equally untouched
-        /// by policy, not merely by that guard — both cases are the SAME
-        /// "this is no longer current/future Planning" outcome, reported
-        /// together. Reported separately from `failed` because it is an
-        /// expected, permanent-for-this-action outcome, not an error.
+        /// Left untouched because its `WeekPlan` is historical
+        /// (`weekStart` before the current week), regardless of whether
+        /// that historical week is `.committed` or `.draft` — this
+        /// action operates only on current/future Planning; a historical
+        /// `.committed` week is never reopened (see `WeekPlan.reopen`'s
+        /// own `.historicalWeekNotReopenable` guard), and a historical
+        /// `.draft` week is left equally untouched by policy. Reported
+        /// separately from `failed` because it is an expected,
+        /// permanent-for-this-action outcome, not an error.
         public let historicalWeeksSkipped: Int
         /// Left untouched because of an unexpected failure (e.g. a
-        /// concurrent revision conflict) reopening or deleting. Distinct
-        /// from `historicalWeeksSkipped` so a caller can tell "this can
-        /// never be cleaned up automatically" from "something went wrong,
-        /// try again."
+        /// concurrent revision conflict) reopening or deleting.
         public let failed: Int
-        /// Review follow-up: count of WeekPlans that WERE originally
-        /// `.committed`, were reopened to allow cleanup, and had at least
-        /// one activity removed — but whose committed status could NOT be
-        /// restored afterward (`PlanningService.commitWeekPlan` failed, or
-        /// the WeekPlan could not be re-fetched). Reported separately so
-        /// this is never silently reported as full success: a caller
-        /// (and the Parent-facing result message) can tell "cleanup
-        /// finished and the week is back the way it was" from "cleanup
-        /// finished but this week is still in draft and needs attention."
+        /// Count of WeekPlans that WERE originally `.committed`, were
+        /// reopened to allow cleanup, and had at least one activity
+        /// removed — but whose committed status could NOT be restored
+        /// afterward. Reported separately so this is never silently
+        /// reported as full success.
         public let lifecycleRestoreFailed: Int
     }
 
-    /// Calendar V1 recovery: removes every currently-linked, not-yet-
-    /// logged `PlannedActivity` this ONE mapping (this athlete + this
-    /// external calendar) has ever imported — the explicit "undo what a
-    /// wrongly-configured connection already created" action a Parent
-    /// reaches for after fixing (or before removing) a mapping that
-    /// pulled in another child's activities from a mixed external
-    /// calendar. Does not disable or delete the mapping itself — call
-    /// `setMappingEnabled`/`deleteMapping` separately if that's also
-    /// wanted; kept deliberately separate so neither one implies the
-    /// other (see `deleteMapping`'s own doc comment).
+    /// Removes every currently-linked, not-yet-logged `PlannedActivity`
+    /// this ONE `source` has ever imported — across EVERY athlete, since
+    /// a family-owned source is not athlete-scoped (unlike Calendar
+    /// Planning Source V1's per-mapping cleanup, which scoped by one
+    /// athlete + one calendar). Does not disable or delete the source
+    /// itself — call `setSourceEnabled`/`deleteSource` separately.
     ///
-    /// SCOPING (identity constraint verified against actual repository
-    /// declarations before writing this method): `PlannedActivity` has no
-    /// persisted `CalendarPlanningMappingId` of its own — provenance is
-    /// only ever the generic `externalSourceId`/`externalSourceType` pair
-    /// `RecurringPlannedActivity` already established, exactly as
-    /// `cancelDisappearedActivities` above already relies on. The same
-    /// three canonical facts that method already uses are sufficient and
-    /// necessary to safely scope this action too, with no new persisted
-    /// ID:
-    ///   1. `athleteId == mapping.athleteId` — every `PlannedActivity`
-    ///      already carries its own canonical, stable owning athlete;
-    ///   2. `externalSourceType == Self.externalSourceType` — excludes
+    /// SCOPING: `PlannedActivity` has no persisted `ExternalPlanningSourceId`
+    /// of its own — provenance is only ever the generic
+    /// `externalSourceId`/`externalSourceType` pair. Two canonical facts
+    /// are sufficient and necessary to safely scope this action, with no
+    /// new persisted ID:
+    ///   1. `externalSourceType == Self.externalSourceType` — excludes
     ///      every manually-created activity (`nil`) AND every Recurring-
-    ///      Planned-Activity-materialized one (`"recurringPlannedActivity"`)
-    ///      in one filter, via `PlanningService.fetchPlannedActivities(forAthlete:externalSourceType:)`;
-    ///   3. `externalSourceId?.hasPrefix("\(mapping.calendarIdentifier)|")` —
-    ///      excludes every activity imported by a DIFFERENT calendar
-    ///      mapping (a different `calendarIdentifier` never produces this
-    ///      exact prefix; see `externalSourceId(calendarIdentifier:event:)`'s
-    ///      own doc comment for the composite format this prefix always
-    ///      starts with, for both the recurring and non-recurring case).
-    /// Together these three facts can only ever match activities this
-    /// exact athlete+calendar combination created — never another
-    /// athlete's, never another calendar's, never a manually-created row.
+    ///      Planned-Activity-materialized one;
+    ///   2. `externalSourceId?.hasPrefix("\(source.externalContainerIdentifier)|")` —
+    ///      excludes every activity imported by a DIFFERENT source (a
+    ///      different `externalContainerIdentifier` never produces this
+    ///      exact prefix).
+    /// Together these can only ever match activities THIS exact source
+    /// created — never another source's, never a manually-created row —
+    /// regardless of which athlete they were classified to.
+    ///
+    /// For each removed activity, its `CalendarImportDecision` (if any)
+    /// is also deleted, so the underlying external event becomes
+    /// reviewable again in Calendar Import Review — the Parent
+    /// explicitly undid a wrong import and should get a chance to
+    /// re-classify it correctly, not have it permanently stuck.
     @discardableResult
-    public func removeImportedActivities(for mapping: CalendarPlanningMapping, removedBy actorId: ActorId) throws -> ImportedActivityCleanupOutcome {
-        let athleteId = AthleteId(rawValue: mapping.athleteId)
-        let calendarPrefix = "\(mapping.calendarIdentifier)|"
-        let athlete = try athleteRepository.fetchAthlete(byId: athleteId)
-        let timeZoneId = athlete?.timeZoneId ?? TimeZoneId(rawValue: TimeZone.current.identifier)
-        let currentWeekStart = Self.localDateAndTime(for: dateProvider.now, in: timeZoneId).0.startOfWeek
-
-        let allLinked = try planningService.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: Self.externalSourceType)
+    public func removeImportedActivities(for source: ExternalPlanningSource, removedBy actorId: ActorId) throws -> ImportedActivityCleanupOutcome {
+        let calendarPrefix = "\(source.externalContainerIdentifier)|"
+        let allLinked = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
         let candidates = allLinked.filter { activity in
             guard let sourceId = activity.externalSourceId else { return false }
             return sourceId.hasPrefix(calendarPrefix)
@@ -305,17 +460,14 @@ public final class CalendarPlanningCoordinationService {
 
         var preservedLogged = 0
 
-        // Review follow-up: grouped by WeekPlanId BEFORE any reopen/delete
-        // happens, so a committed week containing several imported
-        // activities is reopened and (if eligible) recommitted exactly
-        // ONCE, never per-activity. `removeImportedActivities` must never
-        // silently change a WeekPlan's lifecycle state — see this method's
-        // per-week handling below.
+        // Grouped by WeekPlanId BEFORE any reopen/delete happens, so a
+        // committed week containing several imported activities is
+        // reopened and (if eligible) recommitted exactly ONCE, never
+        // per-activity.
         var eligibleByWeek: [WeekPlanId: [PlannedActivity]] = [:]
         for activity in candidates {
             // Planning proposes; Training proves. Proven training truth is
-            // never erased by this action, same rule
-            // `cancelDisappearedActivities` already enforces.
+            // never erased by this action.
             let logged = try trainingService.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
             guard logged.isEmpty else {
                 preservedLogged += 1
@@ -330,32 +482,30 @@ public final class CalendarPlanningCoordinationService {
         var lifecycleRestoreFailed = 0
 
         for (weekPlanId, activities) in eligibleByWeek {
-            // 1. Fetch the canonical WeekPlan.
             guard let weekPlan = try planningService.fetchWeekPlan(byId: weekPlanId) else {
                 failed += activities.count
                 continue
             }
+            // Every activity in one WeekPlan shares that WeekPlan's own
+            // athlete by construction — the "current week" boundary
+            // below is therefore computed for THIS week's actual owning
+            // athlete, correct even when this source's candidates span
+            // several athletes with different time zones.
+            let weekAthleteId = AthleteId(rawValue: weekPlan.athleteId)
+            let weekAthlete = try athleteRepository.fetchAthlete(byId: weekAthleteId)
+            let weekTimeZoneId = weekAthlete?.timeZoneId ?? TimeZoneId(rawValue: TimeZone.current.identifier)
+            let currentWeekStart = Self.localDateAndTime(for: dateProvider.now, in: weekTimeZoneId).0.startOfWeek
 
-            // Review follow-up (BLOCKER): this action operates only on
-            // current/future Planning — a historical week is never
-            // destructively cleaned up, regardless of whether it is
-            // `.committed` or `.draft`. This check runs BEFORE any
-            // status/lifecycle branching below, so a historical `.draft`
-            // week can never fall through to the delete loop the way a
-            // status-first check would allow. Both historical shapes are
-            // the same outcome, reported together — no separate behavior
-            // for historical draft vs. historical committed.
+            // Historical Planning is never destructively cleaned up —
+            // regardless of `.committed`/`.draft` — checked BEFORE any
+            // status/lifecycle branching.
             guard weekPlan.weekStart >= currentWeekStart else {
                 historicalWeeksSkipped += activities.count
                 continue
             }
 
-            // 2. Remember whether it was originally committed (current/
-            // future weeks only, by this point).
             let wasOriginallyCommitted = weekPlan.status == .committed
-
             if wasOriginallyCommitted {
-                // 3. Current/future committed: reopen ONCE for this week.
                 do {
                     try planningService.reopenWeekPlan(
                         weekPlanId, expectedRevision: weekPlan.revision, reopenedBy: actorId, currentWeekStart: currentWeekStart
@@ -366,7 +516,6 @@ public final class CalendarPlanningCoordinationService {
                 }
             }
 
-            // 4. Process all eligible deletes for this week.
             var weekRemoved = 0
             for activity in activities {
                 do {
@@ -374,6 +523,10 @@ public final class CalendarPlanningCoordinationService {
                         activity.plannedActivityId, expectedWeekPlanId: weekPlanId, deletedBy: actorId
                     )
                     weekRemoved += 1
+                    if let key = activity.externalSourceId,
+                       let decision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: key) {
+                        try importDecisionRepository.delete(decision)
+                    }
                 } catch {
                     failed += 1
                 }
@@ -381,18 +534,10 @@ public final class CalendarPlanningCoordinationService {
             removed += weekRemoved
 
             guard wasOriginallyCommitted else { continue }
-            // 5. Restore the week's original committed state through the
-            // canonical PlanningService — never left silently in `.draft`.
-            // The revision after reopen + N deletes is never assumed here:
-            // `deletePlannedActivity` does not itself advance
-            // `WeekPlan.revision`, but re-reading canonical state (rather
-            // than reusing the pre-delete `weekPlan.revision`, or the
-            // reopen call's return value) keeps this correct even if that
-            // ever changes. If the WeekPlan can no longer be found, or
-            // `commitWeekPlan` fails (e.g. a concurrent revision
-            // conflict), this is reported via `lifecycleRestoreFailed`
-            // rather than folded into `removed`/`failed` as a silent
-            // success.
+            // Restore the week's original committed state — never left
+            // silently in `.draft`. The revision after reopen + N
+            // deletes is never assumed; canonical state is re-read
+            // before recommitting.
             do {
                 guard let currentWeekPlan = try planningService.fetchWeekPlan(byId: weekPlanId) else {
                     lifecycleRestoreFailed += 1
@@ -415,49 +560,44 @@ public final class CalendarPlanningCoordinationService {
         )
     }
 
-    // MARK: - Reconciliation
+    // MARK: - Reconciliation (source-owned schedule field updates ONLY — never creates)
 
-    /// Per-mapping reconciliation counts — presentation/diagnostic only,
-    /// never itself a stored or authoritative value.
+    /// Per-source reconciliation counts — presentation/diagnostic only,
+    /// never itself a stored or authoritative value. Unlike Calendar
+    /// Planning Source V1's `ReconciliationOutcome`, there is no
+    /// `created` count: reconciliation under the new model NEVER creates
+    /// a `PlannedActivity` — only `classifyAndImport` does, through
+    /// explicit Parent review. An event with no existing classification
+    /// is simply left for Calendar Import Review, not counted here at
+    /// all (it is not an error, a skip, or a cancellation).
     public struct ReconciliationOutcome: Sendable, Equatable {
-        public let created: Int
+        /// An already-imported `PlannedActivity`'s source-owned fields
+        /// (title/start/duration) were refreshed from the external
+        /// event.
         public let updated: Int
+        /// An already-imported `PlannedActivity` was removed because its
+        /// external event disappeared from the source within the
+        /// reconciliation window (see `cancelDisappearedActivities`).
         public let cancelled: Int
-        /// An event this run could not safely act on — e.g. its target
-        /// week is no longer draft, or it moved to a different week than
-        /// its already-linked `PlannedActivity` (see this type's own
-        /// doc comment on cross-week moves). Never a crash, never a
-        /// fabricated mutation — just "left as-is this round."
+        /// An already-imported event this run could not safely act on —
+        /// e.g. its target week is no longer draft, or it moved to a
+        /// different week than its already-linked `PlannedActivity`.
+        /// Never a crash, never a fabricated mutation.
         public let skipped: Int
     }
 
-    /// Reconciles every currently-enabled mapping, in deterministic
-    /// order. A disabled mapping is skipped entirely (no create/update/
-    /// cancel) — "mapping disabled -> no new import." Safe and idempotent
-    /// to call repeatedly (e.g. on every app foreground); each mapping's
-    /// own `lastReconciledAt` is recorded whether or not anything
-    /// changed (only on a SUCCESSFUL reconciliation — see `reconcile(_:)`).
-    /// A single mapping's failure (e.g. its calendar was removed, or its
-    /// athlete is no longer resolvable) does not prevent the others from
-    /// reconciling.
-    ///
-    /// PR #39 review follow-up (Blocker 1): the earlier version of this
-    /// method called `try reconcile(mapping)` directly inside the loop —
-    /// under Swift's own error-propagation rules, ANY single mapping
-    /// throwing (a removed calendar, an unresolvable athlete) aborted the
-    /// entire function immediately, silently skipping every mapping still
-    /// to come. That directly contradicted this method's own doc comment
-    /// above. Each mapping's `reconcile(_:)` call is now individually
-    /// caught: a failing mapping contributes no entry to the returned
-    /// dictionary (never a fabricated zeroed outcome — this method
-    /// reports only what genuinely happened) and every other mapping
-    /// still reconciles normally in the same run.
+    /// Reconciles every currently-enabled source, in deterministic
+    /// order. A disabled source is skipped entirely; safe and idempotent
+    /// to call repeatedly. A single source's failure (e.g. its calendar
+    /// was removed) does not prevent the others from reconciling — same
+    /// per-source isolation Calendar Planning Source V1 already
+    /// established.
     @discardableResult
-    public func reconcileAllEnabledMappings() throws -> [CalendarPlanningMappingId: ReconciliationOutcome] {
-        var results: [CalendarPlanningMappingId: ReconciliationOutcome] = [:]
-        for mapping in try mappingRepository.fetchAllEnabled() {
+    public func reconcileAllEnabledSources() throws -> [ExternalPlanningSourceId: ReconciliationOutcome] {
+        var results: [ExternalPlanningSourceId: ReconciliationOutcome] = [:]
+        for source in try sourceRepository.fetchAllEnabled() {
             do {
-                results[mapping.calendarPlanningMappingId] = try reconcile(mapping)
+                results[source.externalPlanningSourceId] = try reconcile(source)
             } catch {
                 continue
             }
@@ -465,117 +605,86 @@ public final class CalendarPlanningCoordinationService {
         return results
     }
 
-    /// PR #39 review follow-up (Blocker 1): `calendarEventProvider.events(...)`
-    /// below is a plain `try` — if the provider throws
-    /// `CalendarEventProviderError.calendarUnavailable` (calendar
-    /// removed/unresolvable), this method throws immediately and
-    /// performs NO create/update/cancel for this mapping at all; nothing
+    /// `calendarEventProvider.events(...)` below is a plain `try` — if
+    /// the provider throws `CalendarEventProviderError.calendarUnavailable`
+    /// (calendar removed/unresolvable), this method throws immediately
+    /// and performs NO update/cancel for this source at all; nothing
     /// after this call runs, including `cancelDisappearedActivities` and
-    /// `mappingRepository.recordReconciliation`. An unavailable source is
+    /// `sourceRepository.recordReconciliation`. An unavailable source is
     /// therefore never interpreted as "every previously-imported event
     /// disappeared" — only a genuinely successful (possibly empty) fetch
-    /// can ever reach the cancellation step below. The caller
-    /// (`reconcileAllEnabledMappings`) is responsible for not letting one
-    /// mapping's thrown error stop the others.
+    /// can ever reach the cancellation step below.
     @discardableResult
-    public func reconcile(_ mapping: CalendarPlanningMapping) throws -> ReconciliationOutcome {
-        let athleteId = AthleteId(rawValue: mapping.athleteId)
-        guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
-            throw CalendarPlanningCoordinationError.athleteNotFound
-        }
-
+    public func reconcile(_ source: ExternalPlanningSource) throws -> ReconciliationOutcome {
         let now = dateProvider.now
         guard let windowEnd = Calendar(identifier: .gregorian).date(
             byAdding: .day, value: Self.reconciliationWindowDays, to: now
         ) else {
-            return ReconciliationOutcome(created: 0, updated: 0, cancelled: 0, skipped: 0)
+            return ReconciliationOutcome(updated: 0, cancelled: 0, skipped: 0)
         }
-        let externalEvents = try calendarEventProvider.events(inCalendar: mapping.calendarIdentifier, from: now, to: windowEnd)
+        let externalEvents = try calendarEventProvider.events(inCalendar: source.externalContainerIdentifier, from: now, to: windowEnd)
         // All-day events have no meaningful start TIME to plan around in
-        // this V1 slice (Vǫxtr's own PlannedActivity.startLocalTime is
-        // optional, but a Parent picking "when" needs an actual time to
-        // build a reminder against) — excluded, not imported as a
-        // dateless activity.
+        // this V1 slice — excluded, not imported as a dateless activity.
         let qualifyingEvents = externalEvents.filter { !$0.isAllDay }
 
-        var created = 0
         var updated = 0
         var skipped = 0
-
         var seenExternalSourceIds: Set<String> = []
+
         for event in qualifyingEvents {
-            let externalSourceId = Self.externalSourceId(calendarIdentifier: mapping.calendarIdentifier, event: event)
-            seenExternalSourceIds.insert(externalSourceId)
-            let outcome = try applyEvent(event, externalSourceId: externalSourceId, mapping: mapping, athlete: athlete)
+            let key = ExternalCalendarEventIdentity.externalSourceId(calendarIdentifier: source.externalContainerIdentifier, event: event)
+            seenExternalSourceIds.insert(key)
+            let outcome = try applyReconciledEvent(event, externalSourceId: key)
             switch outcome {
-            case .created: created += 1
             case .updated: updated += 1
             case .skipped: skipped += 1
+            case .notYetImported: break
             }
         }
 
         let cancelled = try cancelDisappearedActivities(
-            mapping: mapping, athleteId: athleteId, windowStart: now, windowEnd: windowEnd, seenExternalSourceIds: seenExternalSourceIds
+            source: source, windowStart: now, windowEnd: windowEnd, seenExternalSourceIds: seenExternalSourceIds
         )
 
-        try mappingRepository.recordReconciliation(mapping, at: now)
-        return ReconciliationOutcome(created: created, updated: updated, cancelled: cancelled, skipped: skipped)
+        try sourceRepository.recordReconciliation(source, at: now)
+        return ReconciliationOutcome(updated: updated, cancelled: cancelled, skipped: skipped)
     }
 
-    private enum EventApplyOutcome { case created, updated, skipped }
+    private enum ReconciledEventOutcome { case updated, skipped, notYetImported }
 
-    private func applyEvent(
-        _ event: ExternalCalendarEvent,
-        externalSourceId: String,
-        mapping: CalendarPlanningMapping,
-        athlete: AthleteProfile
-    ) throws -> EventApplyOutcome {
-        let athleteId = AthleteId(rawValue: athlete.id)
+    /// Reconciles ONE external event against an ALREADY-imported
+    /// `PlannedActivity`, if one exists. Never creates — an event with
+    /// no existing match is `.notYetImported` (left for Calendar Import
+    /// Review, not an error/skip).
+    private func applyReconciledEvent(_ event: ExternalCalendarEvent, externalSourceId: String) throws -> ReconciledEventOutcome {
+        let existingMatches = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
+        guard let existing = existingMatches.first(where: { $0.externalSourceId == externalSourceId }) else {
+            return .notYetImported
+        }
+
+        let athleteId = AthleteId(rawValue: existing.athleteId)
+        guard let athlete = try athleteRepository.fetchAthlete(byId: athleteId) else {
+            return .skipped
+        }
         let timeZoneId = athlete.timeZoneId
         let (localDate, startLocalTime) = Self.localDateAndTime(for: event.startDate, in: timeZoneId)
         let durationMinutes = Self.durationMinutes(start: event.startDate, end: event.endDate)
-
-        let existingMatches = try planningService.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: Self.externalSourceType)
-        guard let existing = existingMatches.first(where: { $0.externalSourceId == externalSourceId }) else {
-            // CREATE: never against a temporary/draft identity — the
-            // canonical WeekPlan is resolved/created first, through the
-            // same getOrCreateWeekPlan every other Planning creation path
-            // uses.
-            let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: localDate.startOfWeek)
-            _ = try planningService.addPlannedActivity(
-                toWeekPlan: weekPlan.weekPlanId,
-                athleteId: athleteId,
-                activityType: mapping.activityType,
-                title: event.title,
-                localDate: localDate,
-                timeZoneId: timeZoneId,
-                sportId: mapping.sportId.map { SportId(rawValue: $0) },
-                startLocalTime: startLocalTime,
-                plannedDurationMinutes: durationMinutes,
-                externalSourceId: externalSourceId,
-                externalSourceType: Self.externalSourceType
-            )
-            return .created
-        }
 
         // UPDATE: the external source owns schedule facts (title/start/
         // duration/time zone); every other Vǫxtr-owned field — sportId,
         // activityType, categoryIds, plannedIntensity, notes, location —
         // is read back from the EXISTING row and passed through
-        // unchanged, never re-applied from the mapping (the Parent may
-        // have adjusted them after import; see this type's own
-        // delivery-report note on field ownership).
+        // unchanged, never re-applied from anywhere else (the Parent's
+        // own classification choice, or a later manual adjustment, is
+        // never overwritten by reconciliation).
         let existingWeekPlanId = WeekPlanId(rawValue: existing.weekPlanId)
         let targetWeekStart = localDate.startOfWeek
         guard let currentWeekPlan = try planningService.fetchWeekPlan(byId: existingWeekPlanId),
               currentWeekPlan.weekStart == targetWeekStart else {
             // The event moved to a different Vǫxtr planning week than its
             // already-linked PlannedActivity. editPlannedActivity cannot
-            // move an activity between WeekPlans (weekPlanId is
-            // identity/ownership, not editable) — inventing a delete+
-            // recreate here would violate "an external update must not
-            // replace the PlannedActivity identity." Left untouched this
-            // round; see this type's own known-limitations note.
+            // move an activity between WeekPlans — left untouched this
+            // round.
             return .skipped
         }
         do {
@@ -604,34 +713,47 @@ public final class CalendarPlanningCoordinationService {
     }
 
     /// Cancels/removes every already-imported `PlannedActivity` (for
-    /// this mapping's calendar) inside the reconciliation window that no
-    /// longer has a matching external event THIS round — "handle an
-    /// event disappearing without silently leaving misleading future
-    /// schedule data forever." Scoped strictly to the SAME window just
-    /// fetched (never activities outside it, which were never re-checked
-    /// this round and must not be treated as "disappeared").
+    /// this source's calendar, across every athlete) inside the
+    /// reconciliation window that no longer has a matching external
+    /// event THIS round — "handle an event disappearing without
+    /// silently leaving misleading future schedule data forever."
+    /// Scoped strictly to the SAME window just fetched. Also deletes the
+    /// corresponding `CalendarImportDecision`, so a genuinely new event
+    /// later reusing the same identity (unlikely, but never assumed
+    /// impossible) is reviewable rather than permanently blocked.
     private func cancelDisappearedActivities(
-        mapping: CalendarPlanningMapping,
-        athleteId: AthleteId,
+        source: ExternalPlanningSource,
         windowStart: Date,
         windowEnd: Date,
         seenExternalSourceIds: Set<String>
     ) throws -> Int {
-        let athlete = try athleteRepository.fetchAthlete(byId: athleteId)
-        let timeZoneId = athlete?.timeZoneId ?? TimeZoneId(rawValue: TimeZone.current.identifier)
-        let windowStartLocalDate = Self.localDateAndTime(for: windowStart, in: timeZoneId).0
-        let windowEndLocalDate = Self.localDateAndTime(for: windowEnd, in: timeZoneId).0
-
-        let calendarPrefix = "\(mapping.calendarIdentifier)|"
-        let allLinked = try planningService.fetchPlannedActivities(forAthlete: athleteId, externalSourceType: Self.externalSourceType)
+        let calendarPrefix = "\(source.externalContainerIdentifier)|"
+        let allLinked = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
         let candidates = allLinked.filter { activity in
             guard let sourceId = activity.externalSourceId, sourceId.hasPrefix(calendarPrefix) else { return false }
-            guard !seenExternalSourceIds.contains(sourceId) else { return false }
-            return activity.localDate >= windowStartLocalDate && activity.localDate <= windowEndLocalDate
+            return !seenExternalSourceIds.contains(sourceId)
         }
 
         var cancelled = 0
+        var timeZoneCache: [UUID: TimeZoneId] = [:]
         for activity in candidates {
+            // Each candidate's OWN athlete's time zone resolves the
+            // window bounds — a family-owned source can span athletes in
+            // different time zones, unlike Calendar Planning Source V1's
+            // single-athlete-per-mapping scoping.
+            let athleteRawId = activity.athleteId
+            let timeZoneId: TimeZoneId
+            if let cached = timeZoneCache[athleteRawId] {
+                timeZoneId = cached
+            } else {
+                let athlete = try athleteRepository.fetchAthlete(byId: AthleteId(rawValue: athleteRawId))
+                timeZoneId = athlete?.timeZoneId ?? TimeZoneId(rawValue: TimeZone.current.identifier)
+                timeZoneCache[athleteRawId] = timeZoneId
+            }
+            let windowStartLocalDate = Self.localDateAndTime(for: windowStart, in: timeZoneId).0
+            let windowEndLocalDate = Self.localDateAndTime(for: windowEnd, in: timeZoneId).0
+            guard activity.localDate >= windowStartLocalDate && activity.localDate <= windowEndLocalDate else { continue }
+
             // Planning proposes; Training proves. Proven training truth
             // is never erased by an external source disappearing.
             let logged = try trainingService.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
@@ -642,6 +764,10 @@ public final class CalendarPlanningCoordinationService {
                     activity.plannedActivityId, expectedWeekPlanId: weekPlanId, deletedBy: .system
                 )
                 cancelled += 1
+                if let key = activity.externalSourceId,
+                   let decision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: key) {
+                    try importDecisionRepository.delete(decision)
+                }
             } catch PlanningServiceError.weekPlanNotDraft {
                 // Same "already-committed week" boundary as the update
                 // path above — left in place, not an error.
@@ -651,53 +777,12 @@ public final class CalendarPlanningCoordinationService {
         return cancelled
     }
 
-    // MARK: - Identity + time normalization
-
-    /// PR #39 review follow-up (Blocker 2, then corrected a second round
-    /// later): `eventIdentifier` alone is NOT a valid occurrence identity
-    /// for a RECURRING event — every concrete occurrence of the same
-    /// series shares the SAME `eventIdentifier` (see
-    /// `ExternalCalendarEvent`'s own doc comment). `occurrenceDate` is
-    /// what actually distinguishes one occurrence from its siblings, and
-    /// — critically — Apple documents it as remaining STABLE even after
-    /// that occurrence is detached and its `startDate` moved. Using it
-    /// (rather than the mutable `startDate`) means a moved/detached
-    /// occurrence's `externalSourceId` does not change, so reconciliation
-    /// finds the SAME already-imported `PlannedActivity` and updates it
-    /// in place — never re-creating it under a new identity, and never
-    /// colliding with a sibling occurrence that happens to move to the
-    /// same new time.
-    ///
-    /// For an ORDINARY, non-recurring event, `eventIdentifier` alone
-    /// already is a valid, stable identity for that event's entire
-    /// lifetime — including across a Parent editing its title or start
-    /// time. Folding `occurrenceDate` into a non-recurring event's
-    /// identity would be actively wrong: `ExternalCalendarEvent.occurrenceDate`
-    /// defaults to (and, for a genuinely non-recurring `EKEvent`, always
-    /// tracks) its own `startDate`, so an ordinary event's identity would
-    /// silently change every time its start time moved — reconciliation
-    /// would then create a SECOND `PlannedActivity` instead of updating
-    /// the first. `ExternalCalendarEvent.isRecurring` — the
-    /// provider-neutral "this belongs to a recurring series" statement,
-    /// correctly classified below the provider boundary (see
-    /// `EventKitCalendarEventProvider`'s own doc comment on assigning it,
-    /// which is more than just `EKEvent.hasRecurrenceRules` alone) — is
-    /// therefore the gate: only a recurring event's identity includes
-    /// `occurrenceDate` at all.
-    static func externalSourceId(calendarIdentifier: String, event: ExternalCalendarEvent) -> String {
-        guard event.isRecurring else {
-            return "\(calendarIdentifier)|\(event.eventIdentifier)"
-        }
-        return "\(calendarIdentifier)|\(event.eventIdentifier)|\(event.occurrenceDate.timeIntervalSince1970)"
-    }
+    // MARK: - Time normalization
 
     /// The ONE place an `ExternalCalendarEvent`'s absolute `Date` is
     /// normalized into Vǫxtr's own `LocalDate`/`LocalTime` — never the
-    /// device's current time zone, always the athlete's own configured
-    /// `AthleteProfile.timeZoneId` (the same field `PlannedActivity.timeZoneId`
-    /// is already populated from throughout this app), matching "do not
-    /// silently use device-current timezone as business truth" and
-    /// "normalize only at the integration boundary."
+    /// device's current time zone, always the relevant athlete's own
+    /// configured `AthleteProfile.timeZoneId`.
     private static func localDateAndTime(for date: Date, in timeZoneId: TimeZoneId) -> (LocalDate, LocalTime) {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZoneId.timeZone ?? TimeZone(identifier: "UTC") ?? .gmt

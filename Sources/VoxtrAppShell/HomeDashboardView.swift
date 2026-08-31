@@ -190,12 +190,16 @@ public struct HomeDashboardView: View {
     /// sheet's own nested `HomeDashboardViewModel` construction below —
     /// same rationale as `activityChangeBroadcaster` immediately above.
     private let sleepChangeBroadcaster: AthleteSleepChangeBroadcaster
-    /// Calendar Planning Source V1: threaded through only to pass to the
-    /// "Manage Athletes" sheet's own nested `AthleteCalendarPlanningViewModel`
-    /// construction below — same rationale as `sleepCoordinationService`
-    /// immediately above.
+    /// Family-Owned Calendar Sources V1: threaded through only to pass
+    /// to the "Manage Athletes" sheet's own nested
+    /// `FamilyCalendarSourcesViewModel` construction below — same
+    /// rationale as `sleepCoordinationService` immediately above.
     private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let sportRepository: SportRepository
+    /// Family-Owned Calendar Sources V1: same rationale as
+    /// `sportRepository` immediately above — needed only to build the
+    /// "Manage Athletes" sheet's own `FamilyCalendarSourcesViewModel`.
+    private let athleteRepository: AthleteRepository
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -216,7 +220,8 @@ public struct HomeDashboardView: View {
         sleepCoordinationService: SleepCoordinationService,
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
-        sportRepository: SportRepository
+        sportRepository: SportRepository,
+        athleteRepository: AthleteRepository
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -236,6 +241,7 @@ public struct HomeDashboardView: View {
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
+        self.athleteRepository = athleteRepository
     }
 
     public var body: some View {
@@ -304,14 +310,12 @@ public struct HomeDashboardView: View {
                             athleteDisplayName: athlete.givenName
                         )
                     },
-                    calendarPlanningViewModel: { athlete in
-                        AthleteCalendarPlanningViewModel(
-                            athleteId: athlete.athleteId,
-                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                            sportRepository: sportRepository,
-                            actorId: committedByActorId
-                        )
-                    }
+                    familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel(
+                        calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                        athleteRepository: athleteRepository,
+                        sportRepository: sportRepository,
+                        actorId: committedByActorId
+                    )
                 )
             }
         }

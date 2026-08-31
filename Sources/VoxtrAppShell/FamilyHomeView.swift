@@ -132,14 +132,12 @@ public struct FamilyHomeView: View {
                             athleteDisplayName: athlete.givenName
                         )
                     },
-                    calendarPlanningViewModel: { athlete in
-                        AthleteCalendarPlanningViewModel(
-                            athleteId: athlete.athleteId,
-                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                            sportRepository: sportRepository,
-                            actorId: ActorId(rawValue: family.participant.id)
-                        )
-                    }
+                    familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel(
+                        calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                        athleteRepository: athleteRepository,
+                        sportRepository: sportRepository,
+                        actorId: ActorId(rawValue: family.participant.id)
+                    )
                 )
             }
         }

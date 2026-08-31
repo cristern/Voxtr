@@ -2,24 +2,33 @@ import Foundation
 import SwiftData
 import VoxtrCoreContracts
 
-/// Calendar Planning Source V1: a Parent's explicit, trusted mapping
-/// from ONE external calendar (currently EventKit; the type stays
-/// provider-neutral in shape) to ONE athlete's Vǫxtr planning context.
+/// Calendar Planning Source V1 (LEGACY/ALPHA — superseded by Family-
+/// Owned Calendar Sources V1): a Parent's explicit, trusted mapping from
+/// ONE external calendar to ONE athlete's Vǫxtr planning context.
+///
+/// Real TestFlight evidence showed multiple children's Spond groups
+/// syncing into the SAME iOS calendar, which this one-calendar-to-one-
+/// athlete assumption cannot represent safely — every child's events
+/// got attributed to whichever single athlete the mapping named. This
+/// type is RETAINED, unchanged, ONLY so any already-persisted row
+/// remains readable and can seed a one-time, additive migration to
+/// `ExternalPlanningSource` (see
+/// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`'s
+/// own doc comment for exactly what that migration does and does not
+/// do). No live repository/service/UI creates, updates, or reads a
+/// `CalendarPlanningMapping` for any other purpose — do not add new
+/// call sites against this type.
 ///
 /// This row is configuration, not schedule data — it never stores an
 /// imported event's own facts (title/time/etc). Those live on the
 /// `PlannedActivity` created for each qualifying event, through the
 /// normal Planning mutation path, exactly like every other Planning
-/// write. Reconciliation (in `VoxtrAppShell`, the only place allowed to
-/// compose this domain with Planning/Training) reads this row to decide
-/// WHERE to look and WHO/WHAT to apply; it is never itself the source
-/// of truth for what happened to a specific imported activity.
+/// write.
 ///
-/// One row per (calendar, athlete) pair is the V1 product contract —
+/// One row per (calendar, athlete) pair was the V1 product contract —
 /// not enforced by a uniqueness constraint here (same "persistence
 /// infrastructure only" boundary every other repository in this
-/// project already follows); the coordination service is responsible
-/// for not creating a second mapping for the same calendar+athlete.
+/// project already follows).
 @Model
 public final class CalendarPlanningMapping {
     @Attribute(.unique) public var id: UUID

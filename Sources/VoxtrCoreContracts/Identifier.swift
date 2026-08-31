@@ -70,7 +70,28 @@ public typealias ActivityReminderId = Identifier<ActivityReminderTag>
 /// project's "typed ID for anything this codebase itself owns and
 /// references by stable identity" convention.
 public enum CalendarPlanningMappingTag {}
+/// Calendar Planning Source V1 (legacy, Alpha): retained ONLY so
+/// existing, already-persisted `CalendarPlanningMapping` rows remain
+/// readable — see that type's own doc comment. Family-Owned Calendar
+/// Sources V1 replaces this athlete-scoped mapping with
+/// `ExternalPlanningSourceId` below; do not create new
+/// `CalendarPlanningMapping` rows.
 public typealias CalendarPlanningMappingId = Identifier<CalendarPlanningMappingTag>
+
+/// Family-Owned Calendar Sources V1: identifies one persisted, family-
+/// owned external calendar/source connection (see
+/// `VoxtrCalendarPlanningDomain.ExternalPlanningSource`) — replaces the
+/// athlete-scoped `CalendarPlanningMappingId` above as the durable
+/// identity for "which external container/calendar is this."
+public enum ExternalPlanningSourceTag {}
+public typealias ExternalPlanningSourceId = Identifier<ExternalPlanningSourceTag>
+
+/// Family-Owned Calendar Sources V1: identifies one persisted Parent
+/// decision (import-and-classify, or ignore) about one specific
+/// external event, keyed by that event's own stable external identity
+/// (see `CalendarImportDecision.externalEventKey`'s own doc comment).
+public enum CalendarImportDecisionTag {}
+public typealias CalendarImportDecisionId = Identifier<CalendarImportDecisionTag>
 
 /// v1.3 Section 3: "String wrapper. Opaque platform account identifier;
 /// never used as email." Deliberately NOT built on the UUID-based

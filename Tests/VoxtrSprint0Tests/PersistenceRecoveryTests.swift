@@ -189,16 +189,18 @@ struct PersistenceRecoveryTests {
         // updated again to AppSchemaV4. Notifications V1 Activity
         // Reminder Foundation: updated again to AppSchemaV5. Activity
         // Reminder What/When: updated again to AppSchemaV6. Calendar
-        // Planning Source V1: updated again to AppSchemaV7, matching
-        // CompositionRoot.build's own real default after that round's
-        // bump — this exact test is the one Codemagic caught lagging
-        // behind that bump (this literal stayed at AppSchemaV6, so
+        // Planning Source V1: updated again to AppSchemaV7 — this exact
+        // test is the one Codemagic caught lagging behind that bump
+        // (this literal stayed at AppSchemaV6, so
         // container.schema.entities.count stayed at the frozen V6
         // shape's 19 while AppSchema.modelTypes.count had already moved
-        // to 20). Keep this literal in lockstep with CompositionRoot's
-        // own default on every future version bump too.
+        // to 20). Family-Owned Calendar Sources V1: updated again to
+        // AppSchemaV8, matching CompositionRoot.build's own real
+        // default after that round's bump. Keep this literal in
+        // lockstep with CompositionRoot's own default on every future
+        // version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV7.self,
+            versionedSchema: AppSchemaV8.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -497,6 +499,103 @@ struct PersistenceRecoveryTests {
         )
         #expect(mapping.calendarIdentifier == "cal-1")
         #expect(try v7Container.mainContext.fetch(FetchDescriptor<CalendarPlanningMapping>()).count == 1)
+    }
+
+    /// Family-Owned Calendar Sources V1, required test 13: migration
+    /// from the current (V7) schema opens safely, preserves the legacy
+    /// `CalendarPlanningMapping` row untouched, and — critically — does
+    /// NOT silently auto-classify anything: the plain SwiftData
+    /// `.lightweight` migration stage creates the two new EMPTY tables
+    /// and nothing else. Only an explicit, separate call to
+    /// `CalendarPlanningCoordinationService.migrateLegacySourcesIfNeeded()`
+    /// (exercised in `CalendarPlanningCoordinationServiceTests`, not
+    /// here) ever turns a legacy mapping into an `ExternalPlanningSource`
+    /// — and even that call never invents a `CalendarImportDecision`
+    /// from the legacy athlete/sport/activityType values.
+    @Test("Family-Owned Calendar Sources V1: a store created under AppSchemaV7 (20 entities, with an existing CalendarPlanningMapping row) reopens successfully under AppSchemaV8 via the lightweight migration stage — existing PlannedActivity/CalendarPlanningMapping data survives untouched, the new ExternalPlanningSource/CalendarImportDecision tables are genuinely usable, and neither is silently populated from the legacy mapping by the migration itself")
+    @MainActor
+    func existingV7StoreMigratesToV8Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v7-to-v8-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v7Schema = Schema(versionedSchema: AppSchemaV7.self)
+        var athleteRawId: UUID
+        var plannedActivityRawId: UUID
+        var legacyMappingRawId: UUID
+        do {
+            let v7Container = try ModelContainer(
+                for: v7Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v7Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Oliver",
+                birthDate: LocalDate(year: 2013, month: 6, day: 2),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v7Container.mainContext.insert(athlete)
+            try v7Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            let athleteId = AthleteId(rawValue: athleteRawId)
+            let weekPlan = WeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 8, day: 17))
+            v7Container.mainContext.insert(weekPlan)
+            let plannedActivity = PlannedActivity(
+                weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 8, day: 18),
+                startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                externalSourceId: "cal-familie|evt-1", externalSourceType: "calendarPlanningSource"
+            )
+            v7Container.mainContext.insert(plannedActivity)
+            try v7Container.mainContext.save()
+            plannedActivityRawId = plannedActivity.id
+
+            let mappingRepository = CalendarPlanningMappingRepository(modelContext: v7Container.mainContext)
+            let mapping = try mappingRepository.insert(
+                athleteId: athleteId, calendarIdentifier: "cal-familie",
+                calendarTitle: "Familie", activityType: .individualTraining, sportId: nil
+            )
+            legacyMappingRawId = mapping.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V8) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV8.self`).
+        let v8Schema = Schema(versionedSchema: AppSchemaV8.self)
+        let v8Container = try ModelContainer(
+            for: v8Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v8Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity and legacy CalendarPlanningMapping
+        // survived completely untouched.
+        let migratedActivity = try v8Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Endurance run")
+
+        let migratedMappings = try v8Container.mainContext.fetch(FetchDescriptor<CalendarPlanningMapping>())
+        #expect(migratedMappings.count == 1)
+        #expect(migratedMappings.first?.id == legacyMappingRawId)
+        #expect(migratedMappings.first?.calendarIdentifier == "cal-familie")
+
+        // The migration itself never invents anything — both new tables
+        // are genuinely empty immediately after opening, proving the
+        // lightweight stage did not (and could not) silently reinterpret
+        // the legacy mapping as a source or a classification decision.
+        #expect(try v8Container.mainContext.fetch(FetchDescriptor<ExternalPlanningSource>()).isEmpty)
+        #expect(try v8Container.mainContext.fetch(FetchDescriptor<CalendarImportDecision>()).isEmpty)
+
+        // The new tables are genuinely usable against the migrated store
+        // — proves the lightweight stage actually created them, not
+        // merely that the container opened.
+        let sourceRepository = ExternalPlanningSourceRepository(modelContext: v8Container.mainContext)
+        let source = try sourceRepository.insert(
+            providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        #expect(source.externalContainerIdentifier == "cal-familie")
+        #expect(try v8Container.mainContext.fetch(FetchDescriptor<ExternalPlanningSource>()).count == 1)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

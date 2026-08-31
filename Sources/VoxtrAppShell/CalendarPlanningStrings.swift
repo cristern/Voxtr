@@ -1,20 +1,32 @@
 import Foundation
 
-/// Calendar Planning Source V1: centralizes this feature's user-facing
-/// strings built as plain `String` values, matching `PlanningStrings`'s
-/// own established rationale. Calm, plain language throughout — no
-/// provider-architecture jargon (no "provenance," "reconciliation,"
-/// "external identity" shown to a Parent).
+/// Family-Owned Calendar Sources V1: centralizes this feature's user-
+/// facing strings built as plain `String` values, matching
+/// `PlanningStrings`'s own established rationale. Calm, plain language
+/// throughout — no provider-architecture jargon (no "provenance,"
+/// "reconciliation," "external identity," "source," or "decision" as
+/// internal terms shown to a Parent — "source" itself is kept since it
+/// reads naturally as "a calendar you connected").
 public enum CalendarPlanningStrings {
+    // MARK: - Family Calendar Sources
+
+    public static var screenTitle: String {
+        String(localized: "calendarPlanning.screenTitle", defaultValue: "Calendar Sources")
+    }
+
     public static var connectCalendarExplanation: String {
         String(
             localized: "calendarPlanning.connectExplanation",
-            defaultValue: "Connect a calendar to bring its events into this athlete's plan automatically."
+            defaultValue: "Connect a calendar to bring its events in for review. Nothing becomes part of anyone's plan until you choose who it belongs to."
         )
     }
 
     public static var connectCalendarButton: String {
         String(localized: "calendarPlanning.connectButton", defaultValue: "Connect Calendar")
+    }
+
+    public static var connectAnotherCalendarButton: String {
+        String(localized: "calendarPlanning.connectAnotherButton", defaultValue: "Connect another calendar")
     }
 
     public static var authorizationDenied: String {
@@ -39,12 +51,12 @@ public enum CalendarPlanningStrings {
         )
     }
 
-    public static var saveMapping: String {
-        String(localized: "calendarPlanning.saveMapping", defaultValue: "Connect and import events")
+    public static var saveSource: String {
+        String(localized: "calendarPlanning.saveSource", defaultValue: "Connect")
     }
 
     public static var enabledLabel: String {
-        String(localized: "calendarPlanning.enabledLabel", defaultValue: "Import events from this calendar")
+        String(localized: "calendarPlanning.enabledLabel", defaultValue: "Bring in events from this calendar")
     }
 
     public static var syncNow: String {
@@ -55,10 +67,10 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.disconnect", defaultValue: "Disconnect calendar")
     }
 
-    public static var duplicateMappingError: String {
+    public static var duplicateSourceError: String {
         String(
-            localized: "calendarPlanning.duplicateMappingError",
-            defaultValue: "This calendar is already connected to this athlete."
+            localized: "calendarPlanning.duplicateSourceError",
+            defaultValue: "This calendar is already connected."
         )
     }
 
@@ -66,14 +78,14 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.genericError", defaultValue: "Something went wrong. Please try again.")
     }
 
-    public static func lastSynced(_ outcome: (created: Int, updated: Int, cancelled: Int)) -> String {
+    public static func lastSynced(_ outcome: (updated: Int, cancelled: Int, skipped: Int)) -> String {
         String(
             localized: "calendarPlanning.lastSynced",
-            defaultValue: "Last sync: \(outcome.created) added, \(outcome.updated) updated, \(outcome.cancelled) removed."
+            defaultValue: "Last sync: \(outcome.updated) updated, \(outcome.cancelled) removed."
         )
     }
 
-    // MARK: - Recovery (Calendar V1 recovery round)
+    // MARK: - Recovery
 
     public static var removeImportedActivitiesButton: String {
         String(localized: "calendarPlanning.removeImportedActivitiesButton", defaultValue: "Remove imported activities")
@@ -84,12 +96,14 @@ public enum CalendarPlanningStrings {
     }
 
     /// Calm, concrete confirmation copy — states exactly what will and
-    /// won't happen, no alarming language. `athleteDisplayName` is
-    /// interpolated so the Parent sees exactly whose plan is affected.
-    public static func removeImportedActivitiesConfirmationMessage(athleteDisplayName: String) -> String {
+    /// won't happen, no alarming language. `sourceDisplayName` is
+    /// interpolated so the Parent sees exactly which calendar is
+    /// affected; this action can affect more than one athlete's plan,
+    /// since a source is not athlete-scoped.
+    public static func removeImportedActivitiesConfirmationMessage(sourceDisplayName: String) -> String {
         String(
             localized: "calendarPlanning.removeImportedActivitiesConfirmationMessage",
-            defaultValue: "Imported future planning activities from this calendar for \(athleteDisplayName) will be removed. Completed and logged training will stay untouched."
+            defaultValue: "Imported future planning activities from \(sourceDisplayName) will be removed, for every athlete they were added to. Completed and logged training will stay untouched."
         )
     }
 
@@ -106,7 +120,7 @@ public enum CalendarPlanningStrings {
         return parts.joined(separator: ", ")
     }
 
-    // MARK: - Metadata inspection (Alpha-only, Calendar V1 metadata round)
+    // MARK: - Metadata inspection (Alpha-only)
 
     public static var inspectEventsButton: String {
         String(localized: "calendarPlanning.inspectEventsButton", defaultValue: "Inspect calendar events (Alpha)")
@@ -121,5 +135,70 @@ public enum CalendarPlanningStrings {
 
     public static var inspectEventsEmpty: String {
         String(localized: "calendarPlanning.inspectEventsEmpty", defaultValue: "No upcoming events found in this window.")
+    }
+
+    // MARK: - Calendar Import Review
+
+    public static var reviewEventsButton: String {
+        String(localized: "calendarPlanning.reviewEventsButton", defaultValue: "Review new events")
+    }
+
+    public static func reviewEventsButtonWithCount(_ count: Int) -> String {
+        count > 0
+            ? String(localized: "calendarPlanning.reviewEventsButtonWithCount", defaultValue: "Review new events (\(count))")
+            : reviewEventsButton
+    }
+
+    public static var reviewScreenTitle: String {
+        String(localized: "calendarPlanning.reviewScreenTitle", defaultValue: "Review New Events")
+    }
+
+    public static var reviewEmpty: String {
+        String(
+            localized: "calendarPlanning.reviewEmpty",
+            defaultValue: "Nothing new to review right now."
+        )
+    }
+
+    public static var reviewExplanation: String {
+        String(
+            localized: "calendarPlanning.reviewExplanation",
+            defaultValue: "Choose who each event belongs to, or ignore it. Nothing here affects anyone's plan until you choose Import."
+        )
+    }
+
+    public static var reviewDetailTitle: String {
+        String(localized: "calendarPlanning.reviewDetailTitle", defaultValue: "Classify Event")
+    }
+
+    public static var chooseAthlete: String {
+        String(localized: "calendarPlanning.chooseAthlete", defaultValue: "Athlete")
+    }
+
+    public static var chooseActivityType: String {
+        String(localized: "calendarPlanning.chooseActivityType", defaultValue: "Activity type")
+    }
+
+    public static var chooseSport: String {
+        String(localized: "calendarPlanning.chooseSport", defaultValue: "Sport")
+    }
+
+    public static var importButton: String {
+        String(localized: "calendarPlanning.importButton", defaultValue: "Import")
+    }
+
+    public static var ignoreButton: String {
+        String(localized: "calendarPlanning.ignoreButton", defaultValue: "Ignore")
+    }
+
+    public static var ignoreConfirmationTitle: String {
+        String(localized: "calendarPlanning.ignoreConfirmationTitle", defaultValue: "Ignore this event?")
+    }
+
+    public static var ignoreConfirmationMessage: String {
+        String(
+            localized: "calendarPlanning.ignoreConfirmationMessage",
+            defaultValue: "This event will never be suggested for import again. It will never become part of anyone's plan."
+        )
     }
 }

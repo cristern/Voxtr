@@ -151,6 +151,31 @@ public enum CalendarEventProviderError: Error, Sendable, Equatable {
     case calendarUnavailable
 }
 
+/// Family-Owned Calendar Sources V1: relocated here, unchanged, from
+/// `CalendarPlanningCoordinationService.externalSourceId(calendarIdentifier:event:)`
+/// (`VoxtrAppShell`) — this rule is provider-neutral, external identity,
+/// not a Planning/Training cross-domain concern, so it belongs in THIS
+/// package alongside `ExternalCalendarEvent` itself. Both
+/// `CalendarPlanningCoordinationService` (reconciliation) and
+/// `CalendarImportDecisionRepository` (review/import/ignore state, keyed
+/// by this exact string) now share the ONE computation — no second,
+/// divergent copy of the recurring-vs-non-recurring identity rule.
+///
+/// See `ExternalCalendarEvent`'s own doc comment for the full rule this
+/// implements: an ordinary, non-recurring event's identity is
+/// `calendarIdentifier|eventIdentifier` alone (stable across a title/
+/// time edit); a RECURRING occurrence additionally folds in
+/// `occurrenceDate`, since every occurrence of the same series shares
+/// the same `eventIdentifier`.
+public enum ExternalCalendarEventIdentity {
+    public static func externalSourceId(calendarIdentifier: String, event: ExternalCalendarEvent) -> String {
+        guard event.isRecurring else {
+            return "\(calendarIdentifier)|\(event.eventIdentifier)"
+        }
+        return "\(calendarIdentifier)|\(event.eventIdentifier)|\(event.occurrenceDate.timeIntervalSince1970)"
+    }
+}
+
 /// The ONE boundary between Planning import/sync and whatever actually
 /// reads external calendar data. Calendar/EventKit is the FIRST
 /// provider this V1 slice validates — never architecturally the only
