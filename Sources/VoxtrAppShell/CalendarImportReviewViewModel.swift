@@ -248,6 +248,46 @@ public final class CalendarImportReviewViewModel {
 
     public var readyToImportCount: Int { readyToImportItems.count }
 
+    /// PR #49 follow-up (zero-ready top action copy): what the top-level
+    /// Import/Suggested-Ignore action area should show — a pure
+    /// derivation from `readyToImportCount` and `suggestedIgnoreItems.count`,
+    /// exposed here (rather than computed inline in the View's body) so
+    /// it is directly unit-testable without any SwiftUI View-body/
+    /// snapshot testing. See `CalendarImportReviewView`'s own top-level
+    /// action area for where this drives visibility, copy, and the tap
+    /// action.
+    public enum TopActionState: Sendable, Equatable {
+        /// Neither a Ready item nor a Suggested Ignore item exists — the
+        /// top-level action area is hidden entirely.
+        case hidden
+        /// At least one Ready item exists — preserves the EXACT existing
+        /// "N ready to import" / "Import N ready activities" copy and
+        /// tap behavior, REGARDLESS of the current Suggested Ignore
+        /// count: importing Ready activities stays the primary
+        /// completion action, and the confirmation dialog itself already
+        /// explains the additional Ignore decision when Suggested Ignore
+        /// items also exist.
+        case readyToImport(readyCount: Int)
+        /// Zero Ready items, but at least one Suggested Ignore item —
+        /// "Import 0" is never shown; calm, accurate, contextual copy
+        /// instead. Tapping still opens the SAME Suggested Ignore
+        /// confirmation dialog as `.readyToImport` — there is no second
+        /// workflow.
+        case suggestedIgnoreOnly(count: Int)
+    }
+
+    public var topActionState: TopActionState {
+        let readyCount = readyToImportCount
+        if readyCount > 0 {
+            return .readyToImport(readyCount: readyCount)
+        }
+        let suggestedIgnoreCount = suggestedIgnoreItems.count
+        if suggestedIgnoreCount > 0 {
+            return .suggestedIgnoreOnly(count: suggestedIgnoreCount)
+        }
+        return .hidden
+    }
+
     private func isReadyToImport(_ externalEventKey: String) -> Bool {
         stagedClassifications[externalEventKey]?.isReady ?? false
     }
@@ -438,13 +478,14 @@ public final class CalendarImportReviewViewModel {
     ///      a single manual Ignore tap already uses — same actor
     ///      attribution, same source scoping, same `ignoredEventTitle`
     ///      snapshot, same stable `externalEventKey` identity;
-    ///   2. calls the existing, UNCHANGED `bulkImportReadyItems()` for the
-    ///      Ready items — its existing `sourceDisabled`/partial-failure/
-    ///      Needs Attention handling is entirely untouched and un-
-    ///      duplicated. `bulkImportReadyItems()` itself returns
-    ///      immediately, WITHOUT refreshing, when there are zero Ready
-    ///      items (its own pre-existing, correct guard for its own single
-    ///      responsibility) — so this method calls
+    ///   2. UNLESS the source became disabled/disconnected during that
+    ///      Ignore phase (see below), calls the existing, UNCHANGED
+    ///      `bulkImportReadyItems()` for the Ready items — its existing
+    ///      partial-failure/Needs Attention handling is entirely
+    ///      untouched and un-duplicated. `bulkImportReadyItems()` itself
+    ///      returns immediately, WITHOUT refreshing, when there are zero
+    ///      Ready items (its own pre-existing, correct guard for its own
+    ///      single responsibility) — so this method calls
     ///      `refreshQueueAndStaging()` itself, right after the Ignore
     ///      phase, to guarantee the newly-ignored truth is always picked
     ///      up even in a Suggested-Ignore-only batch with no Ready items
@@ -453,25 +494,43 @@ public final class CalendarImportReviewViewModel {
     ///      items to import.
     ///
     /// FAILURE BEHAVIOR (V1 — no cross-item rollback; "One Truth" matters
-    /// more than pretending this batch was atomic): each Suggested Ignore
-    /// item is attempted independently. A failure on one item is counted
-    /// and the loop continues to the next — an already-succeeded sibling
-    /// Ignore is never rolled back, and nothing fabricates success for
-    /// the item that failed (it simply stays a pending Suggested Ignore
-    /// candidate, since it was never removed from the review queue). The
-    /// Ready import always still runs afterward (this method has no
-    /// separate "global condition" of its own to abort on — the ONE
-    /// genuine global condition, the source becoming disabled/
-    /// disconnected, is already `bulkImportReadyItems()`'s own guard,
-    /// reused here unchanged rather than duplicated).
+    /// more than pretending this batch was atomic):
+    ///   - PR #49 follow-up (source-disabled Ignore safety): `ignore(_:for:decidedBy:)`
+    ///     now throws `.sourceDisabled` for a disabled/disconnected
+    ///     source (see that method's own doc comment) — the ONE genuine
+    ///     global condition this method aborts on. The Ignore-phase loop
+    ///     stops IMMEDIATELY on the first `.sourceDisabled`: no further
+    ///     Suggested Ignore item is attempted, `bulkImportReadyItems()`
+    ///     is never called (never risking an unsafe Ready import against
+    ///     the same disabled source), state is refreshed, and the SAME
+    ///     `sourceDisabledError` copy every other disabled-source path
+    ///     already surfaces is shown — never a silent partial-success
+    ///     claim. For the common stale-screen case (the source was
+    ///     ALREADY disabled before the Parent even tapped "Ignore &
+    ///     Import"), the very FIRST loop iteration throws, so ZERO new
+    ///     `.ignored` decisions are ever created. Any Suggested Ignore
+    ///     items that DID succeed earlier in the same loop, before a
+    ///     genuine mid-batch source-state change, are left persisted —
+    ///     no rollback machinery;
+    ///   - any OTHER per-item failure (not `.sourceDisabled`) is counted
+    ///     and the loop continues to the next item — an already-succeeded
+    ///     sibling Ignore is never rolled back, and nothing fabricates
+    ///     success for the item that failed (it simply stays a pending
+    ///     Suggested Ignore candidate, since it was never removed from
+    ///     the review queue). The Ready import still runs afterward in
+    ///     this case.
     public func confirmSuggestedIgnoresAndImportReadyItems() {
         errorMessage = nil
         let itemsToIgnore = suggestedIgnoreItems
         var ignoreFailureCount = 0
+        var sourceBecameUnavailable = false
 
         for item in itemsToIgnore {
             do {
                 _ = try calendarPlanningCoordinationService.ignore(item, for: source, decidedBy: actorId)
+            } catch CalendarPlanningCoordinationError.sourceDisabled {
+                sourceBecameUnavailable = true
+                break
             } catch {
                 ignoreFailureCount += 1
             }
@@ -480,16 +539,21 @@ public final class CalendarImportReviewViewModel {
         // See this method's own doc comment: bulkImportReadyItems() below
         // returns without refreshing when there are zero Ready items, so
         // this refresh must happen here to guarantee the newly-ignored
-        // truth is always picked up.
+        // (or, on sourceDisabled, still only partially-ignored) truth is
+        // always picked up.
         refreshQueueAndStaging()
+
+        if sourceBecameUnavailable {
+            errorMessage = CalendarPlanningStrings.sourceDisabledError
+            return
+        }
 
         bulkImportReadyItems()
 
         // bulkImportReadyItems() above already set a more specific
-        // message for its own outcome (sourceDisabled or a Ready-import
-        // partial failure) — never clobber that. Only surface the
-        // Ignore-phase failure count when it would otherwise go
-        // unreported.
+        // message for its own outcome (a Ready-import partial failure) —
+        // never clobber that. Only surface the Ignore-phase failure count
+        // when it would otherwise go unreported.
         if errorMessage == nil, ignoreFailureCount > 0 {
             errorMessage = CalendarPlanningStrings.suggestedIgnoreConfirmationPartialFailure(failed: ignoreFailureCount)
         }
@@ -524,10 +588,19 @@ public final class CalendarImportReviewViewModel {
     /// Planning" — the View is responsible for the actual confirmation
     /// prompt before calling this. Only the confirmed call reaches here;
     /// nothing mutates before that.
+    ///
+    /// PR #49 follow-up: the canonical `ignore(_:for:decidedBy:)` now
+    /// throws `.sourceDisabled` for a disabled/disconnected source (see
+    /// that method's own doc comment) — surfaced here with the SAME
+    /// calm, specific `sourceDisabledError` copy `restore(_:)` already
+    /// uses for the identical case, never the generic fallback.
     public func ignore(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) {
         errorMessage = nil
         do {
             _ = try calendarPlanningCoordinationService.ignore(item, for: source, decidedBy: actorId)
+            refreshQueueAndStaging()
+        } catch CalendarPlanningCoordinationError.sourceDisabled {
+            errorMessage = CalendarPlanningStrings.sourceDisabledError
             refreshQueueAndStaging()
         } catch {
             errorMessage = CalendarPlanningStrings.genericError

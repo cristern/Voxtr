@@ -250,6 +250,21 @@ public enum CalendarPlanningStrings {
         String(localized: "calendarPlanning.bulkImportButton", defaultValue: "Import \(readyCount) ready activities")
     }
 
+    /// PR #49 follow-up (zero-ready top action copy): the top-level
+    /// action area's summary/button text when there are ZERO Ready items
+    /// but at least one Suggested Ignore item — see
+    /// `CalendarImportReviewViewModel.TopActionState.suggestedIgnoreOnly`'s
+    /// own doc comment. Never "Import 0" — this describes the actual
+    /// action tapping the button performs (opening the SAME Suggested
+    /// Ignore confirmation dialog `.readyToImport` also uses).
+    public static func suggestedIgnoreOnlySummary(count: Int) -> String {
+        String(localized: "calendarPlanning.suggestedIgnoreOnlySummary", defaultValue: "\(count) suggested ignores to review")
+    }
+
+    public static func suggestedIgnoreOnlyButton(count: Int) -> String {
+        String(localized: "calendarPlanning.suggestedIgnoreOnlyButton", defaultValue: "Review \(count)")
+    }
+
     /// Shown after `bulkImportReadyItems()` completes with at least one
     /// per-item failure — a calm, concrete count, never a silent
     /// whole-batch success/failure claim. Successfully imported items

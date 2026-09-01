@@ -315,6 +315,58 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.coordinationService.fetchReviewQueue(for: source).isEmpty)
     }
 
+    // MARK: - PR #49 follow-up (source-disabled Ignore safety)
+
+    @Test("Required test 1/3: canonical ignore(...) throws sourceDisabled for a disabled source, and creates no CalendarImportDecision")
+    @MainActor
+    func ignoreThrowsSourceDisabledForDisabledSourceAndPersistsNothing() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: false)
+
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+        }
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
+    }
+
+    @Test("Required test 2/3: canonical ignore(...) throws sourceDisabled for a DISCONNECTED source, and creates no CalendarImportDecision")
+    @MainActor
+    func ignoreThrowsSourceDisabledForDisconnectedSourceAndPersistsNothing() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        try fixture.coordinationService.disconnectSource(source.externalPlanningSourceId)
+
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+        }
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
+    }
+
     // MARK: - Runtime fix: Ignored section read model + restore ("Review again")
 
     @Test("Item 4: fetchIgnoredReviewItems returns an ignored event that is still within the current external provider horizon")

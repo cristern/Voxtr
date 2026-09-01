@@ -74,25 +74,40 @@ struct CalendarImportReviewView: View {
             // Import section below still exists so the Parent can
             // inspect/Edit what is actually staged before committing —
             // this is a shortcut to that same action, not a replacement
-            // for it.
-            if viewModel.readyToImportCount > 0 || !viewModel.suggestedIgnoreItems.isEmpty {
+            // for it. PR #49 follow-up: visibility, summary/button copy,
+            // and the tap action all derive from the ViewModel's own
+            // pure `topActionState` — with ZERO Ready items, this shows
+            // calm "N suggested ignores to review" / "Review N" copy
+            // instead of a misleading "Import 0."
+            if viewModel.topActionState != .hidden {
                 Section {
                     HStack {
-                        Text(CalendarPlanningStrings.readyToImportSummary(count: viewModel.readyToImportCount))
+                        Text(topActionSummaryText)
                             .font(VoxtrTypography.metadata)
                             .foregroundStyle(VoxtrColor.textSecondary)
                         Spacer()
-                        Button(CalendarPlanningStrings.bulkImportButton(readyCount: viewModel.readyToImportCount)) {
-                            // Import-time Suggested Ignore confirmation:
-                            // when there is nothing to confirm, preserve
-                            // the exact prior behavior (immediate bulk
-                            // import); otherwise the Parent must
-                            // explicitly confirm the batch Ignore first —
-                            // see the confirmationDialog below.
-                            if viewModel.suggestedIgnoreItems.isEmpty {
-                                viewModel.bulkImportReadyItems()
-                            } else {
+                        Button(topActionButtonTitle) {
+                            switch viewModel.topActionState {
+                            case .readyToImport:
+                                // Import-time Suggested Ignore
+                                // confirmation: when there is nothing to
+                                // confirm, preserve the exact prior
+                                // behavior (immediate bulk import);
+                                // otherwise the Parent must explicitly
+                                // confirm the batch Ignore first — see
+                                // the confirmationDialog below.
+                                if viewModel.suggestedIgnoreItems.isEmpty {
+                                    viewModel.bulkImportReadyItems()
+                                } else {
+                                    isSuggestedIgnoreConfirmationPresented = true
+                                }
+                            case .suggestedIgnoreOnly:
+                                // Same confirmation dialog as the
+                                // `.readyToImport` case above — no second
+                                // workflow.
                                 isSuggestedIgnoreConfirmationPresented = true
+                            case .hidden:
+                                break
                             }
                         }
                         .buttonStyle(.borderless)
@@ -230,6 +245,30 @@ struct CalendarImportReviewView: View {
             .accessibilityIdentifier("calendarImportReview.reviewSuggestedIgnoreFirstButton")
         } message: {
             Text(CalendarPlanningStrings.suggestedIgnoreConfirmationMessage(count: viewModel.suggestedIgnoreItems.count))
+        }
+    }
+
+    // MARK: - Top-level action area copy (PR #49 follow-up: derives from `viewModel.topActionState`, never "Import 0")
+
+    private var topActionSummaryText: String {
+        switch viewModel.topActionState {
+        case .readyToImport(let readyCount):
+            return CalendarPlanningStrings.readyToImportSummary(count: readyCount)
+        case .suggestedIgnoreOnly(let count):
+            return CalendarPlanningStrings.suggestedIgnoreOnlySummary(count: count)
+        case .hidden:
+            return ""
+        }
+    }
+
+    private var topActionButtonTitle: String {
+        switch viewModel.topActionState {
+        case .readyToImport(let readyCount):
+            return CalendarPlanningStrings.bulkImportButton(readyCount: readyCount)
+        case .suggestedIgnoreOnly(let count):
+            return CalendarPlanningStrings.suggestedIgnoreOnlyButton(count: count)
+        case .hidden:
+            return ""
         }
     }
 
