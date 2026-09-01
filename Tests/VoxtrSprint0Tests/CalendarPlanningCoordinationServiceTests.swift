@@ -1022,6 +1022,62 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(imported.activityType == .individualTraining)
     }
 
+    @Test("Closeout required test 32: classifyAndImport preserves a long external notes string exactly, without truncation")
+    @MainActor
+    func classifyAndImportPreservesLongNotesExactlyWithoutTruncation() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        let longNotes = String(repeating: "n", count: 4000)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: longNotes
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(imported.notes == longNotes)
+        #expect(imported.notes?.count == 4000)
+    }
+
+    @Test("Closeout required test 33: an external notes string over the OLD 500-character limit but within the new 4000 now imports successfully")
+    @MainActor
+    func classifyAndImportSucceedsForNotesOverOldLimitButWithinNewLimit() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        // 1200 characters: comfortably over the OLD 500 limit (this
+        // exact shape was the confirmed TestFlight bulk-import failure
+        // path before this round), comfortably under the NEW 4000.
+        let overOldLimitNotes = String(repeating: "n", count: 1200)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false,
+                notes: overOldLimitNotes
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(imported.notes == overOldLimitNotes)
+    }
+
     @Test("Required test 2: a newly imported event with nil notes/location leaves PlannedActivity notes/location nil")
     @MainActor
     func freshClassifyAndImportWithNilMetadataLeavesNotesLocationNil() throws {

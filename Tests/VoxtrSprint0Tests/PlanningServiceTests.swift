@@ -590,6 +590,148 @@ struct PlanningServiceTests {
         #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
     }
 
+    // MARK: - Calendar Import Review closeout: PlannedActivity.notes capacity (500 -> 4000)
+
+    @Test("Required test 27/29: PlannedActivity/addPlannedActivity accepts notes up to the new 4000-character maximum")
+    @MainActor
+    func addPlannedActivityAccepts4000CharacterNotes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let longNotes = String(repeating: "n", count: 4000)
+
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            notes: longNotes
+        )
+
+        #expect(activity.notes == longNotes)
+        #expect(activity.notes?.count == 4000)
+    }
+
+    @Test("Required test 28/31: PlannedActivity/addPlannedActivity rejects notes over 4000 characters")
+    @MainActor
+    func addPlannedActivityRejectsOver4000CharacterNotes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let tooLongNotes = String(repeating: "n", count: 4001)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId,
+                athleteId: athleteId,
+                activityType: .individualTraining,
+                title: "Endurance run",
+                localDate: LocalDate(year: 2026, month: 1, day: 6),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                notes: tooLongNotes
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
+    }
+
+    @Test("Required test 30: editPlannedActivity accepts notes up to the new 4000-character maximum")
+    @MainActor
+    func editPlannedActivityAccepts4000CharacterNotes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let longNotes = String(repeating: "n", count: 4000)
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            notes: longNotes
+        )
+
+        #expect(edited.notes == longNotes)
+    }
+
+    @Test("Required test 31: editPlannedActivity rejects notes over 4000 characters")
+    @MainActor
+    func editPlannedActivityRejectsOver4000CharacterNotes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let tooLongNotes = String(repeating: "n", count: 4001)
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                notes: tooLongNotes
+            )
+        }
+        let unchanged = try #require(try repository.fetchPlannedActivity(byId: activity.plannedActivityId))
+        #expect(unchanged.notes == nil)
+    }
+
+    @Test("Required test 34: location capacity is unchanged by this round — still exactly 200 characters, accepted as before")
+    @MainActor
+    func locationCapacityRemainsUnchanged() throws {
+        // Bounded audit finding: unlike notes, `location` has no
+        // catchable `PlanningService.validate` boundary at all — only
+        // `PlannedActivity`'s own initializer precondition enforces its
+        // 200-character maximum (a crash, not a throwable error, if
+        // violated), and this round deliberately leaves that entirely
+        // untouched per the task's own explicit "do not change location
+        // capacity without independent evidence" instruction. This test
+        // only confirms the ACCEPTED boundary (200) is unchanged; it
+        // does not attempt to exercise the precondition crash path,
+        // which is not something Swift Testing can catch.
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            location: String(repeating: "l", count: 200)
+        )
+        #expect(activity.location?.count == 200)
+    }
+
     @Test("Fetching PlannedActivity records returns them ordered deterministically by localDate")
     @MainActor
     func fetchPlannedActivitiesOrderedDeterministically() throws {
