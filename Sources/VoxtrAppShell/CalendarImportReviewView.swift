@@ -26,17 +26,32 @@ import VoxtrCalendarPlanningDomain
 ///   5. IGNORED — a compact, receding row for every currently-ignored
 ///      event still in the provider horizon, with an explicit "Review
 ///      again" reversal.
-/// Plus a top-level Import shortcut, shown only while at least one event
-/// is staged Ready, that calls the SAME canonical `bulkImportReadyItems()`
-/// the Ready section's own rows feed. Classifying, editing, ignoring,
-/// restoring, and reviewing a suggestion all happen right here on this
-/// ONE screen; there is deliberately no per-event pushed detail screen
-/// (see this project's own "prefer completing simple/related tasks
-/// inline" UX rule) — notes/location, when present, expand inline via
-/// `DisclosureGroup` inside the SAME row instead.
+/// Plus a top-level Import shortcut, shown while at least one event is
+/// staged Ready OR there is at least one Suggested Ignore item, that
+/// calls the SAME canonical `bulkImportReadyItems()` the Ready section's
+/// own rows feed — UNLESS Suggested Ignore items exist, in which case
+/// tapping it first shows an explicit "Ignore & Import" confirmation
+/// (Import-time Suggested Ignore confirmation) before persisting those
+/// as real Ignore decisions (through the SAME canonical `ignore(_:)`
+/// path a single manual Ignore already uses) and then importing exactly
+/// as before. Classifying, editing, ignoring, restoring, and reviewing a
+/// suggestion all happen right here on this ONE screen; there is
+/// deliberately no per-event pushed detail screen (see this project's
+/// own "prefer completing simple/related tasks inline" UX rule) —
+/// notes/location, when present, expand inline via `DisclosureGroup`
+/// inside the SAME row instead.
 struct CalendarImportReviewView: View {
     @Bindable var viewModel: CalendarImportReviewViewModel
     @State private var itemPendingIgnore: CalendarPlanningCoordinationService.CalendarReviewItem?
+    /// Import-time Suggested Ignore confirmation: presentation-only,
+    /// never persisted — the smallest state needed to show the "Ignore &
+    /// Import" / "Review first" dialog before running
+    /// `confirmSuggestedIgnoresAndImportReadyItems()`. Operates on
+    /// `viewModel.suggestedIgnoreItems` directly (read live at
+    /// confirmation time, not a stale copy) since nothing between the
+    /// Import tap and the confirmation tap can mutate it — no navigation,
+    /// no async gap.
+    @State private var isSuggestedIgnoreConfirmationPresented = false
 
     var body: some View {
         List {
@@ -51,14 +66,16 @@ struct CalendarImportReviewView: View {
             // Calendar Import Review action fix: a calm, top-level
             // shortcut to the SAME `bulkImportReadyItems()` the Ready to
             // Import section's own rows feed — never a second import
-            // pathway. Shown only while there is at least one Ready
-            // item, so the Parent does not have to scroll past every
-            // Needs Review row to reach it once several events are
-            // staged. The Ready to Import section below still exists so
-            // the Parent can inspect/Edit what is actually staged before
-            // committing — this is a shortcut to that same action, not a
-            // replacement for it.
-            if viewModel.readyToImportCount > 0 {
+            // pathway. Shown while there is at least one Ready item, OR
+            // (Import-time Suggested Ignore confirmation) at least one
+            // Suggested Ignore item — a queue that collapsed entirely
+            // into Suggested Ignore still needs a way to complete review
+            // without a per-row Ignore tap on every item. The Ready to
+            // Import section below still exists so the Parent can
+            // inspect/Edit what is actually staged before committing —
+            // this is a shortcut to that same action, not a replacement
+            // for it.
+            if viewModel.readyToImportCount > 0 || !viewModel.suggestedIgnoreItems.isEmpty {
                 Section {
                     HStack {
                         Text(CalendarPlanningStrings.readyToImportSummary(count: viewModel.readyToImportCount))
@@ -66,7 +83,17 @@ struct CalendarImportReviewView: View {
                             .foregroundStyle(VoxtrColor.textSecondary)
                         Spacer()
                         Button(CalendarPlanningStrings.bulkImportButton(readyCount: viewModel.readyToImportCount)) {
-                            viewModel.bulkImportReadyItems()
+                            // Import-time Suggested Ignore confirmation:
+                            // when there is nothing to confirm, preserve
+                            // the exact prior behavior (immediate bulk
+                            // import); otherwise the Parent must
+                            // explicitly confirm the batch Ignore first —
+                            // see the confirmationDialog below.
+                            if viewModel.suggestedIgnoreItems.isEmpty {
+                                viewModel.bulkImportReadyItems()
+                            } else {
+                                isSuggestedIgnoreConfirmationPresented = true
+                            }
                         }
                         .buttonStyle(.borderless)
                         .accessibilityIdentifier("calendarImportReview.topImportButton")
@@ -178,6 +205,31 @@ struct CalendarImportReviewView: View {
             Button("Cancel", role: .cancel) { itemPendingIgnore = nil }
         } message: {
             Text(CalendarPlanningStrings.ignoreConfirmationMessage)
+        }
+        // Import-time Suggested Ignore confirmation: shown ONLY when the
+        // top-level Import button is tapped while `suggestedIgnoreItems`
+        // is non-empty (see that button's own action above). "Ignore &
+        // Import" is the ONLY place `confirmSuggestedIgnoresAndImportReadyItems()`
+        // is ever called — an explicit Parent decision, never automatic.
+        // "Review first" persists/imports nothing; it simply dismisses,
+        // leaving every Suggested Ignore item exactly as it was for the
+        // Parent to inspect.
+        .confirmationDialog(
+            CalendarPlanningStrings.suggestedIgnoreConfirmationTitle,
+            isPresented: $isSuggestedIgnoreConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button(CalendarPlanningStrings.ignoreAndImportButton) {
+                viewModel.confirmSuggestedIgnoresAndImportReadyItems()
+                isSuggestedIgnoreConfirmationPresented = false
+            }
+            .accessibilityIdentifier("calendarImportReview.confirmIgnoreAndImportButton")
+            Button(CalendarPlanningStrings.reviewSuggestedIgnoreFirstButton, role: .cancel) {
+                isSuggestedIgnoreConfirmationPresented = false
+            }
+            .accessibilityIdentifier("calendarImportReview.reviewSuggestedIgnoreFirstButton")
+        } message: {
+            Text(CalendarPlanningStrings.suggestedIgnoreConfirmationMessage(count: viewModel.suggestedIgnoreItems.count))
         }
     }
 

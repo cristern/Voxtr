@@ -371,4 +371,50 @@ public enum CalendarPlanningStrings {
     public static var reviewSuggestedIgnoreButton: String {
         String(localized: "calendarPlanning.reviewSuggestedIgnoreButton", defaultValue: "Review")
     }
+
+    // MARK: - Import-time Suggested Ignore confirmation
+
+    /// Shown only when the Parent taps the top-level Import action while
+    /// `suggestedIgnoreItems` is non-empty — calm, explicit, never "AI",
+    /// a confidence score, or urgency framing (see
+    /// `CalendarImportReviewViewModel.confirmSuggestedIgnoresAndImportReadyItems()`'s
+    /// own doc comment for what confirming actually does).
+    public static var suggestedIgnoreConfirmationTitle: String {
+        String(localized: "calendarPlanning.suggestedIgnoreConfirmationTitle", defaultValue: "Ignore suggested activities?")
+    }
+
+    public static func suggestedIgnoreConfirmationMessage(count: Int) -> String {
+        String(
+            localized: "calendarPlanning.suggestedIgnoreConfirmationMessage",
+            defaultValue: "You have \(count) activities suggested for Ignore based on previous choices. Are you sure you want to ignore these?"
+        )
+    }
+
+    /// The confirmation's PRIMARY action — persists every current
+    /// Suggested Ignore item as a real `.ignored` decision, then imports
+    /// every Ready item. Never the default/only choice; "Review first"
+    /// below is always offered alongside it.
+    public static var ignoreAndImportButton: String {
+        String(localized: "calendarPlanning.ignoreAndImportButton", defaultValue: "Ignore & Import")
+    }
+
+    /// The confirmation's SECONDARY action — dismisses without
+    /// persisting or importing anything; the Parent stays on the current
+    /// screen with Suggested Ignore items still visible for inspection.
+    public static var reviewSuggestedIgnoreFirstButton: String {
+        String(localized: "calendarPlanning.reviewSuggestedIgnoreFirstButton", defaultValue: "Review first")
+    }
+
+    /// Shown only when one or more Suggested Ignore items failed to
+    /// persist during a confirmed "Ignore & Import" batch AND
+    /// `bulkImportReadyItems()` itself did not already report a more
+    /// specific outcome — the successfully-ignored siblings remain
+    /// ignored; the failed item(s) simply remain visible as Suggested
+    /// Ignore for the Parent to retry or handle individually.
+    public static func suggestedIgnoreConfirmationPartialFailure(failed: Int) -> String {
+        String(
+            localized: "calendarPlanning.suggestedIgnoreConfirmationPartialFailure",
+            defaultValue: "\(failed) suggested activities could not be ignored. They remain visible for review."
+        )
+    }
 }
