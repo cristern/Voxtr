@@ -253,12 +253,35 @@ public enum CalendarPlanningStrings {
     /// Shown after `bulkImportReadyItems()` completes with at least one
     /// per-item failure — a calm, concrete count, never a silent
     /// whole-batch success/failure claim. Successfully imported items
-    /// already disappeared from the queue; this only explains the rest.
+    /// already disappeared from the queue; the failed ones are visible,
+    /// with their own reason, in Needs Attention (V1.3) — this summary
+    /// is never the only place a failure is surfaced.
     public static func bulkImportPartialResult(imported: Int, failed: Int) -> String {
         String(
             localized: "calendarPlanning.bulkImportPartialResult",
-            defaultValue: "\(imported) imported. \(failed) could not be imported — review and try again."
+            defaultValue: "\(imported) imported. \(failed) need attention."
         )
+    }
+
+    /// V1.3 (Needs Attention): the calm, specific reason shown for a
+    /// `PlanningServiceError.invalidField` failure — the realistic
+    /// remaining case for a calendar-sourced import even after this
+    /// round's own notes-capacity increase (e.g. notes still exceeding
+    /// the new bound, or an unusually long title). Deliberately does not
+    /// name "notes" specifically, since `invalidField` covers more than
+    /// one validation bound and this must stay accurate for all of them.
+    public static var bulkImportInvalidFieldError: String {
+        String(
+            localized: "calendarPlanning.bulkImportInvalidFieldError",
+            defaultValue: "Calendar information is too long to import with the current activity limits."
+        )
+    }
+
+    /// V1.3 (Needs Attention): the generic, safe fallback reason for any
+    /// bulk-import failure this screen cannot map to a more specific,
+    /// calm explanation — never a raw internal error dump.
+    public static var bulkImportGenericItemError: String {
+        String(localized: "calendarPlanning.bulkImportGenericItemError", defaultValue: "Couldn't import this activity. Review it and try again.")
     }
 
     // MARK: - Calendar Import Review runtime fix (inline details, reversible Ignore)
@@ -311,5 +334,37 @@ public enum CalendarPlanningStrings {
     /// (non-normalized) title.
     public static func similarSuggestionBasedOn(title: String) -> String {
         String(localized: "calendarPlanning.similarSuggestionBasedOn", defaultValue: "Based on: \(title)")
+    }
+
+    // MARK: - Calendar Import Review V1.3 (Needs Attention, Suggested Ignore)
+
+    public static var needsAttentionSectionTitle: String {
+        String(localized: "calendarPlanning.needsAttentionSectionTitle", defaultValue: "Needs Attention")
+    }
+
+    public static var suggestedIgnoreSectionTitle: String {
+        String(localized: "calendarPlanning.suggestedIgnoreSectionTitle", defaultValue: "Suggested Ignore")
+    }
+
+    /// Shown on a Suggested Ignore row — never "AI", a confidence
+    /// percentage, or a score; the Parent decides, this only explains
+    /// why the row is here.
+    public static var suggestedIgnoreExplanation: String {
+        String(localized: "calendarPlanning.suggestedIgnoreExplanation", defaultValue: "Suggested ignore based on a previous event")
+    }
+
+    /// Optional, calm attribution of WHICH prior explicitly-ignored
+    /// event a Suggested Ignore came from — `title` is that prior
+    /// event's own original (non-normalized) title.
+    public static func suggestedIgnoreBasedOn(title: String) -> String {
+        String(localized: "calendarPlanning.suggestedIgnoreBasedOn", defaultValue: "Based on: \(title)")
+    }
+
+    /// The Suggested Ignore row's primary action — moves the event back
+    /// into normal Needs Review for this session; persists nothing (see
+    /// `CalendarImportReviewViewModel.reviewSuggestedIgnore(_:)`'s own
+    /// doc comment).
+    public static var reviewSuggestedIgnoreButton: String {
+        String(localized: "calendarPlanning.reviewSuggestedIgnoreButton", defaultValue: "Review")
     }
 }

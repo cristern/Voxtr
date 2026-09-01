@@ -6,21 +6,34 @@ import VoxtrCalendarPlanningDomain
 
 /// Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk
 /// Import + Remembered Exact Choices; action fix: independent inline
-/// button ownership + top-level Import shortcut): the actual working
-/// surface for classifying many upcoming events efficiently, for ONE
-/// source. Three conceptual sections — NEEDS REVIEW (classify Athlete/
-/// Sport/Activity Type directly on this screen), READY TO IMPORT (a
-/// compact summary row for every fully staged event), and IGNORED (a
-/// compact, receding row for every currently-ignored event still in the
-/// provider horizon, with an explicit "Review again" reversal) — plus a
-/// top-level Import shortcut, shown only while at least one event is
-/// staged Ready, that calls the SAME canonical `bulkImportReadyItems()`
+/// button ownership + top-level Import shortcut) + V1.2 (Similar-Event
+/// Suggestions) + V1.3 (Suggested Ignore, Needs Attention): the actual
+/// working surface for classifying many upcoming events efficiently, for
+/// ONE source. Section order, top to bottom, matches this feature's own
+/// product contract exactly:
+///   1. NEEDS ATTENTION (V1.3) — a still-pending event whose last bulk
+///      import attempt failed, with the specific reason, staying fully
+///      editable (reuses `NeedsReviewRow`) so the Parent can adjust and
+///      retry right here;
+///   2. NEEDS REVIEW — classify Athlete/Sport/Activity Type directly on
+///      this screen;
+///   3. READY TO IMPORT — a compact summary row for every fully staged
+///      event;
+///   4. SUGGESTED IGNORE (V1.3) — a still-pending event whose title
+///      matches a prior EXPLICIT Ignore for this source; reversible
+///      ("Review"), and deliberately ABOVE Ignored (still requires
+///      Parent judgement — Ignored is a completed decision);
+///   5. IGNORED — a compact, receding row for every currently-ignored
+///      event still in the provider horizon, with an explicit "Review
+///      again" reversal.
+/// Plus a top-level Import shortcut, shown only while at least one event
+/// is staged Ready, that calls the SAME canonical `bulkImportReadyItems()`
 /// the Ready section's own rows feed. Classifying, editing, ignoring,
-/// and restoring all happen right here on this ONE screen; there is
-/// deliberately no per-event pushed detail screen (see this project's
-/// own "prefer completing simple/related tasks inline" UX rule) —
-/// notes/location, when present, expand inline via `DisclosureGroup`
-/// inside the SAME row instead.
+/// restoring, and reviewing a suggestion all happen right here on this
+/// ONE screen; there is deliberately no per-event pushed detail screen
+/// (see this project's own "prefer completing simple/related tasks
+/// inline" UX rule) — notes/location, when present, expand inline via
+/// `DisclosureGroup` inside the SAME row instead.
 struct CalendarImportReviewView: View {
     @Bindable var viewModel: CalendarImportReviewViewModel
     @State private var itemPendingIgnore: CalendarPlanningCoordinationService.CalendarReviewItem?
@@ -66,6 +79,27 @@ struct CalendarImportReviewView: View {
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
             } else {
+                // V1.3: Needs Attention is the FIRST event-processing
+                // section — a failed bulk-import attempt is the most
+                // urgent thing for the Parent to see, before any normal
+                // classification work. Reuses NeedsReviewRow exactly (the
+                // event is still just staged, not persisted) so the
+                // failure reason banner, the SAME pickers, and the SAME
+                // Ignore/Ready actions are all available right here —
+                // changing a picker or re-tapping Ready is how the Parent
+                // "retries."
+                if !viewModel.needsAttentionItems.isEmpty {
+                    Section {
+                        ForEach(viewModel.needsAttentionItems, id: \.externalEventKey) { item in
+                            NeedsReviewRow(item: item, viewModel: viewModel) {
+                                itemPendingIgnore = item
+                            }
+                        }
+                    } header: {
+                        VoxtrSectionHeading(CalendarPlanningStrings.needsAttentionSectionTitle)
+                    }
+                }
+
                 if !viewModel.needsReviewItems.isEmpty {
                     Section {
                         ForEach(viewModel.needsReviewItems, id: \.externalEventKey) { item in
@@ -95,6 +129,21 @@ struct CalendarImportReviewView: View {
                         }
                     } header: {
                         VoxtrSectionHeading(CalendarPlanningStrings.readyToImportSectionTitle)
+                    }
+                }
+
+                // V1.3: Suggested Ignore sits ABOVE actual Ignored — it
+                // still requires Parent judgement (a reversible
+                // suggestion), while Ignored below it is a completed,
+                // explicit Parent decision. Never persists anything on
+                // its own; see `CalendarImportReviewViewModel.reviewSuggestedIgnore(_:)`.
+                if !viewModel.suggestedIgnoreItems.isEmpty {
+                    Section {
+                        ForEach(viewModel.suggestedIgnoreItems, id: \.externalEventKey) { item in
+                            suggestedIgnoreRow(item)
+                        }
+                    } header: {
+                        VoxtrSectionHeading(CalendarPlanningStrings.suggestedIgnoreSectionTitle)
                     }
                 }
 
@@ -200,6 +249,57 @@ struct CalendarImportReviewView: View {
         }
         .accessibilityIdentifier("calendarImportReview.ignoredRow")
     }
+
+    // MARK: - SUGGESTED IGNORE (V1.3): still requires Parent judgement — never shown as though already decided
+
+    /// Title/date/time (enough to identify the event), a calm
+    /// explanation of why it's here, an optional "Based on: <prior
+    /// title>" attribution, and two actions: the PRIMARY "Review" (moves
+    /// it back to Needs Review for this session, persists nothing) and
+    /// an explicit Ignore that goes through the SAME confirmation dialog
+    /// and `ignore(_:)` path every other Ignore on this screen already
+    /// uses — never a second Ignore business path. Two `Button`s share
+    /// this row, so `.buttonStyle(.borderless)` is applied for the SAME
+    /// reason `NeedsReviewRow`'s own Ignore/Ready `HStack` needs it (see
+    /// that type's own doc comment) — each button must own its own tap
+    /// target, not the row's default List behavior.
+    @ViewBuilder
+    private func suggestedIgnoreRow(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
+                    .font(VoxtrTypography.cardTitle)
+                    .foregroundStyle(VoxtrColor.textPrimary)
+                Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+            Text(CalendarPlanningStrings.suggestedIgnoreExplanation)
+                .font(VoxtrTypography.metadata)
+                .foregroundStyle(VoxtrColor.textSecondary)
+            if let matchedTitle = viewModel.suggestedIgnoreMatches[item.externalEventKey] {
+                Text(CalendarPlanningStrings.suggestedIgnoreBasedOn(title: matchedTitle))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+            HStack {
+                Button(CalendarPlanningStrings.reviewSuggestedIgnoreButton) {
+                    viewModel.reviewSuggestedIgnore(item)
+                }
+                .accessibilityIdentifier("calendarImportReview.reviewSuggestedIgnoreButton")
+
+                Spacer()
+
+                Button(CalendarPlanningStrings.ignoreButton, role: .destructive) {
+                    itemPendingIgnore = item
+                }
+                .accessibilityIdentifier("calendarImportReview.suggestedIgnoreIgnoreButton")
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 2)
+        .accessibilityIdentifier("calendarImportReview.suggestedIgnoreRow")
+    }
 }
 
 /// Calendar Import Review runtime + action fix: ONE Needs Review row —
@@ -259,9 +359,24 @@ private struct NeedsReviewRow: View {
         return nil
     }
 
+    /// V1.3 (Needs Attention): the calm, specific reason THIS row's most
+    /// recent bulk-import attempt failed, if any — `nil` for a normal
+    /// Needs Review row. See `CalendarImportReviewViewModel.failedImportReasons`'s
+    /// own doc comment for how/when this clears.
+    private var failureReason: String? {
+        viewModel.failedImportReasons[item.externalEventKey]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             eventSummary
+
+            if let failureReason {
+                Text(failureReason)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("calendarImportReview.needsAttentionReason")
+            }
 
             // Calm, compact, near the pickers it explains — never a
             // numeric confidence, percentage, or "AI" framing (see this

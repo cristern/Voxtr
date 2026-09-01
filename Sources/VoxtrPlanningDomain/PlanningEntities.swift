@@ -256,7 +256,20 @@ public final class PlannedActivity {
             precondition((1...10).contains(intensity), "plannedIntensity must be 1-10 (v1.3 Section 8.2)")
         }
         if let n = notes {
-            precondition(n.count <= 500, "notes must be 0-500 characters (v1.3 Section 8.2)")
+            // Calendar Import Review closeout: raised from the v1.3
+            // Section 8.2 baseline of 500 so a full external calendar
+            // event's notes (PR #45's own creation-time preservation)
+            // can be imported without truncation — 500 was sized for
+            // short manual notes, not pasted-in calendar logistics text.
+            // PlanningService.validate's own boundary (the catchable
+            // guard `PlanningService.addPlannedActivity`/`editPlannedActivity`
+            // actually hit) must agree with this precondition exactly —
+            // see that method's own doc comment. Only PlannedActivity's
+            // OWN notes field changes here — LoggedActivity/Training
+            // notes (`TrainingValidator`), Development notes, and
+            // Reflection fields are separate business concepts with
+            // their own limits, deliberately untouched.
+            precondition(n.count <= 4000, "notes must be 0-4000 characters (Calendar Import Review closeout)")
         }
         if let l = location {
             precondition(l.count <= 200, "location must be 0-200 characters")

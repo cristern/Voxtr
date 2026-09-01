@@ -159,6 +159,29 @@ public enum ExternalEventTitleSimilarity {
         return SimilarEventMatch(athleteId: first.athleteId, sportId: first.sportId, activityType: first.activityType, matchedOriginalTitle: first.originalTitle)
     }
 
+    /// Calendar Import Review V1.3 (Suggested Ignore): finds a
+    /// conservative suggested-ignore match for `eventTitle` among the
+    /// ORIGINAL (non-normalized) titles of events the Parent has
+    /// explicitly ignored before — reuses the EXACT SAME `areSimilar(_:_:)`
+    /// rule V1.2's classification suggestion uses (see this type's own
+    /// doc comment); this is deliberately not a second, unrelated
+    /// matcher. Unlike `suggestedMatch(forEventTitle:among:)`, there is
+    /// no classification VALUE to agree/disagree on here — an Ignore
+    /// decision carries none (see `CalendarImportDecision`'s own doc
+    /// comment) — so an exact-title match and a similar-title match
+    /// behave IDENTICALLY: both simply return the FIRST matching prior
+    /// title, for a caller's own "Based on: <title>" display. Never
+    /// itself persists, creates, or suggests anything be marked Ready —
+    /// a pure read the caller decides what, if anything, to do with.
+    ///
+    /// `nil` for a `nil`/blank event title, or when no previously-
+    /// ignored title is similar (`areSimilar(_:_:)`'s own conservative
+    /// token-overlap-plus-marker-veto rule, unchanged).
+    public static func suggestedIgnoreMatch(forEventTitle eventTitle: String?, amongPreviouslyIgnoredTitles ignoredTitles: [String]) -> String? {
+        guard eventTitle != nil else { return nil }
+        return ignoredTitles.first { areSimilar(eventTitle, $0) }
+    }
+
     // MARK: - Private
 
     /// See this type's own doc comment, step 3, for why 75% of the

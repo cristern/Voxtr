@@ -300,8 +300,14 @@ public final class PlanningService {
                 throw PlanningServiceError.invalidField("plannedIntensity must be 1-10")
             }
         }
-        if let notes, notes.count > 500 {
-            throw PlanningServiceError.invalidField("notes must be 0-500 characters")
+        // Calendar Import Review closeout: raised from 500 to 4000,
+        // matching PlannedActivity's own initializer precondition
+        // exactly (see that precondition's own doc comment) — a full
+        // external calendar event's notes must not be rejected here
+        // just because the original limit was sized for short manual
+        // notes.
+        if let notes, notes.count > 4000 {
+            throw PlanningServiceError.invalidField("notes must be 0-4000 characters")
         }
     }
 

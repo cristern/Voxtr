@@ -2,12 +2,14 @@ import Foundation
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
+import VoxtrPlanningDomain
 import VoxtrCalendarPlanningDomain
 
 /// Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk
 /// Import + Remembered Exact Choices) + V1.2 (Similar-Event Suggestions,
-/// see `StagedClassification.SuggestionKind`): backs the "Review new
-/// events" screen for ONE `ExternalPlanningSource`. This is the ONE place an
+/// see `StagedClassification.SuggestionKind`) + V1.3 (Suggested Ignore,
+/// Needs Attention): backs the "Review new events" screen for ONE
+/// `ExternalPlanningSource`. This is the ONE place an
 /// external event becomes a Vǫxtr `PlannedActivity` — no event is ever
 /// imported except through an explicit Parent "Import N ready
 /// activities" tap (`bulkImportReadyItems()`), which itself only ever
@@ -43,6 +45,40 @@ public final class CalendarImportReviewViewModel {
     /// `refreshQueueAndStaging()`, so Ignore/Restore/bulk-import all keep
     /// both lists consistent with each other.
     public private(set) var ignoredItems: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
+    /// Calendar Import Review V1.3 (Suggested Ignore): a still-PENDING
+    /// event (no `CalendarImportDecision` of any kind) whose title
+    /// exactly or conservatively matches a title the Parent has
+    /// explicitly ignored before for this SAME source, current provider
+    /// horizon — see `refreshQueueAndStaging()` for the full derivation
+    /// and its precedence relative to a classification suggestion.
+    /// Never itself in `stagedClassifications` (there is nothing being
+    /// classified — the question is whether to Ignore, not who/what),
+    /// and never in `needsReviewItems`. Purely presentation assistance:
+    /// reversible via `reviewSuggestedIgnore(_:)`, and explicit Ignore
+    /// (if the Parent taps it) goes through the SAME canonical
+    /// `ignore(_:)` this whole screen already uses.
+    public private(set) var suggestedIgnoreItems: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
+    /// V1.3: for each `suggestedIgnoreItems` entry, the ORIGINAL (non-
+    /// normalized) title of the prior explicitly-ignored event it
+    /// matched — for the Parent-facing "Based on: <title>" explanation
+    /// only.
+    public private(set) var suggestedIgnoreMatches: [String: String] = [:]
+    /// Calendar Import Review V1.3 (Needs Attention): a still-PENDING
+    /// event (no `CalendarImportDecision`) whose most recent
+    /// `bulkImportReadyItems()` attempt failed — the Parent-facing
+    /// reason text, calm and specific where the actual error is safely
+    /// distinguishable (see `bulkImportReadyItems()`'s own doc comment),
+    /// otherwise a generic "review and try again." TRANSIENT only —
+    /// never persisted, and pruned in `refreshQueueAndStaging()` for any
+    /// key no longer in `reviewQueue` (imported, ignored, or otherwise
+    /// gone) so this dictionary never leaks stale entries, matching
+    /// `stagedClassifications`'s own established pattern.
+    public private(set) var failedImportReasons: [String: String] = [:]
+    /// V1.3 (Suggested Ignore): the Parent's own explicit "let me look
+    /// at this myself" reversal, per `externalEventKey` — session-
+    /// scoped, transient ViewModel state ONLY (never a persisted
+    /// decision, never a timing hack). See `reviewSuggestedIgnore(_:)`.
+    private var liftedToReviewKeys: Set<String> = []
     /// Active (non-archived) athletes, scoped to `source`'s OWN canonical
     /// workspace only — Lead Review follow-up (family-isolation): a
     /// source belongs to exactly one family (see `ExternalPlanningSource`'s
@@ -162,9 +198,29 @@ public final class CalendarImportReviewViewModel {
     /// REVIEW" section. Includes a brand-new event, an event the Parent
     /// is still filling in, and a Ready event the Parent tapped "Edit"
     /// on (still showing its previously-staged values, but no longer
-    /// confirmed until `markReady(for:)` is called again).
+    /// confirmed until `markReady(for:)` is called again). Excludes
+    /// anything currently shown in Needs Attention or Suggested Ignore
+    /// (V1.3) — each pending event appears in exactly one section.
     public var needsReviewItems: [CalendarPlanningCoordinationService.CalendarReviewItem] {
-        reviewQueue.filter { !isReadyToImport($0.externalEventKey) }
+        let suggestedIgnoreKeys = Set(suggestedIgnoreItems.map(\.externalEventKey))
+        return reviewQueue.filter {
+            !isReadyToImport($0.externalEventKey)
+                && !suggestedIgnoreKeys.contains($0.externalEventKey)
+                && failedImportReasons[$0.externalEventKey] == nil
+        }
+    }
+
+    /// Calendar Import Review V1.3: a still-PENDING event whose most
+    /// recent bulk-import attempt failed — the FIRST event-processing
+    /// section (above Needs Review), so the Parent sees exactly which
+    /// events need a decision before anything else. Excludes anything
+    /// currently Ready (re-confirming Ready, even without changing a
+    /// value, is the Parent's own "try again" signal — see
+    /// `bulkImportReadyItems()`'s own doc comment) so a retried item
+    /// moves cleanly into Ready to Import instead of staying listed
+    /// here twice.
+    public var needsAttentionItems: [CalendarPlanningCoordinationService.CalendarReviewItem] {
+        reviewQueue.filter { failedImportReasons[$0.externalEventKey] != nil && !isReadyToImport($0.externalEventKey) }
     }
 
     /// A Parent-CONFIRMED event, currently collapsed to its compact
@@ -232,13 +288,18 @@ public final class CalendarImportReviewViewModel {
     /// resets `suggestionKind` to `.none` (V1.2): once the Parent has
     /// changed a value, whatever is now shown is the Parent's own choice,
     /// not the original prefill, so the "Suggested from..." explanation
-    /// no longer describes what is on screen and must stop showing.
+    /// no longer describes what is on screen and must stop showing. Also
+    /// clears any Needs Attention failure marker (V1.3): changing the
+    /// classification is exactly the Parent action the failure-clearing
+    /// contract names — the Parent has acted on it, so the stale reason
+    /// from a prior attempt with the OLD values must not keep showing.
     private func updateStaged(for externalEventKey: String, _ mutate: (inout StagedClassification) -> Void) {
         var staged = stagedClassifications[externalEventKey] ?? StagedClassification()
         mutate(&staged)
         staged.isConfirmedReady = false
         staged.suggestionKind = .none
         stagedClassifications[externalEventKey] = staged
+        failedImportReasons.removeValue(forKey: externalEventKey)
     }
 
     // MARK: - Bulk import
@@ -259,17 +320,28 @@ public final class CalendarImportReviewViewModel {
     ///     back to editable (`isConfirmedReady = false`) — the Parent's
     ///     own values are preserved so they can see the conflict and
     ///     adjust, matching the single-event form's own established
-    ///     handling;
+    ///     handling. V1.3: also recorded in `failedImportReasons` with a
+    ///     specific, calm reason and surfaced in Needs Attention;
     ///   - `.sourceDisabled`: the source became disabled/disconnected
     ///     mid-batch (stale UI) — the loop stops immediately, no further
     ///     item in this batch is attempted, and the queue is refreshed
-    ///     (which will now correctly report empty);
-    ///   - any other error: staging is kept, un-confirmed back to
-    ///     editable, so nothing is silently dropped.
+    ///     (which will now correctly report empty). This is a BATCH-level
+    ///     abort, not a per-item Needs Attention entry — after it, the
+    ///     queue is empty, so there is nothing left to attach one to;
+    ///   - any other error (V1.3: `PlanningServiceError.invalidField` —
+    ///     the realistic remaining failure mode for calendar-sourced
+    ///     notes/title exceeding a validation bound even after this same
+    ///     round's notes-capacity increase — mapped to a specific reason;
+    ///     anything else mapped to a generic one): staging is kept, un-
+    ///     confirmed back to editable, recorded in `failedImportReasons`,
+    ///     so nothing is silently dropped and the Parent can see exactly
+    ///     which event needs attention and why, in Needs Attention.
     /// A retry (calling this again after a partial failure) is safe and
     /// never duplicates — `classifyAndImport` itself already guarantees
     /// that (see its own doc comment); this method adds no additional
-    /// state that could break that guarantee.
+    /// state that could break that guarantee. Never persists failure
+    /// state — `failedImportReasons` is plain ViewModel memory, pruned in
+    /// `refreshQueueAndStaging()` for anything no longer in the queue.
     public func bulkImportReadyItems() {
         errorMessage = nil
         let readyItems = readyToImportItems
@@ -286,6 +358,7 @@ public final class CalendarImportReviewViewModel {
                     item, for: source, athleteId: athleteId, sportId: staged.sportId, activityType: staged.activityType, decidedBy: actorId
                 )
                 stagedClassifications.removeValue(forKey: item.externalEventKey)
+                failedImportReasons.removeValue(forKey: item.externalEventKey)
                 importedCount += 1
             } catch CalendarPlanningCoordinationError.sourceDisabled {
                 // The source became disabled/disconnected mid-batch —
@@ -295,11 +368,24 @@ public final class CalendarImportReviewViewModel {
                 // further per-item bookkeeping is meaningful here.
                 sourceBecameUnavailable = true
                 break
+            } catch CalendarPlanningCoordinationError.existingActivityConflict {
+                failedCount += 1
+                var kept = staged
+                kept.isConfirmedReady = false
+                stagedClassifications[item.externalEventKey] = kept
+                failedImportReasons[item.externalEventKey] = CalendarPlanningStrings.existingActivityConflictError
+            } catch let planningError as PlanningServiceError {
+                failedCount += 1
+                var kept = staged
+                kept.isConfirmedReady = false
+                stagedClassifications[item.externalEventKey] = kept
+                failedImportReasons[item.externalEventKey] = Self.needsAttentionReason(forPlanningServiceError: planningError)
             } catch {
                 failedCount += 1
                 var kept = staged
                 kept.isConfirmedReady = false
                 stagedClassifications[item.externalEventKey] = kept
+                failedImportReasons[item.externalEventKey] = CalendarPlanningStrings.bulkImportGenericItemError
             }
         }
 
@@ -309,6 +395,27 @@ public final class CalendarImportReviewViewModel {
             errorMessage = CalendarPlanningStrings.sourceDisabledError
         } else if failedCount > 0 {
             errorMessage = CalendarPlanningStrings.bulkImportPartialResult(imported: importedCount, failed: failedCount)
+        }
+    }
+
+    /// V1.3 (Needs Attention): maps a caught `PlanningServiceError` to a
+    /// calm, useful, Parent-facing reason — never a raw internal error
+    /// dump. `classifyAndImport`'s own genuinely-new creation path (the
+    /// only `PlanningService` call this screen's bulk import can reach)
+    /// only ever throws `.invalidField` in practice (e.g. calendar notes
+    /// or title exceeding a validation bound); every other case is
+    /// handled explicitly anyway since this switch must stay exhaustive
+    /// against the full `PlanningServiceError` type, falling back to the
+    /// same generic reason any other unexpected failure gets.
+    private static func needsAttentionReason(forPlanningServiceError error: PlanningServiceError) -> String {
+        switch error {
+        case .invalidField:
+            return CalendarPlanningStrings.bulkImportInvalidFieldError
+        case .weekPlanNotFound, .plannedActivityNotFound, .plannedActivityDoesNotBelongToWeekPlan, .weekPlanNotDraft,
+             .recurringPlannedActivityNotFound, .recurringOccurrenceAlreadyAccepted, .recurringOccurrenceAthleteMismatch,
+             .recurringOccurrenceOutsideWeekPlan, .recurringOccurrenceWeekdayMismatch, .recurringOccurrenceOutsideEffectiveRange,
+             .recurringPlannedActivityDisabled:
+            return CalendarPlanningStrings.bulkImportGenericItemError
         }
     }
 
@@ -349,28 +456,56 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
-    // MARK: - Queue + staging refresh (shared by load(), ignore(), restore(), and bulkImportReadyItems())
+    /// Calendar Import Review V1.3 (Suggested Ignore): the Parent's
+    /// explicit "let me look at this myself" reversal — moves `item` out
+    /// of the Suggested Ignore section and into normal Needs Review,
+    /// WITHOUT persisting anything: no `CalendarImportDecision` of any
+    /// kind, no `PlannedActivity`, and no fake/placeholder decision
+    /// created to "suppress" the suggestion. The event itself is left
+    /// completely untouched. Suppression is transient, session-scoped
+    /// ViewModel state only (`liftedToReviewKeys`, keyed by the event's
+    /// own stable `externalEventKey`) — never a timing hack — so the
+    /// SAME suggestion does not immediately reapply on the very next
+    /// refresh this call triggers, but leaving and reopening this screen
+    /// (a fresh ViewModel) starts fresh, matching this feature's own
+    /// "reversible, non-permanent suggestion" contract exactly.
+    public func reviewSuggestedIgnore(_ item: CalendarPlanningCoordinationService.CalendarReviewItem) {
+        liftedToReviewKeys.insert(item.externalEventKey)
+        refreshQueueAndStaging()
+    }
+
+    // MARK: - Queue + staging refresh (shared by load(), ignore(), restore(), reviewSuggestedIgnore(_:), and bulkImportReadyItems())
 
     /// Re-fetches the review queue (and the Ignored section's own
     /// current-horizon list) and rebuilds `stagedClassifications` to
     /// match `reviewQueue`: an event already staged (a Parent's in-
-    /// progress edit, or a still-Ready item from an earlier partial bulk
-    /// import) keeps its EXACT existing staging untouched; a genuinely
-    /// new event (including one just restored from Ignored) is seeded
-    /// from Remembered Exact Choices (V1.1) if one applies, else from a
-    /// Similar-Event Suggestion (V1.2) if one applies, or left
-    /// blank/editable otherwise; an event no longer in the queue
+    /// progress edit, a still-Ready item from an earlier partial bulk
+    /// import, or one already re-evaluated after `reviewSuggestedIgnore(_:)`)
+    /// keeps its EXACT existing staging untouched; a genuinely new event
+    /// (including one just restored from Ignored) is seeded from
+    /// Remembered Exact Choices (V1.1) if one applies, else from a
+    /// Similar-Event Suggestion (V1.2) if one applies, else — V1.3, and
+    /// only when the Parent has not already lifted this exact event back
+    /// into review this session — becomes a Suggested Ignore candidate if
+    /// its title matches a prior explicit Ignore for this source, or is
+    /// otherwise left blank/editable; an event no longer in the queue
     /// (imported, ignored, or disappeared from the source) is dropped so
-    /// this dictionary never leaks stale entries.
+    /// `stagedClassifications` never leaks stale entries — `failedImportReasons`
+    /// (V1.3) is pruned the same way.
     ///
-    /// PRECEDENCE (V1.2): exact remembered match is checked FIRST and
-    /// wins outright — a similar-event suggestion is only ever
-    /// considered when no exact match exists for this event's own
-    /// normalized title. Both paths call into pure/read-only helpers
-    /// only (`ExternalEventTitleNormalization`, `ExternalEventTitleSimilarity`,
-    /// and `calendarPlanningCoordinationService`'s own read methods) —
-    /// no matching RULE is implemented inline here; this method only
-    /// orchestrates which prefill, if any, applies to each item.
+    /// PRECEDENCE: exact remembered match is checked FIRST and wins
+    /// outright; a similar-event classification suggestion is only ever
+    /// considered when no exact match exists; Suggested Ignore is only
+    /// ever considered when NEITHER classification signal applies — this
+    /// is the "do not guess when evidence conflicts" rule in concrete
+    /// form: an event this source has classified/imported before (exact
+    /// or similar) is never simultaneously proposed for Ignore. All
+    /// three paths call into pure/read-only helpers only
+    /// (`ExternalEventTitleNormalization`, `ExternalEventTitleSimilarity`,
+    /// and `calendarPlanningCoordinationService`'s own read methods) — no
+    /// matching RULE is implemented inline here; this method only
+    /// orchestrates which prefill or section, if any, applies to each
+    /// item.
     private func refreshQueueAndStaging() {
         do {
             reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
@@ -379,13 +514,17 @@ public final class CalendarImportReviewViewModel {
             errorMessage = errorMessage ?? CalendarPlanningStrings.genericError
         }
         ignoredItems = (try? calendarPlanningCoordinationService.fetchIgnoredReviewItems(for: source)) ?? []
+        let previouslyIgnoredTitles = ignoredItems.compactMap(\.event.title)
 
         let remembered = (try? calendarPlanningCoordinationService.rememberedClassifications(for: source)) ?? [:]
         let historicalTitles = (try? calendarPlanningCoordinationService.historicalTitleClassifications(for: source)) ?? []
-        var rebuilt: [String: StagedClassification] = [:]
+        var rebuiltStaging: [String: StagedClassification] = [:]
+        var rebuiltSuggestedIgnore: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
+        var rebuiltSuggestedIgnoreMatches: [String: String] = [:]
+
         for item in reviewQueue {
             if let existing = stagedClassifications[item.externalEventKey] {
-                rebuilt[item.externalEventKey] = existing
+                rebuiltStaging[item.externalEventKey] = existing
                 continue
             }
             // Remembered Exact Choices (V1.1): PREFILL only — a safe
@@ -398,11 +537,13 @@ public final class CalendarImportReviewViewModel {
             // to override, or explicitly bulk-import as-is.
             if let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title),
                let match = remembered[normalizedTitle] {
-                rebuilt[item.externalEventKey] = StagedClassification(
+                rebuiltStaging[item.externalEventKey] = StagedClassification(
                     athleteId: match.athleteId, sportId: match.sportId, activityType: match.activityType,
                     isConfirmedReady: true, suggestionKind: .exactRemembered
                 )
-            } else if let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: item.event.title, among: historicalTitles) {
+                continue
+            }
+            if let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: item.event.title, among: historicalTitles) {
                 // Similar-Event Suggestion (V1.2): weaker evidence than
                 // an exact match — PREFILLS the classification values,
                 // but deliberately does NOT set isConfirmedReady. The
@@ -412,14 +553,35 @@ public final class CalendarImportReviewViewModel {
                 // baseline requirement — see this type's own doc
                 // comment ("IMPORTANT READY BEHAVIOR" in this feature's
                 // product contract).
-                rebuilt[item.externalEventKey] = StagedClassification(
+                rebuiltStaging[item.externalEventKey] = StagedClassification(
                     athleteId: suggestion.athleteId, sportId: suggestion.sportId, activityType: suggestion.activityType,
                     isConfirmedReady: false, suggestionKind: .similarPreviousEvent(matchedTitle: suggestion.matchedOriginalTitle)
                 )
-            } else {
-                rebuilt[item.externalEventKey] = StagedClassification()
+                continue
             }
+            // Suggested Ignore (V1.3): no classification evidence applies
+            // — check whether the Parent has explicitly Ignored a
+            // matching (exact or similar) title for THIS source before,
+            // unless they already lifted this exact event back into
+            // review this session (`liftedToReviewKeys`). Deliberately
+            // NOT given a `stagedClassifications` entry — nothing is
+            // being classified; the open question is whether to Ignore,
+            // not who/what.
+            if !liftedToReviewKeys.contains(item.externalEventKey),
+               let matchedIgnoredTitle = ExternalEventTitleSimilarity.suggestedIgnoreMatch(
+                   forEventTitle: item.event.title, amongPreviouslyIgnoredTitles: previouslyIgnoredTitles
+               ) {
+                rebuiltSuggestedIgnore.append(item)
+                rebuiltSuggestedIgnoreMatches[item.externalEventKey] = matchedIgnoredTitle
+                continue
+            }
+            rebuiltStaging[item.externalEventKey] = StagedClassification()
         }
-        stagedClassifications = rebuilt
+        stagedClassifications = rebuiltStaging
+        suggestedIgnoreItems = rebuiltSuggestedIgnore
+        suggestedIgnoreMatches = rebuiltSuggestedIgnoreMatches
+
+        let reviewQueueKeys = Set(reviewQueue.map(\.externalEventKey))
+        failedImportReasons = failedImportReasons.filter { reviewQueueKeys.contains($0.key) }
     }
 }

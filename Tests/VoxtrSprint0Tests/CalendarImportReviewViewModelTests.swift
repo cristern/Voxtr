@@ -331,10 +331,19 @@ struct CalendarImportReviewViewModelTests {
 
         #expect(viewModel.errorMessage != nil)
         // The succeeded event is gone from the queue; the conflicting one
-        // remains, staged, and back in the editable Needs Review group.
+        // remains, staged, and editable — but now (V1.3) surfaced in
+        // Needs Attention rather than the plain Needs Review group, since
+        // it carries a specific failure reason.
         #expect(viewModel.reviewQueue.count == 1)
         #expect(viewModel.reviewQueue.first?.externalEventKey == conflictItem.externalEventKey)
-        #expect(viewModel.needsReviewItems.count == 1)
+        // Required test 15/17/24: exactly one failed item is visible in
+        // Needs Attention, mapped to the specific existingActivityConflict
+        // reason (never a raw internal error dump).
+        #expect(viewModel.needsAttentionItems.count == 1)
+        #expect(viewModel.needsAttentionItems.first?.externalEventKey == conflictItem.externalEventKey)
+        #expect(viewModel.needsReviewItems.isEmpty)
+        #expect(viewModel.failedImportReasons[conflictItem.externalEventKey] == CalendarPlanningStrings.existingActivityConflictError)
+        // Required test 18/19: staged classification is kept, un-confirmed.
         let stagedAfterFailure = viewModel.stagedClassification(for: conflictItem.externalEventKey)
         #expect(stagedAfterFailure.athleteId == fixture.athleteId)
         #expect(stagedAfterFailure.isConfirmedReady == false)
@@ -348,12 +357,20 @@ struct CalendarImportReviewViewModelTests {
         // second activity for the still-conflicting one.
         viewModel.markReady(for: conflictItem.externalEventKey)
         #expect(viewModel.readyToImportCount == 1)
+        // Required test: re-confirming Ready moves it out of Needs
+        // Attention presentation (into Ready to Import) even though the
+        // stale failure marker has not been cleared yet by a new outcome.
+        #expect(viewModel.needsAttentionItems.isEmpty)
         viewModel.bulkImportReadyItems()
 
         #expect(viewModel.errorMessage != nil)
         let activitiesAfterRetry = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
         #expect(activitiesAfterRetry.count == 2)
         #expect(viewModel.reviewQueue.first?.externalEventKey == conflictItem.externalEventKey)
+        // Required test 22: retrying and failing again retains/updates the
+        // failure state — still visible in Needs Attention.
+        #expect(viewModel.needsAttentionItems.count == 1)
+        #expect(viewModel.failedImportReasons[conflictItem.externalEventKey] == CalendarPlanningStrings.existingActivityConflictError)
     }
 
     // MARK: - 6, 7: Edit restores editable state without persisting, and does not re-collapse until Ready is explicitly reconfirmed
@@ -757,6 +774,346 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.needsReviewItems.first?.externalEventKey == item.externalEventKey)
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+    }
+
+    // MARK: - V1.3 Suggested Ignore
+
+    @Test("Required test 1/9/10: an exact-title match to a prior explicit Ignore becomes Suggested Ignore — never in Needs Review, never persisted, never a PlannedActivity")
+    @MainActor
+    func exactTitleMatchToPriorIgnoreBecomesSuggestedIgnore() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.suggestedIgnoreMatches[secondItem.externalEventKey] == "Team Practice")
+        #expect(!secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.stagedClassification(for: secondItem.externalEventKey).athleteId == nil)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == 1) // only the original Ignore
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+    }
+
+    @Test("Required test 2: a conservative similar (not identical) title to a prior explicit Ignore also produces Suggested Ignore")
+    @MainActor
+    func similarTitleMatchToPriorIgnoreBecomesSuggestedIgnore() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.suggestedIgnoreMatches[secondItem.externalEventKey] == "Hockeytrening U14")
+    }
+
+    @Test("Required test 3: an unrelated title never produces Suggested Ignore, regardless of prior Ignore history")
+    @MainActor
+    func unrelatedTitleDoesNotProduceSuggestedIgnore() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Piano Lesson", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+    }
+
+    @Test("Required test 4: a training-vs-match conflict remains rejected by the shared similarity matcher, so it produces no Suggested Ignore")
+    @MainActor
+    func trainingVersusMatchConflictProducesNoSuggestedIgnore() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeykamp U14", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+    }
+
+    @Test("Required test 5: prior Ignore evidence on a DIFFERENT ExternalPlanningSource never produces Suggested Ignore")
+    @MainActor
+    func ignoreEvidenceFromAnotherSourceDoesNotApply() throws {
+        let fixture = try makeFixture()
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-b", displayName: "Calendar B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceB.externalPlanningSourceId, isEnabled: true)
+
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let sourceAViewModel = makeViewModel(fixture)
+        sourceAViewModel.load()
+        let sourceAItem = try #require(sourceAViewModel.reviewQueue.first)
+        sourceAViewModel.ignore(sourceAItem)
+
+        var eventsForB = fixture.calendarProvider.eventsByCalendar["cal-b"] ?? []
+        eventsForB.append(
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-b-1", calendarIdentifier: "cal-b", title: "Team Practice",
+                startDate: Self.referenceDate.addingTimeInterval(3600), endDate: Self.referenceDate.addingTimeInterval(7200),
+                isAllDay: false, isRecurring: false
+            )
+        )
+        fixture.calendarProvider.eventsByCalendar["cal-b"] = eventsForB
+        let sourceBViewModel = CalendarImportReviewViewModel(
+            calendarPlanningCoordinationService: fixture.coordinationService,
+            athleteRepository: fixture.athleteRepository, sportRepository: fixture.sportRepository, source: sourceB, actorId: ActorId()
+        )
+        sourceBViewModel.load()
+        let sourceBItem = try #require(sourceBViewModel.reviewQueue.first)
+
+        #expect(sourceBViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(sourceBViewModel.needsReviewItems.map(\.externalEventKey).contains(sourceBItem.externalEventKey))
+    }
+
+    @Test("Required test 7: an IMPORTED (not ignored) prior event never becomes Suggested Ignore evidence — a similar new event gets a classification suggestion instead")
+    @MainActor
+    func importedHistoryNeverBecomesIgnoreEvidence() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.stagedClassification(for: secondItem.externalEventKey).athleteId == fixture.athleteId)
+    }
+
+    @Test("Required test 8: merely staged (never ignored) state never becomes Suggested Ignore evidence for a different event")
+    @MainActor
+    func stagedButUndecidedEventNeverBecomesIgnoreEvidence() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let firstItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-1" })
+        let secondItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        // Stage (but never Ignore or import) the first event.
+        viewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+
+        #expect(viewModel.suggestedIgnoreItems.isEmpty)
+        #expect(viewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+    }
+
+    @Test("Required test 11/12/13: reviewSuggestedIgnore(_:) moves the event to Needs Review, persists nothing, and the same suggestion does not reappear this session")
+    @MainActor
+    func reviewSuggestedIgnoreLiftsEventToReviewWithoutPersistingAndDoesNotReapply() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+
+        secondViewModel.reviewSuggestedIgnore(secondItem)
+
+        // Required test 11/12: moved to Needs Review, nothing persisted
+        // beyond the original single Ignore decision.
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+
+        // Required test 13: a later refresh in the SAME ViewModel/session
+        // (e.g. the Parent reloading the screen) must not immediately
+        // re-suggest Ignore for this exact event — `liftedToReviewKeys`
+        // is instance state that survives repeated refreshes.
+        secondViewModel.load()
+        #expect(!secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+    }
+
+    @Test("Required test 14: explicit Ignore from a Suggested Ignore item uses the SAME canonical ignore(_:) path — exactly one .ignored decision results")
+    @MainActor
+    func explicitIgnoreFromSuggestedIgnoreUsesCanonicalPath() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+
+        secondViewModel.ignore(secondItem)
+
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.ignoredItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        let decisions = try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId)
+        #expect(decisions.count == 2)
+        #expect(decisions.allSatisfy { $0.status == .ignored })
+    }
+
+    // MARK: - V1.3 Needs Attention
+
+    @Test("Required test 20: changing a staged picker after a bulk-import failure clears that event's failure state")
+    @MainActor
+    func changingPickerAfterFailureClearsFailureState() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Will Conflict", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let conflictItem = try #require(viewModel.reviewQueue.first)
+
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: secondAthleteId, weekStart: today)
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: secondAthleteId, activityType: .individualTraining,
+            title: "Will Conflict", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: conflictItem.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
+        viewModel.bulkImportReadyItems()
+        #expect(viewModel.needsAttentionItems.count == 1)
+        #expect(viewModel.failedImportReasons[conflictItem.externalEventKey] != nil)
+
+        // Parent changes Activity Type (any staged value change) — must
+        // clear the stale failure marker immediately, before any retry.
+        viewModel.setStagedActivityType(.teamTraining, for: conflictItem.externalEventKey)
+
+        #expect(viewModel.failedImportReasons[conflictItem.externalEventKey] == nil)
+        #expect(viewModel.needsAttentionItems.isEmpty)
+        #expect(viewModel.needsReviewItems.map(\.externalEventKey).contains(conflictItem.externalEventKey))
+    }
+
+    @Test("Required test 21: a successful retry after a bulk-import failure removes the failure state entirely")
+    @MainActor
+    func successfulRetryRemovesFailureState() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Will Conflict", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let conflictItem = try #require(viewModel.reviewQueue.first)
+
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: secondAthleteId, weekStart: today)
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: secondAthleteId, activityType: .individualTraining,
+            title: "Will Conflict", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: conflictItem.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
+        viewModel.bulkImportReadyItems()
+        #expect(viewModel.needsAttentionItems.count == 1)
+
+        // Parent re-classifies to the athlete the legacy activity ACTUALLY
+        // belongs to (so the retry legitimately succeeds this time via
+        // Blocker 4's own adoption path) and retries.
+        viewModel.setStagedAthlete(secondAthleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
+        viewModel.bulkImportReadyItems()
+
+        #expect(viewModel.needsAttentionItems.isEmpty)
+        #expect(viewModel.failedImportReasons.isEmpty)
+        #expect(viewModel.reviewQueue.isEmpty)
+    }
+
+    @Test("Required test 23: the aggregate partial-result summary uses the 'N imported. M need attention.' wording")
+    @MainActor
+    func aggregatePartialResultUsesNeedAttentionWording() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Will Succeed", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-2", title: "Will Conflict", hoursFromReference: 2)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let succeedItem = try #require(viewModel.reviewQueue.first { $0.event.title == "Will Succeed" })
+        let conflictItem = try #require(viewModel.reviewQueue.first { $0.event.title == "Will Conflict" })
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: secondAthleteId, weekStart: today)
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: secondAthleteId, activityType: .individualTraining,
+            title: "Will Conflict", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: conflictItem.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        viewModel.setStagedAthlete(fixture.athleteId, for: succeedItem.externalEventKey)
+        viewModel.markReady(for: succeedItem.externalEventKey)
+        viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        #expect(viewModel.errorMessage == CalendarPlanningStrings.bulkImportPartialResult(imported: 1, failed: 1))
+        #expect(viewModel.errorMessage == "1 imported. 1 need attention.")
+    }
+
+    @Test("Required test 25/26: an unexpected (unmapped) failure is surfaced with the generic safe reason, and no failure state is ever persisted")
+    @MainActor
+    func unexpectedFailureUsesGenericReasonAndPersistsNothing() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let foreignAthleteId = try addSecondAthlete(fixture, name: "Foreign", workspaceId: otherWorkspaceId)
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        // Directly stage an athlete from a DIFFERENT workspace than the
+        // source — the UI's own picker never offers this, but this
+        // proves the generic-fallback mapping for an error this screen
+        // does not specifically name (athleteOutsideSourceWorkspace).
+        viewModel.setStagedAthlete(foreignAthleteId, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        #expect(viewModel.needsAttentionItems.count == 1)
+        #expect(viewModel.failedImportReasons[item.externalEventKey] == CalendarPlanningStrings.bulkImportGenericItemError)
+        // Required test 26: transient only — nothing new persisted beyond
+        // the (still-empty) decision/activity truth.
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
     }
 
     // MARK: - 16: disabled/disconnected source blocks bulk import of stale staged events
