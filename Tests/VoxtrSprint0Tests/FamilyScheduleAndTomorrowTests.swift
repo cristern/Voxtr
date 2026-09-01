@@ -1077,3 +1077,317 @@ extension FamilyScheduleAndTomorrowTests {
         #expect(viewModel.calendarReviewPrompt.actionableSources.isEmpty)
     }
 }
+
+extension FamilyScheduleAndTomorrowTests {
+    // MARK: - VX-037: Family Schedule athlete filter
+
+    /// Test requirement 1: with no filter applied (the default,
+    /// `selectedAthleteIds` empty = "All"), `visibleDayGroups` is
+    /// identical to the full, unfiltered `dayGroups` — every active
+    /// athlete's rows are shown.
+    @Test("Family Schedule default filter (All) shows rows for every active athlete")
+    @MainActor
+    func familyScheduleDefaultFilterShowsAllActiveAthletes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus3 = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus3)
+        let date3 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let oliverWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: oliverWeekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Football", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let emmaWeekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: emma.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: emmaWeekPlan.weekPlanId, athleteId: emma.athleteId, activityType: .teamTraining,
+            title: "Handball", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        #expect(viewModel.selectedAthleteIds.isEmpty)
+        #expect(viewModel.visibleDayGroups.map(\.id) == viewModel.dayGroups.map(\.id))
+        #expect(Set(viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId, emma.athleteId])
+    }
+
+    /// Test requirement 2 and 3: filtering to one athlete shows only
+    /// that athlete's rows; filtering to multiple shows the union of
+    /// those athletes' rows (and excludes the third, unselected one). A
+    /// day whose only activity belongs to a filtered-out athlete is
+    /// dropped entirely rather than shown as an empty section.
+    @Test("Family Schedule filtered to one athlete shows only that athlete's rows; filtered to multiple shows their union")
+    @MainActor
+    func familyScheduleFilterShowsOneOrUnionOfMultipleAthletes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let noah = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Noah",
+            birthDate: LocalDate(year: 2016, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus3 = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus3)
+        let date3 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        for athlete in [oliver, emma, noah] {
+            let weekPlan = try planningService.getOrCreateWeekPlan(
+                athleteId: athlete.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+            )
+            _ = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .teamTraining,
+                title: "\(athlete.givenName)'s session", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma, noah] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        // One athlete selected — only Oliver's rows remain.
+        viewModel.setSelectedAthletes([oliver.athleteId])
+        #expect(Set(viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId])
+
+        // Multiple athletes selected — the union of Oliver and Noah,
+        // Emma excluded.
+        viewModel.setSelectedAthletes([oliver.athleteId, noah.athleteId])
+        #expect(Set(viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId, noah.athleteId])
+        #expect(!viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId).contains(emma.athleteId))
+
+        // The full, unfiltered dayGroups is untouched by filtering.
+        #expect(Set(viewModel.dayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId, emma.athleteId, noah.athleteId])
+    }
+
+    /// Test requirement 4: a selected athlete who is no longer in the
+    /// active roster (archived elsewhere while this screen stayed
+    /// pushed) is silently dropped from `selectedAthleteIds` on the
+    /// NEXT `loadSchedule()` call — never left dangling on an invalid
+    /// `AthleteId`. When the only selected athlete becomes stale, the
+    /// filter reverts to "All" (empty) rather than showing nothing
+    /// forever.
+    @Test("Family Schedule drops a stale selected athlete id when the active roster changes on the next load")
+    @MainActor
+    func familyScheduleFilterDropsStaleAthleteIdWhenRosterChanges() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        var currentRoster: [AthleteProfile] = [oliver, emma]
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { currentRoster },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+        viewModel.setSelectedAthletes([oliver.athleteId, emma.athleteId])
+        #expect(viewModel.selectedAthleteIds == [oliver.athleteId, emma.athleteId])
+
+        // Emma is archived (removed from the active roster) while this
+        // screen instance stays pushed — no new FamilyScheduleViewModel
+        // constructed.
+        currentRoster = [oliver]
+        viewModel.loadSchedule()
+        #expect(viewModel.selectedAthleteIds == [oliver.athleteId])
+
+        // Now Oliver alone becomes stale too — the filter reverts to
+        // "All" (empty) rather than leaving a dangling, invalid id
+        // selected forever.
+        currentRoster = []
+        viewModel.loadSchedule()
+        #expect(viewModel.selectedAthleteIds.isEmpty)
+    }
+
+    /// Test requirement 5: selecting exactly one athlete resolves that
+    /// athlete's own stable `AthleteId` via `singleSelectedAthleteId` —
+    /// the exact value `FamilyScheduleView`'s Weekly Plan toolbar action
+    /// navigates to.
+    @Test("Family Schedule resolves the correct stable AthleteId via singleSelectedAthleteId when exactly one athlete is selected")
+    @MainActor
+    func familyScheduleSingleSelectedAthleteIdResolvesCorrectId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.setSelectedAthletes([oliver.athleteId])
+
+        #expect(viewModel.singleSelectedAthleteId == oliver.athleteId)
+    }
+
+    /// Test requirement 6: neither the default "All" state nor a
+    /// multiple-athlete selection ever resolves an implicit single
+    /// athlete — `FamilyScheduleView` must never guess which athlete's
+    /// Weekly Plan the Parent wants in either state.
+    @Test("Family Schedule never resolves an implicit single athlete when All or multiple athletes are selected")
+    @MainActor
+    func familyScheduleAllOrMultipleSelectionNeverResolvesImplicitSingleAthlete() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+
+        // Default — All.
+        #expect(viewModel.singleSelectedAthleteId == nil)
+
+        // Multiple selected.
+        viewModel.setSelectedAthletes([oliver.athleteId, emma.athleteId])
+        #expect(viewModel.singleSelectedAthleteId == nil)
+
+        // Explicitly reset back to All.
+        viewModel.setSelectedAthletes([])
+        #expect(viewModel.singleSelectedAthleteId == nil)
+    }
+
+    /// Test requirement 7: the athlete filter must never affect
+    /// `calendarReviewPrompt` — Calendar Review is family/source-owned
+    /// work, not athlete-filtered schedule truth. The prompt stays
+    /// exactly as computed by the injected `provideCalendarReviewPrompt`
+    /// closure regardless of the current filter state.
+    @Test("Family Schedule calendarReviewPrompt is unaffected by the athlete filter")
+    @MainActor
+    func familyScheduleCalendarReviewPromptUnaffectedByAthleteFilter() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let workspaceId = WorkspaceId()
+        let source = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-1", displayName: "Spond", isEnabled: true
+        )
+        let fixedPrompt = FamilyScheduleViewModel.CalendarReviewPrompt.from(
+            sources: [source], reviewCounts: [source.externalPlanningSourceId: 5]
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService,
+            provideCalendarReviewPrompt: { fixedPrompt }
+        )
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+
+        // Filtering to one athlete with zero rows of their own must not
+        // change the calendar review prompt at all.
+        viewModel.setSelectedAthletes([oliver.athleteId])
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+        #expect(viewModel.calendarReviewPrompt.actionableSources == [source.externalPlanningSourceId])
+
+        // Filtering to multiple athletes — still unaffected.
+        viewModel.setSelectedAthletes([oliver.athleteId, emma.athleteId])
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+    }
+}

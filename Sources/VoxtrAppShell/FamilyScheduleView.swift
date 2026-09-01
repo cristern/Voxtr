@@ -1,5 +1,6 @@
 import SwiftUI
 import VoxtrCoreContracts
+import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrCalendarPlanningDomain
@@ -39,6 +40,21 @@ import VoxtrCalendarPlanningDomain
 /// itself already defaults to `.none` there regardless, so this is
 /// purely a defensive "no destination to navigate to" guard, never the
 /// actual gate.
+///
+/// VX-037 round: also shows a compact, toolbar-based athlete filter
+/// (`viewModel.selectedAthleteIds`, empty = "All," the default) — pure
+/// VIEW STATE that only changes which of `viewModel.dayGroups`' rows
+/// `viewModel.visibleDayGroups` returns, never Planning truth, athlete
+/// ownership, or calendar import state. `viewModel.calendarReviewPrompt`
+/// is deliberately unaffected by this filter (family/source work, not
+/// athlete-filtered schedule truth). When the filter narrows to exactly
+/// one athlete, the toolbar's Weekly Plan action collapses to a single
+/// direct button to that athlete's EXISTING `WeeklyPlanningView` (via
+/// `onNavigateToWeeklyPlan`, supplied by the caller that owns the real
+/// navigation stack/path — see that property's own doc comment);
+/// otherwise it stays the full, explicit picker across every active
+/// athlete — this view never guesses which athlete's Weekly Plan the
+/// Parent wants.
 public struct FamilyScheduleView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: FamilyScheduleViewModel
@@ -48,6 +64,18 @@ public struct FamilyScheduleView: View {
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
     private let calendarSourcesViewModel: FamilyCalendarSourcesViewModel?
+    /// VX-037: when supplied, drives the toolbar's Weekly Plan action —
+    /// called with the athlete to navigate to. The CALLER owns the real
+    /// `NavigationPath`/`.navigationDestination(for:)` this pushes onto
+    /// (see `ParentPlanTabView`'s own doc comment for why: `FamilyScheduleView`
+    /// deliberately owns no `NavigationStack` of its own, so it cannot
+    /// safely hold a path binding that would work identically from both
+    /// of this view's production entry points). `nil` for the OTHER
+    /// entry point (`FamilyHomeContentView`'s "View upcoming schedule"
+    /// destination), which never offered a Weekly Plan shortcut before
+    /// this round either — so that entry point's behavior here is
+    /// unchanged; only the NEW athlete filter is shared across both.
+    private let onNavigateToWeeklyPlan: ((AthleteId) -> Void)?
 
     public init(
         viewModel: FamilyScheduleViewModel,
@@ -56,7 +84,8 @@ public struct FamilyScheduleView: View {
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
-        calendarSourcesViewModel: FamilyCalendarSourcesViewModel? = nil
+        calendarSourcesViewModel: FamilyCalendarSourcesViewModel? = nil,
+        onNavigateToWeeklyPlan: ((AthleteId) -> Void)? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.actorId = actorId
@@ -65,6 +94,7 @@ public struct FamilyScheduleView: View {
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
         self.calendarSourcesViewModel = calendarSourcesViewModel
+        self.onNavigateToWeeklyPlan = onNavigateToWeeklyPlan
     }
 
     public var body: some View {
@@ -95,7 +125,7 @@ public struct FamilyScheduleView: View {
                 .voxtrRowSurface()
             }
 
-            if viewModel.dayGroups.isEmpty {
+            if viewModel.visibleDayGroups.isEmpty {
                 Section {
                     Text("No upcoming activities planned yet.")
                         .font(VoxtrTypography.metadata)
@@ -103,7 +133,7 @@ public struct FamilyScheduleView: View {
                 }
                 .voxtrRowSurface()
             } else {
-                ForEach(viewModel.dayGroups) { group in
+                ForEach(viewModel.visibleDayGroups) { group in
                     Section {
                         ForEach(group.rows) { row in
                             scheduleRow(row)
@@ -120,8 +150,126 @@ public struct FamilyScheduleView: View {
         .voxtrScreenBackground()
         .tint(VoxtrColor.accent)
         .navigationTitle("Family Schedule")
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                weeklyPlanToolbarContent
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                athleteFilterMenu
+            }
+        }
         .onAppear {
             viewModel.loadSchedule()
+        }
+    }
+
+    /// VX-037: family Ahead → athlete filter. Compact, native `Menu` —
+    /// never a large permanent selector section pushing the schedule
+    /// down (per this round's own "Calm by Default" contract). "All
+    /// Athletes" (empty selection) and every active athlete are each a
+    /// toggle — tapping an already-selected athlete deselects it, so
+    /// multiple athletes can be built up one tap at a time. Shown
+    /// whenever there is at least one active athlete to filter by,
+    /// regardless of which of `FamilyScheduleView`'s two production
+    /// entry points pushed this screen — the SAME shared filter state
+    /// (`viewModel.selectedAthleteIds`) either way, never a second,
+    /// locally-invented selection model.
+    @ViewBuilder
+    private var athleteFilterMenu: some View {
+        if !viewModel.activeAthletes.isEmpty {
+            Menu {
+                Button {
+                    viewModel.setSelectedAthletes([])
+                } label: {
+                    if viewModel.selectedAthleteIds.isEmpty {
+                        Label("All Athletes", systemImage: "checkmark")
+                    } else {
+                        Text("All Athletes")
+                    }
+                }
+                .accessibilityIdentifier("familySchedule.athleteFilter.all")
+
+                Divider()
+
+                ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
+                    Button {
+                        toggleAthleteFilter(athlete.athleteId)
+                    } label: {
+                        if viewModel.selectedAthleteIds.contains(athlete.athleteId) {
+                            Label(athlete.givenName, systemImage: "checkmark")
+                        } else {
+                            Text(athlete.givenName)
+                        }
+                    }
+                    .accessibilityIdentifier("familySchedule.athleteFilter.athlete.\(athlete.athleteId.rawValue.uuidString)")
+                }
+            } label: {
+                Label(athleteFilterSummary, systemImage: "person.crop.circle.badge.checkmark")
+            }
+            .accessibilityIdentifier("familySchedule.athleteFilterMenu")
+        }
+    }
+
+    private func toggleAthleteFilter(_ athleteId: AthleteId) {
+        var updated = viewModel.selectedAthleteIds
+        if updated.contains(athleteId) {
+            updated.remove(athleteId)
+        } else {
+            updated.insert(athleteId)
+        }
+        viewModel.setSelectedAthletes(updated)
+    }
+
+    /// Compact toolbar label text for the current filter — "All" by
+    /// default, the one athlete's given name when exactly one is
+    /// selected, otherwise a plain count. Deliberately never a ranking
+    /// or performance-flavored count — purely how many athletes are
+    /// currently included in the view.
+    private var athleteFilterSummary: String {
+        if viewModel.selectedAthleteIds.isEmpty {
+            return "All"
+        }
+        if let onlyId = viewModel.singleSelectedAthleteId,
+           let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == onlyId }) {
+            return athlete.givenName
+        }
+        return "\(viewModel.selectedAthleteIds.count) athletes"
+    }
+
+    /// VX-037: family Ahead → one athlete → Weekly Plan. Only rendered
+    /// when a destination is actually reachable
+    /// (`onNavigateToWeeklyPlan` supplied) and there is at least one
+    /// active athlete. Exactly one selected athlete collapses this to a
+    /// single direct action — no submenu needed, since the filter has
+    /// already made the choice unambiguous; `All` or multiple selected
+    /// athletes keeps the full explicit picker across every active
+    /// athlete (never narrowed to just the filtered subset — the filter
+    /// controls what the SCHEDULE shows, not which athlete's Weekly Plan
+    /// is reachable), so the Parent's choice is always explicit, never
+    /// guessed.
+    @ViewBuilder
+    private var weeklyPlanToolbarContent: some View {
+        if let onNavigateToWeeklyPlan, !viewModel.activeAthletes.isEmpty {
+            if let singleAthleteId = viewModel.singleSelectedAthleteId,
+               viewModel.activeAthletes.contains(where: { $0.athleteId == singleAthleteId }) {
+                Button {
+                    onNavigateToWeeklyPlan(singleAthleteId)
+                } label: {
+                    Label("Weekly Plan", systemImage: "calendar.badge.clock")
+                }
+                .accessibilityIdentifier("familySchedule.weeklyPlanDirectButton")
+            } else {
+                Menu {
+                    ForEach(viewModel.activeAthletes, id: \.athleteId) { athlete in
+                        Button(athlete.givenName) {
+                            onNavigateToWeeklyPlan(athlete.athleteId)
+                        }
+                    }
+                } label: {
+                    Label("Weekly Plan", systemImage: "calendar.badge.clock")
+                }
+                .accessibilityIdentifier("familySchedule.weeklyPlanMenu")
+            }
         }
     }
 
