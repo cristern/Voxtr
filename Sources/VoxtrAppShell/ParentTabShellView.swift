@@ -6,6 +6,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrCalendarPlanningDomain
 
 /// Bottom Navigation / Information Architecture Foundation package:
 /// the Parent shell's five approved primary destinations — Home | Plan
@@ -136,13 +137,14 @@ public struct ParentTabShellView: View {
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
 
-            // Plan: "What is planned?" — Family Schedule is the
-            // family-wide view (every athlete's planned activities
-            // across a date range) and is the natural root for a
-            // family-level question; Weekly Planning is deliberately
-            // per-athlete (its own existing, unchanged architecture),
-            // so it is reached FROM this tab via explicit athlete
-            // selection, never auto-selecting one.
+            // Plan: "Ahead" — Family Schedule (every athlete's planned
+            // activities across a date range) IS the Plan tab's root
+            // now, opened directly with no intermediate menu step (see
+            // `ParentPlanTabView`'s own doc comment for the full IA
+            // rationale). Weekly Planning is deliberately per-athlete
+            // (its own existing, unchanged architecture), so it is
+            // reached FROM this root via an explicit toolbar action,
+            // never auto-selecting one.
             ParentPlanTabView(
                 family: family,
                 planningService: planningService,
@@ -152,6 +154,8 @@ public struct ParentTabShellView: View {
                 trainingPlanningCoordinationService: trainingPlanningCoordinationService,
                 athleteRepository: athleteRepository,
                 activityChangeBroadcaster: activityChangeBroadcaster,
+                sportRepository: sportRepository,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 actorId: ActorId(rawValue: family.participant.id)
             )
             .tabItem { Label("Plan", systemImage: "calendar") }
@@ -272,10 +276,42 @@ private func fetchActiveAthletes(workspaceId: WorkspaceId, athleteRepository: At
         } ?? []
 }
 
-/// Plan tab root: Family Schedule (family-wide) with explicit,
-/// per-athlete navigation into Weekly Planning — never auto-selecting
-/// an athlete. Wraps `FamilyScheduleView`, which deliberately owns no
+/// Plan/Ahead root round: the Plan tab's ROOT is now `FamilyScheduleView`
+/// itself — no intermediate menu step. Previously this tab was a
+/// two-item menu (Family Schedule / Weekly Plan) that PUSHED Family
+/// Schedule as a second screen; per the approved "Plan = Ahead" IA
+/// contract, Family Schedule already IS the family-wide Ahead
+/// experience, so it becomes what the Plan tab opens directly into.
+/// Wraps `FamilyScheduleView`, which deliberately owns no
 /// `NavigationStack` of its own, in exactly one.
+///
+/// Per-athlete Weekly Plan is still reachable — via an explicit
+/// toolbar action (never auto-selecting an athlete, exactly the same
+/// explicit-selection contract the old menu enforced) — since
+/// `WeeklyPlanningView` has no OTHER production entry point in this
+/// app (verified: this file is its only construction site).
+/// `WeeklyPlanningView` itself is completely unchanged; only this
+/// toolbar call site was added. Uses value-based navigation
+/// (`NavigationPath` + `.navigationDestination(for:)`) rather than an
+/// inline-destination `NavigationLink` inside the `Menu` — the same
+/// "value-based navigation" fix this app's own history already
+/// established for Home (see the Athlete Home stale-navigation-state
+/// investigation) — never a fresh, unproven pattern for this exact
+/// class of "identity-driven push" navigation.
+///
+/// Also constructs the ONE `FamilyCalendarSourcesViewModel` this tab
+/// needs — the SAME canonical instance both feeds Family Schedule's own
+/// "N calendar events to review" prompt (via
+/// `FamilyScheduleViewModel.provideCalendarReviewPrompt`) AND is reused,
+/// unmodified, as the navigation destination's own view model
+/// (`FamilyCalendarSourcesView`/`CalendarImportReviewView`, via
+/// `FamilyScheduleView`'s own `calendarSourcesViewModel` parameter) — one
+/// instance, one canonical read path
+/// (`fetchSources`/`fetchReviewQueue`), never a second, competing read
+/// of Calendar Planning state. Calendar Sources configuration itself is
+/// completely untouched and still reached from Profile — this only adds
+/// a SECOND navigation path into the SAME existing screens, for the
+/// specific case where there is pending review work to act on.
 ///
 /// Pattern-impact audit finding (fixed here, Category A — same root
 /// cause, same UX contract, low risk, directly within this package):
@@ -295,6 +331,8 @@ private struct ParentPlanTabView: View {
     let trainingPlanningCoordinationService: TrainingPlanningCoordinationService
     let athleteRepository: AthleteRepository
     let activityChangeBroadcaster: AthleteActivityChangeBroadcaster
+    let sportRepository: SportRepository
+    let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     let actorId: ActorId
 
     @State private var activeAthletes: [AthleteProfile]
@@ -308,6 +346,16 @@ private struct ParentPlanTabView: View {
     /// helper, backed by this view's own already-stored
     /// `athleteRepository` — never a second, locally-invented mapping.
     @State private var athleteColors: [AthleteId: AthleteColor] = [:]
+    /// Plan/Ahead root round: constructed once for this tab's lifetime
+    /// — see this type's own doc comment for why it is the single,
+    /// reused source both for the calendar-review prompt AND its own
+    /// navigation destinations.
+    @State private var familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
+    /// Plan/Ahead root round: the explicit, value-based path to
+    /// per-athlete Weekly Plan — see this type's own doc comment for why
+    /// this shape (never an inline-destination `NavigationLink` inside
+    /// the toolbar `Menu`) was chosen.
+    @State private var weeklyPlanPath = NavigationPath()
 
     init(
         family: RestoredFamily,
@@ -318,6 +366,8 @@ private struct ParentPlanTabView: View {
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         athleteRepository: AthleteRepository,
         activityChangeBroadcaster: AthleteActivityChangeBroadcaster,
+        sportRepository: SportRepository,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         actorId: ActorId
     ) {
         self.family = family
@@ -328,81 +378,71 @@ private struct ParentPlanTabView: View {
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.athleteRepository = athleteRepository
         self.activityChangeBroadcaster = activityChangeBroadcaster
+        self.sportRepository = sportRepository
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.actorId = actorId
         _activeAthletes = State(initialValue: family.activeAthletes)
+        _familyCalendarSourcesViewModel = State(initialValue: FamilyCalendarSourcesViewModel(
+            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+            athleteRepository: athleteRepository,
+            sportRepository: sportRepository,
+            workspaceId: WorkspaceId(rawValue: family.workspace.id),
+            actorId: actorId
+        ))
     }
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    NavigationLink("Family Schedule") {
-                        FamilyScheduleView(
-                            viewModel: FamilyScheduleViewModel(
-                                provideActiveAthletes: { activeAthletes },
-                                trainingPlanningCoordinationService: trainingPlanningCoordinationService,
-                                planningService: planningService,
-                                resolveAthleteColor: resolvedColor
-                            ),
-                            actorId: actorId,
-                            planningService: planningService,
-                            trainingService: trainingService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService
-                        )
-                    }
-                    .accessibilityIdentifier("parentPlan.familyScheduleLink")
-                }
-                .voxtrRowSurface()
-
+        NavigationStack(path: $weeklyPlanPath) {
+            FamilyScheduleView(
+                viewModel: FamilyScheduleViewModel(
+                    provideActiveAthletes: { activeAthletes },
+                    trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+                    planningService: planningService,
+                    resolveAthleteColor: resolvedColor,
+                    provideCalendarReviewPrompt: calendarReviewPrompt
+                ),
+                actorId: actorId,
+                planningService: planningService,
+                trainingService: trainingService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                calendarSourcesViewModel: familyCalendarSourcesViewModel
+            )
+            .toolbar {
                 if !activeAthletes.isEmpty {
-                    Section {
-                        ForEach(activeAthletes, id: \.athleteId) { athlete in
-                            NavigationLink {
-                                WeeklyPlanningView(
-                                    viewModel: WeeklyPlanningViewModel(
-                                        service: planningService,
-                                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
-                                        athleteId: athlete.athleteId,
-                                        committedByActorId: actorId,
-                                        activityChangeBroadcaster: activityChangeBroadcaster
-                                    ),
-                                    athleteDisplayName: athlete.givenName,
-                                    planningService: planningService,
-                                    trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                                    notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
-                                    actorId: actorId
-                                )
-                            } label: {
-                                Text(athlete.givenName)
-                                    .font(VoxtrTypography.cardTitle)
-                                    .foregroundStyle(VoxtrColor.textPrimary)
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Menu {
+                            ForEach(activeAthletes, id: \.athleteId) { athlete in
+                                Button(athlete.givenName) {
+                                    weeklyPlanPath.append(athlete.athleteId)
+                                }
                             }
-                            // Design Foundation extension round: this is
-                            // a shared/multi-athlete SELECTOR row into a
-                            // single-athlete Weekly Plan screen — the
-                            // exact same shape (and same treatment) as
-                            // `ParentTrainingTabView`'s own Daily
-                            // Training/Weekly Review/Week by Week rows
-                            // below, reusing the SAME
-                            // `voxtrAthleteIdentityOutline` modifier and
-                            // the SAME canonical resolver, never a local
-                            // invention. `WeeklyPlanningView` itself
-                            // (the destination) stays untouched/neutral —
-                            // the colour identifies THIS row, not that
-                            // single-athlete screen.
-                            .voxtrAthleteIdentityOutline(resolvedColor(for: athlete.athleteId).color)
-                            .accessibilityIdentifier("parentPlan.weeklyPlanLink.\(athlete.athleteId.rawValue.uuidString)")
+                        } label: {
+                            Label("Weekly Plan", systemImage: "calendar.badge.clock")
                         }
-                    } header: {
-                        VoxtrSectionHeading("Weekly Plan")
+                        .accessibilityIdentifier("parentPlan.weeklyPlanMenu")
                     }
-                    .voxtrRowSurface()
                 }
             }
-            .voxtrScreenBackground()
-            .tint(VoxtrColor.accent)
-            .navigationTitle("Plan")
+            .navigationDestination(for: AthleteId.self) { athleteId in
+                if let athlete = activeAthletes.first(where: { $0.athleteId == athleteId }) {
+                    WeeklyPlanningView(
+                        viewModel: WeeklyPlanningViewModel(
+                            service: planningService,
+                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                            athleteId: athlete.athleteId,
+                            committedByActorId: actorId,
+                            activityChangeBroadcaster: activityChangeBroadcaster
+                        ),
+                        athleteDisplayName: athlete.givenName,
+                        planningService: planningService,
+                        trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                        actorId: actorId
+                    )
+                    .accessibilityIdentifier("parentPlan.weeklyPlanDestination.\(athleteId.rawValue.uuidString)")
+                }
+            }
         }
         .onAppear {
             activeAthletes = fetchActiveAthletes(workspaceId: WorkspaceId(rawValue: family.workspace.id), athleteRepository: athleteRepository)
@@ -426,6 +466,26 @@ private struct ParentPlanTabView: View {
     /// is never left with no colour at all.
     private func resolvedColor(for athleteId: AthleteId) -> AthleteColor {
         athleteColors[athleteId] ?? AthleteColor.forAthleteId(athleteId)
+    }
+
+    /// Plan/Ahead root round: the ONE place this tab computes
+    /// `FamilyScheduleViewModel.CalendarReviewPrompt`, passed as
+    /// `FamilyScheduleViewModel`'s `provideCalendarReviewPrompt`
+    /// closure above. Always re-reads FRESH via
+    /// `familyCalendarSourcesViewModel.load()` first — the EXACT same
+    /// call `FamilyCalendarSourcesView`'s own `.onAppear` already makes
+    /// whenever THAT screen appears (a passive EventKit status check
+    /// plus the canonical `fetchSources`/`fetchReviewQueue` reads —
+    /// never a permission PROMPT; see that ViewModel's own "Calm by
+    /// Default" doc comment) — so this never depends on cross-view
+    /// `.onAppear` ordering between this tab and `FamilyScheduleView`'s
+    /// own internal load. The actual aggregation rule (disabled/
+    /// disconnected sources never contribute) lives in the pure, directly
+    /// unit-tested `CalendarReviewPrompt.from(sources:reviewCounts:)` —
+    /// not duplicated here.
+    private func calendarReviewPrompt() -> FamilyScheduleViewModel.CalendarReviewPrompt {
+        familyCalendarSourcesViewModel.load()
+        return .from(sources: familyCalendarSourcesViewModel.sources, reviewCounts: familyCalendarSourcesViewModel.reviewCounts)
     }
 }
 

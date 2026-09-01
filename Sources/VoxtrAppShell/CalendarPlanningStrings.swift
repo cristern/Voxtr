@@ -432,4 +432,14 @@ public enum CalendarPlanningStrings {
             defaultValue: "\(failed) suggested activities could not be ignored. They remain visible for review."
         )
     }
+
+    // MARK: - Plan/Ahead root (Family Schedule calendar review prompt)
+
+    /// Family Schedule's own calm, contextual entry point — shown ONLY
+    /// when `FamilyScheduleViewModel.calendarReviewPrompt.totalPendingCount`
+    /// is positive (see that type's own doc comment); `count` is that
+    /// SAME canonical total, never a second, locally-computed number.
+    public static func familyScheduleCalendarReviewPrompt(count: Int) -> String {
+        String(localized: "calendarPlanning.familyScheduleCalendarReviewPrompt", defaultValue: "\(count) calendar events to review")
+    }
 }
