@@ -526,6 +526,79 @@ struct CalendarImportReviewViewModelTests {
         #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == 1)
     }
 
+    // MARK: - Action fix: Ready/Ignore are fully independent per-event ViewModel operations
+    //
+    // The actual TestFlight-reported bug (Ready sometimes opening the
+    // Ignore confirmation) was a SwiftUI List row hit-testing issue —
+    // see CalendarImportReviewView.NeedsReviewRow's own doc comment for
+    // the structural fix (`.buttonStyle(.borderless)`). That specific
+    // symptom lived entirely in View-owned state (`itemPendingIgnore`
+    // is `@State` private to `CalendarImportReviewView`; `isDetailsExpanded`
+    // is `@State` private to `NeedsReviewRow`) and SwiftUI row tap-target
+    // ownership, neither of which this repository's Swift Testing suite
+    // can exercise (no SwiftUI rendering harness — see this file's own
+    // top-of-file note). What CAN be verified at this layer, and is
+    // verified below, is the underlying ViewModel contract each button's
+    // action closure actually calls into: `markReady(for:)` and
+    // `ignore(_:)` are fully independent per-event operations with no
+    // shared mutable state — so even if two sibling buttons' tap targets
+    // were ever misattributed again, the two actions could never corrupt
+    // each other's outcome for a DIFFERENT event, and neither one has any
+    // code path into the other's persisted/staged effect.
+    //
+    // Action fix required test 2 (Ignore request invokes only Ignore
+    // confirmation state) and required test 5 (Details expansion does
+    // not mutate Ready/Ignore state) are verified by direct code reading
+    // rather than a test here, since both are pure View `@State` with no
+    // ViewModel call at all: `onIgnoreRequested` in `NeedsReviewRow`
+    // only invokes the closure that sets `itemPendingIgnore` on the
+    // parent View — it never calls `markReady(for:)`, `ignore(_:)`, or
+    // any other ViewModel method; and `DisclosureGroup`'s `isExpanded`
+    // binds only to `NeedsReviewRow`'s own local `isDetailsExpanded`,
+    // which no ViewModel method reads or writes.
+
+    @Test("Action fix required tests 1, 3, 4, 6: markReady(for:) and ignore(_:) are fully independent per-event operations — marking one event Ready never persists a decision or touches a different event's Ignored state, and ignoring one event never touches a different event's staged Ready confirmation; picker changes alone never trigger either")
+    @MainActor
+    func readyAndIgnoreActionsAreFullyIndependentPerEvent() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-a", title: "Team Practice", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-b", title: "Swim Session", hoursFromReference: 2)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.externalEventKey.contains("evt-a") })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.externalEventKey.contains("evt-b") })
+
+        // Required test 6: staging via the Athlete picker alone (the
+        // same setter every Picker's Binding.set calls) never triggers
+        // Ready or Ignore for either event.
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.ignoredItems.isEmpty)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+
+        // Required test 1: markReady(for:) invokes only the staged-
+        // confirmation mutation for THAT event — no CalendarImportDecision
+        // is persisted, and the Ignored section stays empty.
+        viewModel.markReady(for: itemA.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+        #expect(viewModel.readyToImportItems.first?.externalEventKey == itemA.externalEventKey)
+        #expect(viewModel.readyToImportCount == 1) // required test 7's gating condition
+        #expect(viewModel.ignoredItems.isEmpty)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+
+        // Required test 4: ignoring a DIFFERENT event never marks the
+        // first event Ready (it already was, from the explicit action
+        // above) and never un-marks it either — the two events' staged
+        // state is fully isolated.
+        viewModel.ignore(itemB)
+        #expect(viewModel.ignoredItems.count == 1)
+        #expect(viewModel.ignoredItems.first?.externalEventKey == itemB.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+        #expect(viewModel.readyToImportItems.first?.externalEventKey == itemA.externalEventKey)
+        #expect(viewModel.stagedClassification(for: itemA.externalEventKey).isConfirmedReady == true)
+        #expect(viewModel.needsReviewItems.isEmpty)
+    }
+
     // MARK: - Runtime fix, items 3, 4: ignored events are excluded from Needs Review and appear in the Ignored section (current provider horizon)
 
     @Test("Item 3/4: an ignored event is excluded from needsReviewItems/readyToImportItems and instead appears in ignoredItems")
