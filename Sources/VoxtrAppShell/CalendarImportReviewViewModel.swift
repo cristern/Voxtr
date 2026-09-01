@@ -147,6 +147,22 @@ public final class CalendarImportReviewViewModel {
         /// the only two places this is ever written.
         public var isConfirmedReady: Bool = false
         public var suggestionKind: SuggestionKind = .none
+        /// Live Suggested Ignore re-evaluation follow-up: `true` the
+        /// moment the Parent has explicitly changed ANY of Athlete/Sport/
+        /// Activity Type for this event, via `updateStaged(for:_:)` — the
+        /// ONE place this is ever set. Exists to distinguish "this row
+        /// merely received DEFAULT staging on the most recent
+        /// `refreshQueueAndStaging()` pass" from "this row carries actual
+        /// Parent-owned state," WITHOUT inferring intent from a value
+        /// that can legitimately be a genuine choice either way (e.g.
+        /// `sportId == nil` is both a valid untouched default AND a
+        /// valid explicit "no Sport" selection — see
+        /// `refreshQueueAndStaging()`'s own doc comment for why this
+        /// distinction has to be an explicit flag, not inferred from
+        /// values). Never persisted — plain transient ViewModel/
+        /// presentation state, exactly like every other field on this
+        /// struct.
+        public var hasUserInteraction: Bool = false
 
         /// The canonical minimum requirement `classifyAndImport` actually
         /// needs: Athlete must resolve/be selected. `activityType`
@@ -293,11 +309,16 @@ public final class CalendarImportReviewViewModel {
     /// classification is exactly the Parent action the failure-clearing
     /// contract names — the Parent has acted on it, so the stale reason
     /// from a prior attempt with the OLD values must not keep showing.
+    /// Also sets `hasUserInteraction = true` (live Suggested Ignore
+    /// re-evaluation follow-up) — the ONE place this ever happens, since
+    /// this is the ONE place a Parent explicitly changes a classification
+    /// value.
     private func updateStaged(for externalEventKey: String, _ mutate: (inout StagedClassification) -> Void) {
         var staged = stagedClassifications[externalEventKey] ?? StagedClassification()
         mutate(&staged)
         staged.isConfirmedReady = false
         staged.suggestionKind = .none
+        staged.hasUserInteraction = true
         stagedClassifications[externalEventKey] = staged
         failedImportReasons.removeValue(forKey: externalEventKey)
     }
@@ -400,6 +421,80 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
+    /// Import-time Suggested Ignore confirmation: the explicit, Parent-
+    /// confirmed batch counterpart of a single manual Ignore tap — called
+    /// ONLY after the View has shown its own "Ignore & Import"
+    /// confirmation dialog (triggered by the top-level Import action when
+    /// `suggestedIgnoreItems` is non-empty) and the Parent has explicitly
+    /// tapped it. The View owns whether confirmation was accepted; this
+    /// method never runs on its own initiative and never assumes consent
+    /// — Suggested Ignore alone still persists nothing.
+    ///
+    /// Does exactly two things, in order, reusing existing canonical
+    /// paths rather than a second implementation of either:
+    ///   1. persists every event CURRENTLY in `suggestedIgnoreItems` as a
+    ///      real `.ignored` `CalendarImportDecision`, through the EXACT
+    ///      SAME `CalendarPlanningCoordinationService.ignore(_:for:decidedBy:)`
+    ///      a single manual Ignore tap already uses — same actor
+    ///      attribution, same source scoping, same `ignoredEventTitle`
+    ///      snapshot, same stable `externalEventKey` identity;
+    ///   2. calls the existing, UNCHANGED `bulkImportReadyItems()` for the
+    ///      Ready items — its existing `sourceDisabled`/partial-failure/
+    ///      Needs Attention handling is entirely untouched and un-
+    ///      duplicated. `bulkImportReadyItems()` itself returns
+    ///      immediately, WITHOUT refreshing, when there are zero Ready
+    ///      items (its own pre-existing, correct guard for its own single
+    ///      responsibility) — so this method calls
+    ///      `refreshQueueAndStaging()` itself, right after the Ignore
+    ///      phase, to guarantee the newly-ignored truth is always picked
+    ///      up even in a Suggested-Ignore-only batch with no Ready items
+    ///      at all. `bulkImportReadyItems()` then does its own (possibly
+    ///      redundant, always harmless) refresh when it actually has
+    ///      items to import.
+    ///
+    /// FAILURE BEHAVIOR (V1 — no cross-item rollback; "One Truth" matters
+    /// more than pretending this batch was atomic): each Suggested Ignore
+    /// item is attempted independently. A failure on one item is counted
+    /// and the loop continues to the next — an already-succeeded sibling
+    /// Ignore is never rolled back, and nothing fabricates success for
+    /// the item that failed (it simply stays a pending Suggested Ignore
+    /// candidate, since it was never removed from the review queue). The
+    /// Ready import always still runs afterward (this method has no
+    /// separate "global condition" of its own to abort on — the ONE
+    /// genuine global condition, the source becoming disabled/
+    /// disconnected, is already `bulkImportReadyItems()`'s own guard,
+    /// reused here unchanged rather than duplicated).
+    public func confirmSuggestedIgnoresAndImportReadyItems() {
+        errorMessage = nil
+        let itemsToIgnore = suggestedIgnoreItems
+        var ignoreFailureCount = 0
+
+        for item in itemsToIgnore {
+            do {
+                _ = try calendarPlanningCoordinationService.ignore(item, for: source, decidedBy: actorId)
+            } catch {
+                ignoreFailureCount += 1
+            }
+        }
+
+        // See this method's own doc comment: bulkImportReadyItems() below
+        // returns without refreshing when there are zero Ready items, so
+        // this refresh must happen here to guarantee the newly-ignored
+        // truth is always picked up.
+        refreshQueueAndStaging()
+
+        bulkImportReadyItems()
+
+        // bulkImportReadyItems() above already set a more specific
+        // message for its own outcome (sourceDisabled or a Ready-import
+        // partial failure) — never clobber that. Only surface the
+        // Ignore-phase failure count when it would otherwise go
+        // unreported.
+        if errorMessage == nil, ignoreFailureCount > 0 {
+            errorMessage = CalendarPlanningStrings.suggestedIgnoreConfirmationPartialFailure(failed: ignoreFailureCount)
+        }
+    }
+
     /// V1.3 (Needs Attention): maps a caught `PlanningServiceError` to a
     /// calm, useful, Parent-facing reason — never a raw internal error
     /// dump. `classifyAndImport`'s own genuinely-new creation path (the
@@ -480,33 +575,73 @@ public final class CalendarImportReviewViewModel {
         refreshQueueAndStaging()
     }
 
+    /// Live Suggested Ignore re-evaluation follow-up: the smallest clean
+    /// distinction between (A) a row that merely received DEFAULT staging
+    /// on the most recent `refreshQueueAndStaging()` pass, and (B) a row
+    /// containing Parent-owned or suggestion-owned state that must never
+    /// be silently discarded. `true` (meaningful — preserve as-is,
+    /// never re-derive) when ANY of:
+    ///   - the Parent has explicitly changed Athlete/Sport/Activity Type
+    ///     (`hasUserInteraction`);
+    ///   - the item is Ready (`isConfirmedReady`) — covers Remembered
+    ///     Exact Choices' own already-Ready prefill too, since that path
+    ///     also sets this;
+    ///   - the item carries a PR #47 exact/similar classification
+    ///     suggestion (`suggestionKind != .none`);
+    ///   - the item is currently Needs Attention (a failed bulk-import
+    ///     attempt recorded in `failedImportReasons`).
+    /// Deliberately does NOT inspect `athleteId`/`sportId`/`activityType`
+    /// values themselves — `sportId == nil`, the default
+    /// `.individualTraining`, and `athleteId == nil` are all legitimate
+    /// UNTOUCHED defaults, so inferring "meaningful" from them would
+    /// misclassify a brand-new, never-interacted-with row as Parent-owned
+    /// and permanently block it from ever being re-evaluated against new
+    /// Suggested Ignore evidence.
+    private func hasMeaningfulStaging(_ staged: StagedClassification, externalEventKey: String) -> Bool {
+        staged.hasUserInteraction
+            || staged.isConfirmedReady
+            || staged.suggestionKind != .none
+            || failedImportReasons[externalEventKey] != nil
+    }
+
     // MARK: - Queue + staging refresh (shared by load(), ignore(), restore(), reviewSuggestedIgnore(_:), and bulkImportReadyItems())
 
     /// Re-fetches the review queue (and the Ignored section's own
     /// current-horizon list) and rebuilds `stagedClassifications` to
-    /// match `reviewQueue`: an event already staged (a Parent's in-
-    /// progress edit, a still-Ready item from an earlier partial bulk
-    /// import, or one already re-evaluated after `reviewSuggestedIgnore(_:)`)
-    /// keeps its EXACT existing staging untouched; a genuinely new event
-    /// (including one just restored from Ignored) is seeded from
-    /// Remembered Exact Choices (V1.1) if one applies, else from a
-    /// Similar-Event Suggestion (V1.2) if one applies, else — V1.3, and
-    /// only when the Parent has not already lifted this exact event back
-    /// into review this session — becomes a Suggested Ignore candidate if
-    /// its title matches a prior explicit Ignore for this source, or is
-    /// otherwise left blank/editable; an event no longer in the queue
-    /// (imported, ignored, or disappeared from the source) is dropped so
-    /// `stagedClassifications` never leaks stale entries — `failedImportReasons`
-    /// (V1.3) is pruned the same way.
+    /// match `reviewQueue`: an event carrying MEANINGFUL existing staging
+    /// (see `hasMeaningfulStaging(_:externalEventKey:)`) keeps its EXACT
+    /// existing staging untouched — a Parent's in-progress edit, a still-
+    /// Ready item from an earlier partial bulk import, an already-
+    /// resolved classification suggestion, or a Needs Attention failure
+    /// marker must never be silently discarded just because this method
+    /// runs again. A genuinely new event, OR one that only ever received
+    /// UNTOUCHED default staging on an earlier pass (never a Parent
+    /// action, never a suggestion, never a failure) — including one just
+    /// restored from Ignored — is (re-)seeded fresh: from Remembered
+    /// Exact Choices (V1.1) if one applies, else from a Similar-Event
+    /// Suggestion (V1.2) if one applies, else — V1.3, and only when the
+    /// Parent has not already lifted this exact event back into review
+    /// this session — becomes a Suggested Ignore candidate if its title
+    /// matches a prior explicit Ignore for this source, or is otherwise
+    /// left blank/editable. This is what makes Suggested Ignore work
+    /// LIVE, in the SAME open ViewModel session, immediately after a new
+    /// explicit Ignore decision: a sibling event's default staging from
+    /// before that Ignore is never treated as "already decided," so the
+    /// very next refresh (which every mutating action already triggers)
+    /// re-derives it against the now-updated Ignore evidence. An event no
+    /// longer in the queue (imported, ignored, or disappeared from the
+    /// source) is dropped so `stagedClassifications` never leaks stale
+    /// entries — `failedImportReasons` (V1.3) is pruned the same way.
     ///
-    /// PRECEDENCE: exact remembered match is checked FIRST and wins
-    /// outright; a similar-event classification suggestion is only ever
-    /// considered when no exact match exists; Suggested Ignore is only
-    /// ever considered when NEITHER classification signal applies — this
-    /// is the "do not guess when evidence conflicts" rule in concrete
-    /// form: an event this source has classified/imported before (exact
-    /// or similar) is never simultaneously proposed for Ignore. All
-    /// three paths call into pure/read-only helpers only
+    /// PRECEDENCE: meaningful existing staging wins outright and is never
+    /// re-derived; for everything else, exact remembered match is checked
+    /// FIRST and wins outright; a similar-event classification suggestion
+    /// is only ever considered when no exact match exists; Suggested
+    /// Ignore is only ever considered when NEITHER classification signal
+    /// applies — this is the "do not guess when evidence conflicts" rule
+    /// in concrete form: an event this source has classified/imported
+    /// before (exact or similar) is never simultaneously proposed for
+    /// Ignore. All three paths call into pure/read-only helpers only
     /// (`ExternalEventTitleNormalization`, `ExternalEventTitleSimilarity`,
     /// and `calendarPlanningCoordinationService`'s own read methods) — no
     /// matching RULE is implemented inline here; this method only
@@ -537,7 +672,8 @@ public final class CalendarImportReviewViewModel {
         var rebuiltSuggestedIgnoreMatches: [String: String] = [:]
 
         for item in reviewQueue {
-            if let existing = stagedClassifications[item.externalEventKey] {
+            if let existing = stagedClassifications[item.externalEventKey],
+               hasMeaningfulStaging(existing, externalEventKey: item.externalEventKey) {
                 rebuiltStaging[item.externalEventKey] = existing
                 continue
             }
