@@ -958,7 +958,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         #expect(prompt.totalPendingCount == 7)
-        #expect(Set(prompt.actionableSources.map(\.externalPlanningSourceId)) == [
+        #expect(Set(prompt.actionableSources) == [
             sourceWithPending.externalPlanningSourceId, secondSourceWithPending.externalPlanningSourceId
         ])
     }
@@ -999,7 +999,7 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         #expect(prompt.totalPendingCount == 3)
-        #expect(prompt.actionableSources.map(\.externalPlanningSourceId) == [enabledSource.externalPlanningSourceId])
+        #expect(prompt.actionableSources == [enabledSource.externalPlanningSourceId])
     }
 
     /// Proves the wiring between `FamilyScheduleViewModel.loadSchedule()`
@@ -1044,7 +1044,7 @@ extension FamilyScheduleAndTomorrowTests {
         currentPrompt = .from(sources: [source], reviewCounts: [source.externalPlanningSourceId: 5])
         viewModel.loadSchedule()
         #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
-        #expect(viewModel.calendarReviewPrompt.actionableSources.map(\.externalPlanningSourceId) == [source.externalPlanningSourceId])
+        #expect(viewModel.calendarReviewPrompt.actionableSources == [source.externalPlanningSourceId])
     }
 
     /// Test requirement: zero pending items must leave
