@@ -137,10 +137,22 @@ public struct FamilyScheduleView: View {
     /// routes to the EXISTING `FamilyCalendarSourcesView` list, which
     /// already shows every source's own review count and its own link
     /// into `CalendarImportReviewView` — never a NEW multi-source list.
+    ///
+    /// Codemagic compile fix: `viewModel.calendarReviewPrompt.actionableSources`
+    /// is now `[ExternalPlanningSourceId]` (see that type's own doc
+    /// comment), so the single-source case resolves the actual
+    /// `ExternalPlanningSource` from `calendarSourcesViewModel.sources` —
+    /// the SAME already-loaded list `calendarReviewPrompt` was computed
+    /// from, never a second fetch. If the id somehow does not resolve
+    /// (never expected in practice, since both come from the same
+    /// underlying `FamilyCalendarSourcesViewModel`), this falls back to
+    /// the multi-source list rather than crashing or showing nothing.
     @ViewBuilder
     private func calendarReviewDestination(calendarSourcesViewModel: FamilyCalendarSourcesViewModel) -> some View {
-        let actionableSources = viewModel.calendarReviewPrompt.actionableSources
-        if actionableSources.count == 1, let onlySource = actionableSources.first {
+        let actionableSourceIds = viewModel.calendarReviewPrompt.actionableSources
+        if actionableSourceIds.count == 1,
+           let onlySourceId = actionableSourceIds.first,
+           let onlySource = calendarSourcesViewModel.sources.first(where: { $0.externalPlanningSourceId == onlySourceId }) {
             CalendarImportReviewView(viewModel: calendarSourcesViewModel.makeImportReviewViewModel(for: onlySource))
         } else {
             FamilyCalendarSourcesView(viewModel: calendarSourcesViewModel)

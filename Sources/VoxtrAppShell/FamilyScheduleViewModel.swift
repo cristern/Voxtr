@@ -88,16 +88,30 @@ public final class FamilyScheduleViewModel {
     /// `FamilyCalendarSourcesViewModel.refreshSources()` already makes
     /// for its own per-source review counts), never a second persisted
     /// count, shadow state, or heuristic. `actionableSources` carries
-    /// only the `ExternalPlanningSource`s that actually have at least
-    /// one pending item — used purely to route navigation (straight to
-    /// that ONE source's own `CalendarImportReviewView` when there is
-    /// exactly one, or to the existing `FamilyCalendarSourcesView` list
-    /// when there is more than one); it is never itself business truth.
-    public struct CalendarReviewPrompt {
+    /// only the stable `ExternalPlanningSourceId`s of sources that
+    /// actually have at least one pending item — used purely to route
+    /// navigation (straight to that ONE source's own
+    /// `CalendarImportReviewView` when there is exactly one, or to the
+    /// existing `FamilyCalendarSourcesView` list when there is more than
+    /// one); it is never itself business truth.
+    ///
+    /// Codemagic compile fix: this carries IDs, not full
+    /// `ExternalPlanningSource` instances — `ExternalPlanningSource` is a
+    /// SwiftData `@Model` class (mutable reference type, not `Sendable`),
+    /// so a `CalendarReviewPrompt.none` static constant could not be
+    /// verified concurrency-safe while holding one. `ExternalPlanningSourceId`
+    /// (`Identifier<ExternalPlanningSourceTag>`) is a plain `Hashable,
+    /// Codable, Sendable` value wrapping a `UUID`, so this type is fully
+    /// and safely `Sendable` with no `@unchecked` escape hatch. The one
+    /// call site that needs the actual `ExternalPlanningSource` object
+    /// (`FamilyScheduleView.calendarReviewDestination(calendarSourcesViewModel:)`)
+    /// resolves it from the SAME `FamilyCalendarSourcesViewModel.sources`
+    /// this prompt was already computed from — never a second fetch.
+    public struct CalendarReviewPrompt: Sendable {
         public let totalPendingCount: Int
-        public let actionableSources: [ExternalPlanningSource]
+        public let actionableSources: [ExternalPlanningSourceId]
 
-        public init(totalPendingCount: Int, actionableSources: [ExternalPlanningSource]) {
+        public init(totalPendingCount: Int, actionableSources: [ExternalPlanningSourceId]) {
             self.totalPendingCount = totalPendingCount
             self.actionableSources = actionableSources
         }
@@ -133,7 +147,7 @@ public final class FamilyScheduleViewModel {
                 source.isEnabled && (reviewCounts[source.externalPlanningSourceId] ?? 0) > 0
             }
             let total = actionable.reduce(0) { $0 + (reviewCounts[$1.externalPlanningSourceId] ?? 0) }
-            return CalendarReviewPrompt(totalPendingCount: total, actionableSources: actionable)
+            return CalendarReviewPrompt(totalPendingCount: total, actionableSources: actionable.map(\.externalPlanningSourceId))
         }
     }
 
