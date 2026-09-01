@@ -963,13 +963,19 @@ extension FamilyScheduleAndTomorrowTests {
         ])
     }
 
-    /// Test requirement 4: a disabled source must never contribute an
-    /// actionable review count, mirroring the canonical
-    /// `FamilyCalendarSourcesViewModel.refreshSources()` guard (a
-    /// disabled source's `reviewCounts` entry is always explicitly `0`,
-    /// never fetched from the review queue at all).
-    @Test("CalendarReviewPrompt.from(sources:reviewCounts:) excludes a disabled source even if its review count would otherwise be positive")
-    func calendarReviewPromptExcludesDisabledSource() throws {
+    /// Test requirement 4 / Lead Review follow-up: a disabled source
+    /// must never contribute an actionable review count — proven here
+    /// with a POSITIVE review count on the disabled source (the
+    /// scenario that actually exercises the `isEnabled` guard inside
+    /// `CalendarReviewPrompt.from(sources:reviewCounts:)` itself, rather
+    /// than merely reflecting `FamilyCalendarSourcesViewModel.refreshSources()`'s
+    /// own separate `isEnabled` short-circuit, which always writes `0`
+    /// and would let a `reviewCounts[id] > 0` check alone pass this test
+    /// without the pure function enforcing the rule directly). Defense
+    /// in depth: this proves the aggregation function excludes a
+    /// disabled source even if `reviewCounts` is stale or malformed.
+    @Test("CalendarReviewPrompt.from(sources:reviewCounts:) excludes a disabled source even when its review count is positive")
+    func calendarReviewPromptExcludesDisabledSourceWithPositiveCount() throws {
         let workspaceId = WorkspaceId()
         let disabledSource = ExternalPlanningSource(
             workspaceId: workspaceId, providerKind: .eventKit,
@@ -980,11 +986,11 @@ extension FamilyScheduleAndTomorrowTests {
             externalContainerIdentifier: "cal-enabled", displayName: "Enabled Calendar", isEnabled: true
         )
 
-        // Matches FamilyCalendarSourcesViewModel.refreshSources()'s own
-        // contract: a disabled source's entry is explicitly 0 — it is
-        // never asked for its real review queue count at all.
+        // Deliberately a POSITIVE count for the disabled source — stale
+        // or malformed caller state is exactly what the pure function's
+        // own `isEnabled` guard must survive.
         let reviewCounts: [ExternalPlanningSourceId: Int] = [
-            disabledSource.externalPlanningSourceId: 0,
+            disabledSource.externalPlanningSourceId: 99,
             enabledSource.externalPlanningSourceId: 3
         ]
 

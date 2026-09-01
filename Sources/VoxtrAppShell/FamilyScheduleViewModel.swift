@@ -116,13 +116,22 @@ public final class FamilyScheduleViewModel {
         /// workspace and ALREADY excludes `.disconnected` sources — the
         /// exact contract `CalendarPlanningCoordinationService.fetchSources(forWorkspace:)`
         /// already guarantees at the canonical service boundary (it
-        /// calls `fetchAllConnected(forWorkspace:)` internally). A
-        /// source with `reviewCounts[id] == nil` (never fetched — e.g.
-        /// because it is disabled, matching
-        /// `FamilyCalendarSourcesViewModel.refreshSources()`'s own
-        /// `isEnabled` short-circuit) or `0` never contributes.
+        /// calls `fetchAllConnected(forWorkspace:)` internally); this
+        /// function does not re-derive disconnected-source handling.
+        ///
+        /// Lead Review follow-up: `isEnabled` is checked HERE, directly,
+        /// not only inferred from an absent/zero `reviewCounts` entry —
+        /// defense in depth, so a disabled source can never become
+        /// actionable even if the caller's `reviewCounts` is stale or
+        /// malformed (e.g. still carries a positive count from before the
+        /// source was disabled). `FamilyCalendarSourcesViewModel.refreshSources()`'s
+        /// own `isEnabled` short-circuit (never fetching a disabled
+        /// source's real count at all) remains the first line of
+        /// defense; this is the second.
         public static func from(sources: [ExternalPlanningSource], reviewCounts: [ExternalPlanningSourceId: Int]) -> CalendarReviewPrompt {
-            let actionable = sources.filter { (reviewCounts[$0.externalPlanningSourceId] ?? 0) > 0 }
+            let actionable = sources.filter { source in
+                source.isEnabled && (reviewCounts[source.externalPlanningSourceId] ?? 0) > 0
+            }
             let total = actionable.reduce(0) { $0 + (reviewCounts[$1.externalPlanningSourceId] ?? 0) }
             return CalendarReviewPrompt(totalPendingCount: total, actionableSources: actionable)
         }
