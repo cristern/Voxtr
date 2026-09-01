@@ -18,6 +18,9 @@ public final class CalendarImportDecisionRepository {
         self.modelContext = modelContext
     }
 
+    /// `ignoredEventTitle` defaults to `nil` so every existing `.imported`
+    /// call site is unaffected — see `CalendarImportDecision.ignoredEventTitle`'s
+    /// own doc comment for what it is and why it exists.
     @discardableResult
     public func insert(
         sourceId: ExternalPlanningSourceId,
@@ -27,6 +30,7 @@ public final class CalendarImportDecisionRepository {
         sportId: SportId?,
         activityType: ActivityType?,
         plannedActivityId: PlannedActivityId?,
+        ignoredEventTitle: String? = nil,
         decidedBy: ActorId
     ) throws -> CalendarImportDecision {
         let decision = CalendarImportDecision(
@@ -37,6 +41,7 @@ public final class CalendarImportDecisionRepository {
             sportId: sportId,
             activityType: activityType,
             plannedActivityId: plannedActivityId,
+            ignoredEventTitle: ignoredEventTitle,
             decidedBy: decidedBy
         )
         modelContext.insert(decision)

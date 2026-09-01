@@ -75,17 +75,21 @@ public final class CompositionRoot {
     /// Calendar Planning Source V1: `AppSchemaV6` was then FROZEN and
     /// this default targeted `AppSchemaV7` ("7.0.0", 20 entities —
     /// activates `CalendarPlanningMapping.self`). Family-Owned Calendar
-    /// Sources V1: `AppSchemaV7` is now itself FROZEN and this default
-    /// targets `AppSchemaV8` ("8.0.0", 22 entities — activates
-    /// `ExternalPlanningSource.self`/`CalendarImportDecision.self`), the
-    /// current genuine version.
+    /// Sources V1: `AppSchemaV7` was then FROZEN and this default
+    /// targeted `AppSchemaV8` ("8.0.0", 22 entities — activates
+    /// `ExternalPlanningSource.self`/`CalendarImportDecision.self`). PR
+    /// #48 follow-up (durable Suggested Ignore evidence): `AppSchemaV8`
+    /// is now itself FROZEN and this default targets `AppSchemaV9`
+    /// ("9.0.0", same 22 entities — adds
+    /// `CalendarImportDecision.ignoredEventTitle: String?`), the current
+    /// genuine version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV8.self,
+            versionedSchema: AppSchemaV9.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

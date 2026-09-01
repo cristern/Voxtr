@@ -195,12 +195,13 @@ struct PersistenceRecoveryTests {
         // container.schema.entities.count stayed at the frozen V6
         // shape's 19 while AppSchema.modelTypes.count had already moved
         // to 20). Family-Owned Calendar Sources V1: updated again to
-        // AppSchemaV8, matching CompositionRoot.build's own real
-        // default after that round's bump. Keep this literal in
-        // lockstep with CompositionRoot's own default on every future
-        // version bump too.
+        // AppSchemaV8. PR #48 follow-up (durable Suggested Ignore
+        // evidence): updated again to AppSchemaV9, matching
+        // CompositionRoot.build's own real default after that round's
+        // bump. Keep this literal in lockstep with CompositionRoot's
+        // own default on every future version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV8.self,
+            versionedSchema: AppSchemaV9.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -596,6 +597,87 @@ struct PersistenceRecoveryTests {
         )
         #expect(source.externalContainerIdentifier == "cal-familie")
         #expect(try v8Container.mainContext.fetch(FetchDescriptor<ExternalPlanningSource>()).count == 1)
+    }
+
+    /// PR #48 follow-up (durable Suggested Ignore evidence): field-level
+    /// addition to an already-listed type — same class of change/test
+    /// shape as `existingV5StoreMigratesToV6Successfully`
+    /// (`ActivityReminder.reminderText`) above, applied to
+    /// `CalendarImportDecision.ignoredEventTitle` instead.
+    @Test("PR #48 follow-up: a store created under AppSchemaV8 (22 entities, CalendarImportDecision with no ignoredEventTitle column) reopens successfully under AppSchemaV9 via the lightweight migration stage — the existing ignored decision survives with ignoredEventTitle honestly nil, and a new decision can set it")
+    @MainActor
+    func existingV8StoreMigratesToV9Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v8-to-v9-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v8Schema = Schema(versionedSchema: AppSchemaV8.self)
+        var sourceRawId: UUID
+        var legacyDecisionRawId: UUID
+        do {
+            let v8Container = try ModelContainer(
+                for: v8Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v8Schema, url: storeURL)]
+            )
+            let sourceId = ExternalPlanningSourceId()
+            sourceRawId = sourceId.rawValue
+            let source = ExternalPlanningSource(
+                id: sourceId, workspaceId: WorkspaceId(), providerKind: .eventKit,
+                externalContainerIdentifier: "cal-familie", displayName: "Familie", isEnabled: true
+            )
+            v8Container.mainContext.insert(source)
+            try v8Container.mainContext.save()
+
+            // A pre-round `.ignored` decision — the V8 shape has no
+            // ignoredEventTitle column at all. Codemagic SwiftData
+            // cast-crash precedent (see existingV5StoreMigratesToV6Successfully
+            // above): MUST be constructed directly against the
+            // v8Container's OWN registered type for this entity — the
+            // frozen AppSchemaV8.CalendarImportDecision — never via
+            // CalendarImportDecisionRepository, which is permanently
+            // bound to the LIVE VoxtrCalendarPlanningDomain.CalendarImportDecision
+            // type.
+            let legacyDecision = AppSchemaV8.CalendarImportDecision(
+                sourceId: sourceRawId, externalEventKey: "cal-familie|evt-old",
+                status: .ignored, decidedBy: ActorId().rawValue
+            )
+            v8Container.mainContext.insert(legacyDecision)
+            try v8Container.mainContext.save()
+            legacyDecisionRawId = legacyDecision.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V9) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV9.self`).
+        let v9Schema = Schema(versionedSchema: AppSchemaV9.self)
+        let v9Container = try ModelContainer(
+            for: v9Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v9Schema, url: storeURL)]
+        )
+
+        // The pre-existing ignored decision survived: same id, same
+        // status/source/key — but ignoredEventTitle is honestly nil,
+        // never fabricated.
+        let importDecisionRepository = CalendarImportDecisionRepository(modelContext: v9Container.mainContext)
+        let migratedDecisions = try importDecisionRepository.fetchAll(forSource: ExternalPlanningSourceId(rawValue: sourceRawId))
+        #expect(migratedDecisions.count == 1)
+        #expect(migratedDecisions.first?.id == legacyDecisionRawId)
+        #expect(migratedDecisions.first?.status == .ignored)
+        #expect(migratedDecisions.first?.ignoredEventTitle == nil)
+
+        // A NEW ignored decision created after migration can set
+        // ignoredEventTitle — proving the new column is genuinely usable
+        // against the migrated store, not merely that the container
+        // opened.
+        let newDecision = try importDecisionRepository.insert(
+            sourceId: ExternalPlanningSourceId(rawValue: sourceRawId), externalEventKey: "cal-familie|evt-new",
+            status: .ignored, athleteId: nil, sportId: nil, activityType: nil, plannedActivityId: nil,
+            ignoredEventTitle: "Hockeytrening U14", decidedBy: ActorId()
+        )
+        #expect(newDecision.ignoredEventTitle == "Hockeytrening U14")
+        #expect(try importDecisionRepository.fetchAll(forSource: ExternalPlanningSourceId(rawValue: sourceRawId)).count == 2)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

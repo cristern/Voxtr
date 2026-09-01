@@ -263,17 +263,21 @@ public enum CalendarPlanningStrings {
         )
     }
 
-    /// V1.3 (Needs Attention): the calm, specific reason shown for a
-    /// `PlanningServiceError.invalidField` failure — the realistic
-    /// remaining case for a calendar-sourced import even after this
-    /// round's own notes-capacity increase (e.g. notes still exceeding
-    /// the new bound, or an unusually long title). Deliberately does not
-    /// name "notes" specifically, since `invalidField` covers more than
-    /// one validation bound and this must stay accurate for all of them.
+    /// V1.3 (Needs Attention), PR #48 follow-up (copy correction): the
+    /// calm reason shown for a `PlanningServiceError.invalidField`
+    /// failure. `CalendarImportReviewViewModel.needsAttentionReason(forPlanningServiceError:)`
+    /// maps every `.invalidField` case to this ONE string without
+    /// inspecting the error's own associated field-description String,
+    /// so this copy must stay true for EVERY validation bound
+    /// `PlanningService`'s genuinely-new creation path can throw
+    /// `.invalidField` for — not just an over-length field (e.g. also
+    /// "title or sportId is required", a MISSING-field case, not a too-
+    /// long one). Deliberately does not claim anything is "too long"
+    /// unless the caught error actually proves that.
     public static var bulkImportInvalidFieldError: String {
         String(
             localized: "calendarPlanning.bulkImportInvalidFieldError",
-            defaultValue: "Calendar information is too long to import with the current activity limits."
+            defaultValue: "Some calendar information couldn't be imported. Review the activity and try again."
         )
     }
 

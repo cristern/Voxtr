@@ -329,10 +329,12 @@ public final class CalendarImportReviewViewModel {
     ///     abort, not a per-item Needs Attention entry — after it, the
     ///     queue is empty, so there is nothing left to attach one to;
     ///   - any other error (V1.3: `PlanningServiceError.invalidField` —
-    ///     the realistic remaining failure mode for calendar-sourced
-    ///     notes/title exceeding a validation bound even after this same
-    ///     round's notes-capacity increase — mapped to a specific reason;
-    ///     anything else mapped to a generic one): staging is kept, un-
+    ///     the realistic remaining failure mode for a calendar-sourced
+    ///     field failing a `PlanningService` validation bound (not
+    ///     necessarily length — e.g. a required field being empty
+    ///     qualifies too) — mapped to a truthful, general reason since
+    ///     this switch does not inspect which bound failed; anything else
+    ///     mapped to a generic one): staging is kept, un-
     ///     confirmed back to editable, recorded in `failedImportReasons`,
     ///     so nothing is silently dropped and the Parent can see exactly
     ///     which event needs attention and why, in Needs Attention.
@@ -403,7 +405,11 @@ public final class CalendarImportReviewViewModel {
     /// dump. `classifyAndImport`'s own genuinely-new creation path (the
     /// only `PlanningService` call this screen's bulk import can reach)
     /// only ever throws `.invalidField` in practice (e.g. calendar notes
-    /// or title exceeding a validation bound); every other case is
+    /// or title failing a validation bound, or a required field being
+    /// empty). This switch does not inspect `.invalidField`'s own
+    /// associated field-description String, so `bulkImportInvalidFieldError`
+    /// must stay a truthful GENERAL reason rather than naming a specific
+    /// cause (see that string's own doc comment) — every other case is
     /// handled explicitly anyway since this switch must stay exhaustive
     /// against the full `PlanningServiceError` type, falling back to the
     /// same generic reason any other unexpected failure gets.
@@ -514,7 +520,15 @@ public final class CalendarImportReviewViewModel {
             errorMessage = errorMessage ?? CalendarPlanningStrings.genericError
         }
         ignoredItems = (try? calendarPlanningCoordinationService.fetchIgnoredReviewItems(for: source)) ?? []
-        let previouslyIgnoredTitles = ignoredItems.compactMap(\.event.title)
+        // PR #48 follow-up (durable Suggested Ignore evidence): deliberately
+        // NOT derived from `ignoredItems` above — that list is horizon-bound
+        // (only events still resolvable from the current provider fetch),
+        // so a repeating event's OWN prior ignored occurrence ages out of it
+        // long before the Parent stops wanting it ignored. This reads the
+        // durable `.ignored` decision history instead (see
+        // `CalendarPlanningCoordinationService.historicalIgnoredTitles(for:)`'s
+        // own doc comment) so Suggested Ignore keeps working after that.
+        let previouslyIgnoredTitles = (try? calendarPlanningCoordinationService.historicalIgnoredTitles(for: source)) ?? []
 
         let remembered = (try? calendarPlanningCoordinationService.rememberedClassifications(for: source)) ?? [:]
         let historicalTitles = (try? calendarPlanningCoordinationService.historicalTitleClassifications(for: source)) ?? []
