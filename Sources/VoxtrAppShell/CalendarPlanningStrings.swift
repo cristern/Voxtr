@@ -284,4 +284,14 @@ public enum CalendarPlanningStrings {
     public static var reviewAgainButton: String {
         String(localized: "calendarPlanning.reviewAgainButton", defaultValue: "Review again")
     }
+
+    // MARK: - Calendar Import Review action fix (top-level Import shortcut)
+
+    /// The calm summary text next to the top-level Import shortcut —
+    /// shown only while `readyToImportCount > 0`; the count is the SAME
+    /// `viewModel.readyToImportCount` the Ready to Import section itself
+    /// already uses, never a separately computed figure.
+    public static func readyToImportSummary(count: Int) -> String {
+        String(localized: "calendarPlanning.readyToImportSummary", defaultValue: "\(count) ready to import")
+    }
 }
