@@ -431,7 +431,7 @@ public final class CalendarPlanningCoordinationService {
         return events.filter { !$0.isAllDay }
     }
 
-    // MARK: - Remembered Exact Choices (V1.1 — prefill only, never auto-import)
+    // MARK: - Remembered Exact Choices (V1.1) + Similar-Event Suggestions (V1.2) — prefill only, never auto-import
 
     /// Calendar Import Review V1.1: a Parent-approved classification this
     /// EXACT `source` has used before for an external event whose
@@ -476,10 +476,65 @@ public final class CalendarPlanningCoordinationService {
     /// left with an event that still requires normal Parent review.
     ///
     /// Never creates, mutates, or persists anything — a pure read.
+    /// Implemented in terms of `historicalTitleClassifications(for:)`
+    /// below (V1.2), which now owns the actual candidate derivation —
+    /// this method's own return type/behavior is otherwise byte-for-byte
+    /// unchanged from V1.1: same source, same `.imported`-only evidence,
+    /// same per-title ambiguity/archived/workspace guards, keyed the
+    /// same way.
     public func rememberedClassifications(for source: ExternalPlanningSource) throws -> [String: RememberedClassification] {
+        var result: [String: RememberedClassification] = [:]
+        for historical in try historicalTitleClassifications(for: source) {
+            result[historical.normalizedTitle] = RememberedClassification(
+                athleteId: historical.athleteId, sportId: historical.sportId, activityType: historical.activityType
+            )
+        }
+        return result
+    }
+
+    /// Calendar Import Review V1.2 (Similar-Event Suggestions): every
+    /// PRIOR distinct normalized title's own unambiguous historical
+    /// classification for `source` — the shared evidence BOTH exact
+    /// remembering (`rememberedClassifications(for:)` above, unchanged
+    /// behavior) and similar-event suggestion
+    /// (`ExternalEventTitleSimilarity.suggestedMatch(forEventTitle:among:)`,
+    /// a pure domain function this method's result directly feeds) are
+    /// built from — one single place this candidate derivation and its
+    /// source/workspace/ambiguity boundaries live, never duplicated.
+    ///
+    /// EVIDENCE SOURCE (identical to V1.1's own, now factored out here):
+    ///   - every `CalendarImportDecision(status: .imported)` already
+    ///     recorded for THIS `source` (never another source, never
+    ///     another workspace — matching never generalizes across
+    ///     calendars/providers/families). Ignored decisions, staged-only
+    ///     Ready state, manually-created `PlannedActivity` rows with no
+    ///     import decision, and failed import attempts are never
+    ///     evidence — only a persisted `.imported` decision with a
+    ///     STILL-RESOLVING linked `PlannedActivity` qualifies;
+    ///   - that `PlannedActivity.title`, normalized via
+    ///     `ExternalEventTitleNormalization.normalize(_:)`, plus the raw
+    ///     (non-normalized) title, kept only for a caller's own "Based
+    ///     on: <title>" display — never used for matching.
+    ///
+    /// AMBIGUITY RULE (unchanged from V1.1): if the SAME normalized
+    /// title has been explicitly imported before with more than one
+    /// DISTINCT (athlete, sport, activityType) combination, NO
+    /// candidate is produced for that title at all — human judgement
+    /// wins over guessing. Similar-event suggestion applies this SAME
+    /// rule a second time, across the SET of similar (not identical)
+    /// titles a caller matches against this result — see
+    /// `ExternalEventTitleSimilarity.suggestedMatch(forEventTitle:among:)`'s
+    /// own doc comment.
+    ///
+    /// WORKSPACE/PRIVACY (unchanged from V1.1): a candidate is discarded
+    /// if its remembered athlete no longer resolves, is archived, or no
+    /// longer belongs to THIS `source`'s own `workspaceId`.
+    ///
+    /// Never creates, mutates, or persists anything — a pure read.
+    public func historicalTitleClassifications(for source: ExternalPlanningSource) throws -> [HistoricalTitleClassification] {
         let importedDecisions = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
             .filter { $0.status == .imported }
-        guard !importedDecisions.isEmpty else { return [:] }
+        guard !importedDecisions.isEmpty else { return [] }
 
         struct Candidate: Hashable {
             let athleteId: UUID
@@ -488,33 +543,38 @@ public final class CalendarPlanningCoordinationService {
         }
 
         var candidatesByTitle: [String: Set<Candidate>] = [:]
+        var originalTitleByNormalizedTitle: [String: String] = [:]
         for decision in importedDecisions {
             guard let plannedActivityId = decision.plannedActivityId,
                   let activity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)),
-                  let normalizedTitle = ExternalEventTitleNormalization.normalize(activity.title),
+                  let rawTitle = activity.title,
+                  let normalizedTitle = ExternalEventTitleNormalization.normalize(rawTitle),
                   let decisionAthleteId = decision.athleteId,
                   let decisionActivityType = decision.activityType else {
                 continue
             }
             let candidate = Candidate(athleteId: decisionAthleteId, sportId: decision.sportId, activityType: decisionActivityType)
             candidatesByTitle[normalizedTitle, default: []].insert(candidate)
+            originalTitleByNormalizedTitle[normalizedTitle] = rawTitle
         }
 
-        var result: [String: RememberedClassification] = [:]
+        var result: [HistoricalTitleClassification] = []
         for (normalizedTitle, candidates) in candidatesByTitle {
             // Ambiguity rule: more than one distinct prior classification
-            // for this exact normalized title -> no prefill.
+            // for this exact normalized title -> no candidate at all.
             guard candidates.count == 1, let onlyCandidate = candidates.first else { continue }
             guard let athlete = try athleteRepository.fetchAthlete(byId: AthleteId(rawValue: onlyCandidate.athleteId)),
                   !athlete.isArchived,
                   athlete.workspaceId == source.workspaceId else {
                 continue
             }
-            result[normalizedTitle] = RememberedClassification(
+            result.append(HistoricalTitleClassification(
+                normalizedTitle: normalizedTitle,
+                originalTitle: originalTitleByNormalizedTitle[normalizedTitle] ?? normalizedTitle,
                 athleteId: athlete.athleteId,
                 sportId: onlyCandidate.sportId.map { SportId(rawValue: $0) },
                 activityType: onlyCandidate.activityType
-            )
+            ))
         }
         return result
     }

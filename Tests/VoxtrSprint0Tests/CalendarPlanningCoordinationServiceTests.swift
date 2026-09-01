@@ -1470,6 +1470,183 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(candidates[normalizedTitle] == nil)
     }
 
+    // MARK: - Similar-Event Suggestions (Calendar Import Review V1.2)
+    //
+    // These exercise `historicalTitleClassifications(for:)` together with
+    // `ExternalEventTitleSimilarity.suggestedMatch(forEventTitle:among:)`
+    // — the SAME combination `CalendarImportReviewViewModel.refreshQueueAndStaging()`
+    // itself calls — so this is genuine end-to-end coverage of the V1.2
+    // suggestion path through real persisted `.imported` decision history,
+    // not just the pure matcher in isolation (see
+    // `ExternalEventTitleSimilarityTests.swift` for that).
+
+    @Test("Required test 8: a similar title on a DIFFERENT ExternalPlanningSource (even in the same workspace) produces no suggestion")
+    @MainActor
+    func similarSuggestionNeverCrossesSourceBoundary() throws {
+        let fixture = try makeFixture()
+        let sourceA = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-a", displayName: "Calendar A"
+        )
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-b", displayName: "Calendar B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceA.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-a"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-a", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceA).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: sourceA, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let historyForB = try fixture.coordinationService.historicalTitleClassifications(for: sourceB)
+        #expect(historyForB.isEmpty)
+        let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: "Hockeytrening U14 tirsdag", among: historyForB)
+        #expect(suggestion == nil)
+    }
+
+    @Test("Required test 9: a similar title in a DIFFERENT workspace produces no suggestion")
+    @MainActor
+    func similarSuggestionNeverCrossesWorkspaceBoundary() throws {
+        let fixture = try makeFixture()
+        let otherWorkspaceId = WorkspaceId()
+        let ownSource = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        let otherSource = try fixture.coordinationService.createSource(
+            forWorkspace: otherWorkspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie-other", displayName: "Other family"
+        )
+        try fixture.coordinationService.setSourceEnabled(ownSource.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: ownSource).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: ownSource, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let historyForOther = try fixture.coordinationService.historicalTitleClassifications(for: otherSource)
+        #expect(historyForOther.isEmpty)
+    }
+
+    @Test("Required test 10: an archived athlete's prior classification never produces a similar-event suggestion")
+    @MainActor
+    func similarSuggestionExcludesArchivedAthlete() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let athlete = try #require(try fixture.athleteRepository.fetchAthlete(byId: fixture.athleteId))
+        athlete.isArchived = true
+        try fixture.athleteRepository.save()
+
+        let history = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: "Hockeytrening U14 tirsdag", among: history)
+        #expect(suggestion == nil)
+    }
+
+    @Test("Required test 11: an IGNORED event's title never becomes similar-event suggestion evidence")
+    @MainActor
+    func similarSuggestionExcludesIgnoredDecisions() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+
+        let history = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        #expect(history.isEmpty)
+        let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: "Hockeytrening U14 tirsdag", among: history)
+        #expect(suggestion == nil)
+    }
+
+    @Test("Required test 12: a decision whose linked PlannedActivity no longer resolves never becomes similar-event suggestion evidence")
+    @MainActor
+    func similarSuggestionExcludesDanglingDecision() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+        let weekPlan = try #require(try fixture.planningService.fetchWeekPlan(byId: WeekPlanId(rawValue: imported.weekPlanId)))
+        try fixture.planningService.deletePlannedActivity(
+            imported.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId, deletedBy: ActorId()
+        )
+
+        let history = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        #expect(history.isEmpty)
+        let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: "Hockeytrening U14 tirsdag", among: history)
+        #expect(suggestion == nil)
+    }
+
+    @Test("A similar (not identical) title with unambiguous history produces a suggestion end-to-end through historicalTitleClassifications, carrying the matched original title for display")
+    @MainActor
+    func similarSuggestionProducedEndToEndFromRealImportHistory() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockeytrening U14",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, decidedBy: ActorId()
+        )
+
+        let history = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        let suggestion = try #require(ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: "Hockeytrening U14 tirsdag", among: history))
+        #expect(suggestion.athleteId == fixture.athleteId)
+        #expect(suggestion.activityType == .teamTraining)
+        #expect(suggestion.matchedOriginalTitle == "Hockeytrening U14")
+    }
+
     // MARK: - Recovery (adapted from Calendar Planning Source V1's PR #40)
 
     @Test("removeImportedActivities never touches a manually-created PlannedActivity (no externalSourceType)")

@@ -294,4 +294,22 @@ public enum CalendarPlanningStrings {
     public static func readyToImportSummary(count: Int) -> String {
         String(localized: "calendarPlanning.readyToImportSummary", defaultValue: "\(count) ready to import")
     }
+
+    // MARK: - Calendar Import Review V1.2 (Similar-Event Suggestions)
+
+    /// Shown near the pickers on a Needs Review row whose staged values
+    /// were prefilled from a similar (not identical) prior event — never
+    /// a numeric confidence, percentage, or "AI suggestion" framing; the
+    /// Parent can freely override any picker, and the event stays in
+    /// Needs Review until they explicitly tap Ready.
+    public static var similarSuggestionExplanation: String {
+        String(localized: "calendarPlanning.similarSuggestionExplanation", defaultValue: "Suggested from a similar previous event")
+    }
+
+    /// Optional, calm attribution of WHICH prior event a similar
+    /// suggestion came from — `title` is that prior event's own original
+    /// (non-normalized) title.
+    public static func similarSuggestionBasedOn(title: String) -> String {
+        String(localized: "calendarPlanning.similarSuggestionBasedOn", defaultValue: "Based on: \(title)")
+    }
 }

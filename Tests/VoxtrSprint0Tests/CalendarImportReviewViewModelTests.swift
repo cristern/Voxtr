@@ -480,6 +480,124 @@ struct CalendarImportReviewViewModelTests {
         #expect(secondActivity.athleteId == secondAthleteId.rawValue)
     }
 
+    // MARK: - V1.2 Similar-Event Suggestions
+
+    @Test("Required test 13/14: a similar (not identical) prior event PREFILLS Athlete/Sport/Activity Type but does NOT initialize isConfirmedReady, and creates no CalendarImportDecision or PlannedActivity by itself")
+    @MainActor
+    func similarSuggestionPrefillsButDoesNotConfirmReadyOrPersist() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.setStagedActivityType(.teamTraining, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
+
+        // A SIMILAR, but NOT identical, later occurrence — a weekday
+        // suffix is added, exactly the shape V1.2's own matcher accepts.
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        let staged = secondViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.athleteId == fixture.athleteId)
+        #expect(staged.activityType == .teamTraining)
+        // Required test 13: PREFILLED, but never auto-confirmed Ready —
+        // weaker evidence than an exact match.
+        #expect(staged.isConfirmedReady == false)
+        #expect(staged.suggestionKind == .similarPreviousEvent(matchedTitle: "Hockeytrening U14"))
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.readyToImportItems.isEmpty)
+
+        // Required test 14: still only ONE decision/activity total — the
+        // suggestion itself created nothing.
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
+    }
+
+    @Test("Required test 15: the Parent can override a similar suggestion's values, explicitly mark it Ready, and bulk import the override — not the suggested classification")
+    @MainActor
+    func parentCanOverrideSimilarSuggestionBeforeBulkImport() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        #expect(secondViewModel.stagedClassification(for: secondItem.externalEventKey).athleteId == fixture.athleteId)
+        #expect(secondViewModel.readyToImportItems.isEmpty) // still Needs Review, per item 13
+
+        // Parent overrides the suggested Athlete to the sibling instead
+        // — this also clears the suggestion label (see `updateStaged`'s
+        // own doc comment) and, as always, requires an explicit Ready.
+        secondViewModel.setStagedAthlete(secondAthleteId, for: secondItem.externalEventKey)
+        #expect(secondViewModel.stagedClassification(for: secondItem.externalEventKey).suggestionKind == .none)
+        secondViewModel.markReady(for: secondItem.externalEventKey)
+        #expect(secondViewModel.readyToImportItems.count == 1)
+
+        secondViewModel.bulkImportReadyItems()
+
+        let secondActivity = try #require(
+            try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+                .first { $0.externalSourceId == secondItem.externalEventKey }
+        )
+        #expect(secondActivity.athleteId == secondAthleteId.rawValue)
+    }
+
+    @Test("Required test 2: an exact remembered match takes precedence over an available similar-event suggestion for the SAME event")
+    @MainActor
+    func exactMatchTakesPrecedenceOverSimilarSuggestion() throws {
+        let fixture = try makeFixture()
+        let otherAthleteId = try addSecondAthlete(fixture)
+
+        // Exact history: "Hockeytrening U14" -> fixture.athleteId.
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        // A DIFFERENT, merely-similar historical title -> a DIFFERENT
+        // athlete. In isolation this would satisfy V1.2's own similarity
+        // rule against "Hockeytrening U14" (every token of the shorter
+        // title present in the longer one).
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 Lag B", hoursFromReference: 24)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        secondViewModel.setStagedAthlete(otherAthleteId, for: secondItem.externalEventKey)
+        secondViewModel.markReady(for: secondItem.externalEventKey)
+        secondViewModel.bulkImportReadyItems()
+
+        // A THIRD event with the EXACT same normalized title as the
+        // first import must be classified from the EXACT match
+        // (fixture.athleteId), never from the merely-similar history's
+        // own (different) athlete.
+        addEvent(fixture, identifier: "evt-3", title: "Hockeytrening U14", hoursFromReference: 48)
+        let thirdViewModel = makeViewModel(fixture)
+        thirdViewModel.load()
+        let thirdItem = try #require(thirdViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-3" })
+
+        let staged = thirdViewModel.stagedClassification(for: thirdItem.externalEventKey)
+        #expect(staged.athleteId == fixture.athleteId)
+        #expect(staged.isConfirmedReady == true)
+        #expect(staged.suggestionKind == .exactRemembered)
+    }
+
     // MARK: - 15: ignored events never resurface
 
     @Test("An ignored event remains ignored — it never appears as Ready or pending again, even after a fresh load()")
