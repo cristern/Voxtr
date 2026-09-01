@@ -9,6 +9,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -903,5 +904,170 @@ extension FamilyScheduleAndTomorrowTests {
         )
 
         #expect(viewModel.resolvedAthleteColor(for: athleteId) == AthleteColor.forAthleteId(athleteId))
+    }
+}
+
+extension FamilyScheduleAndTomorrowTests {
+    // MARK: - Plan/Ahead root: calendar review prompt
+
+    /// Test requirement 2: zero sources (or zero pending counts across
+    /// all of them) must produce the same "nothing to show" result as
+    /// the untouched `.none` default — Calm by Default, no permanent
+    /// empty-state callout.
+    @Test("CalendarReviewPrompt.from(sources:reviewCounts:) with no sources produces zero pending count and no actionable sources")
+    func calendarReviewPromptFromEmptySourcesIsEmpty() throws {
+        let prompt = FamilyScheduleViewModel.CalendarReviewPrompt.from(sources: [], reviewCounts: [:])
+        #expect(prompt.totalPendingCount == 0)
+        #expect(prompt.actionableSources.isEmpty)
+    }
+
+    /// Test requirement 3: with a mix of sources — some with pending
+    /// items, some with zero, one with no entry in `reviewCounts` at
+    /// all — the aggregate sums only the actionable ones and lists only
+    /// those as `actionableSources`.
+    @Test("CalendarReviewPrompt.from(sources:reviewCounts:) sums only sources with a positive pending count")
+    func calendarReviewPromptFromMixedSourcesAggregatesCorrectly() throws {
+        let workspaceId = WorkspaceId()
+        let sourceWithPending = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-with-pending", displayName: "Spond - Football", isEnabled: true
+        )
+        let sourceWithZero = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-with-zero", displayName: "Spond - Handball", isEnabled: true
+        )
+        let sourceWithNoEntry = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-no-entry", displayName: "Spond - Swimming", isEnabled: true
+        )
+        let secondSourceWithPending = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-with-pending-2", displayName: "School Calendar", isEnabled: true
+        )
+
+        let reviewCounts: [ExternalPlanningSourceId: Int] = [
+            sourceWithPending.externalPlanningSourceId: 5,
+            sourceWithZero.externalPlanningSourceId: 0,
+            secondSourceWithPending.externalPlanningSourceId: 2
+            // sourceWithNoEntry deliberately has no entry at all.
+        ]
+
+        let prompt = FamilyScheduleViewModel.CalendarReviewPrompt.from(
+            sources: [sourceWithPending, sourceWithZero, sourceWithNoEntry, secondSourceWithPending],
+            reviewCounts: reviewCounts
+        )
+
+        #expect(prompt.totalPendingCount == 7)
+        #expect(Set(prompt.actionableSources.map(\.externalPlanningSourceId)) == [
+            sourceWithPending.externalPlanningSourceId, secondSourceWithPending.externalPlanningSourceId
+        ])
+    }
+
+    /// Test requirement 4: a disabled source must never contribute an
+    /// actionable review count, mirroring the canonical
+    /// `FamilyCalendarSourcesViewModel.refreshSources()` guard (a
+    /// disabled source's `reviewCounts` entry is always explicitly `0`,
+    /// never fetched from the review queue at all).
+    @Test("CalendarReviewPrompt.from(sources:reviewCounts:) excludes a disabled source even if its review count would otherwise be positive")
+    func calendarReviewPromptExcludesDisabledSource() throws {
+        let workspaceId = WorkspaceId()
+        let disabledSource = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-disabled", displayName: "Disabled Calendar", isEnabled: false
+        )
+        let enabledSource = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-enabled", displayName: "Enabled Calendar", isEnabled: true
+        )
+
+        // Matches FamilyCalendarSourcesViewModel.refreshSources()'s own
+        // contract: a disabled source's entry is explicitly 0 — it is
+        // never asked for its real review queue count at all.
+        let reviewCounts: [ExternalPlanningSourceId: Int] = [
+            disabledSource.externalPlanningSourceId: 0,
+            enabledSource.externalPlanningSourceId: 3
+        ]
+
+        let prompt = FamilyScheduleViewModel.CalendarReviewPrompt.from(
+            sources: [disabledSource, enabledSource], reviewCounts: reviewCounts
+        )
+
+        #expect(prompt.totalPendingCount == 3)
+        #expect(prompt.actionableSources.map(\.externalPlanningSourceId) == [enabledSource.externalPlanningSourceId])
+    }
+
+    /// Proves the wiring between `FamilyScheduleViewModel.loadSchedule()`
+    /// and the injected `provideCalendarReviewPrompt` closure — the
+    /// same freshness contract `provideActiveAthletes` already has:
+    /// re-read at the START of every load, not only at construction.
+    @Test("FamilyScheduleViewModel.loadSchedule() assigns calendarReviewPrompt from the injected provider, freshly on every call")
+    @MainActor
+    func loadScheduleAssignsCalendarReviewPromptFromProvider() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let workspaceId = WorkspaceId()
+        let source = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-1", displayName: "Spond", isEnabled: true
+        )
+
+        var currentPrompt = FamilyScheduleViewModel.CalendarReviewPrompt.none
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService,
+            provideCalendarReviewPrompt: { currentPrompt }
+        )
+
+        // No construction-time call — matches provideActiveAthletes's
+        // own "not consulted until the first load" contract.
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 0)
+        #expect(viewModel.calendarReviewPrompt.actionableSources.isEmpty)
+
+        // Simulates pending review items appearing between two loads of
+        // the same, still-pushed screen instance — no new
+        // FamilyScheduleViewModel constructed.
+        currentPrompt = .from(sources: [source], reviewCounts: [source.externalPlanningSourceId: 5])
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+        #expect(viewModel.calendarReviewPrompt.actionableSources.map(\.externalPlanningSourceId) == [source.externalPlanningSourceId])
+    }
+
+    /// Test requirement: zero pending items must leave
+    /// `FamilyScheduleViewModel.calendarReviewPrompt` at the same
+    /// `.none`-equivalent state every pre-existing construction site
+    /// (none of which supplies `provideCalendarReviewPrompt`) already
+    /// gets by default — proving `FamilyScheduleView`'s own
+    /// `viewModel.calendarReviewPrompt.totalPendingCount > 0` gate would
+    /// show no callout in this state.
+    @Test("FamilyScheduleViewModel defaults calendarReviewPrompt to none when no provider is injected")
+    @MainActor
+    func loadScheduleDefaultsCalendarReviewPromptToNone() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 0)
+        #expect(viewModel.calendarReviewPrompt.actionableSources.isEmpty)
     }
 }

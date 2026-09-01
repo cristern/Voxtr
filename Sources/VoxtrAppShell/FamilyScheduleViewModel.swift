@@ -3,6 +3,7 @@ import VoxtrCoreContracts
 import VoxtrAthleteDomain
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrCalendarPlanningDomain
 
 /// Sprint 1.1, P1: one row in Family Schedule — either a real, planned
 /// activity (opens the canonical Activity Detail) or a recurring
@@ -78,8 +79,62 @@ public struct FamilyScheduleDayGroup: Identifiable {
 @MainActor
 @Observable
 public final class FamilyScheduleViewModel {
+    /// Plan/Ahead root round: the smallest read-only summary Family
+    /// Schedule needs to show its own calm, contextual "N calendar
+    /// events to review" entry point (see `FamilyScheduleView`'s own
+    /// doc comment) — computed ENTIRELY from the existing canonical
+    /// `CalendarPlanningCoordinationService.fetchSources(forWorkspace:)`/
+    /// `fetchReviewQueue(for:)` reads (the SAME calls
+    /// `FamilyCalendarSourcesViewModel.refreshSources()` already makes
+    /// for its own per-source review counts), never a second persisted
+    /// count, shadow state, or heuristic. `actionableSources` carries
+    /// only the `ExternalPlanningSource`s that actually have at least
+    /// one pending item — used purely to route navigation (straight to
+    /// that ONE source's own `CalendarImportReviewView` when there is
+    /// exactly one, or to the existing `FamilyCalendarSourcesView` list
+    /// when there is more than one); it is never itself business truth.
+    public struct CalendarReviewPrompt {
+        public let totalPendingCount: Int
+        public let actionableSources: [ExternalPlanningSource]
+
+        public init(totalPendingCount: Int, actionableSources: [ExternalPlanningSource]) {
+            self.totalPendingCount = totalPendingCount
+            self.actionableSources = actionableSources
+        }
+
+        /// Calm by Default: no callout at all when there is nothing to
+        /// review — this is the default for every existing
+        /// `FamilyScheduleViewModel` construction site that does not
+        /// opt into the calendar-review feature.
+        public static let none = CalendarReviewPrompt(totalPendingCount: 0, actionableSources: [])
+
+        /// The ONE pure aggregation rule this feature uses — extracted
+        /// here (rather than left inline in whichever SwiftUI View
+        /// constructs the real `provideCalendarReviewPrompt` closure) so
+        /// it is directly unit-testable without any SwiftUI view-body
+        /// harness. `sources` is expected to already be scoped to ONE
+        /// workspace and ALREADY excludes `.disconnected` sources — the
+        /// exact contract `CalendarPlanningCoordinationService.fetchSources(forWorkspace:)`
+        /// already guarantees at the canonical service boundary (it
+        /// calls `fetchAllConnected(forWorkspace:)` internally). A
+        /// source with `reviewCounts[id] == nil` (never fetched — e.g.
+        /// because it is disabled, matching
+        /// `FamilyCalendarSourcesViewModel.refreshSources()`'s own
+        /// `isEnabled` short-circuit) or `0` never contributes.
+        public static func from(sources: [ExternalPlanningSource], reviewCounts: [ExternalPlanningSourceId: Int]) -> CalendarReviewPrompt {
+            let actionable = sources.filter { (reviewCounts[$0.externalPlanningSourceId] ?? 0) > 0 }
+            let total = actionable.reduce(0) { $0 + (reviewCounts[$1.externalPlanningSourceId] ?? 0) }
+            return CalendarReviewPrompt(totalPendingCount: total, actionableSources: actionable)
+        }
+    }
+
     public private(set) var dayGroups: [FamilyScheduleDayGroup] = []
     public private(set) var errorMessage: String?
+    /// Refreshed at the START of every `loadSchedule(referenceDate:calendar:)`
+    /// call, from `provideCalendarReviewPrompt` below — never stored as
+    /// a second, competing source of truth between loads, matching
+    /// `provideActiveAthletes`'s own established freshness contract.
+    public private(set) var calendarReviewPrompt = CalendarReviewPrompt.none
 
     /// Active-roster freshness fix (runtime/state audit): previously a
     /// frozen `let activeAthletes: [AthleteProfile]`, captured once at
@@ -119,6 +174,18 @@ public final class FamilyScheduleViewModel {
     /// keeps its existing deterministic behaviour unchanged.
     private let resolveAthleteColor: (AthleteId) -> AthleteColor
 
+    /// Plan/Ahead root round: same injected-closure shape as
+    /// `resolveAthleteColor` above, for the same reason — this
+    /// ViewModel deliberately does not own `CalendarPlanningCoordinationService`
+    /// or `WorkspaceId` itself, since calendar source ownership is not
+    /// this screen's own concern (see `ExternalPlanningSource`'s own
+    /// doc comment: a source is family-owned, not schedule-owned).
+    /// Defaulted to always return `.none` so every pre-existing
+    /// `FamilyScheduleViewModel` construction site — none of which
+    /// supplies this — keeps compiling and keeps showing no callout,
+    /// unchanged.
+    private let provideCalendarReviewPrompt: () -> CalendarReviewPrompt
+
     /// Fix: previously `tomorrow` through `+14 days` — omitted today
     /// entirely, and went twice as far ahead as the approved contract.
     /// This is a family logistics surface, not Weekly Planning (which
@@ -132,12 +199,14 @@ public final class FamilyScheduleViewModel {
         provideActiveAthletes: @escaping () -> [AthleteProfile],
         trainingPlanningCoordinationService: TrainingPlanningCoordinationService,
         planningService: PlanningService,
-        resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId
+        resolveAthleteColor: @escaping (AthleteId) -> AthleteColor = AthleteColor.forAthleteId,
+        provideCalendarReviewPrompt: @escaping () -> CalendarReviewPrompt = { .none }
     ) {
         self.provideActiveAthletes = provideActiveAthletes
         self.trainingPlanningCoordinationService = trainingPlanningCoordinationService
         self.planningService = planningService
         self.resolveAthleteColor = resolveAthleteColor
+        self.provideCalendarReviewPrompt = provideCalendarReviewPrompt
     }
 
     /// The one function every Family Schedule row calls for an
@@ -162,6 +231,10 @@ public final class FamilyScheduleViewModel {
     /// it always used, so no existing behavior changes.
     func loadSchedule(referenceDate: Date, calendar: Calendar) {
         errorMessage = nil
+        // Plan/Ahead root round: refreshed fresh at the START of every
+        // load, exactly like `activeAthletes` below — never held as a
+        // second, competing source of truth between loads.
+        calendarReviewPrompt = provideCalendarReviewPrompt()
         // Active-roster freshness fix: obtained fresh at the START of
         // this load, from the live provider — never the construction-time
         // value this ViewModel no longer stores. Used consistently as a

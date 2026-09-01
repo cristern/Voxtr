@@ -2,6 +2,7 @@ import SwiftUI
 import VoxtrCoreContracts
 import VoxtrPlanningDomain
 import VoxtrTrainingDomain
+import VoxtrCalendarPlanningDomain
 
 /// Sprint 1 completion package, Part 5, extended in Sprint 1.1 P1.
 /// "Family Schedule" — a forward-looking overview of upcoming planned
@@ -19,6 +20,25 @@ import VoxtrTrainingDomain
 /// is shown but not tappable into Activity Detail — accepting it
 /// remains that athlete's Weekly Plan screen's own job, not duplicated
 /// here.
+///
+/// Plan/Ahead root round: also shows an optional, calm, contextual
+/// "N calendar events to review" entry point near the top of the
+/// screen — ONLY when `viewModel.calendarReviewPrompt.totalPendingCount`
+/// is actually positive (Calm by Default: no permanent "0 events"
+/// section). Tapping it reuses the EXISTING Calendar Import Review /
+/// Calendar Sources screens verbatim — never a second, parallel review
+/// implementation: straight to that ONE source's own
+/// `CalendarImportReviewView` when exactly one connected source has
+/// pending work, or to the existing `FamilyCalendarSourcesView` list
+/// (which already shows every source's own review count and its own
+/// link into `CalendarImportReviewView`) when more than one does. Only
+/// meaningful when `calendarSourcesViewModel` is supplied — `nil` for
+/// this view's OTHER production entry point
+/// (`FamilyHomeContentView`'s "View upcoming schedule" destination),
+/// which does not opt into this feature; `viewModel.calendarReviewPrompt`
+/// itself already defaults to `.none` there regardless, so this is
+/// purely a defensive "no destination to navigate to" guard, never the
+/// actual gate.
 public struct FamilyScheduleView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: FamilyScheduleViewModel
@@ -27,6 +47,7 @@ public struct FamilyScheduleView: View {
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    private let calendarSourcesViewModel: FamilyCalendarSourcesViewModel?
 
     public init(
         viewModel: FamilyScheduleViewModel,
@@ -34,7 +55,8 @@ public struct FamilyScheduleView: View {
         planningService: PlanningService,
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarSourcesViewModel: FamilyCalendarSourcesViewModel? = nil
     ) {
         _viewModel = State(initialValue: viewModel)
         self.actorId = actorId
@@ -42,6 +64,7 @@ public struct FamilyScheduleView: View {
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarSourcesViewModel = calendarSourcesViewModel
     }
 
     public var body: some View {
@@ -51,6 +74,23 @@ public struct FamilyScheduleView: View {
                     Text(errorMessage)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("familySchedule.errorMessage")
+                }
+                .voxtrRowSurface()
+            }
+
+            // Plan/Ahead root round: calm, contextual — never shown at
+            // all when there is nothing to review (Calm by Default), and
+            // never rendered without a real destination to navigate to.
+            if let calendarSourcesViewModel, viewModel.calendarReviewPrompt.totalPendingCount > 0 {
+                Section {
+                    NavigationLink {
+                        calendarReviewDestination(calendarSourcesViewModel: calendarSourcesViewModel)
+                    } label: {
+                        Text(CalendarPlanningStrings.familyScheduleCalendarReviewPrompt(count: viewModel.calendarReviewPrompt.totalPendingCount))
+                            .font(VoxtrTypography.cardTitle)
+                            .foregroundStyle(VoxtrColor.textPrimary)
+                    }
+                    .accessibilityIdentifier("familySchedule.calendarReviewLink")
                 }
                 .voxtrRowSurface()
             }
@@ -82,6 +122,28 @@ public struct FamilyScheduleView: View {
         .navigationTitle("Family Schedule")
         .onAppear {
             viewModel.loadSchedule()
+        }
+    }
+
+    /// Plan/Ahead root round: the smallest coherent navigation reusing
+    /// the EXISTING Calendar Import Review / Calendar Sources screens —
+    /// never a second, parallel review implementation, and never a
+    /// relocation of Calendar Sources configuration ownership (still
+    /// reached from Profile as before; this is only a SECOND navigation
+    /// path into the SAME screens). Exactly one actionable source routes
+    /// straight to that source's own `CalendarImportReviewView` (via the
+    /// EXISTING `FamilyCalendarSourcesViewModel.makeImportReviewViewModel(for:)`
+    /// factory `CalendarSourceDetailView` already uses); more than one
+    /// routes to the EXISTING `FamilyCalendarSourcesView` list, which
+    /// already shows every source's own review count and its own link
+    /// into `CalendarImportReviewView` — never a NEW multi-source list.
+    @ViewBuilder
+    private func calendarReviewDestination(calendarSourcesViewModel: FamilyCalendarSourcesViewModel) -> some View {
+        let actionableSources = viewModel.calendarReviewPrompt.actionableSources
+        if actionableSources.count == 1, let onlySource = actionableSources.first {
+            CalendarImportReviewView(viewModel: calendarSourcesViewModel.makeImportReviewViewModel(for: onlySource))
+        } else {
+            FamilyCalendarSourcesView(viewModel: calendarSourcesViewModel)
         }
     }
 
