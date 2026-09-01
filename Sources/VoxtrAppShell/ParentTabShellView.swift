@@ -285,19 +285,24 @@ private func fetchActiveAthletes(workspaceId: WorkspaceId, athleteRepository: At
 /// Wraps `FamilyScheduleView`, which deliberately owns no
 /// `NavigationStack` of its own, in exactly one.
 ///
-/// Per-athlete Weekly Plan is still reachable — via an explicit
-/// toolbar action (never auto-selecting an athlete, exactly the same
-/// explicit-selection contract the old menu enforced) — since
-/// `WeeklyPlanningView` has no OTHER production entry point in this
-/// app (verified: this file is its only construction site).
-/// `WeeklyPlanningView` itself is completely unchanged; only this
-/// toolbar call site was added. Uses value-based navigation
-/// (`NavigationPath` + `.navigationDestination(for:)`) rather than an
-/// inline-destination `NavigationLink` inside the `Menu` — the same
-/// "value-based navigation" fix this app's own history already
-/// established for Home (see the Athlete Home stale-navigation-state
-/// investigation) — never a fresh, unproven pattern for this exact
-/// class of "identity-driven push" navigation.
+/// Per-athlete Weekly Plan is still reachable — never auto-selecting an
+/// athlete — since `WeeklyPlanningView` has no OTHER production entry
+/// point in this app (verified: this file is its only construction
+/// site). `WeeklyPlanningView` itself is completely unchanged. This
+/// view owns the ACTUAL `NavigationStack`/`NavigationPath` (value-based
+/// navigation — `NavigationPath` + `.navigationDestination(for:)` —
+/// the same "value-based navigation" fix this app's own history already
+/// established for Home; see the Athlete Home stale-navigation-state
+/// investigation) and the `.navigationDestination(for: AthleteId.self)`
+/// that actually constructs `WeeklyPlanningView`, but the toolbar
+/// CONTROL that decides which athlete(s) can be reached — a submenu
+/// across every active athlete, or (VX-037 round) a single direct
+/// button once the schedule is filtered to exactly one athlete — now
+/// lives inside `FamilyScheduleView` itself, driven by the
+/// `onNavigateToWeeklyPlan` closure passed below. This tab supplies
+/// only `weeklyPlanPath.append(_:)`, the SAME value-based push it
+/// always used; `FamilyScheduleView` never gets a path/binding of its
+/// own (it deliberately still owns no `NavigationStack`).
 ///
 /// Also constructs the ONE `FamilyCalendarSourcesViewModel` this tab
 /// needs — the SAME canonical instance both feeds Family Schedule's own
@@ -353,8 +358,11 @@ private struct ParentPlanTabView: View {
     @State private var familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
     /// Plan/Ahead root round: the explicit, value-based path to
     /// per-athlete Weekly Plan — see this type's own doc comment for why
-    /// this shape (never an inline-destination `NavigationLink` inside
-    /// the toolbar `Menu`) was chosen.
+    /// this shape (never an inline-destination `NavigationLink`) was
+    /// chosen. VX-037 round: the toolbar control that decides WHICH
+    /// athlete to append now lives inside `FamilyScheduleView` itself
+    /// (driven by `onNavigateToWeeklyPlan` below); this tab still owns
+    /// the path itself and the real `.navigationDestination(for:)`.
     @State private var weeklyPlanPath = NavigationPath()
 
     init(
@@ -406,24 +414,9 @@ private struct ParentPlanTabView: View {
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
-                calendarSourcesViewModel: familyCalendarSourcesViewModel
+                calendarSourcesViewModel: familyCalendarSourcesViewModel,
+                onNavigateToWeeklyPlan: { athleteId in weeklyPlanPath.append(athleteId) }
             )
-            .toolbar {
-                if !activeAthletes.isEmpty {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Menu {
-                            ForEach(activeAthletes, id: \.athleteId) { athlete in
-                                Button(athlete.givenName) {
-                                    weeklyPlanPath.append(athlete.athleteId)
-                                }
-                            }
-                        } label: {
-                            Label("Weekly Plan", systemImage: "calendar.badge.clock")
-                        }
-                        .accessibilityIdentifier("parentPlan.weeklyPlanMenu")
-                    }
-                }
-            }
             .navigationDestination(for: AthleteId.self) { athleteId in
                 if let athlete = activeAthletes.first(where: { $0.athleteId == athleteId }) {
                     WeeklyPlanningView(

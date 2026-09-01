@@ -32,6 +32,17 @@ public enum FamilyScheduleRow: Identifiable {
         }
     }
 
+    /// VX-037: the stable `AthleteId` this row belongs to — used by
+    /// `FamilyScheduleViewModel.visibleDayGroups` to filter rows by
+    /// athlete selection. Never derived from `athleteName` or any other
+    /// display text.
+    public var athleteId: AthleteId {
+        switch self {
+        case .planned(let row): return row.athleteId
+        case .recurringSuggestion(_, let athleteId, _, _): return athleteId
+        }
+    }
+
     /// Sport / Activity Identity domain foundation: resolves primary activity
     /// label following the canonical `Name ?? Sport` rule via `ActivityLabelResolver`.
     @MainActor
@@ -157,7 +168,71 @@ public final class FamilyScheduleViewModel {
     /// call, from `provideCalendarReviewPrompt` below — never stored as
     /// a second, competing source of truth between loads, matching
     /// `provideActiveAthletes`'s own established freshness contract.
+    /// VX-037: deliberately NOT filtered by `selectedAthleteIds` —
+    /// Calendar Review is family/source-owned work, not athlete-filtered
+    /// schedule truth (see this task's own product contract). Filtering
+    /// the schedule must never filter this count.
     public private(set) var calendarReviewPrompt = CalendarReviewPrompt.none
+
+    /// VX-037: the CURRENT active roster, as of the last
+    /// `loadSchedule(referenceDate:calendar:)` call — exposed read-only
+    /// so `FamilyScheduleView` can build its athlete-filter control and
+    /// its Weekly Plan navigation menu from the SAME live roster this
+    /// ViewModel already fetches for its own schedule query, never a
+    /// second, separately-fetched athlete list.
+    public private(set) var activeAthletes: [AthleteProfile] = []
+
+    /// VX-037: which athletes the schedule is currently filtered to.
+    /// Empty means "All" — the default, and the state every existing
+    /// caller (none of which calls `setSelectedAthletes`) stays in
+    /// forever. Pure VIEW STATE ONLY: never persisted, never mutates
+    /// `PlannedActivity`/athlete ownership/Planning truth/calendar
+    /// import state — it only changes what `visibleDayGroups` below
+    /// returns from data already loaded for the full active roster.
+    /// Normalized against the current `activeAthletes` at the START of
+    /// every load (see `loadSchedule(referenceDate:calendar:)`), so a
+    /// selected athlete who is archived while not currently visible can
+    /// never remain selected — it is silently dropped, never left
+    /// dangling on a now-invalid `AthleteId`.
+    public private(set) var selectedAthleteIds: Set<AthleteId> = []
+
+    /// VX-037: the one mutator for `selectedAthleteIds` — pass an empty
+    /// set for "All." Never mutates any canonical domain state; purely
+    /// changes what `visibleDayGroups` filters to on the NEXT read (no
+    /// reload/re-query needed, since filtering happens over rows already
+    /// loaded for the full active roster).
+    public func setSelectedAthletes(_ athleteIds: Set<AthleteId>) {
+        selectedAthleteIds = athleteIds
+    }
+
+    /// VX-037: the rows Family Schedule should actually display —
+    /// `dayGroups` filtered by `selectedAthleteIds` (unfiltered, i.e.
+    /// identical to `dayGroups`, when the selection is empty/"All"). A
+    /// day whose only rows belong to athletes filtered OUT is dropped
+    /// entirely, never shown as an empty day section. `dayGroups` itself
+    /// stays the full, unfiltered family schedule — Calendar Review and
+    /// any other consumer of the full roster's data are unaffected by
+    /// this filter.
+    public var visibleDayGroups: [FamilyScheduleDayGroup] {
+        guard !selectedAthleteIds.isEmpty else { return dayGroups }
+        return dayGroups.compactMap { group in
+            let filteredRows = group.rows.filter { selectedAthleteIds.contains($0.athleteId) }
+            guard !filteredRows.isEmpty else { return nil }
+            return FamilyScheduleDayGroup(id: group.id, date: group.date, rows: filteredRows)
+        }
+    }
+
+    /// VX-037: non-nil ONLY when the current filter represents EXACTLY
+    /// one selected athlete — the one condition under which Family
+    /// Schedule may offer a direct, un-ambiguous path to that athlete's
+    /// Weekly Plan. `All` (empty selection) or a multiple-athlete
+    /// selection always returns `nil` here — this ViewModel never
+    /// guesses which athlete's Weekly Plan the Parent wants; picking
+    /// among several always remains an explicit, separate choice.
+    public var singleSelectedAthleteId: AthleteId? {
+        guard selectedAthleteIds.count == 1 else { return nil }
+        return selectedAthleteIds.first
+    }
 
     /// Active-roster freshness fix (runtime/state audit): previously a
     /// frozen `let activeAthletes: [AthleteProfile]`, captured once at
@@ -264,6 +339,17 @@ public final class FamilyScheduleViewModel {
         // local snapshot for the rest of THIS load only; never held as a
         // second, competing source of truth between loads.
         let activeAthletes = provideActiveAthletes()
+        self.activeAthletes = activeAthletes
+        // VX-037: normalize the filter against the CURRENT roster —
+        // never leave a selected AthleteId dangling once its athlete is
+        // no longer active (archived elsewhere while this screen stayed
+        // pushed). An empty result after normalization means "All,"
+        // exactly this ViewModel's own default/safe-fallback state —
+        // never a permanently-empty selection that shows nothing.
+        if !selectedAthleteIds.isEmpty {
+            let activeAthleteIds = Set(activeAthletes.map(\.athleteId))
+            selectedAthleteIds = selectedAthleteIds.intersection(activeAthleteIds)
+        }
         guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: referenceDate) else {
             dayGroups = []
             return
