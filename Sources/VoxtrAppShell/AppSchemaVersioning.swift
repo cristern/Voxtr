@@ -1099,7 +1099,7 @@ public enum AppSchemaV7: VersionedSchema {
     }
 }
 
-/// Family-Owned Calendar Sources V1: the current, live version. Adds
+/// Family-Owned Calendar Sources V1: adds
 /// TWO model types, `ExternalPlanningSource.self` and
 /// `CalendarImportDecision.self` (`VoxtrCalendarPlanningDomain`) —
 /// replacing `CalendarPlanningMapping`'s athlete-scoped calendar mapping
@@ -1118,6 +1118,106 @@ public enum AppSchemaV7: VersionedSchema {
 public enum AppSchemaV8: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(8, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+            CalendarPlanningMapping.self,
+            ExternalPlanningSource.self,
+            AppSchemaV8.CalendarImportDecision.self,
+        ]
+    }
+
+    /// FROZEN — the genuine V8-era shape of `CalendarImportDecision`,
+    /// before the PR #48 follow-up (durable Suggested Ignore evidence)
+    /// added `ignoredEventTitle: String?`. This type exists ONLY to give
+    /// `AppSchemaV8.models` above an accurate historical shape for
+    /// migration purposes — nothing in this codebase's live repositories/
+    /// services/UI may construct or read it; see
+    /// `VoxtrCalendarPlanningDomain.CalendarImportDecision` for the real,
+    /// live, current type.
+    @Model
+    public final class CalendarImportDecision {
+        @Attribute(.unique) public var id: UUID
+        public var sourceId: UUID
+        public var externalEventKey: String
+        public var status: CalendarImportDecisionStatus
+        public var athleteId: UUID?
+        public var sportId: UUID?
+        public var activityType: ActivityType?
+        public var plannedActivityId: UUID?
+        public var decidedBy: UUID
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            sourceId: UUID,
+            externalEventKey: String,
+            status: CalendarImportDecisionStatus,
+            athleteId: UUID? = nil,
+            sportId: UUID? = nil,
+            activityType: ActivityType? = nil,
+            plannedActivityId: UUID? = nil,
+            decidedBy: UUID,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.sourceId = sourceId
+            self.externalEventKey = externalEventKey
+            self.status = status
+            self.athleteId = athleteId
+            self.sportId = sportId
+            self.activityType = activityType
+            self.plannedActivityId = plannedActivityId
+            self.decidedBy = decidedBy
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+    }
+}
+
+/// PR #48 follow-up (durable Suggested Ignore evidence): adds ONE field
+/// to an already-listed live type — `CalendarImportDecision.ignoredEventTitle: String?`
+/// — no model *type* addition/removal, so `AppSchema.modelTypes` itself
+/// is unchanged by this round (see that file's own doc comment: a
+/// field-level change does not touch that array), the same class of
+/// change as `AthleteSettings.preferredColor` (V2→V3) and
+/// `ActivityReminder.reminderText` (V5→V6).
+///
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V8 was
+/// the latest version; this round now freezes it to the exact 22-entity
+/// literal V8 always actually had, plus a nested, frozen V8-era
+/// `CalendarImportDecision` copy (see that type's own doc comment
+/// immediately above), following this file's own "HOW TO ADD A NEW
+/// VERSION" step 1, same as every version before it. See `AppSchemaV9`
+/// immediately below for the new latest version.
+public enum AppSchemaV9: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(9, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1178,7 +1278,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
         [
             AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self,
-            AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self,
+            AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self, AppSchemaV9.self,
         ]
     }
 
@@ -1276,6 +1376,24 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// existing 20 entities' data — including every existing
     /// `CalendarPlanningMapping`, `PlannedActivity`, and
     /// `ActivityReminder` row — completely untouched.
+    ///
+    /// V8 ("8.0.0", 22 entities) → V9 ("9.0.0", same 22 entities — adds
+    /// `CalendarImportDecision.ignoredEventTitle: String?`, PR #48
+    /// follow-up: durable Suggested Ignore evidence). `.lightweight`
+    /// again: the exact same class of change as V2→V3's
+    /// `AthleteSettings.preferredColor` addition and V5→V6's
+    /// `ActivityReminder.reminderText` addition — a genuinely new,
+    /// genuinely optional column with no other value it could infer for
+    /// an existing row than `nil`, which is exactly what this migration
+    /// needs: every pre-existing `.ignored` `CalendarImportDecision` row
+    /// migrates with `ignoredEventTitle == nil`, honestly representing
+    /// "no title snapshot was ever captured for this decision" rather
+    /// than inventing one — such a row simply contributes no evidence to
+    /// `CalendarPlanningCoordinationService.historicalIgnoredTitles(for:)`
+    /// until the Parent ignores that (or a similar) event again under the
+    /// new code path. Every existing decision's `status`/`athleteId`/
+    /// `sportId`/`activityType`/`plannedActivityId` is completely
+    /// untouched; only this one new field starts unset on old rows.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
@@ -1285,6 +1403,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: AppSchemaV5.self, toVersion: AppSchemaV6.self),
             .lightweight(fromVersion: AppSchemaV6.self, toVersion: AppSchemaV7.self),
             .lightweight(fromVersion: AppSchemaV7.self, toVersion: AppSchemaV8.self),
+            .lightweight(fromVersion: AppSchemaV8.self, toVersion: AppSchemaV9.self),
         ]
     }
 }

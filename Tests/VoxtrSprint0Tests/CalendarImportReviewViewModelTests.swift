@@ -991,6 +991,163 @@ struct CalendarImportReviewViewModelTests {
         #expect(decisions.allSatisfy { $0.status == .ignored })
     }
 
+    // MARK: - PR #48 follow-up (durable Suggested Ignore evidence)
+
+    @Test("Required test 2: after the original ignored event no longer appears in the provider (aged out of the reconciliation horizon), a NEW event with the exact same title still becomes Suggested Ignore")
+    @MainActor
+    func exactTitleSuggestedIgnoreSurvivesProviderHorizonExpiry() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        // The original ignored occurrence ages entirely out of the
+        // provider's own reconciliation window — e.g. EventKit simply
+        // stops returning it. Before this round's durable evidence, this
+        // alone would have silently broken Suggested Ignore for every
+        // future occurrence of the same repeating event.
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = []
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.suggestedIgnoreMatches[secondItem.externalEventKey] == "Team Practice")
+        // The Ignored section itself (horizon-bound, unchanged) no
+        // longer shows the original occurrence — proving this
+        // suggestion came from durable decision history, not from
+        // `ignoredItems`.
+        #expect(secondViewModel.ignoredItems.isEmpty)
+    }
+
+    @Test("Required test 3: after the original ignored event ages out of the provider horizon, a conservatively similar (not identical) title still becomes Suggested Ignore")
+    @MainActor
+    func similarTitleSuggestedIgnoreSurvivesProviderHorizonExpiry() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = []
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+        #expect(secondViewModel.suggestedIgnoreMatches[secondItem.externalEventKey] == "Hockeytrening U14")
+    }
+
+    @Test("Required test 5: prior Ignore evidence in a DIFFERENT workspace's source never produces Suggested Ignore, even for an identically-titled event")
+    @MainActor
+    func ignoreEvidenceFromAnotherWorkspaceDoesNotApply() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        // A completely different family/workspace, with its own source
+        // and its own independent occurrence of an identically-titled
+        // event.
+        let otherWorkspaceId = WorkspaceId()
+        let otherSource = try fixture.coordinationService.createSource(
+            forWorkspace: otherWorkspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-other-familie", displayName: "Other Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(otherSource.externalPlanningSourceId, isEnabled: true)
+        fixture.calendarProvider.eventsByCalendar["cal-other-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-other-1", calendarIdentifier: "cal-other-familie", title: "Team Practice",
+                startDate: Self.referenceDate.addingTimeInterval(3600), endDate: Self.referenceDate.addingTimeInterval(7200),
+                isAllDay: false, isRecurring: false
+            )
+        ]
+        let otherViewModel = CalendarImportReviewViewModel(
+            calendarPlanningCoordinationService: fixture.coordinationService,
+            athleteRepository: fixture.athleteRepository, sportRepository: fixture.sportRepository, source: otherSource, actorId: ActorId()
+        )
+        otherViewModel.load()
+        let otherItem = try #require(otherViewModel.reviewQueue.first)
+
+        #expect(otherViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(otherViewModel.needsReviewItems.map(\.externalEventKey).contains(otherItem.externalEventKey))
+    }
+
+    @Test("Required test 7: restoring (\"Review again\") the original ignored decision removes its durable evidence too — a later identically-titled event no longer becomes Suggested Ignore")
+    @MainActor
+    func restoringIgnoredDecisionRemovesDurableEvidence() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        try fixture.coordinationService.restoreIgnoredEvent(firstItem.externalEventKey, for: fixture.source)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        #expect(secondViewModel.suggestedIgnoreItems.isEmpty)
+        #expect(secondViewModel.needsReviewItems.map(\.externalEventKey).contains(secondItem.externalEventKey))
+    }
+
+    @Test("Required test 11: the actual Ignored section (ignoredItems) stays horizon-bound and unchanged by durable Suggested Ignore evidence — it never retroactively includes a decision whose event has aged out")
+    @MainActor
+    func ignoredSectionStaysHorizonBoundAfterDurableEvidenceChange() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        viewModel.ignore(item)
+        viewModel.load()
+        #expect(viewModel.ignoredItems.map(\.externalEventKey).contains(item.externalEventKey))
+
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = []
+        viewModel.load()
+
+        #expect(viewModel.ignoredItems.isEmpty)
+    }
+
+    @Test("Required test 12: an exact remembered classification for a title takes precedence over Suggested Ignore evidence for the SAME normalized title")
+    @MainActor
+    func classificationPrecedesSuggestedIgnoreForSameTitle() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 24)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        secondViewModel.ignore(secondItem)
+
+        addEvent(fixture, identifier: "evt-3", title: "Team Practice", hoursFromReference: 48)
+        let thirdViewModel = makeViewModel(fixture)
+        thirdViewModel.load()
+        let thirdItem = try #require(thirdViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-3" })
+
+        #expect(thirdViewModel.stagedClassification(for: thirdItem.externalEventKey).athleteId == fixture.athleteId)
+        #expect(thirdViewModel.stagedClassification(for: thirdItem.externalEventKey).isConfirmedReady == true)
+        #expect(!thirdViewModel.suggestedIgnoreItems.map(\.externalEventKey).contains(thirdItem.externalEventKey))
+    }
+
     // MARK: - V1.3 Needs Attention
 
     @Test("Required test 20: changing a staged picker after a bulk-import failure clears that event's failure state")

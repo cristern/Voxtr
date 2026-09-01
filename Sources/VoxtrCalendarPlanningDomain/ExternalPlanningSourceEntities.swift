@@ -184,6 +184,39 @@ public final class CalendarImportDecision {
     /// find the canonical record this decision is about without a
     /// second identity lookup. `nil` for `.ignored`.
     public var plannedActivityId: UUID?
+    /// Calendar Import Review closeout follow-up (durable Suggested
+    /// Ignore evidence): set ONLY when `status == .ignored` — the
+    /// ORIGINAL (non-normalized) title of the exact external event the
+    /// Parent explicitly ignored, captured at the moment of that
+    /// decision. `nil` for `.imported` (evidence for that case already
+    /// lives durably on the linked `PlannedActivity.title` via
+    /// `plannedActivityId` — see `CalendarPlanningCoordinationService.historicalTitleClassifications(for:)`).
+    ///
+    /// This is HISTORICAL EVIDENCE about ONE Parent decision, never a
+    /// persisted matching rule: it records "the Parent explicitly
+    /// ignored an event titled X," nothing more. It is read (never
+    /// written to compute a match) by
+    /// `CalendarPlanningCoordinationService.historicalIgnoredTitles(for:)`,
+    /// which a caller compares a NEW event's title against using
+    /// `ExternalEventTitleSimilarity` — the same conservative, stateless
+    /// matcher V1.2 classification suggestions already use. Matching
+    /// against it can only ever propose a NEW Suggested Ignore for a
+    /// caller to review; it never itself creates another
+    /// `CalendarImportDecision`.
+    ///
+    /// Exists specifically because this decision's own
+    /// `externalEventKey` is an opaque provider identity string with no
+    /// title in it, and — unlike an imported decision — an ignored
+    /// decision has no linked `PlannedActivity` to read a title back
+    /// from; without this field, Suggested Ignore evidence would
+    /// silently stop working the moment the exact ignored calendar
+    /// occurrence ages out of the provider's own reconciliation window
+    /// (`CalendarPlanningCoordinationService.qualifyingEvents(for:)`),
+    /// which defeats this feature's entire purpose (recognizing a
+    /// REPEATING event the Parent has ignored before). Deleting this
+    /// decision (`restoreIgnoredEvent(_:for:)`, "Review again") deletes
+    /// this field along with it — there is no separate record to orphan.
+    public var ignoredEventTitle: String?
     /// The real Parent `ActorId` who made this decision — never
     /// `.system`; see this domain's own actor-attribution contract.
     public var decidedBy: UUID
@@ -200,6 +233,7 @@ public final class CalendarImportDecision {
         sportId: SportId? = nil,
         activityType: ActivityType? = nil,
         plannedActivityId: PlannedActivityId? = nil,
+        ignoredEventTitle: String? = nil,
         decidedBy: ActorId,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -214,6 +248,7 @@ public final class CalendarImportDecision {
         self.sportId = sportId?.rawValue
         self.activityType = activityType
         self.plannedActivityId = plannedActivityId?.rawValue
+        self.ignoredEventTitle = ignoredEventTitle
         self.decidedBy = decidedBy.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt

@@ -414,6 +414,41 @@ public final class CalendarPlanningCoordinationService {
         return ignored.sorted { $0.event.startDate < $1.event.startDate }
     }
 
+    /// PR #48 follow-up (durable Suggested Ignore evidence): every
+    /// ORIGINAL (non-normalized) title the Parent has explicitly ignored
+    /// for THIS `source` — ever, regardless of whether the exact ignored
+    /// external event is still resolvable within the current provider
+    /// reconciliation horizon. Deliberately UNBOUNDED and separate from
+    /// `fetchIgnoredReviewItems(for:)` above: that method stays
+    /// horizon-bound because it needs a currently-resolvable
+    /// `ExternalCalendarEvent` to display/reverse in the Ignored section;
+    /// this method exists purely as historical matching evidence for
+    /// `ExternalEventTitleSimilarity.suggestedIgnoreMatch(forEventTitle:amongPreviouslyIgnoredTitles:)`,
+    /// so a repeating event the Parent already ignored keeps being
+    /// recognized as Suggested Ignore even after the original occurrence
+    /// ages out of the provider's own window. These are different read
+    /// purposes and must not be conflated.
+    ///
+    /// Scoped to THIS `source` only (never another source, never another
+    /// workspace — matching never generalizes across calendars/providers/
+    /// families, exactly like `historicalTitleClassifications(for:)`).
+    /// Only `.ignored` decisions with a non-nil `ignoredEventTitle`
+    /// contribute — `.imported` decisions carry no `ignoredEventTitle`
+    /// and are never evidence here. A decision deleted via
+    /// `restoreIgnoredEvent(_:for:)` ("Review again") naturally stops
+    /// contributing, since its `ignoredEventTitle` lived on that same
+    /// now-deleted row.
+    ///
+    /// Never creates, mutates, or persists anything — a pure read. The
+    /// caller (`CalendarImportReviewViewModel`) only ever uses this to
+    /// PROPOSE a new event as Suggested Ignore for Parent review; it is
+    /// never used to automatically create a `CalendarImportDecision`.
+    public func historicalIgnoredTitles(for source: ExternalPlanningSource) throws -> [String] {
+        try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+            .filter { $0.status == .ignored }
+            .compactMap(\.ignoredEventTitle)
+    }
+
     /// Shared by `fetchReviewQueue(for:)` and `fetchIgnoredReviewItems(for:)`:
     /// every all-day-excluded event in `source`'s calendar within the
     /// reconciliation window, or `[]` immediately (never calling the
@@ -737,6 +772,7 @@ public final class CalendarPlanningCoordinationService {
             sportId: nil,
             activityType: nil,
             plannedActivityId: nil,
+            ignoredEventTitle: item.event.title,
             decidedBy: decidedBy
         )
     }

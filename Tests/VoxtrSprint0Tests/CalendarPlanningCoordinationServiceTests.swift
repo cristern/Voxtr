@@ -496,6 +496,112 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(decisions.first?.status == .ignored)
     }
 
+    // MARK: - PR #48 follow-up: durable Suggested Ignore evidence
+    // (historicalIgnoredTitles(for:))
+
+    @Test("Required test 1: an explicit Ignore persists the event's title on its CalendarImportDecision, and historicalIgnoredTitles(for:) returns it even after the event disappears from the provider horizon")
+    @MainActor
+    func ignorePersistsTitleEvidenceSurvivingHorizonExpiry() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+        #expect(decision.ignoredEventTitle == "Team Practice")
+
+        // The event ages entirely out of the provider's own
+        // reconciliation window — historicalIgnoredTitles never touches
+        // the provider at all, so this must not affect it.
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = []
+        #expect(try fixture.coordinationService.fetchIgnoredReviewItems(for: source).isEmpty)
+
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: source) == ["Team Practice"])
+    }
+
+    @Test("Required test 4: historicalIgnoredTitles(for:) never includes titles ignored on a DIFFERENT source")
+    @MainActor
+    func historicalIgnoredTitlesIsSourceScoped() throws {
+        let fixture = try makeFixture()
+        let sourceA = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-a", displayName: "Calendar A"
+        )
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-b", displayName: "Calendar B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceA.externalPlanningSourceId, isEnabled: true)
+        try fixture.coordinationService.setSourceEnabled(sourceB.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-b"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-b", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let itemB = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceB).first)
+        try fixture.coordinationService.ignore(itemB, for: sourceB, decidedBy: ActorId())
+
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: sourceA).isEmpty)
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: sourceB) == ["Team Practice"])
+    }
+
+    @Test("Required test 6: historicalIgnoredTitles(for:) never includes a title from an .imported decision")
+    @MainActor
+    func historicalIgnoredTitlesExcludesImportedDecisions() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        _ = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: source).isEmpty)
+    }
+
+    @Test("Required test 7: restoreIgnoredEvent deletes the decision that carried the title snapshot, so historicalIgnoredTitles(for:) no longer returns it")
+    @MainActor
+    func restoreRemovesTitleEvidence() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.ignore(item, for: source, decidedBy: ActorId())
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: source) == ["Team Practice"])
+
+        try fixture.coordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
+
+        #expect(try fixture.coordinationService.historicalIgnoredTitles(for: source).isEmpty)
+    }
+
     @Test("Calling reconcile() repeatedly after an event is imported never creates a second PlannedActivity")
     @MainActor
     func repeatedSyncNeverDuplicatesImportedActivity() throws {
