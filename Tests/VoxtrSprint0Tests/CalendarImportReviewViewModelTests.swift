@@ -1298,6 +1298,23 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.reviewQueue.isEmpty)
     }
 
+    @Test("Required test 5: a source disabled before a single-row explicit Ignore creates no CalendarImportDecision, and surfaces the SAME calm sourceDisabledError copy restore(_:) already uses — never a generic fallback")
+    @MainActor
+    func singleRowIgnoreSurfacesSourceDisabledCalmlyAndPersistsNothing() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        try fixture.coordinationService.setSourceEnabled(fixture.source.externalPlanningSourceId, isEnabled: false)
+
+        viewModel.ignore(item)
+
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+        #expect(viewModel.errorMessage == CalendarPlanningStrings.sourceDisabledError)
+    }
+
     // MARK: - Live Suggested Ignore re-evaluation
 
     @Test("Required test 1: initial load — two untouched pending identical-title events are both in Needs Review")
@@ -1724,31 +1741,40 @@ struct CalendarImportReviewViewModelTests {
         #expect(viewModel.errorMessage != nil)
     }
 
-    @Test("Required test 25: a source becoming disabled prevents the Ready import from unsafely continuing, even after a confirmed Suggested Ignore batch")
+    @Test("Required test 4/25: a source ALREADY disabled before the Parent confirms creates ZERO new Ignore decisions, ZERO PlannedActivities, stops immediately, and surfaces sourceDisabled — never a silent partial-success claim")
     @MainActor
-    func confirmedBatchStopsReadyImportWhenSourceBecomesDisabled() throws {
+    func confirmedBatchWithSourceAlreadyDisabledCreatesNoNewDecisionsOrActivities() throws {
         let fixture = try makeFixture()
         addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
         let firstViewModel = makeViewModel(fixture)
         firstViewModel.load()
         let firstItem = try #require(firstViewModel.reviewQueue.first)
         firstViewModel.ignore(firstItem)
+        let decisionCountBeforeConfirmation = try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count
 
         addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
-        addEvent(fixture, identifier: "evt-ready", title: "New Activity", hoursFromReference: 49)
+        addEvent(fixture, identifier: "evt-3", title: "Team Practice", hoursFromReference: 49)
+        addEvent(fixture, identifier: "evt-ready", title: "New Activity", hoursFromReference: 50)
         let viewModel = makeViewModel(fixture)
         viewModel.load()
         let readyItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-ready" })
         viewModel.setStagedAthlete(fixture.athleteId, for: readyItem.externalEventKey)
         viewModel.markReady(for: readyItem.externalEventKey)
+        // Two Suggested Ignore candidates queued for the batch, so this
+        // test also proves the loop stops at the FIRST one rather than
+        // merely happening to have nothing to process.
+        #expect(viewModel.suggestedIgnoreItems.count == 2)
 
+        // Stale-screen case: the source was ALREADY disabled before the
+        // Parent even tapped "Ignore & Import."
         try fixture.coordinationService.setSourceEnabled(fixture.source.externalPlanningSourceId, isEnabled: false)
 
         viewModel.confirmSuggestedIgnoresAndImportReadyItems()
 
-        // The existing, unchanged sourceDisabled guard (classifyAndImport's
-        // own) correctly aborts the Ready import — nothing imported, and
-        // the Parent is told, never a silent pretend-success.
+        // ZERO new Ignore decisions — the canonical ignore(...) guard
+        // (PR #49 follow-up) rejects the very first attempt, so the
+        // batch never proceeds to a second item or to Ready import.
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).count == decisionCountBeforeConfirmation)
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(viewModel.errorMessage == CalendarPlanningStrings.sourceDisabledError)
     }
@@ -1779,6 +1805,79 @@ struct CalendarImportReviewViewModelTests {
             sourceId: fixture.source.externalPlanningSourceId, externalEventKey: suggestedItem.externalEventKey
         )
         #expect(ignoredDecision?.status == .ignored)
+    }
+
+    // MARK: - PR #49 follow-up (zero-ready top action copy)
+
+    @Test("Required test 8: Ready > 0, Suggested Ignore == 0 — topActionState carries the exact unchanged 'Import N' semantics")
+    @MainActor
+    func topActionStateWithOnlyReadyItemsUsesUnchangedImportSemantics() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey)
+
+        #expect(viewModel.suggestedIgnoreItems.isEmpty)
+        #expect(viewModel.topActionState == .readyToImport(readyCount: 1))
+    }
+
+    @Test("Required test 9: Ready > 0, Suggested Ignore > 0 — topActionState still reports 'Import N' (Ready import stays the primary action), and confirmation is still required by the View's own tap-routing logic")
+    @MainActor
+    func topActionStateWithReadyAndSuggestedIgnoreKeepsImportSemantics() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        addEvent(fixture, identifier: "evt-ready", title: "New Activity", hoursFromReference: 49)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let readyItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-ready" })
+        viewModel.setStagedAthlete(fixture.athleteId, for: readyItem.externalEventKey)
+        viewModel.markReady(for: readyItem.externalEventKey)
+
+        #expect(!viewModel.suggestedIgnoreItems.isEmpty)
+        // Still "Import 1" — importing Ready activities remains the
+        // primary completion action even with Suggested Ignore items
+        // present; the confirmation dialog itself explains the
+        // additional Ignore decision (see CalendarImportReviewView's own
+        // top-level button action, which still routes through
+        // isSuggestedIgnoreConfirmationPresented whenever
+        // suggestedIgnoreItems is non-empty).
+        #expect(viewModel.topActionState == .readyToImport(readyCount: 1))
+    }
+
+    @Test("Required test 10: Ready == 0, Suggested Ignore > 0 — topActionState is suggestedIgnoreOnly (never 'Import 0'), with contextual copy and the same confirmation path")
+    @MainActor
+    func topActionStateWithOnlySuggestedIgnoreAvoidsImportZeroCopy() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Team Practice", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.ignore(firstItem)
+
+        addEvent(fixture, identifier: "evt-2", title: "Team Practice", hoursFromReference: 48)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+
+        #expect(viewModel.readyToImportCount == 0)
+        #expect(viewModel.suggestedIgnoreItems.count == 1)
+        #expect(viewModel.topActionState == .suggestedIgnoreOnly(count: 1))
+
+        // The derived copy never mentions "Import 0" and is calm,
+        // contextual text instead.
+        let summary = CalendarPlanningStrings.suggestedIgnoreOnlySummary(count: 1)
+        let button = CalendarPlanningStrings.suggestedIgnoreOnlyButton(count: 1)
+        #expect(!summary.localizedCaseInsensitiveContains("import 0"))
+        #expect(!button.localizedCaseInsensitiveContains("import 0"))
+        #expect(button.contains("1"))
     }
 }
 

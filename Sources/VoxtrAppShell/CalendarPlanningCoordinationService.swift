@@ -759,8 +759,27 @@ public final class CalendarPlanningCoordinationService {
     /// Never creates or touches a `PlannedActivity`. Idempotent: ignoring
     /// an already-decided event is a safe no-op (returns the existing
     /// decision unchanged) rather than a duplicate row.
+    ///
+    /// PR #49 follow-up (source-disabled Ignore safety): throws
+    /// `.sourceDisabled` for a disabled/disconnected source, matching
+    /// every other mutating action's own boundary
+    /// (`classifyAndImport`/`restoreIgnoredEvent`) — a stale review
+    /// screen must never be able to persist a NEW `.ignored` decision
+    /// against a source the Parent has since disabled or disconnected.
+    /// This guard lives HERE, at the canonical service boundary, so
+    /// every caller — a single manual Ignore tap AND
+    /// `CalendarImportReviewViewModel.confirmSuggestedIgnoresAndImportReadyItems()`'s
+    /// own batch loop — obeys the exact same invariant; it is
+    /// deliberately not re-implemented as a View/ViewModel-side check.
+    /// The idempotent "already decided" return above is checked AFTER
+    /// this guard, so even a harmless idempotent re-Ignore of an
+    /// already-`.ignored` event correctly fails calmly against a
+    /// disabled source rather than silently succeeding.
     @discardableResult
     public func ignore(_ item: CalendarReviewItem, for source: ExternalPlanningSource, decidedBy: ActorId) throws -> CalendarImportDecision {
+        guard source.isEnabled, source.lifecycleStatus == .connected else {
+            throw CalendarPlanningCoordinationError.sourceDisabled
+        }
         if let existing = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
             return existing
         }
