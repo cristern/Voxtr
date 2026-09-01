@@ -245,9 +245,41 @@ private struct NeedsReviewRow: View {
         item.event.notes?.isEmpty == false || item.event.location?.isEmpty == false
     }
 
+    /// V1.2 (Similar-Event Suggestions): `nil` unless THIS row's staged
+    /// values were prefilled from a similar (not identical) prior event
+    /// — see `StagedClassification.SuggestionKind`'s own doc comment.
+    /// Exact remembered matches (`.exactRemembered`) show no special
+    /// label here, matching V1.1's own unchanged, already-established
+    /// UX (an exact match typically never even reaches Needs Review —
+    /// it starts already Ready — so there is nothing to label inline).
+    private var similarSuggestionMatchedTitle: String? {
+        if case .similarPreviousEvent(let matchedTitle) = viewModel.stagedClassification(for: item.externalEventKey).suggestionKind {
+            return matchedTitle
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             eventSummary
+
+            // Calm, compact, near the pickers it explains — never a
+            // numeric confidence, percentage, or "AI" framing (see this
+            // feature's own product contract). Purely informational:
+            // reading it never mutates anything, and it disappears on
+            // its own the moment the Parent changes any picker (see
+            // `updateStaged(for:_:)`'s own doc comment).
+            if let matchedTitle = similarSuggestionMatchedTitle {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(CalendarPlanningStrings.similarSuggestionExplanation)
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                    Text(CalendarPlanningStrings.similarSuggestionBasedOn(title: matchedTitle))
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                }
+                .accessibilityIdentifier("calendarImportReview.similarSuggestionExplanation")
+            }
 
             Picker(CalendarPlanningStrings.chooseAthlete, selection: Binding(
                 get: { viewModel.stagedClassification(for: item.externalEventKey).athleteId },

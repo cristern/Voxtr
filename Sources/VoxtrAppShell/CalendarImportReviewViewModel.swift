@@ -5,8 +5,9 @@ import VoxtrAthleteDomain
 import VoxtrCalendarPlanningDomain
 
 /// Calendar Import Review V1.1 (Inline Review + Ready Staging + Bulk
-/// Import + Remembered Exact Choices): backs the "Review new events"
-/// screen for ONE `ExternalPlanningSource`. This is the ONE place an
+/// Import + Remembered Exact Choices) + V1.2 (Similar-Event Suggestions,
+/// see `StagedClassification.SuggestionKind`): backs the "Review new
+/// events" screen for ONE `ExternalPlanningSource`. This is the ONE place an
 /// external event becomes a Vǫxtr `PlannedActivity` — no event is ever
 /// imported except through an explicit Parent "Import N ready
 /// activities" tap (`bulkImportReadyItems()`), which itself only ever
@@ -73,6 +74,32 @@ public final class CalendarImportReviewViewModel {
     /// "Done" action) does, and only when the classification already
     /// satisfies the canonical minimum import requirement.
     public struct StagedClassification: Sendable, Equatable {
+        /// Calendar Import Review V1.2 (Similar-Event Suggestions): the
+        /// smallest explicit presentation metadata the View needs to
+        /// distinguish why a staged classification's values arrived
+        /// already filled in — never persisted, never itself a source of
+        /// business truth. `.none` for a brand-new or Parent-edited
+        /// staging (see `updateStaged(for:_:)`, the ONE place this is
+        /// reset back to `.none` once the Parent changes any value —
+        /// once edited, the values shown are the Parent's own, not the
+        /// original suggestion's, so continuing to label them as a
+        /// suggestion would be a stale/misleading claim).
+        public enum SuggestionKind: Sendable, Equatable {
+            case none
+            /// V1.1 exact remembered match — unchanged behavior; this
+            /// case exists so a future caller COULD distinguish it, but
+            /// today's UX intentionally shows no special label for it
+            /// (see `CalendarImportReviewView`'s own doc comment).
+            case exactRemembered
+            /// V1.2 similar-event suggestion — weaker evidence than an
+            /// exact match, so it PREFILLS but never confirms Ready (see
+            /// `refreshQueueAndStaging()` below). `matchedTitle` is the
+            /// ORIGINAL (non-normalized) title of the prior similar
+            /// event this suggestion came from, for the Parent-facing
+            /// "Based on: <title>" explanation only.
+            case similarPreviousEvent(matchedTitle: String)
+        }
+
         public var athleteId: AthleteId?
         public var sportId: SportId?
         public var activityType: ActivityType = .individualTraining
@@ -83,6 +110,7 @@ public final class CalendarImportReviewViewModel {
         /// picker change; see `markReady(for:)` and `beginEditing(for:)`,
         /// the only two places this is ever written.
         public var isConfirmedReady: Bool = false
+        public var suggestionKind: SuggestionKind = .none
 
         /// The canonical minimum requirement `classifyAndImport` actually
         /// needs: Athlete must resolve/be selected. `activityType`
@@ -200,11 +228,16 @@ public final class CalendarImportReviewViewModel {
     /// value change also explicitly UN-confirms an already-Ready item
     /// (mirroring `beginEditing(for:)`), so a stale confirmation can
     /// never survive a value it no longer describes — the ONE place a
-    /// staged event's classification values themselves change.
+    /// staged event's classification values themselves change. Also
+    /// resets `suggestionKind` to `.none` (V1.2): once the Parent has
+    /// changed a value, whatever is now shown is the Parent's own choice,
+    /// not the original prefill, so the "Suggested from..." explanation
+    /// no longer describes what is on screen and must stop showing.
     private func updateStaged(for externalEventKey: String, _ mutate: (inout StagedClassification) -> Void) {
         var staged = stagedClassifications[externalEventKey] ?? StagedClassification()
         mutate(&staged)
         staged.isConfirmedReady = false
+        staged.suggestionKind = .none
         stagedClassifications[externalEventKey] = staged
     }
 
@@ -324,10 +357,20 @@ public final class CalendarImportReviewViewModel {
     /// progress edit, or a still-Ready item from an earlier partial bulk
     /// import) keeps its EXACT existing staging untouched; a genuinely
     /// new event (including one just restored from Ignored) is seeded
-    /// from Remembered Exact Choices (V1.1) if one applies, or left
+    /// from Remembered Exact Choices (V1.1) if one applies, else from a
+    /// Similar-Event Suggestion (V1.2) if one applies, or left
     /// blank/editable otherwise; an event no longer in the queue
     /// (imported, ignored, or disappeared from the source) is dropped so
     /// this dictionary never leaks stale entries.
+    ///
+    /// PRECEDENCE (V1.2): exact remembered match is checked FIRST and
+    /// wins outright — a similar-event suggestion is only ever
+    /// considered when no exact match exists for this event's own
+    /// normalized title. Both paths call into pure/read-only helpers
+    /// only (`ExternalEventTitleNormalization`, `ExternalEventTitleSimilarity`,
+    /// and `calendarPlanningCoordinationService`'s own read methods) —
+    /// no matching RULE is implemented inline here; this method only
+    /// orchestrates which prefill, if any, applies to each item.
     private func refreshQueueAndStaging() {
         do {
             reviewQueue = try calendarPlanningCoordinationService.fetchReviewQueue(for: source)
@@ -338,6 +381,7 @@ public final class CalendarImportReviewViewModel {
         ignoredItems = (try? calendarPlanningCoordinationService.fetchIgnoredReviewItems(for: source)) ?? []
 
         let remembered = (try? calendarPlanningCoordinationService.rememberedClassifications(for: source)) ?? [:]
+        let historicalTitles = (try? calendarPlanningCoordinationService.historicalTitleClassifications(for: source)) ?? []
         var rebuilt: [String: StagedClassification] = [:]
         for item in reviewQueue {
             if let existing = stagedClassifications[item.externalEventKey] {
@@ -355,7 +399,22 @@ public final class CalendarImportReviewViewModel {
             if let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title),
                let match = remembered[normalizedTitle] {
                 rebuilt[item.externalEventKey] = StagedClassification(
-                    athleteId: match.athleteId, sportId: match.sportId, activityType: match.activityType, isConfirmedReady: true
+                    athleteId: match.athleteId, sportId: match.sportId, activityType: match.activityType,
+                    isConfirmedReady: true, suggestionKind: .exactRemembered
+                )
+            } else if let suggestion = ExternalEventTitleSimilarity.suggestedMatch(forEventTitle: item.event.title, among: historicalTitles) {
+                // Similar-Event Suggestion (V1.2): weaker evidence than
+                // an exact match — PREFILLS the classification values,
+                // but deliberately does NOT set isConfirmedReady. The
+                // event stays in Needs Review with the suggestion shown
+                // and the Parent's explicit markReady(for:) still
+                // required, exactly like a brand-new event's own
+                // baseline requirement — see this type's own doc
+                // comment ("IMPORTANT READY BEHAVIOR" in this feature's
+                // product contract).
+                rebuilt[item.externalEventKey] = StagedClassification(
+                    athleteId: suggestion.athleteId, sportId: suggestion.sportId, activityType: suggestion.activityType,
+                    isConfirmedReady: false, suggestionKind: .similarPreviousEvent(matchedTitle: suggestion.matchedOriginalTitle)
                 )
             } else {
                 rebuilt[item.externalEventKey] = StagedClassification()
