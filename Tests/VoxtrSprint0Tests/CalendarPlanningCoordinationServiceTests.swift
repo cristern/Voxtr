@@ -3147,6 +3147,168 @@ extension CalendarPlanningCoordinationServiceTests {
 
         #expect(try fixture.coordinationService.hasDecompositionEvidence(for: source) == true)
     }
+
+    // MARK: - VX-038 TestFlight follow-up (Part 5): production-realistic persistence lifecycle
+
+    /// Runtime follow-up (Part 5 — production-realistic persistence):
+    /// every earlier Suggested Split test reused the SAME
+    /// `CalendarPlanningCoordinationService`/`CalendarImportReviewViewModel`
+    /// instance (or, at most, a fresh ViewModel against a
+    /// `ModelContainer` that was never actually closed) for both the
+    /// split import and the later Suggested Split read — never proving
+    /// the pattern survives the lifecycle TestFlight actually crosses
+    /// (app quit/relaunch, a fresh `ModelContainer` reopened from the
+    /// SAME on-disk store). This test goes through a genuinely CLOSED
+    /// and REOPENED `ModelContainer` against a temp on-disk store — the
+    /// exact pattern `PersistenceRecoveryTests` already establishes for
+    /// fresh-install/restart coverage — plus a completely fresh
+    /// `CalendarPlanningCoordinationService` AND a fresh
+    /// `CalendarImportReviewViewModel` built against the reopened store.
+    @Test("VX-038 TestFlight follow-up test 17/18: Suggested Split survives a genuinely closed-and-reopened ModelContainer, with a fresh CalendarPlanningCoordinationService and a fresh CalendarImportReviewViewModel")
+    @MainActor
+    func suggestedSplitSurvivesClosedAndReopenedStore() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("vx038-persistence-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let schema = Schema(versionedSchema: AppSchemaV10.self)
+
+        var workspaceId: WorkspaceId!
+        var athleteId: AthleteId!
+        var sourceId: ExternalPlanningSourceId!
+        let calendarProvider = FakeCalendarEventProvider()
+        let firstOccurrenceStart = Self.referenceDate.addingTimeInterval(3600)
+        let secondOccurrenceStart = firstOccurrenceStart.addingTimeInterval(7 * 24 * 3600)
+        calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: firstOccurrenceStart, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: firstOccurrenceStart, endDate: firstOccurrenceStart.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: secondOccurrenceStart, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondOccurrenceStart, endDate: secondOccurrenceStart.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+
+        // Steps 1-3: persisted source/events, first coordination service +
+        // first ViewModel, configure and import an explicit split.
+        do {
+            let container = try ModelContainer(
+                for: schema, migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: schema, url: storeURL)]
+            )
+            let planningRepository = PlanningRepository(modelContext: container.mainContext)
+            let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+            let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+            let sportRepository = SportRepository(modelContext: container.mainContext)
+            let sourceRepository = ExternalPlanningSourceRepository(modelContext: container.mainContext)
+            let importDecisionRepository = CalendarImportDecisionRepository(modelContext: container.mainContext)
+            let legacyMappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+            let decomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: container.mainContext)
+            let decompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: container.mainContext)
+            let planningService = PlanningService(repository: planningRepository)
+            let trainingService = TrainingService(repository: trainingRepository)
+            let coordinationService = CalendarPlanningCoordinationService(
+                sourceRepository: sourceRepository,
+                importDecisionRepository: importDecisionRepository,
+                legacyMappingRepository: legacyMappingRepository,
+                decomposedActivityLinkRepository: decomposedActivityLinkRepository,
+                decompositionEvidenceRepository: decompositionEvidenceRepository,
+                calendarEventProvider: calendarProvider,
+                planningService: planningService,
+                trainingService: trainingService,
+                athleteRepository: athleteRepository,
+                dateProvider: FixedDateProvider(now: Self.referenceDate)
+            )
+
+            let workspace = WorkspaceId()
+            let athlete = try athleteRepository.createAthlete(
+                workspaceId: workspace, givenName: "Runner", birthDate: LocalDate(year: 2012, month: 3, day: 1),
+                timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+            )
+            let source = try coordinationService.createSource(
+                forWorkspace: workspace, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            )
+            try coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+            workspaceId = workspace
+            athleteId = athlete.athleteId
+            sourceId = source.externalPlanningSourceId
+
+            let viewModel = CalendarImportReviewViewModel(
+                calendarPlanningCoordinationService: coordinationService,
+                athleteRepository: athleteRepository,
+                sportRepository: sportRepository,
+                source: source,
+                actorId: ActorId()
+            )
+            viewModel.load()
+            let firstItem = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == firstOccurrenceStart })
+
+            viewModel.setSplitEnabled(true, for: firstItem.externalEventKey)
+            viewModel.setSplitAthlete(athlete.athleteId, for: firstItem.externalEventKey)
+            viewModel.addSplitChild(for: firstItem.externalEventKey)
+            let secondChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[1].id
+            viewModel.updateSplitChild(secondChildId, for: firstItem.externalEventKey) {
+                $0.startOffsetMinutes = 70
+                $0.durationMinutes = 60
+            }
+            viewModel.markReady(for: firstItem.externalEventKey)
+            viewModel.bulkImportReadyItems()
+
+            #expect(try coordinationService.hasDecompositionEvidence(for: source) == true)
+        }
+        // Step 4: the first ViewModel, coordination service, repositories,
+        // and their whole ModelContainer all go out of scope here —
+        // genuinely closed, not merely discarded while still reachable.
+
+        // Steps 5-9: a fresh CalendarPlanningCoordinationService and a
+        // fresh CalendarImportReviewViewModel, against the SAME store,
+        // reopened from disk.
+        let reopenedContainer = try ModelContainer(
+            for: schema, migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: schema, url: storeURL)]
+        )
+        let reopenedPlanningRepository = PlanningRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedTrainingRepository = TrainingRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedAthleteRepository = AthleteRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedSportRepository = SportRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedSourceRepository = ExternalPlanningSourceRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedImportDecisionRepository = CalendarImportDecisionRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedLegacyMappingRepository = CalendarPlanningMappingRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedDecomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedDecompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedPlanningService = PlanningService(repository: reopenedPlanningRepository)
+        let reopenedTrainingService = TrainingService(repository: reopenedTrainingRepository)
+        let reopenedCoordinationService = CalendarPlanningCoordinationService(
+            sourceRepository: reopenedSourceRepository,
+            importDecisionRepository: reopenedImportDecisionRepository,
+            legacyMappingRepository: reopenedLegacyMappingRepository,
+            decomposedActivityLinkRepository: reopenedDecomposedActivityLinkRepository,
+            decompositionEvidenceRepository: reopenedDecompositionEvidenceRepository,
+            calendarEventProvider: calendarProvider,
+            planningService: reopenedPlanningService,
+            trainingService: reopenedTrainingService,
+            athleteRepository: reopenedAthleteRepository,
+            dateProvider: FixedDateProvider(now: Self.referenceDate)
+        )
+
+        let reopenedSource = try #require(try reopenedSourceRepository.fetch(byId: sourceId))
+        #expect(try reopenedCoordinationService.hasDecompositionEvidence(for: reopenedSource) == true)
+
+        let reopenedViewModel = CalendarImportReviewViewModel(
+            calendarPlanningCoordinationService: reopenedCoordinationService,
+            athleteRepository: reopenedAthleteRepository,
+            sportRepository: reopenedSportRepository,
+            source: reopenedSource,
+            actorId: ActorId()
+        )
+        reopenedViewModel.load()
+        let secondItem = try #require(reopenedViewModel.reviewQueue.first { $0.event.occurrenceDate == secondOccurrenceStart })
+
+        let staged = reopenedViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.isSplitEnabled)
+        #expect(staged.isSuggestedSplitPrefill)
+        #expect(staged.splitAthleteId == athleteId)
+        #expect(staged.splitChildren.map(\.durationMinutes) == [30, 60])
+    }
 }
 
 private extension Date {

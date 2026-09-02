@@ -165,17 +165,37 @@ public final class CalendarImportReviewViewModel {
             public var activityType: ActivityType
             public var startOffsetMinutes: Int
             public var durationMinutes: Int
+            /// Runtime follow-up (Part 3 — sequential split timing
+            /// assistance): the SMALLEST transient staging metadata
+            /// needed to distinguish "this child's duration is still the
+            /// system's own proposal, anchored to the external event's
+            /// remaining time" from "the Parent has explicitly edited
+            /// this duration, so it is now Parent-owned." `false` by
+            /// default — a brand-new blank/manually-added child, or one
+            /// added with no usable external end time to derive from,
+            /// starts Parent-owned from the moment it exists. Set `true`
+            /// ONLY by `CalendarImportReviewViewModel`'s own sequential-
+            /// timing helper when it derives a duration from the
+            /// external event's remaining time; cleared the instant the
+            /// Parent explicitly edits `durationMinutes` (see
+            /// `updateSplitChild(_:for:mutate:)`). Never sent to
+            /// `CalendarPlanningCoordinationService` — purely a View-
+            /// layer editing signal, never a persisted or domain
+            /// concept.
+            public var isDurationDerivedFromEventRemainder: Bool = false
 
             public init(
                 id: UUID = UUID(),
                 activityType: ActivityType = .individualTraining,
                 startOffsetMinutes: Int = 0,
-                durationMinutes: Int = 30
+                durationMinutes: Int = 30,
+                isDurationDerivedFromEventRemainder: Bool = false
             ) {
                 self.id = id
                 self.activityType = activityType
                 self.startOffsetMinutes = startOffsetMinutes
                 self.durationMinutes = durationMinutes
+                self.isDurationDerivedFromEventRemainder = isDurationDerivedFromEventRemainder
             }
 
             var isValid: Bool {
@@ -397,20 +417,37 @@ public final class CalendarImportReviewViewModel {
 
     // MARK: - VX-038: Split activity (inline staging only — same "no persistence" contract)
 
-    /// The explicit "Split activity" toggle. Turning split ON with no
-    /// children yet seeds exactly one empty child, so the View always
-    /// has something to show/edit immediately — never an empty split
-    /// with no rows at all. Turning split OFF preserves any
-    /// already-entered children untouched (so toggling back on restores
-    /// them) — this method only ever changes `isSplitEnabled` itself.
-    /// Never sets `isConfirmedReady`, matching every other staging
-    /// mutation's own "selecting/changing something never auto-confirms
-    /// Ready" rule.
+    /// The explicit "Split activity" toggle.
+    ///
+    /// Runtime follow-up (TestFlight — classification preservation):
+    /// `splitChildren.isEmpty` is the ONE signal for "no split-editing
+    /// state exists yet at all" — every activation after the FIRST
+    /// always leaves at least one child behind (Split OFF never clears
+    /// `splitChildren`; see below), so this same check both (a) decides
+    /// whether to seed a first child at all, and (b) decides whether
+    /// this is a genuinely first activation that should INHERIT the
+    /// Parent's already-entered ordinary classification
+    /// (`athleteId`/`sportId`/`activityType`) rather than let it appear
+    /// to silently vanish. A REACTIVATION (children already present)
+    /// never re-seeds from the ordinary fields — the Parent's own prior
+    /// split edits win untouched, exactly as before. The ordinary
+    /// `athleteId`/`sportId`/`activityType` fields themselves are never
+    /// modified by this method — they remain intact underneath for a
+    /// later Split OFF to fall back to.
+    ///
+    /// Turning split OFF preserves any already-entered
+    /// `splitAthleteId`/`splitSportId`/`splitChildren` untouched — this
+    /// method only ever changes `isSplitEnabled` itself once split
+    /// state already exists. Never sets `isConfirmedReady`, matching
+    /// every other staging mutation's own "selecting/changing something
+    /// never auto-confirms Ready" rule.
     public func setSplitEnabled(_ isEnabled: Bool, for externalEventKey: String) {
         updateStaged(for: externalEventKey) { staged in
             staged.isSplitEnabled = isEnabled
             if isEnabled && staged.splitChildren.isEmpty {
-                staged.splitChildren = [StagedClassification.SplitChild()]
+                staged.splitAthleteId = staged.athleteId
+                staged.splitSportId = staged.sportId
+                staged.splitChildren = [StagedClassification.SplitChild(activityType: staged.activityType)]
             }
         }
     }
@@ -436,9 +473,21 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
+    /// Runtime follow-up (Part 3 — sequential split timing assistance):
+    /// a new child's `startOffsetMinutes` and `durationMinutes` are
+    /// PROPOSED, not left blank for the Parent to calculate by hand —
+    /// see `Self.nextSequentialSplitChild(afterLastOf:eventStart:eventEnd:)`'s
+    /// own doc comment for the exact algorithm. Assistance only: every
+    /// proposed value remains freely editable, and the Parent may
+    /// create a gap or overlap by editing them — this method never
+    /// rewrites any EARLIER child.
     public func addSplitChild(for externalEventKey: String) {
+        let event = reviewItem(for: externalEventKey)?.event
         updateStaged(for: externalEventKey) { staged in
-            staged.splitChildren.append(StagedClassification.SplitChild())
+            let newChild = Self.nextSequentialSplitChild(
+                afterLastOf: staged.splitChildren, eventStart: event?.startDate, eventEnd: event?.endDate
+            )
+            staged.splitChildren.append(newChild)
             staged.isSuggestedSplitPrefill = false
         }
     }
@@ -450,12 +499,108 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
+    /// Runtime follow-up (Part 3 — sequential split timing assistance,
+    /// "DERIVED END-ANCHORED DURATION" / "HUMAN OVERRIDE"): after
+    /// `mutate` runs, compares the child's OWN before/after values (the
+    /// generic `mutate` closure is used for every child field — Activity
+    /// Type, start offset, and duration alike — from the View's own
+    /// per-control bindings, each of which changes exactly one field per
+    /// call) to decide:
+    ///   - `durationMinutes` itself changed → the Parent just edited
+    ///     duration directly; it becomes Parent-owned from this point on
+    ///     (`isDurationDerivedFromEventRemainder = false`), and no
+    ///     further recalculation ever overwrites it again;
+    ///   - `startOffsetMinutes` changed AND duration is STILL system-
+    ///     derived (never explicitly edited) → duration is recalculated
+    ///     to keep the child anchored to the external event's own end,
+    ///     using the SAME remaining-time rule
+    ///     `nextSequentialSplitChild` itself uses. If the new offset
+    ///     would produce a non-positive remainder, the duration is left
+    ///     exactly as it was — never forced to an invalid value, and
+    ///     the Parent's own offset edit is never reverted (Parent
+    ///     judgement wins; see this feature's own "GAPS AND OVERLAPS"
+    ///     contract);
+    ///   - any other change (Activity Type, or a child whose duration
+    ///     is already Parent-owned) leaves the derived/owned flag
+    ///     exactly as it was.
+    /// This method never touches any OTHER child.
     public func updateSplitChild(_ childId: UUID, for externalEventKey: String, mutate: (inout StagedClassification.SplitChild) -> Void) {
+        let event = reviewItem(for: externalEventKey)?.event
         updateStaged(for: externalEventKey) { staged in
             guard let index = staged.splitChildren.firstIndex(where: { $0.id == childId }) else { return }
+            let before = staged.splitChildren[index]
             mutate(&staged.splitChildren[index])
+            var after = staged.splitChildren[index]
+
+            if after.durationMinutes != before.durationMinutes {
+                after.isDurationDerivedFromEventRemainder = false
+            } else if after.startOffsetMinutes != before.startOffsetMinutes, after.isDurationDerivedFromEventRemainder,
+                      let eventStart = event?.startDate, let eventEnd = event?.endDate {
+                let eventDurationMinutes = Int(eventEnd.timeIntervalSince(eventStart) / 60)
+                let remainingMinutes = eventDurationMinutes - after.startOffsetMinutes
+                if remainingMinutes > 0 {
+                    after.durationMinutes = remainingMinutes
+                }
+            }
+            staged.splitChildren[index] = after
             staged.isSuggestedSplitPrefill = false
         }
+    }
+
+    /// Runtime follow-up (Part 3 — sequential split timing assistance):
+    /// the ONE place automatic child timing is computed, used by both
+    /// `addSplitChild(for:)` (a brand-new child) and
+    /// `updateSplitChild(_:for:mutate:)` (re-anchoring a still-derived
+    /// child's duration after its own start offset moves).
+    ///
+    /// `afterLastOf.last == nil` (the very first child a split ever
+    /// gets): the existing safe product default (`0` / `30`, via
+    /// `SplitChild.init`'s own defaults) — deliberately NEVER
+    /// automatically consumes the whole external event.
+    ///
+    /// Otherwise: `startOffsetMinutes = previous.startOffsetMinutes + previous.durationMinutes`
+    /// (immediately after the previous child ends) — this is never
+    /// negative, since both of the previous child's own values are
+    /// already bounded `>= 0`/`> 0`. If the external event has a usable
+    /// end time (`eventEnd` non-nil and after `eventStart`) and the
+    /// resulting remaining time (`eventDurationMinutes - startOffsetMinutes`)
+    /// is POSITIVE, the new child's duration is proposed as exactly that
+    /// remainder, marked `isDurationDerivedFromEventRemainder = true`.
+    /// Otherwise (no usable end time, or the previous child already
+    /// reaches/exceeds the event's own end) falls back to the safe
+    /// default duration — NEVER a zero/negative or otherwise invalid
+    /// derived value — Parent-owned from the start, so a later start-
+    /// offset edit never tries to "fix" it. Never blocks adding the
+    /// child itself: Parent judgement wins on any resulting gap/overlap.
+    private static func nextSequentialSplitChild(
+        afterLastOf existingChildren: [StagedClassification.SplitChild],
+        eventStart: Date?,
+        eventEnd: Date?
+    ) -> StagedClassification.SplitChild {
+        guard let previous = existingChildren.last else {
+            return StagedClassification.SplitChild()
+        }
+        let startOffsetMinutes = previous.startOffsetMinutes + previous.durationMinutes
+        guard let eventStart, let eventEnd, eventEnd > eventStart else {
+            return StagedClassification.SplitChild(startOffsetMinutes: startOffsetMinutes)
+        }
+        let eventDurationMinutes = Int(eventEnd.timeIntervalSince(eventStart) / 60)
+        let remainingMinutes = eventDurationMinutes - startOffsetMinutes
+        guard remainingMinutes > 0 else {
+            return StagedClassification.SplitChild(startOffsetMinutes: startOffsetMinutes)
+        }
+        return StagedClassification.SplitChild(
+            startOffsetMinutes: startOffsetMinutes, durationMinutes: remainingMinutes, isDurationDerivedFromEventRemainder: true
+        )
+    }
+
+    /// Runtime follow-up (Part 3): the current `CalendarReviewItem` for
+    /// `externalEventKey`, looked up from the live `reviewQueue` — never
+    /// stored on `StagedClassification` itself (which stays a plain,
+    /// `Equatable`, presentation-only value type with no reference back
+    /// to the review queue).
+    private func reviewItem(for externalEventKey: String) -> CalendarPlanningCoordinationService.CalendarReviewItem? {
+        reviewQueue.first { $0.externalEventKey == externalEventKey }
     }
 
     /// Lead Review follow-up: the ONE explicit Parent action that moves a
@@ -475,9 +620,22 @@ public final class CalendarImportReviewViewModel {
     /// every currently-staged field is left exactly as it was, but the
     /// Parent's PRIOR confirmation no longer applies — `markReady(for:)`
     /// must be called again before this event can bulk-import.
+    ///
+    /// Runtime follow-up (VX-038 — `hasMeaningfulStaging` no longer
+    /// treats a bare `isConfirmedReady`/`suggestionKind` as sticky on its
+    /// own, so an untouched system-generated prefill can be superseded
+    /// by newly-learned Suggested Split evidence — see that method's own
+    /// doc comment): tapping "Edit" is itself an explicit Parent action,
+    /// exactly like `updateStaged(for:_:)`'s own callers — it now also
+    /// sets `hasUserInteraction = true`, so a row the Parent is actively
+    /// reconsidering can never be silently wiped and re-derived (e.g.
+    /// snapping back to auto-Ready) by an unrelated refresh triggered
+    /// elsewhere (ignoring/restoring/importing a DIFFERENT event) before
+    /// the Parent re-confirms it.
     public func beginEditing(for externalEventKey: String) {
         guard var staged = stagedClassifications[externalEventKey] else { return }
         staged.isConfirmedReady = false
+        staged.hasUserInteraction = true
         stagedClassifications[externalEventKey] = staged
     }
 
@@ -830,26 +988,69 @@ public final class CalendarImportReviewViewModel {
     /// containing Parent-owned or suggestion-owned state that must never
     /// be silently discarded. `true` (meaningful — preserve as-is,
     /// never re-derive) when ANY of:
-    ///   - the Parent has explicitly changed Athlete/Sport/Activity Type
-    ///     (`hasUserInteraction`);
-    ///   - the item is Ready (`isConfirmedReady`) — covers Remembered
-    ///     Exact Choices' own already-Ready prefill too, since that path
-    ///     also sets this;
-    ///   - the item carries a PR #47 exact/similar classification
-    ///     suggestion (`suggestionKind != .none`);
+    ///   - the Parent has explicitly changed Athlete/Sport/Activity Type,
+    ///     or explicitly toggled Split (both go through `updateStaged`,
+    ///     the ONE place `hasUserInteraction` is set);
+    ///   - the item ALREADY carries an applied split (`isSplitEnabled`) —
+    ///     whether Parent-built or a previously-applied Suggested Split;
+    ///     once correct, never re-derived merely because this method runs
+    ///     again;
     ///   - the item is currently Needs Attention (a failed bulk-import
     ///     attempt recorded in `failedImportReasons`).
+    ///
+    /// Runtime follow-up (VX-038 — the actual missing-Suggested-Split
+    /// root cause): `isConfirmedReady` and `suggestionKind != .none` were
+    /// PREVIOUSLY also included here, which was the real production bug.
+    /// A Remembered Exact Choice (V1.1) or Similar-Event Suggestion
+    /// (V1.2) prefill — computed on some EARLIER refresh, before this
+    /// event had any decomposition evidence, and never touched by the
+    /// Parent (`hasUserInteraction` stays `false` for both — they are
+    /// written directly in `refreshQueueAndStaging()`, bypassing
+    /// `updateStaged`) — used to lock in permanently the instant it was
+    /// first computed. The exact real-world sequence this broke: the
+    /// Parent has previously imported ordinary (non-split) occurrences of
+    /// a recurring event (so V1.1 remembered-exact history exists for its
+    /// title); opening Review therefore immediately prefills EVERY still-
+    /// pending occurrence — including a LATER one the Parent hasn't
+    /// looked at yet — with an already-Ready exact-remembered
+    /// classification. The Parent then explicitly splits an EARLIER
+    /// occurrence, writing new decomposition evidence. On the very same
+    /// refresh cycle that import triggers, the later occurrence's stale
+    /// exact-remembered staging was preserved untouched by the OLD
+    /// `isConfirmedReady`/`suggestionKind` checks — `suggestedSplit(for:source:)`
+    /// (verified structurally correct — recurring-series match, then
+    /// same-source exact-title fallback) was simply never CALLED for it,
+    /// on that refresh or any later one, because this method had already
+    /// decided the row was "meaningful" and skipped straight past the
+    /// Suggested Split precedence tier entirely. This is why "the
+    /// EventKit identifiers might differ" was never a sufficient
+    /// explanation on its own: the title-fallback branch was correct and
+    /// reachable, but never reached.
+    ///
+    /// Every existing call site that sets `isConfirmedReady = true` was
+    /// checked: `markReady(for:)` (an explicit Parent action) can only
+    /// ever run on a staging whose `athleteId`/`splitAthleteId` already
+    /// came from `updateStaged` (`hasUserInteraction == true`) or from a
+    /// suggestion prefill captured by `isSplitEnabled`/re-derivation
+    /// below — never from a bare `isConfirmedReady` with neither.
+    /// Dropping both fields from this OR-list therefore never discards a
+    /// genuine Parent "Ready" tap: it is always already covered by
+    /// `hasUserInteraction` or `isSplitEnabled`. A not-yet-imported
+    /// Remembered/Similar prefill re-deriving identically (when nothing
+    /// changed) is invisible to the Parent; re-deriving to a NEW, more
+    /// specific Suggested Split (when a split was just learned) is
+    /// exactly the fix — and still requires the Parent's own explicit
+    /// Ready/import action before anything is committed, same as before.
+    ///
     /// Deliberately does NOT inspect `athleteId`/`sportId`/`activityType`
     /// values themselves — `sportId == nil`, the default
     /// `.individualTraining`, and `athleteId == nil` are all legitimate
     /// UNTOUCHED defaults, so inferring "meaningful" from them would
     /// misclassify a brand-new, never-interacted-with row as Parent-owned
     /// and permanently block it from ever being re-evaluated against new
-    /// Suggested Ignore evidence.
+    /// Suggested Ignore (or Suggested Split) evidence.
     private func hasMeaningfulStaging(_ staged: StagedClassification, externalEventKey: String) -> Bool {
         staged.hasUserInteraction
-            || staged.isConfirmedReady
-            || staged.suggestionKind != .none
             || staged.isSplitEnabled
             || failedImportReasons[externalEventKey] != nil
     }
