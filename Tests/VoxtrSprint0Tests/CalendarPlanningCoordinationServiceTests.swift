@@ -2297,12 +2297,17 @@ extension CalendarPlanningCoordinationServiceTests {
         let childrenBefore = try fixture.decompositionEvidenceRepository.fetchChildren(forEvidence: evidenceBefore[0].decompositionEvidenceId)
         #expect(childrenBefore.map(\.durationMinutes) == [40, 60])
 
-        // A DIFFERENT, explicitly EDITED split for the second occurrence.
+        // A DIFFERENT, explicitly EDITED split for the second occurrence
+        // (still 2 children — the canonical minimum — but different
+        // durations/offsets than the original evidence).
         try fixture.coordinationService.classifyAndImportSplit(
             secondItem, for: source,
             children: [
                 CalendarPlanningCoordinationService.DecomposedChildInput(
                     athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 90
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 100, durationMinutes: 20
                 )
             ],
             decidedBy: ActorId()
@@ -2412,11 +2417,30 @@ extension CalendarPlanningCoordinationServiceTests {
         )
 
         let historicalTitles = try fixture.coordinationService.historicalTitleClassifications(for: source)
-        // Only the ORDINARY import qualifies as classification evidence
-        // (decomposed decisions carry no single unambiguous
-        // athlete/sport/activityType/plannedActivityId meaningful as a
-        // single-activity remembered choice for that shared title).
+        // The ORDINARY import remains valid single-activity
+        // classification evidence...
         #expect(historicalTitles.contains { $0.normalizedTitle == "swim practice" })
+        // ...but the DECOMPOSED decision's title must NEVER surface as
+        // single-activity classification evidence, even though it still
+        // mirrors its first child's athlete/sport/activityType/
+        // plannedActivityId on the `CalendarImportDecision` itself (Lead
+        // Review follow-up, Blocker 1) — a decision carrying
+        // `DecomposedActivityLink` rows is structurally excluded.
+        #expect(!historicalTitles.contains { $0.normalizedTitle == "hockey training" })
+        let rememberedTitles = try fixture.coordinationService.rememberedClassifications(for: source)
+        #expect(rememberedTitles["hockey training"] == nil)
+        #expect(rememberedTitles["swim practice"] != nil)
+
+        // Decomposition evidence is a SEPARATE, canonical record for the
+        // split title — unaffected by its exclusion from single-activity
+        // classification evidence, and still produces a Suggested Split
+        // for a later matching (same source, same exact title) event.
+        let laterHockeyEvent = ExternalCalendarEvent(
+            eventIdentifier: "evt-split-2", calendarIdentifier: "cal-familie", title: "Hockey training",
+            startDate: start.addingTimeInterval(7 * 24 * 3600), endDate: nil, isAllDay: false, isRecurring: false
+        )
+        let suggested = try fixture.coordinationService.suggestedSplit(for: laterHockeyEvent, source: source)
+        #expect(suggested?.children.count == 2)
     }
 
     /// Test requirement 15: decomposition evidence for one title never
@@ -2504,6 +2528,205 @@ extension CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
         #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
+    }
+
+    /// Lead Review follow-up (split semantics — minimum two children):
+    /// zero or exactly one child both throw
+    /// `.splitRequiresAtLeastTwoChildren` and create nothing at all —
+    /// the ordinary `classifyAndImport` path already owns the
+    /// one-activity case.
+    @Test("VX-038 Lead Review follow-up: classifyAndImportSplit requires at least two children")
+    @MainActor
+    func splitRequiresAtLeastTwoChildren() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let oneChild = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            )
+        ]
+
+        #expect(throws: CalendarPlanningCoordinationError.splitRequiresAtLeastTwoChildren) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: [], decidedBy: ActorId())
+        }
+        #expect(throws: CalendarPlanningCoordinationError.splitRequiresAtLeastTwoChildren) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: oneChild, decidedBy: ActorId())
+        }
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+    }
+
+    /// Test requirement 6: a completed split has exactly ONE
+    /// `CalendarImportDecision` and exactly ONE `DecomposedActivityLink`
+    /// per created `PlannedActivity` — the normalized provenance model
+    /// this feature is built on, never comma-separated IDs or duplicated
+    /// decision rows.
+    @Test("VX-038: a completed split persists exactly one decision and exactly one link per created PlannedActivity")
+    @MainActor
+    func completedSplitHasExactlyOneDecisionAndOneLinkPerChild() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        let created = try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+
+        let allDecisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(allDecisions.count == 1)
+        let decision = try #require(allDecisions.first)
+
+        let links = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
+        #expect(links.count == created.count)
+        #expect(Set(links.map(\.plannedActivityId)) == Set(created.map { $0.plannedActivityId.rawValue }))
+    }
+
+    /// Test requirement 7: calling `classifyAndImportSplit` again for the
+    /// SAME already-completed split (same `externalEventKey`) is a safe,
+    /// idempotent no-op — returns every original child, in order, and
+    /// creates NO additional `PlannedActivity`/decision/link.
+    @Test("VX-038: retry of a fully completed split remains idempotent and returns every child")
+    @MainActor
+    func retryOfCompletedSplitIsIdempotent() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        let firstAttempt = try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+
+        // Retry — same item, same (or even different) children input;
+        // the existing decision's own coherent link set wins.
+        let retryAttempt = try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+
+        #expect(retryAttempt.map(\.plannedActivityId) == firstAttempt.map(\.plannedActivityId))
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
+    }
+
+    /// Test requirement 5 & 8 (Lead Review follow-up, Blocker 2): this
+    /// codebase's repositories are concrete SwiftData types with no
+    /// fault-injection seam (see `classifyAndImportSplit`'s own "CORE
+    /// CONSISTENCY" doc note), so a genuine mid-write failure cannot be
+    /// triggered from a black-box test without inventing a new
+    /// protocol/mock abstraction — out of this fix's bounded scope. This
+    /// test instead directly reproduces the EXACT critical failure mode
+    /// described in the review (2 `PlannedActivity` rows already exist,
+    /// an `.imported` `CalendarImportDecision` exists, but only ONE
+    /// `DecomposedActivityLink` row exists — precisely what a prior
+    /// `classifyAndImportSplit` call interrupted between its decision
+    /// insert and its second link insert, before this fix's own
+    /// rollback existed, would have left behind) and proves a retry
+    /// against that state fails safely with `.splitProvenanceIncomplete`
+    /// rather than silently returning the 1-activity subset as a
+    /// successful import.
+    @Test("VX-038 Lead Review follow-up: retry against a decomposed decision with an incomplete link set fails safely rather than returning a subset")
+    @MainActor
+    func retryAgainstIncompleteSplitProvenanceFailsSafely() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+
+        // Reproduce the exact partial state directly, bypassing
+        // classifyAndImportSplit entirely (which, after this fix, would
+        // never leave this state behind on its own).
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 1).startOfWeek)
+        let firstActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Hockey training", localDate: LocalDate(year: 2026, month: 1, day: 2),
+            timeZoneId: Self.timeZoneId, startLocalTime: LocalTime(hour: 2, minute: 0), plannedDurationMinutes: 40,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        let secondActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .teamTraining,
+            title: "Hockey training", localDate: LocalDate(year: 2026, month: 1, day: 2),
+            timeZoneId: Self.timeZoneId, startLocalTime: LocalTime(hour: 3, minute: 10), plannedDurationMinutes: 60,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        let decision = try fixture.importDecisionRepository.insert(
+            sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey, status: .imported,
+            athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining,
+            plannedActivityId: firstActivity.plannedActivityId, decidedBy: ActorId()
+        )
+        // Only ONE of the two intended links — the exact partial state
+        // a mid-write interruption would leave.
+        try fixture.decomposedActivityLinkRepository.insert(
+            calendarImportDecisionId: decision.calendarImportDecisionId, plannedActivityId: firstActivity.plannedActivityId, orderIndex: 0
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.splitProvenanceIncomplete) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+        }
+
+        // The retry attempt never silently "fixed" or extended the
+        // corrupt state — still exactly 1 decision, 1 link, and the
+        // second, orphaned PlannedActivity remains exactly as it was
+        // (never duplicated, never silently linked after the fact).
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
+        _ = secondActivity
     }
 }
 

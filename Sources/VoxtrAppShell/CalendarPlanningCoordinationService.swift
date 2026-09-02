@@ -58,8 +58,22 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     /// `removeImportedActivities(for:removedBy:)` for that separate,
     /// explicit action.
     case decisionNotIgnored
-    /// VX-038: `classifyAndImportSplit` guard — no children supplied.
-    case noSplitChildren
+    /// Lead Review follow-up (split semantics): `classifyAndImportSplit`
+    /// guard — fewer than 2 children supplied. The ordinary
+    /// `classifyAndImport` path already owns one-event →
+    /// one-`PlannedActivity`; a split must represent an actual
+    /// decomposition into at least two training units, never a
+    /// single-child no-op carrying extra provenance rows.
+    case splitRequiresAtLeastTwoChildren
+    /// Lead Review follow-up (Blocker 2): `classifyAndImportSplit`'s own
+    /// existing-decision idempotency check found a decomposed decision
+    /// (it has `DecomposedActivityLink` rows) whose link set does NOT
+    /// represent a coherent completed split — fewer than 2 links, which
+    /// can only mean a prior split attempt was interrupted mid-write.
+    /// Never returned as though a subset of the intended children were
+    /// a successful import; see `classifyAndImportSplit`'s own
+    /// "IDEMPOTENCY / EXISTING-DECISION COHERENCE" doc note.
+    case splitProvenanceIncomplete
     /// VX-038: `classifyAndImportSplit` guard — child at `index` has a
     /// duration outside the canonical `1...1440` minute bound Planning
     /// already enforces (`PlanningService.addPlannedActivity`'s own
@@ -601,6 +615,23 @@ public final class CalendarPlanningCoordinationService {
     /// if its remembered athlete no longer resolves, is archived, or no
     /// longer belongs to THIS `source`'s own `workspaceId`.
     ///
+    /// Lead Review follow-up (Blocker 1): a decomposed decision (one
+    /// carrying `DecomposedActivityLink` rows — see
+    /// `plannedActivityIds(for:)`'s own doc comment) is EXCLUDED here,
+    /// even though it still carries `athleteId`/`sportId`/`activityType`/
+    /// `plannedActivityId` mirroring its first child (see
+    /// `classifyAndImportSplit`'s own doc comment for why that mirroring
+    /// exists at all — provenance/idempotency bookkeeping, never a
+    /// single-activity classification claim). Those mirrored fields must
+    /// never surface as remembered/exact/similar single-activity
+    /// classification evidence for the event's title: "Hockey training"
+    /// having once been explicitly split into "Off-ice" + "Hockey" must
+    /// never make "Off-ice" the remembered choice for a later plain
+    /// "Hockey training" import. `DecompositionEvidence` (see
+    /// `suggestedSplit(for:source:)`) is the ONE canonical historical
+    /// record for a split event's title — this method's own single-
+    /// activity evidence pool must never duplicate or contradict it.
+    ///
     /// Never creates, mutates, or persists anything — a pure read.
     public func historicalTitleClassifications(for source: ExternalPlanningSource) throws -> [HistoricalTitleClassification] {
         let importedDecisions = try importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
@@ -616,6 +647,9 @@ public final class CalendarPlanningCoordinationService {
         var candidatesByTitle: [String: Set<Candidate>] = [:]
         var originalTitleByNormalizedTitle: [String: String] = [:]
         for decision in importedDecisions {
+            guard try decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).isEmpty else {
+                continue
+            }
             guard let plannedActivityId = decision.plannedActivityId,
                   let activity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)),
                   let rawTitle = activity.title,
@@ -701,6 +735,26 @@ public final class CalendarPlanningCoordinationService {
         }
 
         // Step 1: an existing decision for this exact event.
+        //
+        // Lead Review follow-up (Blocker 2, bounded-audit finding —
+        // documented, not fixed, deliberately out of this fix's scope):
+        // this read trusts `existingDecision.plannedActivityId` directly
+        // and does NOT check for `DecomposedActivityLink` rows. If this
+        // method were ever called for an `externalEventKey` that
+        // already has a DECOMPOSED decision, it would silently return
+        // only that decision's mirrored FIRST child, never surfacing the
+        // other children. This is currently UNREACHABLE in production:
+        // `fetchReviewQueue(for:)` excludes any event with an existing
+        // decision (of either kind) from the pending queue, and this
+        // method's only call site (`CalendarImportReviewViewModel.bulkImportReadyItems()`)
+        // only ever calls it for items still in that queue — so a
+        // decomposed decision can never reach this branch through the
+        // approved UI flow. `classifyAndImport` is intentionally
+        // UNCHANGED by VX-038 (contract item 2: the ordinary path stays
+        // the untouched default fast path) — closing this theoretical
+        // gap would mean adding decomposition awareness to a method this
+        // feature explicitly promised not to modify, so it is reported
+        // here rather than fixed.
         if let existingDecision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
             guard existingDecision.status == .imported, let plannedActivityId = existingDecision.plannedActivityId,
                   let plannedActivity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)) else {
@@ -840,9 +894,17 @@ public final class CalendarPlanningCoordinationService {
     /// SEPARATE case of more than one training unit, reusing the exact
     /// same source-disabled/idempotency/family-isolation checks.
     ///
+    /// Lead Review follow-up (split semantics — minimum two children):
+    /// the ordinary `classifyAndImport` path already owns one-event →
+    /// one-`PlannedActivity`; "Split activity" must represent an actual
+    /// decomposition, never a one-child no-op with extra provenance
+    /// rows. `children.count < 2` throws
+    /// `.splitRequiresAtLeastTwoChildren` before any other validation
+    /// runs.
+    ///
     /// VALIDATION (all children checked BEFORE any `PlannedActivity` is
-    /// created — see this method's own "ATOMICITY" note below):
-    ///   - at least one child (`.noSplitChildren`);
+    /// created — see this method's own "CORE CONSISTENCY" note below):
+    ///   - at least two children (`.splitRequiresAtLeastTwoChildren`);
     ///   - each child's `durationMinutes` in `1...1440`
     ///     (`.invalidSplitChildDuration`) — the same bound
     ///     `PlanningService.addPlannedActivity` itself enforces;
@@ -860,33 +922,81 @@ public final class CalendarPlanningCoordinationService {
     /// matching `PlanningService`'s own existing timing constraints
     /// rather than inventing a stricter rule here.
     ///
-    /// IDEMPOTENCY: mirrors `classifyAndImport`'s own Step 1 — an
-    /// existing decision for this exact `externalEventKey` returns its
-    /// already-linked activities unchanged (via `plannedActivityIds(for:)`)
-    /// rather than creating a duplicate split.
+    /// IDEMPOTENCY / EXISTING-DECISION COHERENCE (Lead Review follow-up,
+    /// Blocker 2): mirrors `classifyAndImport`'s own Step 1 — an existing
+    /// decision for this exact `externalEventKey` returns its already-
+    /// linked activities unchanged rather than creating a duplicate
+    /// split, but ONLY after proving that decision's own link set is a
+    /// COHERENT completed split, never a subset a caller could mistake
+    /// for success:
+    ///   - zero `DecomposedActivityLink` rows: this is an ORDINARY
+    ///     (non-split) decision already occupying this exact
+    ///     `externalEventKey` — falls through to the same
+    ///     `.alreadyDecided` guard `classifyAndImport` itself throws for
+    ///     a conflicting prior decision, never silently reinterpreted as
+    ///     a 1-child split;
+    ///   - `1` link row: structurally CANNOT be a valid completed split
+    ///     (the minimum is 2 — see above) — this can only mean a PRIOR
+    ///     `classifyAndImportSplit` call was interrupted between writing
+    ///     its decision/first link and this fix's own rollback existing
+    ///     (or, before this fix, having no rollback at all for that
+    ///     window). Throws `.splitProvenanceIncomplete` rather than
+    ///     returning that one activity as though the split succeeded —
+    ///     a caller must never receive a subset as success;
+    ///   - `>= 2` link rows, but fewer resolve to a still-existing
+    ///     `PlannedActivity` than there are links (one was deleted
+    ///     through some other path): the SAME `.alreadyDecided` guard
+    ///     `classifyAndImport` uses for its own equivalent case — a
+    ///     decision that no longer cleanly resolves is never silently
+    ///     "fixed" by creating replacements;
+    ///   - `>= 2` link rows, all resolving cleanly: genuinely idempotent
+    ///     — returns every linked `PlannedActivity`, in order, unchanged.
     ///
-    /// ATOMICITY: this repository layer has no cross-write SwiftData
-    /// transaction (see `ExternalPlanningSourceRepository`/
-    /// `CalendarImportDecisionRepository`'s own `save()`-per-call
-    /// pattern — unchanged by this feature). Every child is validated
-    /// BEFORE any is created, so the common failure mode (bad input) is
-    /// caught with zero partial state. If a `PlanningService.addPlannedActivity`
-    /// call still fails partway through creation (e.g. a concurrent
-    /// revision conflict), every child ALREADY created in this same call
-    /// is explicitly rolled back via `PlanningService.deletePlannedActivity`
-    /// before the original error is rethrown — never leaving half a
-    /// split behind. A rollback delete failing (defensive, not expected)
-    /// is swallowed for that one already-created child rather than
-    /// masking the original creation error; this is a best-effort bounded
-    /// rollback, not a database-level transaction.
+    /// CORE CONSISTENCY (Lead Review follow-up, Blocker 2): this
+    /// repository layer has no cross-write SwiftData transaction (see
+    /// `ExternalPlanningSourceRepository`/`CalendarImportDecisionRepository`'s
+    /// own `save()`-per-call pattern — unchanged by this feature), so
+    /// the CORE durable result — every intended `PlannedActivity`, ONE
+    /// `CalendarImportDecision`, and ONE `DecomposedActivityLink` per
+    /// child — is made all-or-nothing from the caller's perspective by
+    /// explicit, ordered rollback rather than a real transaction:
+    ///   1. every child is validated BEFORE any `PlannedActivity` is
+    ///      created, so the common failure mode (bad input) is caught
+    ///      with zero partial state;
+    ///   2. `PlannedActivity` creation, the `CalendarImportDecision`
+    ///      insert, and every `DecomposedActivityLink` insert all run
+    ///      inside ONE `do` block. On ANY failure in that block — a
+    ///      `PlannedActivity` creation failing partway through, the
+    ///      decision insert failing, or a link insert failing partway
+    ///      through — the `catch` unwinds EVERYTHING already durably
+    ///      written in this same call, in reverse order: any
+    ///      already-inserted `DecomposedActivityLink` rows for the
+    ///      (possibly-created) decision, the decision itself if it was
+    ///      created, then every already-created `PlannedActivity`. A
+    ///      rollback delete failing (defensive, not expected) is
+    ///      swallowed for that one row rather than masking the original
+    ///      failure — this is a best-effort bounded rollback, not a
+    ///      database-level transaction, and is explicitly documented as
+    ///      such rather than hidden.
+    /// A retry after ANY failure in step 2 therefore finds NO decision
+    /// at all for this `externalEventKey` (never a partial one) and
+    /// proceeds as a genuinely fresh split attempt.
     ///
-    /// EVIDENCE: after every child is created and linked, records
-    /// reusable decomposition evidence for THIS split, but ONLY if no
-    /// evidence already exists for this exact (source, recurring
-    /// series) or (source, exact title) key — see
+    /// EVIDENCE (Lead Review follow-up: Planning truth first, learning
+    /// evidence is assistance): `DecompositionEvidence` persistence is
+    /// explicitly OUTSIDE the core atomic scope above — it runs only
+    /// AFTER every `PlannedActivity`/`CalendarImportDecision`/
+    /// `DecomposedActivityLink` write has already durably succeeded, and
+    /// its own failure is swallowed (`try?`) rather than propagated: the
+    /// Parent's split import is already fully, correctly committed to
+    /// Planning at that point, and a caller must never receive an error
+    /// claiming the import failed when it did not. The cost is that a
+    /// failed evidence write silently forfeits a future Suggested Split
+    /// for this exact split (never a correctness problem for the
+    /// import itself, and never observable as a partial import) — see
     /// `recordDecompositionEvidenceIfAbsent(...)`'s own doc comment for
-    /// why this is create-only, never a silent overwrite of a
-    /// previously-learned pattern.
+    /// why the write itself is also create-only, never a silent
+    /// overwrite of a previously-learned pattern.
     @discardableResult
     public func classifyAndImportSplit(
         _ item: CalendarReviewItem,
@@ -897,17 +1007,27 @@ public final class CalendarPlanningCoordinationService {
         guard source.isEnabled, source.lifecycleStatus == .connected else {
             throw CalendarPlanningCoordinationError.sourceDisabled
         }
-        guard !children.isEmpty else {
-            throw CalendarPlanningCoordinationError.noSplitChildren
+        guard children.count >= 2 else {
+            throw CalendarPlanningCoordinationError.splitRequiresAtLeastTwoChildren
         }
 
         if let existingDecision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
             guard existingDecision.status == .imported else {
                 throw CalendarPlanningCoordinationError.alreadyDecided
             }
-            let existingIds = try plannedActivityIds(for: existingDecision)
-            let existingActivities = try existingIds.compactMap { try planningService.fetchPlannedActivity(byId: $0) }
-            guard existingActivities.count == existingIds.count, !existingActivities.isEmpty else {
+            let existingLinks = try decomposedActivityLinkRepository.fetchAll(forDecision: existingDecision.calendarImportDecisionId)
+            guard !existingLinks.isEmpty else {
+                // An ORDINARY (non-split) decision already occupies this
+                // key — never silently reinterpreted as a 1-child split.
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            guard existingLinks.count >= 2 else {
+                // Structurally incomplete — see this method's own
+                // "IDEMPOTENCY / EXISTING-DECISION COHERENCE" doc note.
+                throw CalendarPlanningCoordinationError.splitProvenanceIncomplete
+            }
+            let existingActivities = try existingLinks.compactMap { try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: $0.plannedActivityId)) }
+            guard existingActivities.count == existingLinks.count else {
                 throw CalendarPlanningCoordinationError.alreadyDecided
             }
             return existingActivities
@@ -933,6 +1053,7 @@ public final class CalendarPlanningCoordinationService {
         }
 
         var created: [PlannedActivity] = []
+        var decision: CalendarImportDecision?
         do {
             for child in children {
                 guard let athlete = resolvedAthletes[child.athleteId] else {
@@ -962,7 +1083,34 @@ public final class CalendarPlanningCoordinationService {
                 )
                 created.append(activity)
             }
+
+            let firstChild = children[0]
+            let newDecision = try importDecisionRepository.insert(
+                sourceId: source.externalPlanningSourceId,
+                externalEventKey: item.externalEventKey,
+                status: .imported,
+                athleteId: firstChild.athleteId,
+                sportId: firstChild.sportId,
+                activityType: firstChild.activityType,
+                plannedActivityId: created[0].plannedActivityId,
+                decidedBy: decidedBy
+            )
+            decision = newDecision
+            for (index, activity) in created.enumerated() {
+                try decomposedActivityLinkRepository.insert(
+                    calendarImportDecisionId: newDecision.calendarImportDecisionId,
+                    plannedActivityId: activity.plannedActivityId,
+                    orderIndex: index
+                )
+            }
         } catch {
+            if let decision {
+                let partialLinks = (try? decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)) ?? []
+                for link in partialLinks {
+                    try? decomposedActivityLinkRepository.delete(link)
+                }
+                try? importDecisionRepository.delete(decision)
+            }
             for activity in created {
                 try? planningService.deletePlannedActivity(
                     activity.plannedActivityId, expectedWeekPlanId: WeekPlanId(rawValue: activity.weekPlanId), deletedBy: decidedBy
@@ -971,26 +1119,16 @@ public final class CalendarPlanningCoordinationService {
             throw error
         }
 
-        let firstChild = children[0]
-        let decision = try importDecisionRepository.insert(
-            sourceId: source.externalPlanningSourceId,
-            externalEventKey: item.externalEventKey,
-            status: .imported,
-            athleteId: firstChild.athleteId,
-            sportId: firstChild.sportId,
-            activityType: firstChild.activityType,
-            plannedActivityId: created[0].plannedActivityId,
-            decidedBy: decidedBy
-        )
-        for (index, activity) in created.enumerated() {
-            try decomposedActivityLinkRepository.insert(
-                calendarImportDecisionId: decision.calendarImportDecisionId,
-                plannedActivityId: activity.plannedActivityId,
-                orderIndex: index
-            )
-        }
+        // Reaching here means the `do` block above completed without
+        // throwing — every `PlannedActivity`, the `CalendarImportDecision`,
+        // and every `DecomposedActivityLink` are durably committed;
+        // `decision` itself is no longer needed (only `created` is
+        // returned to the caller).
 
-        try recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
+        // EVIDENCE: post-import learning assistance only — see this
+        // method's own "EVIDENCE" doc note above for why a failure here
+        // is deliberately swallowed rather than propagated.
+        try? recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
 
         return created
     }

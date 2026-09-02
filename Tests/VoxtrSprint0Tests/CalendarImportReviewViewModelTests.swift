@@ -1883,6 +1883,57 @@ struct CalendarImportReviewViewModelTests {
         #expect(!button.localizedCaseInsensitiveContains("import 0"))
         #expect(button.contains("1"))
     }
+
+    /// Lead Review follow-up (split semantics — minimum two children):
+    /// a split-enabled row is never Ready until at least 2 valid
+    /// children exist, even though the Parent may toggle Split on with
+    /// exactly one editable child and edit it freely — proves
+    /// `StagedClassification.splitChildrenAreValid`/
+    /// `satisfiesMinimumImportRequirements` and `markReady`'s own no-op
+    /// guard compose correctly, mirroring
+    /// `CalendarPlanningCoordinationService`'s own
+    /// `.splitRequiresAtLeastTwoChildren` guard.
+    @Test("VX-038 Lead Review follow-up: a split with only one child never becomes Ready; a second valid child is required")
+    @MainActor
+    func splitWithOnlyOneChildNeverBecomesReady() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        // Toggling Split on starts with exactly ONE editable child —
+        // never auto-created as a second classified child.
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildren.count == 1)
+        viewModel.updateSplitChild(
+            viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id, for: item.externalEventKey
+        ) { child in
+            child.athleteId = fixture.athleteId
+        }
+        #expect(!viewModel.stagedClassification(for: item.externalEventKey).splitChildrenAreValid)
+        #expect(!viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+
+        // markReady is a no-op with only one valid child.
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+
+        // Adding a second, valid child makes it eligible for Ready.
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { child in
+            child.athleteId = fixture.athleteId
+            child.startOffsetMinutes = 70
+            child.durationMinutes = 60
+        }
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildrenAreValid)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+        #expect(viewModel.needsReviewItems.isEmpty)
+    }
 }
 
 private extension Date {
