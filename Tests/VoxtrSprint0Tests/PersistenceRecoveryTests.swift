@@ -196,12 +196,14 @@ struct PersistenceRecoveryTests {
         // shape's 19 while AppSchema.modelTypes.count had already moved
         // to 20). Family-Owned Calendar Sources V1: updated again to
         // AppSchemaV8. PR #48 follow-up (durable Suggested Ignore
-        // evidence): updated again to AppSchemaV9, matching
-        // CompositionRoot.build's own real default after that round's
-        // bump. Keep this literal in lockstep with CompositionRoot's
-        // own default on every future version bump too.
+        // evidence): updated again to AppSchemaV9. VX-038 (External
+        // Event Decomposition / Suggested Split): updated again to
+        // AppSchemaV10, matching CompositionRoot.build's own real
+        // default after that round's bump. Keep this literal in
+        // lockstep with CompositionRoot's own default on every future
+        // version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV9.self,
+            versionedSchema: AppSchemaV10.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
