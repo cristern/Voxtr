@@ -243,7 +243,7 @@ public final class FamilyScheduleViewModel {
     /// this screen is pushed — a fresh `FamilyScheduleViewModel`
     /// (construction-time default) always starts back at
     /// `defaultHorizonDays`.
-    public private(set) var horizonDays = Self.defaultHorizonDays
+    public private(set) var horizonDays = FamilyScheduleViewModel.defaultHorizonDays
 
     /// Whether `extendHorizon()` can still add more days — `false` once
     /// `horizonDays` has reached `maximumHorizonDays`, the bounded total
