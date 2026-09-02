@@ -2728,6 +2728,215 @@ extension CalendarPlanningCoordinationServiceTests {
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
         _ = secondActivity
     }
+
+    /// Lead Review follow-up (evidence correctness), test requirements
+    /// 1-4: two DIFFERENT recurring series sharing the exact same title
+    /// each learn and resolve their OWN distinct split pattern —
+    /// series B's first explicit split creates series-B evidence even
+    /// though series A's title-fallback evidence already existed at
+    /// that moment (the exact bug: recording used to treat "a
+    /// suggestion exists" as "evidence already recorded," silently
+    /// discarding B's own explicit pattern forever), and neither
+    /// series's own evidence is disturbed by the other's.
+    @Test("VX-038 Lead Review follow-up: series A and series B share the exact same title but learn and resolve distinct split patterns")
+    @MainActor
+    func differentRecurringSeriesWithSameTitleLearnDistinctPatterns() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+
+        let seriesAFirst = Self.referenceDate.addingTimeInterval(3600)
+        let seriesASecond = seriesAFirst.addingTimeInterval(7 * 24 * 3600)
+        let seriesBFirst = Self.referenceDate.addingTimeInterval(2 * 3600)
+        let seriesBSecond = seriesBFirst.addingTimeInterval(7 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-a", occurrenceDate: seriesAFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesAFirst, endDate: seriesAFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-a", occurrenceDate: seriesASecond, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesASecond, endDate: seriesASecond.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-b", occurrenceDate: seriesBFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesBFirst, endDate: seriesBFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-b", occurrenceDate: seriesBSecond, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesBSecond, endDate: seriesBSecond.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let seriesAFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-a" && $0.event.occurrenceDate == seriesAFirst })
+        let seriesASecondItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-a" && $0.event.occurrenceDate == seriesASecond })
+        let seriesBFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-b" && $0.event.occurrenceDate == seriesBFirst })
+        let seriesBSecondItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-b" && $0.event.occurrenceDate == seriesBSecond })
+
+        let patternA = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        try fixture.coordinationService.classifyAndImportSplit(seriesAFirstItem, for: source, children: patternA, decidedBy: ActorId())
+
+        // Requirement 2 setup: before series B has ANY evidence of its
+        // own, series A's evidence is genuinely reachable for series B
+        // via the title fallback.
+        let titleFallbackBeforeB = try fixture.coordinationService.suggestedSplit(for: seriesBSecondItem.event, source: source)
+        #expect(titleFallbackBeforeB?.children.map(\.durationMinutes) == [40, 60])
+
+        // Requirement 2: series B's own explicit, DIFFERENT split still
+        // creates series-B evidence — the title-fallback suggestion
+        // that existed a moment ago must never have been mistaken for
+        // "evidence already recorded for series B."
+        let patternB = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 50
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .strength, startOffsetMinutes: 60, durationMinutes: 45
+            )
+        ]
+        try fixture.coordinationService.classifyAndImportSplit(seriesBFirstItem, for: source, children: patternB, decidedBy: ActorId())
+
+        // Requirement 1: both patterns are now persisted as SEPARATE
+        // evidence rows.
+        #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 2)
+
+        // Requirement 3: a later series-B occurrence now resolves B's
+        // OWN series-specific pattern, not A's.
+        let suggestedForB = try fixture.coordinationService.suggestedSplit(for: seriesBSecondItem.event, source: source)
+        #expect(suggestedForB?.children.map(\.durationMinutes) == [50, 45])
+        #expect(suggestedForB?.children.map(\.activityType) == [.individualTraining, .strength])
+
+        // Requirement 4: a later series-A occurrence STILL resolves A's
+        // own pattern, completely undisturbed by series B's own,
+        // separately-learned evidence.
+        let suggestedForA = try fixture.coordinationService.suggestedSplit(for: seriesASecondItem.event, source: source)
+        #expect(suggestedForA?.children.map(\.durationMinutes) == [40, 60])
+        #expect(suggestedForA?.children.map(\.activityType) == [.individualTraining, .teamTraining])
+    }
+
+    /// Lead Review follow-up (evidence correctness), test requirement 5:
+    /// once series A and series B carry CONFLICTING split shapes under
+    /// the same title, the non-recurring/same-title fallback must never
+    /// arbitrarily pick one — it returns nil rather than guessing.
+    @Test("VX-038 Lead Review follow-up: non-recurring title fallback returns nil when matching evidence rows disagree on split shape")
+    @MainActor
+    func titleFallbackReturnsNilWhenMatchingEvidenceDisagrees() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let seriesAFirst = Self.referenceDate.addingTimeInterval(3600)
+        let seriesBFirst = Self.referenceDate.addingTimeInterval(2 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-a", occurrenceDate: seriesAFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesAFirst, endDate: seriesAFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-b", occurrenceDate: seriesBFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesBFirst, endDate: seriesBFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let seriesAFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-a" })
+        let seriesBFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-b" })
+
+        try fixture.coordinationService.classifyAndImportSplit(
+            seriesAFirstItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+        try fixture.coordinationService.classifyAndImportSplit(
+            seriesBFirstItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 50
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .strength, startOffsetMinutes: 60, durationMinutes: 45
+                )
+            ],
+            decidedBy: ActorId()
+        )
+
+        // A THIRD, non-recurring event with the SAME title matches
+        // neither series's own recurringEventIdentifier, so only the
+        // title fallback applies — and it must see the two conflicting
+        // shapes and refuse to guess.
+        let laterNonRecurringEvent = ExternalCalendarEvent(
+            eventIdentifier: "evt-one-off", calendarIdentifier: "cal-familie", title: "Hockey training",
+            startDate: Self.referenceDate.addingTimeInterval(14 * 24 * 3600), endDate: nil, isAllDay: false, isRecurring: false
+        )
+        #expect(try fixture.coordinationService.suggestedSplit(for: laterNonRecurringEvent, source: source) == nil)
+    }
+
+    /// Lead Review follow-up (evidence correctness), test requirement 6:
+    /// the title fallback still safely returns a suggestion when every
+    /// matching evidence row for that title happens to agree on the
+    /// exact same split shape — ambiguity handling must not become
+    /// over-cautious and break the ordinary, unambiguous case.
+    @Test("VX-038 Lead Review follow-up: non-recurring title fallback still succeeds when multiple matching evidence rows agree on the same split shape")
+    @MainActor
+    func titleFallbackSucceedsWhenMatchingEvidenceAgrees() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let seriesAFirst = Self.referenceDate.addingTimeInterval(3600)
+        let seriesBFirst = Self.referenceDate.addingTimeInterval(2 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-a", occurrenceDate: seriesAFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesAFirst, endDate: seriesAFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series-b", occurrenceDate: seriesBFirst, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: seriesBFirst, endDate: seriesBFirst.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let seriesAFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-a" })
+        let seriesBFirstItem = try #require(queue.first { $0.event.eventIdentifier == "evt-series-b" })
+
+        // Series A and series B happen to be split IDENTICALLY.
+        let sameShape = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        try fixture.coordinationService.classifyAndImportSplit(seriesAFirstItem, for: source, children: sameShape, decidedBy: ActorId())
+        try fixture.coordinationService.classifyAndImportSplit(seriesBFirstItem, for: source, children: sameShape, decidedBy: ActorId())
+        #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 2)
+
+        let laterNonRecurringEvent = ExternalCalendarEvent(
+            eventIdentifier: "evt-one-off", calendarIdentifier: "cal-familie", title: "Hockey training",
+            startDate: Self.referenceDate.addingTimeInterval(14 * 24 * 3600), endDate: nil, isAllDay: false, isRecurring: false
+        )
+        let suggested = try fixture.coordinationService.suggestedSplit(for: laterNonRecurringEvent, source: source)
+        #expect(suggested?.children.map(\.durationMinutes) == [40, 60])
+        #expect(suggested?.children.map(\.activityType) == [.individualTraining, .teamTraining])
+    }
 }
 
 private extension Date {

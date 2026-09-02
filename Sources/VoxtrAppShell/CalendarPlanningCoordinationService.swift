@@ -1148,6 +1148,39 @@ public final class CalendarPlanningCoordinationService {
         public let children: [Child]
     }
 
+    /// Lead Review follow-up (evidence correctness): one evidence row's
+    /// child sequence, reduced to only the fields that make two splits
+    /// the SAME durable shape — order is significant (child 0 of one row
+    /// must match child 0 of another, not merely "some permutation
+    /// matches"). Used ONLY to compare evidence rows against each other
+    /// (title-fallback ambiguity, below) — never persisted itself.
+    private struct EvidenceChildShape: Equatable {
+        let athleteId: UUID
+        let sportId: UUID?
+        let activityType: ActivityType
+        let startOffsetMinutes: Int
+        let durationMinutes: Int
+    }
+
+    private func childShape(forEvidence evidence: DecompositionEvidence) throws -> [EvidenceChildShape] {
+        try decompositionEvidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId).map {
+            EvidenceChildShape(
+                athleteId: $0.athleteId, sportId: $0.sportId, activityType: $0.activityType,
+                startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes
+            )
+        }
+    }
+
+    private static func suggestedSplitChild(_ shape: EvidenceChildShape) -> SuggestedSplit.Child {
+        SuggestedSplit.Child(
+            athleteId: AthleteId(rawValue: shape.athleteId),
+            sportId: shape.sportId.map { SportId(rawValue: $0) },
+            activityType: shape.activityType,
+            startOffsetMinutes: shape.startOffsetMinutes,
+            durationMinutes: shape.durationMinutes
+        )
+    }
+
     /// VX-038: looks up durable decomposition evidence for `event`
     /// within `source` ONLY — a pure read, never itself creating or
     /// mutating anything, and never applied without explicit Parent
@@ -1156,64 +1189,113 @@ public final class CalendarPlanningCoordinationService {
     ///   1. `event.isRecurring` AND a `DecompositionEvidence` row exists
     ///      for `source` whose `recurringEventIdentifier` matches
     ///      `event.eventIdentifier` — the STRONGEST evidence (the same
-    ///      recurring series, not merely similar text);
-    ///   2. else, a `DecompositionEvidence` row exists for `source`
-    ///      whose `normalizedTitle` matches `event.title` (via
+    ///      recurring series, not merely similar text). At most ONE such
+    ///      row can ever exist for a given (source, recurringEventIdentifier)
+    ///      pair — `recordDecompositionEvidenceIfAbsent`'s own series-
+    ///      scoped existence check (see that method's own doc comment)
+    ///      enforces this by construction, so this match is inherently
+    ///      unambiguous, never a `.first`-among-conflicting-rows choice;
+    ///   2. else, EVERY `DecompositionEvidence` row for `source` whose
+    ///      `normalizedTitle` matches `event.title` (via
     ///      `ExternalEventTitleNormalization.normalize(_:)`, the SAME
     ///      exact-match normalization this domain's remembered-
-    ///      classification evidence already uses) — the fallback,
-    ///      scoped to `source` only (never a different source, even one
-    ///      with an identical title — see `DecompositionEvidence`'s own
-    ///      doc comment);
+    ///      classification evidence already uses) — scoped to `source`
+    ///      only, never a different source even with an identical title.
+    ///      Lead Review follow-up (evidence correctness): TWO DIFFERENT
+    ///      recurring series (or a recurring series and a non-recurring
+    ///      import) legitimately CAN share the same title and each carry
+    ///      their OWN distinct split evidence (recording is series-
+    ///      scoped, not title-scoped, for a recurring event — see
+    ///      `recordDecompositionEvidenceIfAbsent`). This is therefore
+    ///      NEVER a `.first`-wins business decision: every matching row's
+    ///      own ordered child shape (`EvidenceChildShape` — athleteId,
+    ///      sportId, activityType, startOffsetMinutes, durationMinutes,
+    ///      IN ORDER) is compared. If every matching row agrees on the
+    ///      exact same shape, that shape is returned (multiple
+    ///      historical imports of unrelated events that all happened to
+    ///      produce an identical split are indistinguishable from one
+    ///      truth, so a suggestion is still safe). If any two matching
+    ///      rows disagree in ANY of those fields or in ordering, NO
+    ///      suggestion is returned — arbitrarily picking one
+    ///      Parent-approved pattern over another conflicting one would
+    ///      be exactly the kind of invented business decision this
+    ///      feature must never make. No confidence scoring, no fuzzy
+    ///      matching — an exact-shape match or nothing;
     ///   3. else `nil` — no suggestion.
     public func suggestedSplit(for event: ExternalCalendarEvent, source: ExternalPlanningSource) throws -> SuggestedSplit? {
         let allEvidence = try decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)
         guard !allEvidence.isEmpty else { return nil }
 
-        let matched: DecompositionEvidence?
         if event.isRecurring, let recurringMatch = allEvidence.first(where: { $0.recurringEventIdentifier == event.eventIdentifier }) {
-            matched = recurringMatch
-        } else if let normalizedTitle = ExternalEventTitleNormalization.normalize(event.title),
-                  let titleMatch = allEvidence.first(where: { $0.normalizedTitle == normalizedTitle }) {
-            matched = titleMatch
-        } else {
-            matched = nil
+            let shape = try childShape(forEvidence: recurringMatch)
+            guard !shape.isEmpty else { return nil }
+            return SuggestedSplit(children: shape.map(Self.suggestedSplitChild))
         }
-        guard let evidence = matched else { return nil }
 
-        let children = try decompositionEvidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId)
-        guard !children.isEmpty else { return nil }
-        return SuggestedSplit(children: children.map { child in
-            SuggestedSplit.Child(
-                athleteId: AthleteId(rawValue: child.athleteId),
-                sportId: child.sportId.map { SportId(rawValue: $0) },
-                activityType: child.activityType,
-                startOffsetMinutes: child.startOffsetMinutes,
-                durationMinutes: child.durationMinutes
-            )
-        })
+        guard let normalizedTitle = ExternalEventTitleNormalization.normalize(event.title) else { return nil }
+        let titleMatches = allEvidence.filter { $0.normalizedTitle == normalizedTitle }
+        guard !titleMatches.isEmpty else { return nil }
+
+        var agreedShape: [EvidenceChildShape]?
+        for evidence in titleMatches {
+            let shape = try childShape(forEvidence: evidence)
+            guard !shape.isEmpty else { continue }
+            if let existingShape = agreedShape {
+                guard existingShape == shape else { return nil }
+            } else {
+                agreedShape = shape
+            }
+        }
+        guard let agreedShape else { return nil }
+        return SuggestedSplit(children: agreedShape.map(Self.suggestedSplitChild))
     }
 
-    /// VX-038: CREATE-ONLY — records durable decomposition evidence for
-    /// `children` (the split just explicitly imported) UNLESS matching
-    /// evidence already exists for this exact key, checked with the
-    /// SAME precedence `suggestedSplit(for:source:)` itself uses. This
-    /// is the ONE place a later, edited (or from-scratch) split for a
-    /// DIFFERENT occurrence of the same recurring series is guaranteed
-    /// to never silently rewrite the historical, already-learned
-    /// pattern — the approved contract's own "editing one occurrence
-    /// must not silently rewrite historical decomposition evidence for
-    /// the whole recurring series" rule, enforced structurally (never
-    /// called at all when evidence already exists) rather than by a
-    /// caller remembering not to overwrite.
+    /// VX-038, Lead Review follow-up (evidence correctness): CREATE-ONLY
+    /// — records durable decomposition evidence for `children` (the
+    /// split just explicitly imported) UNLESS matching evidence already
+    /// exists for THIS event's own key — never `suggestedSplit(for:source:)`'s
+    /// broader read precedence, which deliberately ALSO falls back to a
+    /// title match that may belong to a completely different recurring
+    /// series. Using that broader precedence as the existence check
+    /// here was the original bug: an explicit split for series B would
+    /// see series A's title-fallback suggestion and wrongly treat that
+    /// as "evidence already recorded for B," silently discarding B's own
+    /// explicit pattern forever.
+    ///
+    /// The correct key depends on the event itself:
+    ///   - RECURRING: existence is checked ONLY by
+    ///     `source + recurringEventIdentifier` — series B may always
+    ///     establish its own evidence the first time it is explicitly
+    ///     split, REGARDLESS of whether series A (or any non-recurring
+    ///     import) already has matching-title evidence. This is also
+    ///     what keeps `suggestedSplit`'s own recurring-match branch
+    ///     unambiguous (see that method's own doc comment): at most one
+    ///     evidence row can ever exist per (source, recurringEventIdentifier);
+    ///   - NON-RECURRING: existence is checked by
+    ///     `source + normalizedTitle` — unchanged from this feature's
+    ///     original behavior (a non-recurring event was never eligible
+    ///     for the recurring branch in the first place, so this was
+    ///     always the effective check for it).
+    /// Either way, once ANY matching evidence exists for the correct
+    /// key, this method returns without writing anything — the same
+    /// "editing one occurrence must not silently rewrite historical
+    /// decomposition evidence" guarantee as before, now scoped
+    /// correctly per series rather than per shared title.
     private func recordDecompositionEvidenceIfAbsent(
         item: CalendarReviewItem,
         source: ExternalPlanningSource,
         children: [DecomposedChildInput],
         decidedBy: ActorId
     ) throws {
-        if try suggestedSplit(for: item.event, source: source) != nil {
-            return
+        let allEvidence = try decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        if item.event.isRecurring {
+            guard !allEvidence.contains(where: { $0.recurringEventIdentifier == item.event.eventIdentifier }) else {
+                return
+            }
+        } else if let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title) {
+            guard !allEvidence.contains(where: { $0.normalizedTitle == normalizedTitle }) else {
+                return
+            }
         }
         let recurringEventIdentifier = item.event.isRecurring ? item.event.eventIdentifier : nil
         let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title)
