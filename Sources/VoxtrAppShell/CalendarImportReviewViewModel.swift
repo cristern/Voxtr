@@ -405,14 +405,17 @@ public final class CalendarImportReviewViewModel {
 
     public func setStagedAthlete(_ athleteId: AthleteId?, for externalEventKey: String) {
         updateStaged(for: externalEventKey) { $0.athleteId = athleteId }
+        logRestoreSplitDiagnostic(point: "B (after Athlete selection)", for: externalEventKey)
     }
 
     public func setStagedSport(_ sportId: SportId?, for externalEventKey: String) {
         updateStaged(for: externalEventKey) { $0.sportId = sportId }
+        logRestoreSplitDiagnostic(point: "C (after Sport selection)", for: externalEventKey)
     }
 
     public func setStagedActivityType(_ activityType: ActivityType, for externalEventKey: String) {
         updateStaged(for: externalEventKey) { $0.activityType = activityType }
+        logRestoreSplitDiagnostic(point: "D (after Activity Type selection)", for: externalEventKey)
     }
 
     // MARK: - VX-038: Split activity (inline staging only — same "no persistence" contract)
@@ -442,6 +445,7 @@ public final class CalendarImportReviewViewModel {
     /// every other staging mutation's own "selecting/changing something
     /// never auto-confirms Ready" rule.
     public func setSplitEnabled(_ isEnabled: Bool, for externalEventKey: String) {
+        logRestoreSplitDiagnostic(point: "E (immediately before Split activation)", for: externalEventKey)
         updateStaged(for: externalEventKey) { staged in
             staged.isSplitEnabled = isEnabled
             if isEnabled && staged.splitChildren.isEmpty {
@@ -450,6 +454,7 @@ public final class CalendarImportReviewViewModel {
                 staged.splitChildren = [StagedClassification.SplitChild(activityType: staged.activityType)]
             }
         }
+        logRestoreSplitDiagnostic(point: "F (immediately after Split activation)", for: externalEventKey)
     }
 
     /// Runtime follow-up (split UX — shared Athlete/Sport): sets the ONE
@@ -637,10 +642,30 @@ public final class CalendarImportReviewViewModel {
     /// not yet satisfy the canonical minimum import requirement (the UI
     /// should also disable this action in that case, via
     /// `stagedClassification(for:).satisfiesMinimumImportRequirements`).
+    ///
+    /// VX-038 unified recognition follow-up (Part 10 — Ready-time
+    /// re-evaluation): a Parent-confirmed Ready classification is
+    /// TRANSIENT recognition evidence for the rest of the active Review
+    /// workflow (see `ReadyRecognitionShape`'s own doc comment) — so
+    /// marking THIS event Ready must let any other still-untouched
+    /// pending row re-evaluate against it immediately, exactly like
+    /// `bulkImportReadyItems()` already re-evaluates the remaining queue
+    /// after each import. `refreshQueueAndStaging()` is safe to call
+    /// here: it never discards genuine Parent-owned state (protected by
+    /// `hasMeaningfulStaging`), and it never creates any durable Planning
+    /// or evidence truth by itself. Also sets `hasUserInteraction = true`
+    /// (Part 12): tapping "Ready" is itself an explicit Parent action —
+    /// this is what makes an item that arrived ALREADY Ready purely from
+    /// a system prefill (Remembered Exact Choice, `hasUserInteraction ==
+    /// false`) distinguishable from one the Parent genuinely confirmed,
+    /// so only the latter is eligible to teach a THIRD pending event —
+    /// see `readyRecognitionShape(for:)`'s own doc comment.
     public func markReady(for externalEventKey: String) {
         guard var staged = stagedClassifications[externalEventKey], staged.satisfiesMinimumImportRequirements else { return }
         staged.isConfirmedReady = true
+        staged.hasUserInteraction = true
         stagedClassifications[externalEventKey] = staged
+        refreshQueueAndStaging()
     }
 
     /// The explicit "Edit" action on a compact Ready row — restores the
@@ -984,12 +1009,58 @@ public final class CalendarImportReviewViewModel {
         do {
             try calendarPlanningCoordinationService.restoreIgnoredEvent(item.externalEventKey, for: source)
             refreshQueueAndStaging()
+            logRestoreSplitDiagnostic(point: "A (immediately after Review again)", for: item.externalEventKey)
         } catch CalendarPlanningCoordinationError.sourceDisabled {
             errorMessage = CalendarPlanningStrings.sourceDisabledError
             refreshQueueAndStaging()
         } catch {
             errorMessage = CalendarPlanningStrings.genericError
         }
+    }
+
+    /// VX-038 unified recognition follow-up (Part 17 — Alpha diagnostic):
+    /// static repository-level testing and repeated code-level tracing
+    /// could not reproduce a THIRD, distinct root cause — beyond what PR
+    /// #55 already fixed — specific to the Ignore → "Review again" →
+    /// classify → Split lifecycle the Product Owner reported on
+    /// TestFlight; the exact 11-step regression sequence (restore →
+    /// Athlete/Sport/non-default Activity Type → Split) traces through
+    /// this ViewModel's own logic as correct. This is the smallest
+    /// useful, privacy-safe capture of that EXACT transition on a real
+    /// device, so a genuine TestFlight run can show whether the failure
+    /// is happening at a layer these tests cannot see (e.g. SwiftUI
+    /// Picker/Toggle/row-identity timing) rather than in this staging
+    /// logic itself. Alpha/Console only (OSLog, `.private` for the one
+    /// identifying value) — never athlete names, event titles, notes,
+    /// location, or URLs; every other field is a bare enum case or
+    /// nil/non-nil boolean, never a raw value. Purely observational:
+    /// never mutates anything, never gates any behavior.
+    private func logRestoreSplitDiagnostic(point: String, for externalEventKey: String) {
+        let staged = stagedClassifications[externalEventKey] ?? StagedClassification()
+        let recognitionShapeCategory: String
+        if let shape = Self.readyRecognitionShape(for: staged) {
+            switch shape {
+            case .single: recognitionShapeCategory = "single"
+            case .split: recognitionShapeCategory = "split"
+            }
+        } else {
+            recognitionShapeCategory = "none"
+        }
+        VoxtrLog.logger(.appShell).info("""
+            VX-038 unified recognition restore/split diagnostic [\(point, privacy: .public)] \
+            externalEventKey=\(externalEventKey, privacy: .private) \
+            ordinaryAthleteSet=\(staged.athleteId != nil, privacy: .public) \
+            ordinarySportSet=\(staged.sportId != nil, privacy: .public) \
+            ordinaryActivityType=\(String(describing: staged.activityType), privacy: .public) \
+            splitChildrenCount=\(staged.splitChildren.count, privacy: .public) \
+            splitAthleteSet=\(staged.splitAthleteId != nil, privacy: .public) \
+            splitSportSet=\(staged.splitSportId != nil, privacy: .public) \
+            firstChildActivityType=\(staged.splitChildren.first.map { String(describing: $0.activityType) } ?? "none", privacy: .public) \
+            hasUserInteraction=\(staged.hasUserInteraction, privacy: .public) \
+            isSplitEnabled=\(staged.isSplitEnabled, privacy: .public) \
+            isConfirmedReady=\(staged.isConfirmedReady, privacy: .public) \
+            recognitionShape=\(recognitionShapeCategory, privacy: .public)
+            """)
     }
 
     /// Calendar Import Review V1.3 (Suggested Ignore): the Parent's
@@ -1083,6 +1154,170 @@ public final class CalendarImportReviewViewModel {
             || failedImportReasons[externalEventKey] != nil
     }
 
+    // MARK: - VX-038 unified recognition (Ready-time transient evidence)
+
+    /// VX-038 unified recognition follow-up: the ONE user-visible
+    /// recognition contract — "classify → Ready → matching event is
+    /// prefilled/suggested" — must behave identically whether the
+    /// Parent-approved classification represents Shape A (single) or
+    /// Shape B (split). Repository inspection (Part 1) found that the
+    /// EXISTING single-activity mechanism (Remembered Exact Choices/
+    /// Similar-Event Suggestions) only ever reads FROM DURABLE evidence
+    /// — `CalendarImportDecision(status: .imported)` rows — meaning it
+    /// already only actually taught AFTER Import, not at bare Ready,
+    /// despite `StagedClassification.isConfirmedReady` existing as a
+    /// distinct concept. That was an accidental implementation gap, not
+    /// an intentional product rule (nothing in this feature's own
+    /// contract ever said Ready alone should NOT assist), so this type
+    /// generalizes recognition to also cover TRANSIENT, in-session Ready
+    /// evidence for BOTH shapes — the smallest common representation,
+    /// never persisted, never sent to `CalendarPlanningCoordinationService`.
+    ///
+    /// CONFLICT: compared via `Equatable` exactly like
+    /// `CalendarPlanningCoordinationService`'s own `EvidenceChildShape`
+    /// comparison for durable Split evidence — for Split this means
+    /// shared Athlete, shared Sport, child count/order, and each child's
+    /// Activity Type/start offset/duration ALL have to agree for two
+    /// Ready rows to count as the same shape (Part 9).
+    private enum ReadyRecognitionShape: Equatable {
+        case single(athleteId: AthleteId, sportId: SportId?, activityType: ActivityType)
+        case split(athleteId: AthleteId, sportId: SportId?, children: [SplitChildShape])
+
+        struct SplitChildShape: Equatable {
+            let activityType: ActivityType
+            let startOffsetMinutes: Int
+            let durationMinutes: Int
+        }
+    }
+
+    /// `nil` unless `staged` resolves to a complete, valid shape AND is
+    /// GENUINELY Parent-approved — `isConfirmedReady` alone is not
+    /// enough (Part 12: "B must not become new evidence merely because
+    /// it was suggested. Only after Parent explicitly marks B Ready may
+    /// B itself become... evidence"). A Remembered Exact Choice (V1.1)
+    /// MAY still arrive already `isConfirmedReady == true` purely as a
+    /// system prefill the Parent never touched (`hasUserInteraction ==
+    /// false`) — that existing, unchanged UX still lets it sit in Ready
+    /// to Import and be bulk-imported as-is, but it must NOT itself
+    /// teach a THIRD, different pending event within this same session
+    /// until the Parent does something explicit with it (edits a value,
+    /// or taps "Ready" themselves — `setStagedAthlete`/`setStagedSport`/
+    /// `setStagedActivityType`/the whole Split editing surface, and
+    /// `markReady(for:)` itself, all set `hasUserInteraction = true`).
+    /// A Split shape is unaffected in practice: it can only ever become
+    /// Ready through genuine Parent-driven staging (`setSplitEnabled`/
+    /// `addSplitChild`/`updateSplitChild`/`markReady`), so
+    /// `hasUserInteraction` is always already `true` by the time a split
+    /// is Ready — Suggested Split itself never sets `isConfirmedReady`.
+    private static func readyRecognitionShape(for staged: StagedClassification) -> ReadyRecognitionShape? {
+        guard staged.isConfirmedReady, staged.hasUserInteraction else { return nil }
+        if staged.isSplitEnabled {
+            guard let splitAthleteId = staged.splitAthleteId, staged.splitChildrenAreValid else { return nil }
+            return .split(
+                athleteId: splitAthleteId,
+                sportId: staged.splitSportId,
+                children: staged.splitChildren.map {
+                    ReadyRecognitionShape.SplitChildShape(
+                        activityType: $0.activityType, startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes
+                    )
+                }
+            )
+        }
+        guard let athleteId = staged.athleteId else { return nil }
+        return .single(athleteId: athleteId, sportId: staged.sportId, activityType: staged.activityType)
+    }
+
+    /// VX-038 unified recognition follow-up: the transient, per-refresh
+    /// index of every currently Ready classification's shape, keyed
+    /// exactly like durable evidence (`recurringEventIdentifier` first,
+    /// `normalizedTitle` fallback — Part 8, same matching direction, no
+    /// fuzzy Split matching). Built fresh from the staging that existed
+    /// BEFORE this refresh pass, so a row this SAME pass derives from it
+    /// can never itself feed back into the index until a LATER, separate
+    /// refresh — preventing the self-propagating chain Part 12 forbids
+    /// ("an unconfirmed suggestion must not teach," and a row this pass
+    /// only just prefilled was never itself Parent-confirmed within this
+    /// same pass).
+    private struct ReadyRecognitionIndex {
+        private var byRecurringId: [String: ReadyRecognitionShape] = [:]
+        private var conflictedRecurringIds: Set<String> = []
+        private var byNormalizedTitle: [String: ReadyRecognitionShape] = [:]
+        private var conflictedTitles: Set<String> = []
+
+        mutating func add(recurringId: String?, normalizedTitle: String?, shape: ReadyRecognitionShape) {
+            if let recurringId {
+                Self.merge(shape, into: &byRecurringId, conflicts: &conflictedRecurringIds, key: recurringId)
+            }
+            if let normalizedTitle {
+                Self.merge(shape, into: &byNormalizedTitle, conflicts: &conflictedTitles, key: normalizedTitle)
+            }
+        }
+
+        private static func merge(_ shape: ReadyRecognitionShape, into map: inout [String: ReadyRecognitionShape], conflicts: inout Set<String>, key: String) {
+            guard !conflicts.contains(key) else { return }
+            if let existing = map[key] {
+                guard existing == shape else {
+                    map.removeValue(forKey: key)
+                    conflicts.insert(key)
+                    return
+                }
+            } else {
+                map[key] = shape
+            }
+        }
+
+        /// `nil` for both "no Ready evidence at all" and "conflicting
+        /// Ready evidence" (Part 9 — never arbitrarily pick one).
+        func agreedShape(forRecurringId recurringId: String) -> ReadyRecognitionShape? {
+            conflictedRecurringIds.contains(recurringId) ? nil : byRecurringId[recurringId]
+        }
+
+        func agreedShape(forNormalizedTitle title: String) -> ReadyRecognitionShape? {
+            conflictedTitles.contains(title) ? nil : byNormalizedTitle[title]
+        }
+    }
+
+    /// Same recurring-series-first, exact-title-fallback precedence
+    /// `CalendarPlanningCoordinationService.suggestedSplit(for:source:)`
+    /// already uses for durable evidence (Part 8).
+    private static func sessionReadyShape(for event: ExternalCalendarEvent, index: ReadyRecognitionIndex) -> ReadyRecognitionShape? {
+        if event.isRecurring, let shape = index.agreedShape(forRecurringId: event.eventIdentifier) {
+            return shape
+        }
+        guard let normalizedTitle = ExternalEventTitleNormalization.normalize(event.title) else { return nil }
+        return index.agreedShape(forNormalizedTitle: normalizedTitle)
+    }
+
+    /// Translates a `ReadyRecognitionShape` into the SAME staging shapes
+    /// the durable-evidence tiers already construct — `.single` mirrors
+    /// Remembered Exact Choice's own "MAY arrive already Ready" contract
+    /// (V1.1, unchanged); `.split` mirrors Suggested Split's own "NEVER
+    /// arrives Ready" contract (VX-038, unchanged) — same shapes, same
+    /// Ready-ness rules, regardless of whether the evidence is this
+    /// session's own transient Ready staging or durable persisted
+    /// evidence. Either way this is presentation assistance only: never
+    /// itself a `CalendarImportDecision`/`PlannedActivity`/
+    /// `DecompositionEvidence` write.
+    private static func stagedClassification(fromReadyShape shape: ReadyRecognitionShape) -> StagedClassification {
+        switch shape {
+        case .single(let athleteId, let sportId, let activityType):
+            return StagedClassification(
+                athleteId: athleteId, sportId: sportId, activityType: activityType,
+                isConfirmedReady: true, suggestionKind: .exactRemembered
+            )
+        case .split(let athleteId, let sportId, let children):
+            return StagedClassification(
+                splitAthleteId: athleteId,
+                splitSportId: sportId,
+                isSplitEnabled: true,
+                splitChildren: children.map {
+                    StagedClassification.SplitChild(activityType: $0.activityType, startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes)
+                },
+                isSuggestedSplitPrefill: true
+            )
+        }
+    }
+
     // MARK: - Queue + staging refresh (shared by load(), ignore(), restore(), reviewSuggestedIgnore(_:), and bulkImportReadyItems())
 
     /// Re-fetches the review queue (and the Ignored section's own
@@ -1158,6 +1393,21 @@ public final class CalendarImportReviewViewModel {
         // something to explain.
         let hasAnyDecompositionEvidence = (try? calendarPlanningCoordinationService.hasDecompositionEvidence(for: source)) ?? false
 
+        // VX-038 unified recognition follow-up (Part 5/6/10): the
+        // TRANSIENT, in-session Ready-evidence index — built from the
+        // staging that existed BEFORE this pass, over every event still
+        // in `reviewQueue` (an item removed from the queue this pass,
+        // e.g. just imported, contributes nothing — its own evidence is
+        // durable now, read through the persisted tiers below instead).
+        var readyRecognitionIndex = ReadyRecognitionIndex()
+        for candidateItem in reviewQueue {
+            guard let candidateStaged = stagedClassifications[candidateItem.externalEventKey],
+                  let shape = Self.readyRecognitionShape(for: candidateStaged) else { continue }
+            let recurringId = candidateItem.event.isRecurring ? candidateItem.event.eventIdentifier : nil
+            let normalizedTitle = ExternalEventTitleNormalization.normalize(candidateItem.event.title)
+            readyRecognitionIndex.add(recurringId: recurringId, normalizedTitle: normalizedTitle, shape: shape)
+        }
+
         for item in reviewQueue {
             if let existing = stagedClassifications[item.externalEventKey],
                hasMeaningfulStaging(existing, externalEventKey: item.externalEventKey) {
@@ -1165,6 +1415,20 @@ public final class CalendarImportReviewViewModel {
                 if hasAnyDecompositionEvidence {
                     VoxtrLog.logger(.appShell).info("VX-038 suggestion diagnostic C (meaningful staging already present, not re-evaluated) externalEventKey=\(item.externalEventKey, privacy: .private)")
                 }
+                continue
+            }
+            // VX-038 unified recognition follow-up (Part 5/6/10):
+            // TRANSIENT Ready evidence from elsewhere in THIS active
+            // Review workflow wins ahead of durable evidence — it
+            // reflects the Parent's own most current explicit decision.
+            // Represents EITHER shape uniformly (single or split); never
+            // sets `isConfirmedReady` for a split shape (Part 6 — "B
+            // remains unconfirmed until the Parent explicitly marks it
+            // Ready"), matching Suggested Split's own existing contract
+            // exactly. Read-only; never itself creates or mutates
+            // Planning/evidence truth.
+            if let sessionShape = Self.sessionReadyShape(for: item.event, index: readyRecognitionIndex) {
+                rebuiltStaging[item.externalEventKey] = Self.stagedClassification(fromReadyShape: sessionShape)
                 continue
             }
             // VX-038 (Suggested Split): checked BEFORE exact/similar

@@ -2821,6 +2821,630 @@ struct CalendarImportReviewViewModelTests {
 
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
     }
+
+    // MARK: - VX-038 unified recognition follow-up: restore + Split preservation (required tests 1-5)
+
+    @Test("VX-038 unified test 1/2/3: Ignore -> Review again -> Athlete/Sport/non-default Activity Type -> Split inherits all three, using the actual restored externalEventKey, with ordinary values intact underneath")
+    @MainActor
+    func restoreThenClassifyThenSplitInheritsAllThree() throws {
+        let fixture = try makeFixture()
+        let seededSports = try fixture.sportRepository.seedCanonicalSportsIfNeeded()
+        let sport = try #require(seededSports.first)
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let originalItem = try #require(viewModel.reviewQueue.first)
+
+        // Step 4-5: Ignore, then confirm it left pending Review and
+        // appears in Ignored.
+        viewModel.ignore(originalItem)
+        #expect(viewModel.reviewQueue.isEmpty)
+        #expect(viewModel.ignoredItems.map(\.externalEventKey).contains(originalItem.externalEventKey))
+
+        // Step 6-7: restore ("Review again") — back in the review queue,
+        // editable, SAME externalEventKey.
+        let ignoredItem = try #require(viewModel.ignoredItems.first)
+        viewModel.restore(ignoredItem)
+        let restoredItem = try #require(viewModel.reviewQueue.first)
+        #expect(restoredItem.externalEventKey == originalItem.externalEventKey)
+
+        // Step 8-9: Athlete/Sport/a NON-DEFAULT Activity Type, using the
+        // real ViewModel setters and the actual restored key.
+        viewModel.setStagedAthlete(fixture.athleteId, for: restoredItem.externalEventKey)
+        viewModel.setStagedSport(sport.sportId, for: restoredItem.externalEventKey)
+        viewModel.setStagedActivityType(.teamTraining, for: restoredItem.externalEventKey)
+
+        let beforeSplit = viewModel.stagedClassification(for: restoredItem.externalEventKey)
+        #expect(beforeSplit.athleteId == fixture.athleteId)
+        #expect(beforeSplit.sportId == sport.sportId)
+        #expect(beforeSplit.activityType == .teamTraining)
+
+        // Step 10-11: enable Split — inherits all three immediately.
+        viewModel.setSplitEnabled(true, for: restoredItem.externalEventKey)
+        let afterSplit = viewModel.stagedClassification(for: restoredItem.externalEventKey)
+        #expect(afterSplit.isSplitEnabled)
+        #expect(afterSplit.splitAthleteId == fixture.athleteId)
+        #expect(afterSplit.splitSportId == sport.sportId)
+        #expect(afterSplit.splitChildren.first?.activityType == .teamTraining)
+
+        // Ordinary values remain intact underneath.
+        #expect(afterSplit.athleteId == fixture.athleteId)
+        #expect(afterSplit.sportId == sport.sportId)
+        #expect(afterSplit.activityType == .teamTraining)
+    }
+
+    @Test("VX-038 unified test 4/5: after restore, Split OFF/ON preserves Parent-edited Split state, and reactivation never overwrites it from the ordinary fields")
+    @MainActor
+    func restoreThenSplitOffOnPreservesEditedSplitState() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let originalItem = try #require(viewModel.reviewQueue.first)
+        viewModel.ignore(originalItem)
+        viewModel.restore(try #require(viewModel.ignoredItems.first))
+        let restoredItem = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: restoredItem.externalEventKey)
+        viewModel.setSplitEnabled(true, for: restoredItem.externalEventKey)
+        viewModel.addSplitChild(for: restoredItem.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: restoredItem.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: restoredItem.externalEventKey) { $0.durationMinutes = 55 }
+
+        // Split OFF/ON preserves the edited split state.
+        viewModel.setSplitEnabled(false, for: restoredItem.externalEventKey)
+        viewModel.setSplitEnabled(true, for: restoredItem.externalEventKey)
+        let staged = viewModel.stagedClassification(for: restoredItem.externalEventKey)
+        #expect(staged.splitChildren.count == 2)
+        #expect(staged.splitChildren[1].durationMinutes == 55)
+
+        // Changing the ordinary Athlete while Split is off never
+        // re-seeds the already-edited split Athlete on reactivation.
+        viewModel.setSplitEnabled(false, for: restoredItem.externalEventKey)
+        viewModel.setStagedAthlete(secondAthleteId, for: restoredItem.externalEventKey)
+        viewModel.setSplitEnabled(true, for: restoredItem.externalEventKey)
+        #expect(viewModel.stagedClassification(for: restoredItem.externalEventKey).splitAthleteId == fixture.athleteId)
+    }
+
+    // MARK: - VX-038 unified recognition follow-up: existing normal recognition (required tests 6-7)
+
+    @Test("VX-038 unified test 6: an ordinary classification marked Ready — WITHOUT importing first — assists a matching untouched pending event within the same active Review workflow")
+    @MainActor
+    func ordinaryReadyClassificationAssistsMatchingEventWithoutImportFirst() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.setStagedActivityType(.teamTraining, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // A was never imported — no PlannedActivity exists yet.
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+
+        let stagedB = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(stagedB.athleteId == fixture.athleteId)
+        #expect(stagedB.activityType == .teamTraining)
+        #expect(stagedB.isConfirmedReady)
+        #expect(stagedB.suggestionKind == .exactRemembered)
+    }
+
+    @Test("VX-038 unified test 7: a Ready ordinary classification creates no Planning truth before Import")
+    @MainActor
+    func readyOrdinaryClassificationCreatesNoPlanningTruthBeforeImport() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.markReady(for: item.externalEventKey)
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+        #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+    }
+
+    // MARK: - VX-038 unified recognition follow-up: unified Split recognition (required tests 8-15)
+
+    @Test("VX-038 unified test 8: a configured but NOT Ready Split does not teach a matching pending event")
+    @MainActor
+    func configuredButNotReadySplitDoesNotTeach() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        // Deliberately NOT marked Ready.
+
+        let stagedB = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(!stagedB.isSplitEnabled)
+        #expect(stagedB.athleteId == nil)
+    }
+
+    @Test("VX-038 unified test 9/10/11/12: a Parent-confirmed Ready Split — WITHOUT importing first — teaches a matching untouched event within the same Review workflow, with correct shared Athlete/Sport, child count/order, Activity Types, offsets and durations, and it does not arrive auto-Ready")
+    @MainActor
+    func readySplitTeachesMatchingEventWithoutImportFirst() throws {
+        let fixture = try makeFixture()
+        let seededSports = try fixture.sportRepository.seedCanonicalSportsIfNeeded()
+        let sport = try #require(seededSports.first)
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.setSplitSport(sport.sportId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: itemA.externalEventKey).splitChildren[0].id
+        let secondChildId = viewModel.stagedClassification(for: itemA.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(firstChildId, for: itemA.externalEventKey) { $0.durationMinutes = 40 }
+        viewModel.updateSplitChild(secondChildId, for: itemA.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // A was never imported.
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+
+        let stagedB = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(stagedB.isSplitEnabled)
+        #expect(stagedB.isSuggestedSplitPrefill)
+        #expect(stagedB.splitAthleteId == fixture.athleteId)
+        #expect(stagedB.splitSportId == sport.sportId)
+        #expect(stagedB.splitChildren.map(\.startOffsetMinutes) == [0, 70])
+        #expect(stagedB.splitChildren.map(\.durationMinutes) == [40, 60])
+        // Never arrives auto-Ready — the Parent must still confirm it.
+        #expect(!stagedB.isConfirmedReady)
+    }
+
+    @Test("VX-038 unified test 13: explicitly marking the Suggested Split event B Ready makes it itself eligible as Parent-approved evidence for a THIRD matching event C")
+    @MainActor
+    func markingSuggestedSplitReadyMakesItEligibleAsEvidenceForThirdEvent() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // B received the Suggested Split (not yet confirmed).
+        #expect(!viewModel.stagedClassification(for: itemB.externalEventKey).isConfirmedReady)
+
+        // The Parent explicitly confirms B Ready.
+        viewModel.markReady(for: itemB.externalEventKey)
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).isConfirmedReady)
+
+        // A THIRD matching event C now appears — it must also receive
+        // the Suggested Split, proving B's own confirmation propagated.
+        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 48)
+        viewModel.load()
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-C" })
+        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
+        #expect(stagedC.isSplitEnabled)
+        #expect(stagedC.isSuggestedSplitPrefill)
+        #expect(stagedC.splitAthleteId == fixture.athleteId)
+    }
+
+    @Test("VX-038 unified test 14: editing a Ready Split invalidates its evidence eligibility until Ready is explicitly confirmed again")
+    @MainActor
+    func editingReadySplitInvalidatesEvidenceUntilReconfirmed() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).isSplitEnabled)
+
+        // The Parent edits A's split AFTER marking it Ready — this
+        // un-confirms A (existing invariant, unchanged for Split).
+        let firstChildId = viewModel.stagedClassification(for: itemA.externalEventKey).splitChildren[0].id
+        viewModel.updateSplitChild(firstChildId, for: itemA.externalEventKey) { $0.durationMinutes = 45 }
+        #expect(!viewModel.stagedClassification(for: itemA.externalEventKey).isConfirmedReady)
+
+        // A THIRD event now appears — since A is no longer confirmed
+        // Ready, it must NOT receive A's now-stale shape.
+        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 48)
+        viewModel.load()
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-C" })
+        #expect(!viewModel.stagedClassification(for: itemC.externalEventKey).isSplitEnabled)
+    }
+
+    @Test("VX-038 unified test 15: conflicting Ready Split shapes for the same title produce no automatic Split suggestion")
+    @MainActor
+    func conflictingReadySplitShapesProduceNoAutomaticSuggestion() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 48)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-C" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // A conflicting shared Athlete, marked Ready on a DIFFERENT
+        // occurrence of the SAME title.
+        viewModel.setSplitEnabled(true, for: itemB.externalEventKey)
+        viewModel.setSplitAthlete(secondAthleteId, for: itemB.externalEventKey)
+        viewModel.addSplitChild(for: itemB.externalEventKey)
+        viewModel.markReady(for: itemB.externalEventKey)
+
+        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
+        #expect(!stagedC.isSplitEnabled)
+    }
+
+    // MARK: - VX-038 unified recognition follow-up: refresh/state safety (required tests 16-20)
+
+    @Test("VX-038 unified test 16/17/18/19/20: marking Ready re-evaluates untouched pending rows while preserving Parent-owned staging, existing Ready rows, Needs Attention state, and lifted Suggested Ignore state")
+    @MainActor
+    func markReadyReEvaluatesWhilePreservingAllOtherState() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-parent-owned", title: "Swim practice", hoursFromReference: 25)
+        addEvent(fixture, identifier: "evt-already-ready", title: "Piano recital", hoursFromReference: 26)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemParentOwned = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-parent-owned" })
+        let itemAlreadyReady = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-already-ready" })
+
+        // A different, unrelated Parent-owned edit — not yet Ready.
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemParentOwned.externalEventKey)
+        viewModel.setStagedActivityType(.recovery, for: itemParentOwned.externalEventKey)
+
+        // A different, already-Ready item.
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemAlreadyReady.externalEventKey)
+        viewModel.markReady(for: itemAlreadyReady.externalEventKey)
+
+        // Now mark A Ready — this triggers the required re-evaluation.
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // The untouched matching row (B) got re-evaluated.
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).athleteId == fixture.athleteId)
+
+        // The unrelated Parent-owned edit survived, untouched.
+        let stagedParentOwned = viewModel.stagedClassification(for: itemParentOwned.externalEventKey)
+        #expect(stagedParentOwned.athleteId == fixture.athleteId)
+        #expect(stagedParentOwned.activityType == .recovery)
+        #expect(!stagedParentOwned.isConfirmedReady)
+
+        // The already-Ready item survived Ready.
+        #expect(viewModel.stagedClassification(for: itemAlreadyReady.externalEventKey).isConfirmedReady)
+        #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(itemAlreadyReady.externalEventKey))
+    }
+
+    @Test("VX-038 unified test 19 (Needs Attention survives markReady-triggered re-evaluation)")
+    @MainActor
+    func needsAttentionSurvivesMarkReadyTriggeredReEvaluation() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-conflict", title: "Will Conflict", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-other", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let conflictItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-conflict" })
+        let otherItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-other" })
+
+        // Pre-seed a legacy PlannedActivity owned by a DIFFERENT athlete
+        // so classifyAndImport throws existingActivityConflict for this
+        // one item — the same established pattern as
+        // partialBatchFailureLeavesFailedItemEditableWithoutDuplicating.
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: secondAthleteId, weekStart: today)
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: secondAthleteId, activityType: .individualTraining,
+            title: "Will Conflict", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: conflictItem.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: conflictItem.externalEventKey)
+        viewModel.markReady(for: conflictItem.externalEventKey)
+        viewModel.bulkImportReadyItems()
+        #expect(viewModel.needsAttentionItems.map(\.externalEventKey).contains(conflictItem.externalEventKey))
+
+        // Now mark a DIFFERENT, unrelated item Ready — this triggers the
+        // required re-evaluation of the rest of the queue.
+        viewModel.setStagedAthlete(fixture.athleteId, for: otherItem.externalEventKey)
+        viewModel.markReady(for: otherItem.externalEventKey)
+
+        // The Needs Attention item survived, untouched.
+        #expect(viewModel.needsAttentionItems.map(\.externalEventKey).contains(conflictItem.externalEventKey))
+        #expect(viewModel.failedImportReasons[conflictItem.externalEventKey] == CalendarPlanningStrings.existingActivityConflictError)
+    }
+
+    // MARK: - VX-038 unified recognition follow-up: Ignore lifecycle (required tests 21-22)
+
+    @Test("VX-038 unified test 21: a prior Ignore -> Review again history never blocks normal recognition for the SAME event")
+    @MainActor
+    func priorIgnoreReviewAgainDoesNotBlockNormalRecognition() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let originalItem = try #require(viewModel.reviewQueue.first)
+        viewModel.ignore(originalItem)
+        viewModel.restore(try #require(viewModel.ignoredItems.first))
+        let restoredItem = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: restoredItem.externalEventKey)
+        #expect(viewModel.stagedClassification(for: restoredItem.externalEventKey).satisfiesMinimumImportRequirements)
+        viewModel.markReady(for: restoredItem.externalEventKey)
+        #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(restoredItem.externalEventKey))
+    }
+
+    @Test("VX-038 unified test 22: a newer explicit Ready classification can assist a matching pending event even though an older Ignore decision exists for a DIFFERENT prior occurrence, without deleting that canonical Ignore history")
+    @MainActor
+    func newerExplicitReadySupersedesStaleIgnoreDerivedAssistance() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-ignored", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let ignoredOriginal = try #require(viewModel.reviewQueue.first)
+        viewModel.ignore(ignoredOriginal)
+        #expect(viewModel.ignoredItems.map(\.externalEventKey).contains(ignoredOriginal.externalEventKey))
+
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 48)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).athleteId == fixture.athleteId)
+
+        // The original Ignore decision is untouched — canonical history
+        // was never deleted to achieve this.
+        #expect(viewModel.ignoredItems.map(\.externalEventKey).contains(ignoredOriginal.externalEventKey))
+    }
+
+    // MARK: - VX-038 unified recognition follow-up: persistence boundary (required tests 23-30)
+
+    @Test("VX-038 unified test 23/24/25: Ready alone — for both ordinary and Split — creates no PlannedActivity, no CalendarImportDecision, and no persisted DecompositionEvidence")
+    @MainActor
+    func readyAloneCreatesNoDurableTruthForEitherShape() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-single", title: "Swim practice", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-split", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let singleItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single" })
+        let splitItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split" })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: singleItem.externalEventKey)
+        viewModel.markReady(for: singleItem.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: splitItem.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: splitItem.externalEventKey)
+        viewModel.addSplitChild(for: splitItem.externalEventKey)
+        viewModel.markReady(for: splitItem.externalEventKey)
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+        #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
+    }
+
+    @Test("VX-038 unified test 26/27: bulk import uses the existing canonical classifyAndImport/classifyAndImportSplit paths, and an imported Split creates durable decomposition evidence")
+    @MainActor
+    func bulkImportUsesCanonicalPathsAndCreatesDurableSplitEvidence() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-single", title: "Swim practice", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-split", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let singleItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single" })
+        let splitItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split" })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: singleItem.externalEventKey)
+        viewModel.markReady(for: singleItem.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: splitItem.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: splitItem.externalEventKey)
+        viewModel.addSplitChild(for: splitItem.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: splitItem.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: splitItem.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        viewModel.markReady(for: splitItem.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        let imported = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(imported.count == 3) // 1 single + 2 split children
+        let decisions = try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId)
+        #expect(decisions.count == 2)
+        let evidence = try fixture.decompositionEvidenceRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId)
+        #expect(evidence.count == 1)
+    }
+
+    @Test("VX-038 unified test 28/29: a fresh coordination service and fresh ViewModel, against a genuinely closed-and-reopened on-disk store, can still suggest the Split for a later matching occurrence from durable evidence")
+    @MainActor
+    func freshServiceAndViewModelAgainstReopenedStoreSuggestSplitFromDurableEvidence() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("vx038-unified-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let schema = Schema(versionedSchema: AppSchemaV10.self)
+
+        var workspaceId: WorkspaceId!
+        var athleteId: AthleteId!
+        var sourceId: ExternalPlanningSourceId!
+        let calendarProvider = FakeCalendarEventProvider()
+        let firstStart = Self.referenceDate.addingTimeInterval(3600)
+        let secondStart = firstStart.addingTimeInterval(7 * 24 * 3600)
+        calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: firstStart, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: firstStart, endDate: firstStart.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: secondStart, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondStart, endDate: secondStart.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+
+        do {
+            let container = try ModelContainer(
+                for: schema, migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: schema, url: storeURL)]
+            )
+            let planningRepository = PlanningRepository(modelContext: container.mainContext)
+            let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+            let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+            let sportRepository = SportRepository(modelContext: container.mainContext)
+            let sourceRepository = ExternalPlanningSourceRepository(modelContext: container.mainContext)
+            let importDecisionRepository = CalendarImportDecisionRepository(modelContext: container.mainContext)
+            let legacyMappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+            let decomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: container.mainContext)
+            let decompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: container.mainContext)
+            let planningService = PlanningService(repository: planningRepository)
+            let trainingService = TrainingService(repository: trainingRepository)
+            let coordinationService = CalendarPlanningCoordinationService(
+                sourceRepository: sourceRepository,
+                importDecisionRepository: importDecisionRepository,
+                legacyMappingRepository: legacyMappingRepository,
+                decomposedActivityLinkRepository: decomposedActivityLinkRepository,
+                decompositionEvidenceRepository: decompositionEvidenceRepository,
+                calendarEventProvider: calendarProvider,
+                planningService: planningService,
+                trainingService: trainingService,
+                athleteRepository: athleteRepository,
+                dateProvider: FixedDateProvider(now: Self.referenceDate)
+            )
+            let workspace = WorkspaceId()
+            let athlete = try athleteRepository.createAthlete(
+                workspaceId: workspace, givenName: "Runner", birthDate: LocalDate(year: 2012, month: 3, day: 1),
+                timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+            )
+            let source = try coordinationService.createSource(
+                forWorkspace: workspace, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+            )
+            try coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+            workspaceId = workspace
+            athleteId = athlete.athleteId
+            sourceId = source.externalPlanningSourceId
+
+            let viewModel = CalendarImportReviewViewModel(
+                calendarPlanningCoordinationService: coordinationService,
+                athleteRepository: athleteRepository, sportRepository: sportRepository, source: source, actorId: ActorId()
+            )
+            viewModel.load()
+            let firstItem = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == firstStart })
+
+            viewModel.setSplitEnabled(true, for: firstItem.externalEventKey)
+            viewModel.setSplitAthlete(athlete.athleteId, for: firstItem.externalEventKey)
+            viewModel.addSplitChild(for: firstItem.externalEventKey)
+            let secondChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[1].id
+            viewModel.updateSplitChild(secondChildId, for: firstItem.externalEventKey) {
+                $0.startOffsetMinutes = 70
+                $0.durationMinutes = 60
+            }
+            viewModel.markReady(for: firstItem.externalEventKey)
+            viewModel.bulkImportReadyItems()
+
+            #expect(try coordinationService.hasDecompositionEvidence(for: source) == true)
+        }
+
+        let reopenedContainer = try ModelContainer(
+            for: schema, migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: schema, url: storeURL)]
+        )
+        let reopenedPlanningRepository = PlanningRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedTrainingRepository = TrainingRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedAthleteRepository = AthleteRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedSportRepository = SportRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedSourceRepository = ExternalPlanningSourceRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedImportDecisionRepository = CalendarImportDecisionRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedLegacyMappingRepository = CalendarPlanningMappingRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedDecomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedDecompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: reopenedContainer.mainContext)
+        let reopenedPlanningService = PlanningService(repository: reopenedPlanningRepository)
+        let reopenedTrainingService = TrainingService(repository: reopenedTrainingRepository)
+        let reopenedCoordinationService = CalendarPlanningCoordinationService(
+            sourceRepository: reopenedSourceRepository,
+            importDecisionRepository: reopenedImportDecisionRepository,
+            legacyMappingRepository: reopenedLegacyMappingRepository,
+            decomposedActivityLinkRepository: reopenedDecomposedActivityLinkRepository,
+            decompositionEvidenceRepository: reopenedDecompositionEvidenceRepository,
+            calendarEventProvider: calendarProvider,
+            planningService: reopenedPlanningService,
+            trainingService: reopenedTrainingService,
+            athleteRepository: reopenedAthleteRepository,
+            dateProvider: FixedDateProvider(now: Self.referenceDate)
+        )
+        let reopenedSource = try #require(try reopenedSourceRepository.fetch(byId: sourceId))
+        let reopenedViewModel = CalendarImportReviewViewModel(
+            calendarPlanningCoordinationService: reopenedCoordinationService,
+            athleteRepository: reopenedAthleteRepository, sportRepository: reopenedSportRepository, source: reopenedSource, actorId: ActorId()
+        )
+        reopenedViewModel.load()
+        let secondItem = try #require(reopenedViewModel.reviewQueue.first { $0.event.occurrenceDate == secondStart })
+        let staged = reopenedViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.isSplitEnabled)
+        #expect(staged.isSuggestedSplitPrefill)
+        #expect(staged.splitAthleteId == athleteId)
+        #expect(staged.splitChildren.map(\.durationMinutes) == [30, 60])
+    }
+
+    @Test("VX-038 unified test 30: no automatic Import occurs anywhere in the Ready-time recognition flow")
+    @MainActor
+    func noAutomaticImportOccursInReadyTimeRecognitionFlow() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).isSuggestedSplitPrefill)
+        // Neither A nor B was ever imported by this flow alone.
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(itemA.externalEventKey))
+        #expect(!viewModel.readyToImportItems.map(\.externalEventKey).contains(itemB.externalEventKey))
+    }
 }
 
 private extension Date {
