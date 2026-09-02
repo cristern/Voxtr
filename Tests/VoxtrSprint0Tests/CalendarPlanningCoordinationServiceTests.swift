@@ -2937,6 +2937,178 @@ extension CalendarPlanningCoordinationServiceTests {
         #expect(suggested?.children.map(\.durationMinutes) == [40, 60])
         #expect(suggested?.children.map(\.activityType) == [.individualTraining, .teamTraining])
     }
+
+    /// Lead Review follow-up (single-activity boundary guard), test
+    /// requirement 1: `classifyAndImport` against an `externalEventKey`
+    /// that already has a DECOMPOSED decision must never return the
+    /// mirrored first child as though it were a successful ordinary
+    /// import — it fails safely with `.alreadyDecided`, and creates
+    /// nothing.
+    @Test("VX-038 Lead Review follow-up: classifyAndImport against an existing decomposed decision throws alreadyDecided rather than returning the first child")
+    @MainActor
+    func classifyAndImportAgainstDecomposedDecisionThrowsSafely() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImportSplit(
+            item, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.alreadyDecided) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+
+        // Nothing was created, adopted, or reinterpreted — still exactly
+        // the split's own 1 decision and 2 activities.
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
+    }
+
+    /// Lead Review follow-up (single-activity boundary guard), test
+    /// requirement 2: an ORDINARY historical one-to-one decision (zero
+    /// `DecomposedActivityLink` rows) resolves exactly as before this
+    /// guard — a repeat `classifyAndImport` call remains a safe,
+    /// idempotent no-op that returns the SAME `PlannedActivity`.
+    @Test("VX-038 Lead Review follow-up: classifyAndImport against an ordinary one-to-one decision remains idempotent, unchanged by the decomposed-decision guard")
+    @MainActor
+    func classifyAndImportOrdinaryDecisionRemainsIdempotent() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Swim practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let firstImport = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        let secondImport = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(secondImport.plannedActivityId == firstImport.plannedActivityId)
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
+    }
+
+    /// Lead Review follow-up (single-activity boundary guard), test
+    /// requirement 3: `classifyAndImport` with NO decision yet but TWO
+    /// `PlannedActivity` rows already sharing the exact
+    /// `externalEventKey` (a corrupt/partially-rolled-back provenance
+    /// state, never a healthy state this path itself could produce)
+    /// must never arbitrarily adopt one of them — it fails safely with
+    /// `.existingActivityConflict`, adopting neither and creating no
+    /// `CalendarImportDecision`.
+    @Test("VX-038 Lead Review follow-up: classifyAndImport with no decision but two matching PlannedActivities adopts neither and creates no decision")
+    @MainActor
+    func classifyAndImportWithTwoMatchingActivitiesAdoptsNeither() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        // Directly reproduce a corrupt/partial state: two PlannedActivity
+        // rows sharing this exact externalEventKey, but NO decision at
+        // all (never producible by this path itself, which always
+        // writes at most one such row before a decision exists).
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Hockey training", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        _ = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .teamTraining,
+            title: "Hockey training", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.existingActivityConflict) {
+            try fixture.coordinationService.classifyAndImport(
+                item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+            )
+        }
+
+        #expect(try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 2)
+    }
+
+    /// Lead Review follow-up (single-activity boundary guard), test
+    /// requirement 4: EXACTLY one matching, classification-compatible
+    /// `PlannedActivity` (the pre-existing "legacy adoption" case)
+    /// preserves this path's existing adoption behavior, unchanged by
+    /// the new `count <= 1` guard.
+    @Test("VX-038 Lead Review follow-up: classifyAndImport with exactly one matching PlannedActivity preserves existing adoption behavior")
+    @MainActor
+    func classifyAndImportWithExactlyOneMatchingActivityStillAdopts() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Team Practice",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let today = Self.referenceDate.startOfWeekLocalDate(timeZoneId: Self.timeZoneId)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: today)
+        let legacyActivity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Team Practice", localDate: today, timeZoneId: Self.timeZoneId,
+            externalSourceId: item.externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+
+        let adopted = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        #expect(adopted.plannedActivityId == legacyActivity.plannedActivityId)
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).count == 1)
+        let decision = try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey)
+        #expect(decision?.plannedActivityId == legacyActivity.plannedActivityId.rawValue)
+    }
 }
 
 private extension Date {
