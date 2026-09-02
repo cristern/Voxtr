@@ -800,7 +800,7 @@ public final class CalendarPlanningCoordinationService {
     public func plannedActivityIds(for decision: CalendarImportDecision) throws -> [PlannedActivityId] {
         let links = try decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
         guard links.isEmpty else {
-            return links.map(\.plannedActivityId)
+            return links.map { PlannedActivityId(rawValue: $0.plannedActivityId) }
         }
         guard let plannedActivityId = decision.plannedActivityId else { return [] }
         return [PlannedActivityId(rawValue: plannedActivityId)]
