@@ -2515,11 +2515,17 @@ struct CalendarImportReviewViewModelTests {
         #expect(second.durationMinutes == 30)
     }
 
-    @Test("VX-038 TestFlight follow-up test 14: no automatic calculation ever creates a zero or negative duration")
+    /// Lead Review follow-up (PR #55 — do not auto-create a child outside
+    /// the event envelope), required test 1: a 90-minute event whose
+    /// only child already consumes the WHOLE event — tapping "Add
+    /// another activity" must not invent an app-generated activity
+    /// starting at the event's own boundary. No second child is
+    /// appended at all.
+    @Test("VX-038 Lead Review follow-up test 1: a child already consuming the whole event blocks the automatic Add proposal")
     @MainActor
-    func neverGeneratesZeroOrNegativeDuration() throws {
+    func addSplitChildDoesNothingWhenPreviousChildConsumesWholeEvent() throws {
         let fixture = try makeFixture()
-        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 60)
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
         let viewModel = makeViewModel(fixture)
         viewModel.load()
         let item = try #require(viewModel.reviewQueue.first)
@@ -2528,19 +2534,19 @@ struct CalendarImportReviewViewModelTests {
         let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
         // Parent explicitly stretches the first child to consume the
         // WHOLE event.
-        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 60 }
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 90 }
 
         viewModel.addSplitChild(for: item.externalEventKey)
-        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
-        #expect(second.durationMinutes > 0)
-        #expect(second.startOffsetMinutes == 60)
-        #expect(second.durationMinutes == 30)
-        #expect(!second.isDurationDerivedFromEventRemainder)
+
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildren.count == 1)
     }
 
-    @Test("VX-038 TestFlight follow-up test 15: adding a child after the previous one already exceeds the event end still produces a safe, non-negative fallback")
+    /// Lead Review follow-up (PR #55), required test 2: a child that
+    /// already exceeds the known event end — same guard applies whether
+    /// the previous child ends exactly at, or past, the event boundary.
+    @Test("VX-038 Lead Review follow-up test 2: a child already past the event end also blocks the automatic Add proposal")
     @MainActor
-    func addingChildPastEventEndProducesSafeFallback() throws {
+    func addSplitChildDoesNothingWhenPreviousChildExceedsEventEnd() throws {
         let fixture = try makeFixture()
         addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 60)
         let viewModel = makeViewModel(fixture)
@@ -2550,15 +2556,76 @@ struct CalendarImportReviewViewModelTests {
         viewModel.setSplitEnabled(true, for: item.externalEventKey)
         let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
         // Parent explicitly extends the first child PAST the event's own
-        // end — Parent judgement wins on the resulting overlap/gap.
+        // end — Parent judgement wins on this existing gap/overlap
+        // (unaffected by the automatic-Add guard).
         viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 90 }
 
         viewModel.addSplitChild(for: item.externalEventKey)
-        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
-        #expect(second.startOffsetMinutes == 90)
-        #expect(second.durationMinutes > 0)
-        #expect(second.durationMinutes == 30)
-        #expect(!second.isDurationDerivedFromEventRemainder)
+
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildren.count == 1)
+    }
+
+    /// Lead Review follow-up (PR #55), required test 6: a general sweep
+    /// confirming no automatic Add operation with a known event end ever
+    /// produces a child whose startOffset is at or beyond the event's
+    /// own duration — exercised at the exact boundary (offset ==
+    /// duration) via test 1 above, and comfortably past it via test 2 —
+    /// this asserts the same invariant directly against
+    /// `addSplitChild`'s own no-op contract for a THIRD attempt after
+    /// the guard has already fired once, proving it does not flip on a
+    /// later call.
+    @Test("VX-038 Lead Review follow-up test 6: repeated Add taps never produce a child starting at or past the event end")
+    @MainActor
+    func repeatedAddNeverProducesChildAtOrPastEventEnd() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 60)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 60 }
+
+        viewModel.addSplitChild(for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitChildren.count == 1)
+        #expect(staged.splitChildren.allSatisfy { $0.startOffsetMinutes < 60 })
+    }
+
+    /// Lead Review follow-up (PR #55), required test 5: the automatic-Add
+    /// guard never reaches back and blocks (or rewrites) a gap/overlap
+    /// the Parent has already explicitly created by editing an EXISTING
+    /// child's own values — this guard applies only to the automatic
+    /// "Add another activity" proposal itself.
+    @Test("VX-038 Lead Review follow-up test 5: an existing manually-created gap/overlap between children remains fully editable and untouched")
+    @MainActor
+    func manuallyCreatedGapOrOverlapRemainsAllowed() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        // Parent explicitly creates an overlap: second child starts
+        // BEFORE the first child ends.
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) {
+            $0.startOffsetMinutes = 10
+            $0.durationMinutes = 20
+        }
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitChildren[0].startOffsetMinutes == 0)
+        #expect(staged.splitChildren[0].durationMinutes == 30)
+        #expect(staged.splitChildren[1].startOffsetMinutes == 10)
+        #expect(staged.splitChildren[1].durationMinutes == 20)
+        #expect(staged.splitChildrenAreValid)
     }
 
     // MARK: - VX-038 TestFlight follow-up: real Suggested Split root cause (Part 4)

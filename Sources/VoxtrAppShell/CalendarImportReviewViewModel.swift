@@ -481,12 +481,25 @@ public final class CalendarImportReviewViewModel {
     /// proposed value remains freely editable, and the Parent may
     /// create a gap or overlap by editing them — this method never
     /// rewrites any EARLIER child.
+    ///
+    /// Lead Review follow-up (do not auto-create a child outside the
+    /// event envelope): when the external event has a known end and the
+    /// previous child already reaches or exceeds it, there is no
+    /// remaining known event time from which Vǫxtr can safely PROPOSE
+    /// another activity — `nextSequentialSplitChild` returns `nil`, and
+    /// this method appends nothing. Reads current staging first and
+    /// returns early in that case, so a no-op tap never runs
+    /// `updateStaged`'s own side effects (clearing `isConfirmedReady`/
+    /// `suggestionKind`, etc.) for a screen that did not actually
+    /// change — mirroring `markReady(for:)`'s own "guard before
+    /// mutating" shape.
     public func addSplitChild(for externalEventKey: String) {
         let event = reviewItem(for: externalEventKey)?.event
+        let staged = stagedClassification(for: externalEventKey)
+        guard let newChild = Self.nextSequentialSplitChild(
+            afterLastOf: staged.splitChildren, eventStart: event?.startDate, eventEnd: event?.endDate
+        ) else { return }
         updateStaged(for: externalEventKey) { staged in
-            let newChild = Self.nextSequentialSplitChild(
-                afterLastOf: staged.splitChildren, eventStart: event?.startDate, eventEnd: event?.endDate
-            )
             staged.splitChildren.append(newChild)
             staged.isSuggestedSplitPrefill = false
         }
@@ -547,36 +560,51 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
-    /// Runtime follow-up (Part 3 — sequential split timing assistance):
-    /// the ONE place automatic child timing is computed, used by both
-    /// `addSplitChild(for:)` (a brand-new child) and
-    /// `updateSplitChild(_:for:mutate:)` (re-anchoring a still-derived
-    /// child's duration after its own start offset moves).
+    /// Runtime follow-up (Part 3 — sequential split timing assistance);
+    /// Lead Review follow-up (do not auto-create a child outside the
+    /// event envelope): the ONE place automatic child timing is
+    /// computed, used only by `addSplitChild(for:)` (a brand-new child)
+    /// — `updateSplitChild(_:for:mutate:)`'s own re-anchoring of an
+    /// EXISTING still-derived child after the Parent's own explicit
+    /// start-offset edit is a separate "Parent judgement wins" case
+    /// (see that method's own doc comment) and is NOT guarded by this
+    /// function.
     ///
     /// `afterLastOf.last == nil` (the very first child a split ever
     /// gets): the existing safe product default (`0` / `30`, via
     /// `SplitChild.init`'s own defaults) — deliberately NEVER
-    /// automatically consumes the whole external event.
+    /// automatically consumes the whole external event. Always returns a
+    /// child in this case — a split's own first child is never withheld.
     ///
     /// Otherwise: `startOffsetMinutes = previous.startOffsetMinutes + previous.durationMinutes`
     /// (immediately after the previous child ends) — this is never
     /// negative, since both of the previous child's own values are
-    /// already bounded `>= 0`/`> 0`. If the external event has a usable
-    /// end time (`eventEnd` non-nil and after `eventStart`) and the
-    /// resulting remaining time (`eventDurationMinutes - startOffsetMinutes`)
-    /// is POSITIVE, the new child's duration is proposed as exactly that
-    /// remainder, marked `isDurationDerivedFromEventRemainder = true`.
-    /// Otherwise (no usable end time, or the previous child already
-    /// reaches/exceeds the event's own end) falls back to the safe
-    /// default duration — NEVER a zero/negative or otherwise invalid
-    /// derived value — Parent-owned from the start, so a later start-
-    /// offset edit never tries to "fix" it. Never blocks adding the
-    /// child itself: Parent judgement wins on any resulting gap/overlap.
+    /// already bounded `>= 0`/`> 0`.
+    ///   - No usable external end time (`eventEnd` nil, or not after
+    ///     `eventStart`): the existing safe sequential fallback —
+    ///     `startOffsetMinutes` as computed above, safe default
+    ///     duration, `isDurationDerivedFromEventRemainder = false`
+    ///     (Parent-owned from the start, so a later start-offset edit
+    ///     never tries to "fix" it).
+    ///   - A usable end time exists, but the previous child already
+    ///     reaches or exceeds it (`startOffsetMinutes >= eventDurationMinutes`):
+    ///     returns `nil` — there is no remaining KNOWN event time from
+    ///     which Vǫxtr can safely PROPOSE another activity, so no child
+    ///     is generated at all. This is an automatic-PROPOSAL guard
+    ///     only: it never prevents the Parent from manually creating a
+    ///     gap or overlap by editing an EXISTING child's own values (see
+    ///     `updateSplitChild`'s own "GAPS AND OVERLAPS" contract), and it
+    ///     never rewrites any earlier child.
+    ///   - A usable end time exists and remains ahead of the proposed
+    ///     start: the new child's duration is proposed as exactly the
+    ///     remainder (`eventDurationMinutes - startOffsetMinutes`,
+    ///     always `> 0` here), marked
+    ///     `isDurationDerivedFromEventRemainder = true`.
     private static func nextSequentialSplitChild(
         afterLastOf existingChildren: [StagedClassification.SplitChild],
         eventStart: Date?,
         eventEnd: Date?
-    ) -> StagedClassification.SplitChild {
+    ) -> StagedClassification.SplitChild? {
         guard let previous = existingChildren.last else {
             return StagedClassification.SplitChild()
         }
@@ -585,10 +613,10 @@ public final class CalendarImportReviewViewModel {
             return StagedClassification.SplitChild(startOffsetMinutes: startOffsetMinutes)
         }
         let eventDurationMinutes = Int(eventEnd.timeIntervalSince(eventStart) / 60)
-        let remainingMinutes = eventDurationMinutes - startOffsetMinutes
-        guard remainingMinutes > 0 else {
-            return StagedClassification.SplitChild(startOffsetMinutes: startOffsetMinutes)
+        guard startOffsetMinutes < eventDurationMinutes else {
+            return nil
         }
+        let remainingMinutes = eventDurationMinutes - startOffsetMinutes
         return StagedClassification.SplitChild(
             startOffsetMinutes: startOffsetMinutes, durationMinutes: remainingMinutes, isDurationDerivedFromEventRemainder: true
         )
