@@ -1013,17 +1013,24 @@ public final class CalendarPlanningCoordinationService {
     /// evidence is assistance): `DecompositionEvidence` persistence is
     /// explicitly OUTSIDE the core atomic scope above — it runs only
     /// AFTER every `PlannedActivity`/`CalendarImportDecision`/
-    /// `DecomposedActivityLink` write has already durably succeeded, and
-    /// its own failure is swallowed (`try?`) rather than propagated: the
-    /// Parent's split import is already fully, correctly committed to
-    /// Planning at that point, and a caller must never receive an error
-    /// claiming the import failed when it did not. The cost is that a
-    /// failed evidence write silently forfeits a future Suggested Split
-    /// for this exact split (never a correctness problem for the
-    /// import itself, and never observable as a partial import) — see
-    /// `recordDecompositionEvidenceIfAbsent(...)`'s own doc comment for
-    /// why the write itself is also create-only, never a silent
-    /// overwrite of a previously-learned pattern.
+    /// `DecomposedActivityLink` write has already durably succeeded. Its
+    /// own failure is NEVER rethrown/rolled back into the import (a
+    /// caller must never receive an error claiming the import failed
+    /// when it did not — the Parent's split import is already fully,
+    /// correctly committed to Planning at that point), but — Runtime
+    /// follow-up (missing Suggested Split diagnosability) — it is no
+    /// longer silently discarded via bare `try?` either: a failure is
+    /// logged through `VoxtrLog` (category `.appShell`, the same
+    /// category `CompositionRoot` itself already logs through),
+    /// specifically so a real evidence-write failure in Alpha/TestFlight
+    /// is inspectable (Console/Xcode Organizer logs) rather than
+    /// indistinguishable from "this split genuinely has no reusable
+    /// pattern yet." The cost of a failed write is still only a
+    /// forfeited future Suggested Split for this exact split — never a
+    /// correctness problem for the import itself, and never observable
+    /// as a partial import — see `recordDecompositionEvidenceIfAbsent(...)`'s
+    /// own doc comment for why the write itself is also create-only,
+    /// never a silent overwrite of a previously-learned pattern.
     @discardableResult
     public func classifyAndImportSplit(
         _ item: CalendarReviewItem,
@@ -1153,9 +1160,14 @@ public final class CalendarPlanningCoordinationService {
         // returned to the caller).
 
         // EVIDENCE: post-import learning assistance only — see this
-        // method's own "EVIDENCE" doc note above for why a failure here
-        // is deliberately swallowed rather than propagated.
-        try? recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
+        // method's own "EVIDENCE" doc note above. Never propagated as an
+        // import failure, but no longer silently discarded either — a
+        // failure is logged so it is diagnosable in Alpha/TestFlight.
+        do {
+            try recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
+        } catch {
+            VoxtrLog.logger(.appShell).error("VX-038 decomposition evidence recording failed after a successful split import (externalEventKey=\(item.externalEventKey, privacy: .private)): \(String(describing: error), privacy: .public)")
+        }
 
         return created
     }

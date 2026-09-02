@@ -304,10 +304,9 @@ struct CalendarImportReviewView: View {
 
     private func readySummary(_ staged: CalendarImportReviewViewModel.StagedClassification) -> String {
         if staged.isSplitEnabled {
-            let athleteNames = staged.splitChildren.compactMap { child in
-                child.athleteId.flatMap { id in viewModel.athletes.first(where: { $0.athleteId == id })?.givenName }
-            }
-            return CalendarPlanningStrings.splitReadySummary(childCount: staged.splitChildren.count, athleteNames: Array(Set(athleteNames)).sorted())
+            let athleteName = staged.splitAthleteId.flatMap { id in viewModel.athletes.first(where: { $0.athleteId == id })?.givenName }
+            let sportName = staged.splitSportId.flatMap { id in viewModel.sports.first(where: { $0.sportId == id })?.displayName }
+            return CalendarPlanningStrings.splitReadySummary(childCount: staged.splitChildren.count, athleteName: athleteName, sportName: sportName)
         }
         var parts: [String] = []
         if let athleteId = staged.athleteId, let athlete = viewModel.athletes.first(where: { $0.athleteId == athleteId }) {
@@ -600,12 +599,14 @@ private struct NeedsReviewRow: View {
         .accessibilityIdentifier("calendarImportReview.needsReviewRow")
     }
 
-    /// VX-038: one card per child — Athlete/Sport/Activity Type, start
-    /// offset (minutes from the external event's own start), and
-    /// duration (minutes). "Add another" appends an empty child;
-    /// removing the last remaining child is not offered (a split needs
-    /// at least one) — the Parent turns split OFF instead, via the
-    /// toggle above, to return to the ordinary single-activity fields.
+    /// Runtime follow-up (split UX — shared Athlete/Sport): a split
+    /// belongs to ONE Athlete and ONE Sport shared by every child — shown
+    /// ONCE, above the child list — since each child then differs only
+    /// by Activity Type and timing. "Add another" appends an empty
+    /// child; removing the last remaining child is not offered (a split
+    /// needs at least one row to edit) — the Parent turns split OFF
+    /// instead, via the toggle above, to return to the ordinary
+    /// single-activity fields.
     @ViewBuilder
     private var splitChildrenEditor: some View {
         let staged = viewModel.stagedClassification(for: item.externalEventKey)
@@ -615,36 +616,39 @@ private struct NeedsReviewRow: View {
                 .foregroundStyle(VoxtrColor.textSecondary)
                 .accessibilityIdentifier("calendarImportReview.suggestedSplitLabel")
         }
+
+        Picker(CalendarPlanningStrings.chooseAthlete, selection: Binding(
+            get: { staged.splitAthleteId },
+            set: { viewModel.setSplitAthlete($0, for: item.externalEventKey) }
+        )) {
+            Text(CalendarPlanningStrings.chooseAthlete).tag(AthleteId?.none)
+            ForEach(viewModel.athletes, id: \.athleteId) { athlete in
+                Text(athlete.givenName).tag(AthleteId?.some(athlete.athleteId))
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("calendarImportReview.splitAthletePicker")
+
+        Picker(CalendarPlanningStrings.chooseSport, selection: Binding(
+            get: { staged.splitSportId },
+            set: { viewModel.setSplitSport($0, for: item.externalEventKey) }
+        )) {
+            Text("None").tag(SportId?.none)
+            ForEach(viewModel.sports, id: \.sportId) { sport in
+                Text(sport.displayName).tag(SportId?.some(sport.sportId))
+            }
+        }
+        .pickerStyle(.menu)
+        .accessibilityIdentifier("calendarImportReview.splitSportPicker")
+
         ForEach(staged.splitChildren) { child in
             VStack(alignment: .leading, spacing: 6) {
-                Picker(CalendarPlanningStrings.chooseAthlete, selection: Binding(
-                    get: { child.athleteId },
-                    set: { newValue in viewModel.updateSplitChild(child.id, for: item.externalEventKey) { $0.athleteId = newValue } }
-                )) {
-                    Text(CalendarPlanningStrings.chooseAthlete).tag(AthleteId?.none)
-                    ForEach(viewModel.athletes, id: \.athleteId) { athlete in
-                        Text(athlete.givenName).tag(AthleteId?.some(athlete.athleteId))
-                    }
-                }
-                .pickerStyle(.menu)
-
                 Picker(CalendarPlanningStrings.chooseActivityType, selection: Binding(
                     get: { child.activityType },
                     set: { newValue in viewModel.updateSplitChild(child.id, for: item.externalEventKey) { $0.activityType = newValue } }
                 )) {
                     ForEach(ActivityType.selectableCases, id: \.self) { type in
                         Text(type.displayName).tag(type)
-                    }
-                }
-                .pickerStyle(.menu)
-
-                Picker(CalendarPlanningStrings.chooseSport, selection: Binding(
-                    get: { child.sportId },
-                    set: { newValue in viewModel.updateSplitChild(child.id, for: item.externalEventKey) { $0.sportId = newValue } }
-                )) {
-                    Text("None").tag(SportId?.none)
-                    ForEach(viewModel.sports, id: \.sportId) { sport in
-                        Text(sport.displayName).tag(SportId?.some(sport.sportId))
                     }
                 }
                 .pickerStyle(.menu)

@@ -474,11 +474,19 @@ public enum CalendarPlanningStrings {
     /// "Ready to Import" row summary for a split-enabled event — never
     /// a numeric-only count on its own; names the athlete(s) involved
     /// when known.
-    public static func splitReadySummary(childCount: Int, athleteNames: [String]) -> String {
+    /// Runtime follow-up (split UX — shared Athlete/Sport): a split now
+    /// has exactly ONE shared Athlete/Sport, never a per-child list —
+    /// `athleteName`/`sportName` mirror the ordinary path's own single-
+    /// value summary shape, with the child count standing in for
+    /// `activityType` (a split has several, one per child).
+    public static func splitReadySummary(childCount: Int, athleteName: String?, sportName: String?) -> String {
         let countPhrase = childCount == 1
             ? String(localized: "calendarPlanning.splitReadySummary.oneActivity", defaultValue: "1 activity")
             : String(localized: "calendarPlanning.splitReadySummary.manyActivities", defaultValue: "\(childCount) activities")
-        guard !athleteNames.isEmpty else { return countPhrase }
-        return "\(countPhrase) · \(athleteNames.joined(separator: ", "))"
+        var parts: [String] = []
+        if let athleteName { parts.append(athleteName) }
+        if let sportName { parts.append(sportName) }
+        parts.append(countPhrase)
+        return parts.joined(separator: " · ")
     }
 }
