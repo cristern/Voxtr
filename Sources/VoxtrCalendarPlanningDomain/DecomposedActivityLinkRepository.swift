@@ -2,15 +2,22 @@ import Foundation
 import SwiftData
 import VoxtrCoreContracts
 
-/// VX-038: insert/fetch `DecomposedActivityLink` only — pure
+/// VX-038: insert/fetch/delete `DecomposedActivityLink` — pure
 /// persistence, matching every other repository in this domain. No
-/// `update`/`delete`: a link is written once, at split-import time, and
-/// is never mutated afterward (removing a decomposed import's children
-/// goes through the normal `PlanningService.deletePlannedActivity` path
-/// per child; the link rows themselves are inert provenance, harmless
-/// to leave pointing at a since-deleted `PlannedActivityId`, exactly
+/// `update`: a link is written once, at split-import time, and is never
+/// mutated afterward.
+///
+/// Lead Review follow-up (Blocker 2): `delete(_:)` exists STRICTLY for
+/// `CalendarPlanningCoordinationService.classifyAndImportSplit(...)`'s
+/// own bounded rollback — unwinding link rows already written earlier
+/// in the SAME failed call, so a retry never finds a partial split. It
+/// is never used to remove a decomposed import's children after a
+/// SUCCESSFUL split; that still goes through the normal
+/// `PlanningService.deletePlannedActivity` path per child, and the link
+/// row for an already-deleted child remains inert provenance, harmless
+/// to leave pointing at a since-deleted `PlannedActivityId` — exactly
 /// like `CalendarImportDecision.plannedActivityId` already can for the
-/// ordinary one-activity path).
+/// ordinary one-activity path.
 @MainActor
 public final class DecomposedActivityLinkRepository {
     private let modelContext: ModelContext
@@ -45,5 +52,11 @@ public final class DecomposedActivityLinkRepository {
         return try modelContext.fetch(FetchDescriptor<DecomposedActivityLink>())
             .filter { $0.calendarImportDecisionId == rawDecisionId }
             .sorted { $0.orderIndex < $1.orderIndex }
+    }
+
+    /// Rollback-only — see this type's own doc comment.
+    public func delete(_ link: DecomposedActivityLink) throws {
+        modelContext.delete(link)
+        try modelContext.save()
     }
 }

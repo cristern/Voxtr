@@ -204,8 +204,14 @@ public final class CalendarImportReviewViewModel {
         /// action regardless of this flag.
         public var isSuggestedSplitPrefill: Bool = false
 
+        /// Lead Review follow-up (split semantics — minimum two
+        /// children): mirrors `CalendarPlanningCoordinationService`'s own
+        /// `.splitRequiresAtLeastTwoChildren` guard — a split with fewer
+        /// than 2 children is never Ready/importable, even though the
+        /// Parent may still toggle Split on and edit a single child
+        /// in-progress (see `setSplitEnabled(_:for:)`/`addSplitChild(for:)`).
         public var splitChildrenAreValid: Bool {
-            !splitChildren.isEmpty && splitChildren.allSatisfy(\.isValid)
+            splitChildren.count >= 2 && splitChildren.allSatisfy(\.isValid)
         }
         /// Live Suggested Ignore re-evaluation follow-up: `true` the
         /// moment the Parent has explicitly changed ANY of Athlete/Sport/
