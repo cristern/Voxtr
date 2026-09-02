@@ -1259,10 +1259,17 @@ public enum AppSchemaV9: VersionedSchema {
 /// (most directly `AppSchemaV8`'s own two-type addition immediately
 /// above).
 ///
-/// `models` was a live passthrough to `AppSchema.modelTypes` while V9
-/// was the latest version; this round now freezes it to the exact
-/// 22-entity literal V9 always actually had, following this file's own
-/// "HOW TO ADD A NEW VERSION" step 1, same as every version before it.
+/// `models` stays a LIVE passthrough to `AppSchema.modelTypes` — V10 is
+/// the new latest version (see `AppSchemaV9`'s own doc comment
+/// immediately above for that version's own freeze, step 1 of this
+/// file's "HOW TO ADD A NEW VERSION" recipe). This passthrough is what
+/// `CompositionRoot.build`'s default `versionedSchema:` targets, and
+/// what `container.schema.entities.count` must equal
+/// `AppSchema.modelTypes.count` against in
+/// `PersistenceRecoveryTests.compositionRootDefaultPersistenceConstructsSuccessfully` —
+/// that test's own literal must be updated to `AppSchemaV10.self` here,
+/// same as every prior version bump (see that test's own doc comment
+/// for the exact class of bug this guards against).
 public enum AppSchemaV10: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(10, 0, 0)
