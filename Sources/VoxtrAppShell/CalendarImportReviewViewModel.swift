@@ -1,4 +1,5 @@
 import Foundation
+import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrCoreReferenceData
 import VoxtrAthleteDomain
@@ -920,10 +921,21 @@ public final class CalendarImportReviewViewModel {
         var rebuiltSuggestedIgnore: [CalendarPlanningCoordinationService.CalendarReviewItem] = []
         var rebuiltSuggestedIgnoreMatches: [String: String] = [:]
 
+        // Lead Review follow-up (runtime diagnostics — bounded, Alpha-
+        // only, NOT a claimed fix): computed ONCE per refresh so the
+        // per-item Suggested Split diagnostics below stay silent for the
+        // overwhelming common case (this source has no decomposition
+        // evidence at all) and only fire when there is genuinely
+        // something to explain.
+        let hasAnyDecompositionEvidence = (try? calendarPlanningCoordinationService.hasDecompositionEvidence(for: source)) ?? false
+
         for item in reviewQueue {
             if let existing = stagedClassifications[item.externalEventKey],
                hasMeaningfulStaging(existing, externalEventKey: item.externalEventKey) {
                 rebuiltStaging[item.externalEventKey] = existing
+                if hasAnyDecompositionEvidence {
+                    VoxtrLog.logger(.appShell).info("VX-038 suggestion diagnostic C (meaningful staging already present, not re-evaluated) externalEventKey=\(item.externalEventKey, privacy: .private)")
+                }
                 continue
             }
             // VX-038 (Suggested Split): checked BEFORE exact/similar
@@ -964,8 +976,15 @@ public final class CalendarImportReviewViewModel {
                         },
                         isSuggestedSplitPrefill: true
                     )
+                    if hasAnyDecompositionEvidence {
+                        VoxtrLog.logger(.appShell).info("VX-038 suggestion diagnostic D (applied) externalEventKey=\(item.externalEventKey, privacy: .private) childCount=\(suggested.children.count, privacy: .public)")
+                    }
                     continue
+                } else if hasAnyDecompositionEvidence {
+                    VoxtrLog.logger(.appShell).info("VX-038 suggestion diagnostic B (matched, but children disagree on shared athleteId/sportId) externalEventKey=\(item.externalEventKey, privacy: .private) distinctAthleteCount=\(athleteIds.count, privacy: .public) distinctSportCount=\(sportIds.count, privacy: .public)")
                 }
+            } else if hasAnyDecompositionEvidence {
+                VoxtrLog.logger(.appShell).info("VX-038 suggestion diagnostic A (suggestedSplit returned nil/empty for this event) externalEventKey=\(item.externalEventKey, privacy: .private) isRecurring=\(item.event.isRecurring, privacy: .public)")
             }
             // Remembered Exact Choices (V1.1): PREFILL only — a safe
             // exact-title match MAY arrive already Parent-confirmed

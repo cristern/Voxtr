@@ -3109,6 +3109,44 @@ extension CalendarPlanningCoordinationServiceTests {
         let decision = try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey)
         #expect(decision?.plannedActivityId == legacyActivity.plannedActivityId.rawValue)
     }
+
+    /// Lead Review follow-up (runtime diagnostics): `hasDecompositionEvidence(for:)`
+    /// is the smallest existence check the ViewModel's own bounded
+    /// Suggested Split diagnostics rely on — never itself a matching/
+    /// business decision.
+    @Test("VX-038 Lead Review follow-up: hasDecompositionEvidence(for:) reflects whether any decomposition evidence exists for a source")
+    @MainActor
+    func hasDecompositionEvidenceReflectsSourceState() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        #expect(try fixture.coordinationService.hasDecompositionEvidence(for: source) == false)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImportSplit(
+            item, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+
+        #expect(try fixture.coordinationService.hasDecompositionEvidence(for: source) == true)
+    }
 }
 
 private extension Date {
