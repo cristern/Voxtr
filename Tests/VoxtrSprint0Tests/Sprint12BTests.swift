@@ -156,8 +156,10 @@ struct Sprint12BTests {
     /// Fix: the previous version of this test computed its recurring
     /// definition's effective range from `.now + 3 days`, then asserted
     /// a hardcoded count of 5. Family Schedule's own window is the
-    /// approved `today...today+7` rolling range (`FamilyScheduleViewModel.upcomingDayCount`,
-    /// inclusive both ends) — not the Monday-Sunday Weekly Planning
+    /// approved `today...today+7` rolling range (`FamilyScheduleViewModel`'s
+    /// `horizonDays`, defaulted from `defaultHorizonDays`, inclusive
+    /// both ends — see the "Show 2 more weeks" round for why this is no
+    /// longer a fixed constant) — not the Monday-Sunday Weekly Planning
     /// week — and `.now + 3 days` through `.now + 9 days` only
     /// coincidentally lined up with that window's 5 weekday slots when
     /// "today" happened to be a Friday when CI ran. On any other

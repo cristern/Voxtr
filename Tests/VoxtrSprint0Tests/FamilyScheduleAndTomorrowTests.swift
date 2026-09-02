@@ -1391,3 +1391,361 @@ extension FamilyScheduleAndTomorrowTests {
         #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
     }
 }
+
+extension FamilyScheduleAndTomorrowTests {
+    // MARK: - "Show 2 more weeks": progressive schedule horizon
+
+    /// Test requirement 1: the default load uses the existing (7-day)
+    /// horizon — an activity within it appears; one beyond it (but
+    /// within the extended horizon) does not, until the Parent asks for
+    /// more.
+    @Test("Family Schedule default load uses the existing 7-day horizon")
+    @MainActor
+    func familyScheduleDefaultLoadUsesExistingHorizon() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        func localDate(_ date: Date) -> LocalDate {
+            let c = Calendar.current.dateComponents([.year, .month, .day], from: date)
+            return LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        }
+        guard let dayPlus5 = Calendar.current.date(byAdding: .day, value: 5, to: .now),
+              let dayPlus15 = Calendar.current.date(byAdding: .day, value: 15, to: .now) else {
+            Issue.record("Could not compute reference dates"); return
+        }
+        let date5 = localDate(dayPlus5)
+        let date15 = localDate(dayPlus15)
+
+        let weekPlan5 = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus5)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan5.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Within default horizon", localDate: date5, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let weekPlan15 = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus15)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan15.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Beyond default horizon", localDate: date15, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+
+        #expect(viewModel.horizonDays == 7)
+        #expect(viewModel.dayGroups.contains { $0.date == date5 })
+        #expect(!viewModel.dayGroups.contains { $0.date == date15 })
+    }
+
+    /// Test requirement 2: one "show more" step extends the horizon by
+    /// exactly 14 days.
+    @Test("Family Schedule extendHorizon() extends the horizon by exactly 14 days")
+    @MainActor
+    func familyScheduleExtendHorizonExtendsByExactlyFourteenDays() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        #expect(viewModel.horizonDays == 7)
+
+        viewModel.extendHorizon()
+        #expect(viewModel.horizonDays == 21)
+
+        viewModel.extendHorizon()
+        #expect(viewModel.horizonDays == 35)
+    }
+
+    /// Test requirement 3: repeated extension stops at the configured
+    /// maximum (49 days — see `FamilyScheduleViewModel`'s own
+    /// `maximumHorizonDays` doc comment) — never an effectively
+    /// unbounded schedule.
+    @Test("Family Schedule repeated horizon extension stops at the configured maximum")
+    @MainActor
+    func familyScheduleRepeatedExtensionStopsAtMaximum() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        #expect(viewModel.canExtendHorizon)
+
+        for _ in 0..<5 {
+            viewModel.extendHorizon()
+        }
+
+        #expect(viewModel.horizonDays == 49)
+        #expect(!viewModel.canExtendHorizon)
+    }
+
+    /// Test requirement 4: expanding the horizon and reloading must not
+    /// duplicate a planned activity that was already visible within the
+    /// smaller, default window — the canonical load path re-queries the
+    /// full current window fresh each time rather than incrementally
+    /// appending, so this proves that in practice, not just by
+    /// inspecting the implementation.
+    @Test("Family Schedule expanding the horizon does not duplicate an already-visible planned activity")
+    @MainActor
+    func familyScheduleExpandingHorizonDoesNotDuplicateAlreadyVisibleActivities() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus3 = Calendar.current.date(byAdding: .day, value: 3, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus3)
+        let date3 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let weekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus3)
+        )
+        let created = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Football", localDate: date3, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+        func countOfActivity() -> Int {
+            viewModel.dayGroups.flatMap(\.rows).filter { row in
+                if case .planned(let familyRow) = row { return familyRow.plannedActivity.plannedActivityId == created.plannedActivityId }
+                return false
+            }.count
+        }
+        #expect(countOfActivity() == 1)
+
+        viewModel.extendHorizon()
+        viewModel.loadSchedule()
+        #expect(countOfActivity() == 1)
+    }
+
+    /// Test requirement 5: expanding the horizon must preserve the
+    /// current athlete filter selection — the horizon extension must
+    /// never reset the filter back to All.
+    @Test("Family Schedule expanding the horizon preserves the active athlete filter")
+    @MainActor
+    func familyScheduleExpandingHorizonPreservesAthleteFilter() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+        viewModel.setSelectedAthletes([oliver.athleteId])
+        #expect(viewModel.selectedAthleteIds == [oliver.athleteId])
+
+        viewModel.extendHorizon()
+        viewModel.loadSchedule()
+
+        #expect(viewModel.selectedAthleteIds == [oliver.athleteId])
+    }
+
+    /// Test requirement 6: an activity that only falls inside the
+    /// EXPANDED horizon still filters correctly for one and for
+    /// multiple selected athletes.
+    @Test("Family Schedule filters correctly within the expanded horizon for one and multiple athletes")
+    @MainActor
+    func familyScheduleExpandedHorizonFiltersCorrectlyForOneOrMultipleAthletes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        let emma = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Emma",
+            birthDate: LocalDate(year: 2014, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus15 = Calendar.current.date(byAdding: .day, value: 15, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus15)
+        let date15 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        for athlete in [oliver, emma] {
+            let weekPlan = try planningService.getOrCreateWeekPlan(
+                athleteId: athlete.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus15)
+            )
+            _ = try planningService.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .teamTraining,
+                title: "\(athlete.givenName)'s session", localDate: date15, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver, emma] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+        // Not yet visible — beyond the default 7-day horizon.
+        #expect(!viewModel.dayGroups.contains { $0.date == date15 })
+
+        viewModel.extendHorizon()
+        viewModel.loadSchedule()
+        #expect(viewModel.dayGroups.contains { $0.date == date15 })
+
+        viewModel.setSelectedAthletes([oliver.athleteId])
+        #expect(Set(viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId])
+
+        viewModel.setSelectedAthletes([oliver.athleteId, emma.athleteId])
+        #expect(Set(viewModel.visibleDayGroups.flatMap(\.rows).map(\.athleteId)) == [oliver.athleteId, emma.athleteId])
+    }
+
+    /// Test requirement 7: `calendarReviewPrompt` is unaffected by
+    /// horizon expansion — Calendar Review is independent of the
+    /// schedule's time window, exactly as it is already independent of
+    /// the athlete filter.
+    @Test("Family Schedule calendarReviewPrompt is unaffected by horizon expansion")
+    @MainActor
+    func familyScheduleCalendarReviewPromptUnaffectedByHorizonExpansion() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let workspaceId = WorkspaceId()
+        let source = ExternalPlanningSource(
+            workspaceId: workspaceId, providerKind: .eventKit,
+            externalContainerIdentifier: "cal-1", displayName: "Spond", isEnabled: true
+        )
+        let fixedPrompt = FamilyScheduleViewModel.CalendarReviewPrompt.from(
+            sources: [source], reviewCounts: [source.externalPlanningSourceId: 5]
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService,
+            provideCalendarReviewPrompt: { fixedPrompt }
+        )
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+
+        viewModel.extendHorizon()
+        viewModel.loadSchedule()
+        #expect(viewModel.calendarReviewPrompt.totalPendingCount == 5)
+    }
+
+    /// Test requirement 8: when the default horizon has no upcoming
+    /// activities at all, expanding must reveal a later one — Family
+    /// Schedule must never be a dead end.
+    @Test("Family Schedule reveals later activities on expansion when the default horizon is empty")
+    @MainActor
+    func familyScheduleExpandingRevealsActivitiesWhenDefaultWindowEmpty() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingPlanningCoordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository, trainingRepository: trainingRepository
+        )
+        let oliver = AthleteProfile(
+            workspaceId: WorkspaceId(), givenName: "Oliver",
+            birthDate: LocalDate(year: 2012, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+        )
+        guard let dayPlus15 = Calendar.current.date(byAdding: .day, value: 15, to: .now) else {
+            Issue.record("Could not compute reference date"); return
+        }
+        let c = Calendar.current.dateComponents([.year, .month, .day], from: dayPlus15)
+        let date15 = LocalDate(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        let weekPlan = try planningService.getOrCreateWeekPlan(
+            athleteId: oliver.athleteId, weekStart: TrainingPlanningCoordinationService.weekStart(referenceDate: dayPlus15)
+        )
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: oliver.athleteId, activityType: .teamTraining,
+            title: "Only upcoming session", localDate: date15, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let viewModel = FamilyScheduleViewModel(
+            provideActiveAthletes: { [oliver] },
+            trainingPlanningCoordinationService: trainingPlanningCoordinationService,
+            planningService: planningService
+        )
+        viewModel.loadSchedule()
+        #expect(viewModel.visibleDayGroups.isEmpty)
+
+        viewModel.extendHorizon()
+        viewModel.loadSchedule()
+        #expect(!viewModel.visibleDayGroups.isEmpty)
+        #expect(viewModel.visibleDayGroups.contains { $0.date == date15 })
+    }
+}
