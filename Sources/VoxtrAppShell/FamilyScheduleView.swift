@@ -55,6 +55,16 @@ import VoxtrCalendarPlanningDomain
 /// otherwise it stays the full, explicit picker across every active
 /// athlete — this view never guesses which athlete's Weekly Plan the
 /// Parent wants.
+///
+/// "Show 2 more weeks" round: a calm, secondary action at the bottom of
+/// the list (after the last loaded day, or after the empty-state
+/// message — never a dead end) lets the Parent progressively widen
+/// `viewModel.horizonDays` via `viewModel.extendHorizon()`, up to a
+/// bounded maximum (`viewModel.canExtendHorizon` gates whether the
+/// action is even shown). The schedule's default, calm short horizon
+/// itself is unchanged — this only adds an explicit, capped way to look
+/// further ahead in the SAME view, never a permanent long horizon or a
+/// date-range picker.
 public struct FamilyScheduleView: View {
     @Environment(\.modelContext) private var modelContext
     @State private var viewModel: FamilyScheduleViewModel
@@ -145,6 +155,30 @@ public struct FamilyScheduleView: View {
                     .voxtrRowSurface()
                     .accessibilityIdentifier("familySchedule.dayGroup.\(group.id)")
                 }
+            }
+
+            // "Show 2 more weeks" round: placed AFTER the last loaded
+            // day (or after the empty-state message, so an empty short
+            // window is never a dead end — the Parent can still ask to
+            // look further ahead). Visible whenever
+            // `viewModel.canExtendHorizon` is true, regardless of the
+            // current athlete filter or whether the current window has
+            // any rows — this is about the schedule's TIME horizon, not
+            // which athletes/rows are currently shown.
+            if viewModel.canExtendHorizon {
+                Section {
+                    Button {
+                        viewModel.extendHorizon()
+                        viewModel.loadSchedule()
+                    } label: {
+                        Text("Show 2 more weeks")
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .accessibilityIdentifier("familySchedule.showMoreWeeksButton")
+                }
+                .voxtrRowSurface()
             }
         }
         .voxtrScreenBackground()

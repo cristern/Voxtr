@@ -234,6 +234,41 @@ public final class FamilyScheduleViewModel {
         return selectedAthleteIds.first
     }
 
+    /// "Show 2 more weeks" round: how many days ahead of `referenceDate`
+    /// the schedule query currently extends — starts at
+    /// `defaultHorizonDays` (the same short, calm default this screen
+    /// has always used) and grows only through explicit `extendHorizon()`
+    /// calls, never automatically. Pure VIEW/RUNTIME state: never
+    /// persisted, never read back on the next launch or the next time
+    /// this screen is pushed — a fresh `FamilyScheduleViewModel`
+    /// (construction-time default) always starts back at
+    /// `defaultHorizonDays`.
+    public private(set) var horizonDays = Self.defaultHorizonDays
+
+    /// Whether `extendHorizon()` can still add more days — `false` once
+    /// `horizonDays` has reached `maximumHorizonDays`, the bounded total
+    /// this screen will ever query. `FamilyScheduleView`'s "Show 2 more
+    /// weeks" action is shown only while this is `true`, so the Parent
+    /// is never offered an action that would do nothing.
+    public var canExtendHorizon: Bool {
+        horizonDays < Self.maximumHorizonDays
+    }
+
+    /// "Show 2 more weeks": extends `horizonDays` by
+    /// `horizonExtensionDays`, clamped to `maximumHorizonDays` — never an
+    /// effectively unbounded schedule. Pure state mutation only; the
+    /// caller (`FamilyScheduleView`'s button action) follows this with
+    /// its own `loadSchedule()` call, exactly the same "mutate state,
+    /// then explicitly reload" shape `onActivityLogged` callbacks
+    /// elsewhere in this file already use — `loadSchedule(referenceDate:calendar:)`
+    /// below is the ONE canonical query path, re-run for the new,
+    /// larger window rather than incrementally merging/appending rows
+    /// (which would risk duplicating a row already shown for the
+    /// previously-loaded, smaller window).
+    public func extendHorizon() {
+        horizonDays = min(horizonDays + Self.horizonExtensionDays, Self.maximumHorizonDays)
+    }
+
     /// Active-roster freshness fix (runtime/state audit): previously a
     /// frozen `let activeAthletes: [AthleteProfile]`, captured once at
     /// construction — correct only for the moment Family Schedule was
@@ -288,10 +323,32 @@ public final class FamilyScheduleViewModel {
     /// entirely, and went twice as far ahead as the approved contract.
     /// This is a family logistics surface, not Weekly Planning (which
     /// intentionally keeps its own, separate Monday-Sunday model) —
-    /// today through 7 calendar days ahead, so e.g. a Sunday view still
-    /// shows the coming week rather than only the current calendar
-    /// week's final day.
-    private static let upcomingDayCount = 7
+    /// today through 7 calendar days ahead by default, so e.g. a Sunday
+    /// view still shows the coming week rather than only the current
+    /// calendar week's final day.
+    ///
+    /// "Show 2 more weeks" round: this is now only the STARTING value
+    /// for `horizonDays` above, not a fixed query bound — Family
+    /// Schedule's default, calm short horizon is unchanged; the Parent
+    /// can explicitly ask for more via `extendHorizon()`.
+    private static let defaultHorizonDays = 7
+
+    /// "Show 2 more weeks" round: each `extendHorizon()` call adds
+    /// exactly this many days — the approved contract's "14 additional
+    /// calendar days" per tap.
+    private static let horizonExtensionDays = 14
+
+    /// "Show 2 more weeks" round: the bounded total this screen will
+    /// ever query, regardless of how many times the Parent taps "Show 2
+    /// more weeks" — `defaultHorizonDays` (7) + 3 extensions of 14 days
+    /// each = 49 days (7 weeks) total from today, inside the approved
+    /// "6-8 weeks total" / "42-56 days total" recommended range, and
+    /// landing exactly on a `defaultHorizonDays + N * horizonExtensionDays`
+    /// step so every actual tap adds a full, un-clamped 14 days (the
+    /// `min(...)` clamp in `extendHorizon()` is still the real bound —
+    /// this constant is just chosen so that clamp is never needed in
+    /// practice). Never an effectively unbounded schedule.
+    private static let maximumHorizonDays = 49
 
     public init(
         provideActiveAthletes: @escaping () -> [AthleteProfile],
@@ -350,7 +407,7 @@ public final class FamilyScheduleViewModel {
             let activeAthleteIds = Set(activeAthletes.map(\.athleteId))
             selectedAthleteIds = selectedAthleteIds.intersection(activeAthleteIds)
         }
-        guard let endDate = calendar.date(byAdding: .day, value: Self.upcomingDayCount, to: referenceDate) else {
+        guard let endDate = calendar.date(byAdding: .day, value: horizonDays, to: referenceDate) else {
             dayGroups = []
             return
         }
