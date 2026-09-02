@@ -79,17 +79,21 @@ public final class CompositionRoot {
     /// targeted `AppSchemaV8` ("8.0.0", 22 entities — activates
     /// `ExternalPlanningSource.self`/`CalendarImportDecision.self`). PR
     /// #48 follow-up (durable Suggested Ignore evidence): `AppSchemaV8`
-    /// is now itself FROZEN and this default targets `AppSchemaV9`
-    /// ("9.0.0", same 22 entities — adds
-    /// `CalendarImportDecision.ignoredEventTitle: String?`), the current
-    /// genuine version.
+    /// was then FROZEN and this default targeted `AppSchemaV9` ("9.0.0",
+    /// same 22 entities — adds
+    /// `CalendarImportDecision.ignoredEventTitle: String?`). VX-038
+    /// (External Event Decomposition / Suggested Split): `AppSchemaV9`
+    /// is now itself FROZEN and this default targets `AppSchemaV10`
+    /// ("10.0.0", 25 entities — activates
+    /// `DecomposedActivityLink.self`/`DecompositionEvidence.self`/
+    /// `DecompositionEvidenceChild.self`), the current genuine version.
     /// This parameter must be updated at every future schema version
     /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
     /// instructions — missing this exact step is the documented root
     /// cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV9.self,
+            versionedSchema: AppSchemaV10.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
@@ -270,6 +274,8 @@ public final class CompositionRoot {
             sourceRepository: container.resolve(ExternalPlanningSourceRepository.self),
             importDecisionRepository: container.resolve(CalendarImportDecisionRepository.self),
             legacyMappingRepository: container.resolve(CalendarPlanningMappingRepository.self),
+            decomposedActivityLinkRepository: container.resolve(DecomposedActivityLinkRepository.self),
+            decompositionEvidenceRepository: container.resolve(DecompositionEvidenceRepository.self),
             calendarEventProvider: EventKitCalendarEventProvider(),
             planningService: container.resolve(PlanningService.self),
             trainingService: container.resolve(TrainingService.self),

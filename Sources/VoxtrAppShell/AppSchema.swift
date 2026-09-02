@@ -111,6 +111,18 @@ import VoxtrCalendarPlanningDomain
 /// no live path creates new rows of that type anymore. Two genuine
 /// model-type additions, both purely additive (`AppSchemaV8`, see
 /// `AppSchemaVersioning.swift`).
+/// VX-038 (External Event Decomposition / Suggested Split) adds THREE
+/// model types (`VoxtrCalendarPlanningDomain`): `DecomposedActivityLink`
+/// (normalized provenance from one `CalendarImportDecision` to each
+/// child `PlannedActivity` a split produced), `DecompositionEvidence`
+/// and `DecompositionEvidenceChild` (durable, reusable evidence of one
+/// explicit Parent-approved split, used only to propose a Suggested
+/// Split later — see those types' own doc comments for the full
+/// contract). The existing one-event-to-one-activity import path
+/// (`CalendarPlanningCoordinationService.classifyAndImport`) is
+/// completely unchanged and never writes to any of these three tables.
+/// Purely additive (`AppSchemaV10`, see `AppSchemaVersioning.swift`): no
+/// existing entity or property is renamed, removed, or changed in place.
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [
@@ -136,6 +148,9 @@ public enum AppSchema {
             CalendarPlanningMapping.self,
             ExternalPlanningSource.self,
             CalendarImportDecision.self,
+            DecomposedActivityLink.self,
+            DecompositionEvidence.self,
+            DecompositionEvidenceChild.self,
         ]
     }
 }

@@ -8,7 +8,9 @@ import VoxtrCore
 /// current) plus `CalendarPlanningMappingRepository` (Calendar Planning
 /// Source V1, legacy/Alpha — retained only so already-persisted rows
 /// remain readable for the one-time migration read; see
-/// `CalendarPlanningMapping`'s own doc comment). It does NOT subscribe
+/// `CalendarPlanningMapping`'s own doc comment), and (VX-038)
+/// `DecomposedActivityLinkRepository`/`DecompositionEvidenceRepository`.
+/// It does NOT subscribe
 /// to `EventBus` or compose with Planning — that cross-domain work
 /// (`CalendarPlanningCoordinationService`) lives in `VoxtrAppShell`,
 /// same placement rationale `NotificationsPlanningCoordinationService`
@@ -34,5 +36,11 @@ public struct CalendarPlanningModule: VoxtrModule {
 
         let importDecisionRepository = CalendarImportDecisionRepository(modelContext: modelContainer.mainContext)
         container.register(CalendarImportDecisionRepository.self) { importDecisionRepository }
+
+        let decomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: modelContainer.mainContext)
+        container.register(DecomposedActivityLinkRepository.self) { decomposedActivityLinkRepository }
+
+        let decompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: modelContainer.mainContext)
+        container.register(DecompositionEvidenceRepository.self) { decompositionEvidenceRepository }
     }
 }
