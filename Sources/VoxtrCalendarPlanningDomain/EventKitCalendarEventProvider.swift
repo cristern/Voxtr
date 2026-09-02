@@ -1,5 +1,6 @@
 import EventKit
 import Foundation
+import VoxtrCore
 
 /// Calendar Planning Source V1: the ONE production conformance of
 /// `CalendarEventProviding` — every `EKEventStore`/`EKEvent`/`EKCalendar`
@@ -46,7 +47,25 @@ public final class EventKitCalendarEventProvider: CalendarEventProviding, @unche
         }
         let predicate = store.predicateForEvents(withStart: from, end: to, calendars: [calendar])
         return store.events(matching: predicate).map { event in
-            ExternalCalendarEvent(
+            // Lead Review follow-up (runtime diagnostics — bounded,
+            // Alpha-only, NOT a claimed fix, NOT a logic change): logs
+            // the exact identity facts VX-038's own recurring-series
+            // matching relies on, so a real device run can confirm or
+            // refute the runtime assumption this file's own doc comments
+            // already state — that `event.eventIdentifier` stays shared
+            // across occurrences of the same recurring series while
+            // `event.occurrenceDate` distinguishes them — rather than
+            // trusting that assumption from documentation/theory alone.
+            // Never used for matching/classification itself; that logic
+            // (`hasRecurrenceRules || isDetached`, below) is unchanged.
+            VoxtrLog.logger(.appShell).info("""
+                VX-038 EventKit identity: eventIdentifier=\(event.eventIdentifier, privacy: .private) \
+                occurrenceDate=\(event.occurrenceDate, privacy: .private) \
+                hasRecurrenceRules=\(event.hasRecurrenceRules, privacy: .public) \
+                isDetached=\(event.isDetached, privacy: .public) \
+                isRecurring=\(event.hasRecurrenceRules || event.isDetached, privacy: .public)
+                """)
+            return ExternalCalendarEvent(
                 eventIdentifier: event.eventIdentifier,
                 // PR #39 review follow-up (Blocker 2): `event.occurrenceDate`,
                 // never `event.startDate` — see `ExternalCalendarEvent`'s

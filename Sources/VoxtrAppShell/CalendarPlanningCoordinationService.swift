@@ -1165,6 +1165,7 @@ public final class CalendarPlanningCoordinationService {
         // failure is logged so it is diagnosable in Alpha/TestFlight.
         do {
             try recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
+            logEvidenceReadBackDiagnostic(item: item, source: source)
         } catch {
             VoxtrLog.logger(.appShell).error("VX-038 decomposition evidence recording failed after a successful split import (externalEventKey=\(item.externalEventKey, privacy: .private)): \(String(describing: error), privacy: .public)")
         }
@@ -1345,6 +1346,54 @@ public final class CalendarPlanningCoordinationService {
             createdBy: decidedBy,
             children: children.map { (athleteId: $0.athleteId, sportId: $0.sportId, activityType: $0.activityType, startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes) }
         )
+    }
+
+    /// Lead Review follow-up (runtime diagnostics — bounded, Alpha-only,
+    /// NOT a claimed fix): a PURE read-only verification, run only after
+    /// `recordDecompositionEvidenceIfAbsent(...)` has already succeeded,
+    /// that the evidence this exact split's own key resolves to is
+    /// genuinely resolvable again right now — using the SAME exact-key
+    /// semantics that method itself used (recurring-scoped if the event
+    /// is recurring, else title-scoped), never `suggestedSplit`'s own
+    /// broader multi-row precedence. Never mutates anything, never
+    /// changes matching/product behavior. Exists solely so a real
+    /// TestFlight run can show whether the write→read round-trip itself
+    /// — as opposed to something later in the review-refresh pipeline —
+    /// is where a missing Suggested Split actually breaks; this method
+    /// proves nothing about WHY a suggestion is or isn't later applied
+    /// to a DIFFERENT occurrence (see `CalendarImportReviewViewModel.refreshQueueAndStaging()`'s
+    /// own diagnostics for that).
+    private func logEvidenceReadBackDiagnostic(item: CalendarReviewItem, source: ExternalPlanningSource) {
+        let allEvidence = (try? decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)) ?? []
+        let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title)
+        let matched: DecompositionEvidence?
+        if item.event.isRecurring {
+            matched = allEvidence.first(where: { $0.recurringEventIdentifier == item.event.eventIdentifier })
+        } else if let normalizedTitle {
+            matched = allEvidence.first(where: { $0.normalizedTitle == normalizedTitle })
+        } else {
+            matched = nil
+        }
+        let childCount = matched.flatMap { evidence in
+            try? decompositionEvidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId).count
+        } ?? 0
+        VoxtrLog.logger(.appShell).info("""
+            VX-038 evidence read-back (sourceId=\(source.externalPlanningSourceId.rawValue, privacy: .private)): \
+            isRecurring=\(item.event.isRecurring, privacy: .public) \
+            recurringSeriesEvidenceResolves=\(item.event.isRecurring && matched != nil, privacy: .public) \
+            normalizedTitleAvailable=\(normalizedTitle != nil, privacy: .public) \
+            evidenceChildCount=\(childCount, privacy: .public)
+            """)
+    }
+
+    /// Lead Review follow-up (runtime diagnostics): the smallest
+    /// existence check `CalendarImportReviewViewModel.refreshQueueAndStaging()`
+    /// needs to bound its own per-item Suggested Split diagnostics to
+    /// only sources that actually have SOME decomposition evidence —
+    /// never itself a matching/business decision, never used by
+    /// `suggestedSplit(for:source:)` or `classifyAndImportSplit(...)`.
+    public func hasDecompositionEvidence(for source: ExternalPlanningSource) throws -> Bool {
+        !(try decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
     }
 
     /// The explicit Parent action for "this event should never become
