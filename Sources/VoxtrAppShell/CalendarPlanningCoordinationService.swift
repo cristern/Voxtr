@@ -58,6 +58,27 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     /// `removeImportedActivities(for:removedBy:)` for that separate,
     /// explicit action.
     case decisionNotIgnored
+    /// VX-038: `classifyAndImportSplit` guard — no children supplied.
+    case noSplitChildren
+    /// VX-038: `classifyAndImportSplit` guard — child at `index` has a
+    /// duration outside the canonical `1...1440` minute bound Planning
+    /// already enforces (`PlanningService.addPlannedActivity`'s own
+    /// `plannedDurationMinutes` validation).
+    case invalidSplitChildDuration(index: Int)
+    /// VX-038: `classifyAndImportSplit` guard — child at `index` has a
+    /// negative start offset from the external event's own start; a
+    /// child may start AT the event's start (offset `0`) or later, but
+    /// never before it — this is a schedule ENVELOPE, not an arbitrary
+    /// timeline.
+    case invalidSplitChildStartOffset(index: Int)
+    /// VX-038: `classifyAndImportSplit` guard — child at `index`'s
+    /// `athleteId` does not resolve to a real, active athlete.
+    case splitChildAthleteNotFound(index: Int)
+    /// VX-038: `classifyAndImportSplit` guard — child at `index`'s
+    /// athlete does not belong to `source`'s own workspace — the same
+    /// family-isolation boundary `classifyAndImport` already enforces,
+    /// checked per child since children may name different athletes.
+    case splitChildAthleteOutsideSourceWorkspace(index: Int)
 }
 
 /// Family-Owned Calendar Sources V1: the one place
@@ -126,6 +147,17 @@ public final class CalendarPlanningCoordinationService {
     /// `migrateLegacySourcesIfNeeded(forWorkspace:)`. No other method in
     /// this type reads or writes through this repository.
     private let legacyMappingRepository: CalendarPlanningMappingRepository
+    /// VX-038: provenance links from a decomposed `CalendarImportDecision`
+    /// to each child `PlannedActivity` it produced — see
+    /// `DecomposedActivityLink`'s own doc comment. Only
+    /// `classifyAndImportSplit(...)` writes through this; the ordinary
+    /// one-activity `classifyAndImport(...)` path never touches it.
+    private let decomposedActivityLinkRepository: DecomposedActivityLinkRepository
+    /// VX-038: durable, reusable evidence of an explicit Parent-approved
+    /// split — see `DecompositionEvidence`'s own doc comment. Read by
+    /// `suggestedSplit(for:source:)`, written (create-only) by
+    /// `classifyAndImportSplit(...)`.
+    private let decompositionEvidenceRepository: DecompositionEvidenceRepository
     private let calendarEventProvider: CalendarEventProviding
     private let planningService: PlanningService
     private let trainingService: TrainingService
@@ -136,6 +168,8 @@ public final class CalendarPlanningCoordinationService {
         sourceRepository: ExternalPlanningSourceRepository,
         importDecisionRepository: CalendarImportDecisionRepository,
         legacyMappingRepository: CalendarPlanningMappingRepository,
+        decomposedActivityLinkRepository: DecomposedActivityLinkRepository,
+        decompositionEvidenceRepository: DecompositionEvidenceRepository,
         calendarEventProvider: CalendarEventProviding,
         planningService: PlanningService,
         trainingService: TrainingService,
@@ -145,6 +179,8 @@ public final class CalendarPlanningCoordinationService {
         self.sourceRepository = sourceRepository
         self.importDecisionRepository = importDecisionRepository
         self.legacyMappingRepository = legacyMappingRepository
+        self.decomposedActivityLinkRepository = decomposedActivityLinkRepository
+        self.decompositionEvidenceRepository = decompositionEvidenceRepository
         self.calendarEventProvider = calendarEventProvider
         self.planningService = planningService
         self.trainingService = trainingService
@@ -752,6 +788,306 @@ public final class CalendarPlanningCoordinationService {
         return plannedActivity
     }
 
+    // MARK: - VX-038: External Event Decomposition / Suggested Split
+
+    /// Every `PlannedActivityId` a `CalendarImportDecision` produced —
+    /// the ONE read helper that makes a historical, ordinary 1:1
+    /// decision (no `DecomposedActivityLink` rows) and a new decomposed
+    /// decision (N link rows, written by `classifyAndImportSplit`)
+    /// resolve identically, so a caller never needs to know which kind
+    /// of decision it is holding. `[]` for an `.ignored` decision (its
+    /// `plannedActivityId` is always `nil`).
+    public func plannedActivityIds(for decision: CalendarImportDecision) throws -> [PlannedActivityId] {
+        let links = try decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
+        guard links.isEmpty else {
+            return links.map(\.plannedActivityId)
+        }
+        guard let plannedActivityId = decision.plannedActivityId else { return [] }
+        return [PlannedActivityId(rawValue: plannedActivityId)]
+    }
+
+    /// VX-038: ONE child's Parent-approved shape for
+    /// `classifyAndImportSplit(_:for:children:decidedBy:)` — the same
+    /// canonical value types (`AthleteId`/`SportId`/`ActivityType`)
+    /// every other Planning write already uses; never a second,
+    /// locally-invented representation.
+    public struct DecomposedChildInput: Sendable, Equatable {
+        public let athleteId: AthleteId
+        public let sportId: SportId?
+        public let activityType: ActivityType
+        /// Minutes from the external event's own start — `0` means "at
+        /// the event's start," matching the approved contract's own
+        /// example (`offset 0 min` / `offset 70 min`).
+        public let startOffsetMinutes: Int
+        public let durationMinutes: Int
+
+        public init(athleteId: AthleteId, sportId: SportId?, activityType: ActivityType, startOffsetMinutes: Int, durationMinutes: Int) {
+            self.athleteId = athleteId
+            self.sportId = sportId
+            self.activityType = activityType
+            self.startOffsetMinutes = startOffsetMinutes
+            self.durationMinutes = durationMinutes
+        }
+    }
+
+    /// The explicit Parent action for "this external event is actually
+    /// several training units" — creates one canonical `PlannedActivity`
+    /// PER `children` entry, all sharing `item`'s own
+    /// `externalEventKey`/provenance, plus ONE `CalendarImportDecision`
+    /// linking every child via `DecomposedActivityLink` (see that type's
+    /// own doc comment). Never a bypass of `classifyAndImport`'s own
+    /// guards — this is a SEPARATE, parallel creation path for the
+    /// SEPARATE case of more than one training unit, reusing the exact
+    /// same source-disabled/idempotency/family-isolation checks.
+    ///
+    /// VALIDATION (all children checked BEFORE any `PlannedActivity` is
+    /// created — see this method's own "ATOMICITY" note below):
+    ///   - at least one child (`.noSplitChildren`);
+    ///   - each child's `durationMinutes` in `1...1440`
+    ///     (`.invalidSplitChildDuration`) — the same bound
+    ///     `PlanningService.addPlannedActivity` itself enforces;
+    ///   - each child's `startOffsetMinutes >= 0`
+    ///     (`.invalidSplitChildStartOffset`) — a child may start AT the
+    ///     external event's own start or later, never before it;
+    ///   - each child's athlete resolves, is active, and belongs to
+    ///     `source`'s own workspace (`.splitChildAthleteNotFound`/
+    ///     `.splitChildAthleteOutsideSourceWorkspace`) — the same
+    ///     family-isolation boundary `classifyAndImport` already
+    ///     enforces, checked per child since children may name
+    ///     different athletes.
+    /// Children are never required to be contiguous or to fill the
+    /// entire external event — only the bounds above are enforced,
+    /// matching `PlanningService`'s own existing timing constraints
+    /// rather than inventing a stricter rule here.
+    ///
+    /// IDEMPOTENCY: mirrors `classifyAndImport`'s own Step 1 — an
+    /// existing decision for this exact `externalEventKey` returns its
+    /// already-linked activities unchanged (via `plannedActivityIds(for:)`)
+    /// rather than creating a duplicate split.
+    ///
+    /// ATOMICITY: this repository layer has no cross-write SwiftData
+    /// transaction (see `ExternalPlanningSourceRepository`/
+    /// `CalendarImportDecisionRepository`'s own `save()`-per-call
+    /// pattern — unchanged by this feature). Every child is validated
+    /// BEFORE any is created, so the common failure mode (bad input) is
+    /// caught with zero partial state. If a `PlanningService.addPlannedActivity`
+    /// call still fails partway through creation (e.g. a concurrent
+    /// revision conflict), every child ALREADY created in this same call
+    /// is explicitly rolled back via `PlanningService.deletePlannedActivity`
+    /// before the original error is rethrown — never leaving half a
+    /// split behind. A rollback delete failing (defensive, not expected)
+    /// is swallowed for that one already-created child rather than
+    /// masking the original creation error; this is a best-effort bounded
+    /// rollback, not a database-level transaction.
+    ///
+    /// EVIDENCE: after every child is created and linked, records
+    /// reusable decomposition evidence for THIS split, but ONLY if no
+    /// evidence already exists for this exact (source, recurring
+    /// series) or (source, exact title) key — see
+    /// `recordDecompositionEvidenceIfAbsent(...)`'s own doc comment for
+    /// why this is create-only, never a silent overwrite of a
+    /// previously-learned pattern.
+    @discardableResult
+    public func classifyAndImportSplit(
+        _ item: CalendarReviewItem,
+        for source: ExternalPlanningSource,
+        children: [DecomposedChildInput],
+        decidedBy: ActorId
+    ) throws -> [PlannedActivity] {
+        guard source.isEnabled, source.lifecycleStatus == .connected else {
+            throw CalendarPlanningCoordinationError.sourceDisabled
+        }
+        guard !children.isEmpty else {
+            throw CalendarPlanningCoordinationError.noSplitChildren
+        }
+
+        if let existingDecision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
+            guard existingDecision.status == .imported else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            let existingIds = try plannedActivityIds(for: existingDecision)
+            let existingActivities = try existingIds.compactMap { try planningService.fetchPlannedActivity(byId: $0) }
+            guard existingActivities.count == existingIds.count, !existingActivities.isEmpty else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            return existingActivities
+        }
+
+        var resolvedAthletes: [AthleteId: AthleteProfile] = [:]
+        for (index, child) in children.enumerated() {
+            guard (1...1440).contains(child.durationMinutes) else {
+                throw CalendarPlanningCoordinationError.invalidSplitChildDuration(index: index)
+            }
+            guard child.startOffsetMinutes >= 0 else {
+                throw CalendarPlanningCoordinationError.invalidSplitChildStartOffset(index: index)
+            }
+            if resolvedAthletes[child.athleteId] == nil {
+                guard let athlete = try athleteRepository.fetchAthlete(byId: child.athleteId), !athlete.isArchived else {
+                    throw CalendarPlanningCoordinationError.splitChildAthleteNotFound(index: index)
+                }
+                guard athlete.workspaceId == source.workspaceId else {
+                    throw CalendarPlanningCoordinationError.splitChildAthleteOutsideSourceWorkspace(index: index)
+                }
+                resolvedAthletes[child.athleteId] = athlete
+            }
+        }
+
+        var created: [PlannedActivity] = []
+        do {
+            for child in children {
+                guard let athlete = resolvedAthletes[child.athleteId] else {
+                    // Unreachable — every child's athlete was resolved
+                    // into `resolvedAthletes` in the validation pass
+                    // above, which throws before this loop is ever
+                    // reached if any lookup fails.
+                    continue
+                }
+                let occurrenceStart = item.event.startDate.addingTimeInterval(TimeInterval(child.startOffsetMinutes * 60))
+                let (localDate, startLocalTime) = Self.localDateAndTime(for: occurrenceStart, in: athlete.timeZoneId)
+                let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: child.athleteId, weekStart: localDate.startOfWeek)
+                let activity = try planningService.addPlannedActivity(
+                    toWeekPlan: weekPlan.weekPlanId,
+                    athleteId: child.athleteId,
+                    activityType: child.activityType,
+                    title: item.event.title,
+                    localDate: localDate,
+                    timeZoneId: athlete.timeZoneId,
+                    sportId: child.sportId,
+                    startLocalTime: startLocalTime,
+                    plannedDurationMinutes: child.durationMinutes,
+                    externalSourceId: item.externalEventKey,
+                    externalSourceType: Self.externalSourceType,
+                    notes: item.event.notes,
+                    location: item.event.location
+                )
+                created.append(activity)
+            }
+        } catch {
+            for activity in created {
+                try? planningService.deletePlannedActivity(
+                    activity.plannedActivityId, expectedWeekPlanId: WeekPlanId(rawValue: activity.weekPlanId), deletedBy: decidedBy
+                )
+            }
+            throw error
+        }
+
+        let firstChild = children[0]
+        let decision = try importDecisionRepository.insert(
+            sourceId: source.externalPlanningSourceId,
+            externalEventKey: item.externalEventKey,
+            status: .imported,
+            athleteId: firstChild.athleteId,
+            sportId: firstChild.sportId,
+            activityType: firstChild.activityType,
+            plannedActivityId: created[0].plannedActivityId,
+            decidedBy: decidedBy
+        )
+        for (index, activity) in created.enumerated() {
+            try decomposedActivityLinkRepository.insert(
+                calendarImportDecisionId: decision.calendarImportDecisionId,
+                plannedActivityId: activity.plannedActivityId,
+                orderIndex: index
+            )
+        }
+
+        try recordDecompositionEvidenceIfAbsent(item: item, source: source, children: children, decidedBy: decidedBy)
+
+        return created
+    }
+
+    /// VX-038: the reusable, historical shape of a Suggested Split — a
+    /// prefill proposal only, never itself Planning truth. See
+    /// `suggestedSplit(for:source:)`'s own doc comment for how it is
+    /// matched.
+    public struct SuggestedSplit: Sendable, Equatable {
+        public struct Child: Sendable, Equatable {
+            public let athleteId: AthleteId
+            public let sportId: SportId?
+            public let activityType: ActivityType
+            public let startOffsetMinutes: Int
+            public let durationMinutes: Int
+        }
+        public let children: [Child]
+    }
+
+    /// VX-038: looks up durable decomposition evidence for `event`
+    /// within `source` ONLY — a pure read, never itself creating or
+    /// mutating anything, and never applied without explicit Parent
+    /// confirmation (that confirmation is `classifyAndImportSplit`
+    /// itself). Precedence, per the approved contract:
+    ///   1. `event.isRecurring` AND a `DecompositionEvidence` row exists
+    ///      for `source` whose `recurringEventIdentifier` matches
+    ///      `event.eventIdentifier` — the STRONGEST evidence (the same
+    ///      recurring series, not merely similar text);
+    ///   2. else, a `DecompositionEvidence` row exists for `source`
+    ///      whose `normalizedTitle` matches `event.title` (via
+    ///      `ExternalEventTitleNormalization.normalize(_:)`, the SAME
+    ///      exact-match normalization this domain's remembered-
+    ///      classification evidence already uses) — the fallback,
+    ///      scoped to `source` only (never a different source, even one
+    ///      with an identical title — see `DecompositionEvidence`'s own
+    ///      doc comment);
+    ///   3. else `nil` — no suggestion.
+    public func suggestedSplit(for event: ExternalCalendarEvent, source: ExternalPlanningSource) throws -> SuggestedSplit? {
+        let allEvidence = try decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        guard !allEvidence.isEmpty else { return nil }
+
+        let matched: DecompositionEvidence?
+        if event.isRecurring, let recurringMatch = allEvidence.first(where: { $0.recurringEventIdentifier == event.eventIdentifier }) {
+            matched = recurringMatch
+        } else if let normalizedTitle = ExternalEventTitleNormalization.normalize(event.title),
+                  let titleMatch = allEvidence.first(where: { $0.normalizedTitle == normalizedTitle }) {
+            matched = titleMatch
+        } else {
+            matched = nil
+        }
+        guard let evidence = matched else { return nil }
+
+        let children = try decompositionEvidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId)
+        guard !children.isEmpty else { return nil }
+        return SuggestedSplit(children: children.map { child in
+            SuggestedSplit.Child(
+                athleteId: AthleteId(rawValue: child.athleteId),
+                sportId: child.sportId.map { SportId(rawValue: $0) },
+                activityType: child.activityType,
+                startOffsetMinutes: child.startOffsetMinutes,
+                durationMinutes: child.durationMinutes
+            )
+        })
+    }
+
+    /// VX-038: CREATE-ONLY — records durable decomposition evidence for
+    /// `children` (the split just explicitly imported) UNLESS matching
+    /// evidence already exists for this exact key, checked with the
+    /// SAME precedence `suggestedSplit(for:source:)` itself uses. This
+    /// is the ONE place a later, edited (or from-scratch) split for a
+    /// DIFFERENT occurrence of the same recurring series is guaranteed
+    /// to never silently rewrite the historical, already-learned
+    /// pattern — the approved contract's own "editing one occurrence
+    /// must not silently rewrite historical decomposition evidence for
+    /// the whole recurring series" rule, enforced structurally (never
+    /// called at all when evidence already exists) rather than by a
+    /// caller remembering not to overwrite.
+    private func recordDecompositionEvidenceIfAbsent(
+        item: CalendarReviewItem,
+        source: ExternalPlanningSource,
+        children: [DecomposedChildInput],
+        decidedBy: ActorId
+    ) throws {
+        if try suggestedSplit(for: item.event, source: source) != nil {
+            return
+        }
+        let recurringEventIdentifier = item.event.isRecurring ? item.event.eventIdentifier : nil
+        let normalizedTitle = ExternalEventTitleNormalization.normalize(item.event.title)
+        try decompositionEvidenceRepository.insert(
+            sourceId: source.externalPlanningSourceId,
+            recurringEventIdentifier: recurringEventIdentifier,
+            normalizedTitle: normalizedTitle,
+            createdBy: decidedBy,
+            children: children.map { (athleteId: $0.athleteId, sportId: $0.sportId, activityType: $0.activityType, startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes) }
+        )
+    }
+
     /// The explicit Parent action for "this event should never become
     /// Planning" — records a `CalendarImportDecision(status: .ignored)`
     /// with no athlete/sport/activityType/plannedActivityId, so
@@ -1127,8 +1463,24 @@ public final class CalendarPlanningCoordinationService {
     /// Review, not an error/skip).
     private func applyReconciledEvent(_ event: ExternalCalendarEvent, externalSourceId: String) throws -> ReconciledEventOutcome {
         let existingMatches = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
-        guard let existing = existingMatches.first(where: { $0.externalSourceId == externalSourceId }) else {
-            return .notYetImported
+            .filter { $0.externalSourceId == externalSourceId }
+        guard !existingMatches.isEmpty else { return .notYetImported }
+        // VX-038: more than one PlannedActivity sharing this exact
+        // externalSourceId means this event was explicitly DECOMPOSED
+        // (see classifyAndImportSplit) — each child's planned timing is
+        // offset-based and Vǫxtr/Parent-owned, never a literal mirror of
+        // the external event's own start time, so blindly updating only
+        // the FIRST match here (the old single-activity assumption)
+        // would silently corrupt that child's timing while leaving its
+        // siblings stale. Skipped entirely, not updated — matches this
+        // feature's own "do not silently overwrite Vǫxtr-edited child
+        // classification/timing" reconciliation contract. An event that
+        // genuinely disappears is still handled correctly:
+        // `cancelDisappearedActivities` matches by the SAME
+        // `externalSourceId` and removes every one of these children
+        // together.
+        guard existingMatches.count == 1, let existing = existingMatches.first else {
+            return .skipped
         }
 
         let athleteId = AthleteId(rawValue: existing.athleteId)

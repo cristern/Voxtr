@@ -147,6 +147,66 @@ public final class CalendarImportReviewViewModel {
         /// the only two places this is ever written.
         public var isConfirmedReady: Bool = false
         public var suggestionKind: SuggestionKind = .none
+
+        /// VX-038: ONE child within a Parent-defined (or Suggested-
+        /// Split-prefilled) split — a plain, view-layer editing shape;
+        /// never itself Planning truth. Mirrors
+        /// `CalendarPlanningCoordinationService.DecomposedChildInput`'s
+        /// own fields exactly, plus a stable `id` this View's `ForEach`
+        /// needs for add/remove/edit.
+        public struct SplitChild: Sendable, Equatable, Identifiable {
+            public let id: UUID
+            public var athleteId: AthleteId?
+            public var sportId: SportId?
+            public var activityType: ActivityType
+            public var startOffsetMinutes: Int
+            public var durationMinutes: Int
+
+            public init(
+                id: UUID = UUID(),
+                athleteId: AthleteId? = nil,
+                sportId: SportId? = nil,
+                activityType: ActivityType = .individualTraining,
+                startOffsetMinutes: Int = 0,
+                durationMinutes: Int = 30
+            ) {
+                self.id = id
+                self.athleteId = athleteId
+                self.sportId = sportId
+                self.activityType = activityType
+                self.startOffsetMinutes = startOffsetMinutes
+                self.durationMinutes = durationMinutes
+            }
+
+            var isValid: Bool {
+                athleteId != nil && durationMinutes > 0 && durationMinutes <= 1440 && startOffsetMinutes >= 0
+            }
+        }
+
+        /// VX-038: `true` once the Parent has explicitly chosen "Split
+        /// activity" (or accepted/is viewing a Suggested Split) for this
+        /// event — while `true`, `splitChildren` (not
+        /// `athleteId`/`sportId`/`activityType` above) is what actually
+        /// imports, via `classifyAndImportSplit`. Toggling this off
+        /// returns to the ordinary single-activity fields, which are
+        /// left untouched underneath (so toggling back on never loses a
+        /// Parent's earlier split edits — see `setSplitEnabled(_:for:)`).
+        public var isSplitEnabled: Bool = false
+        public var splitChildren: [SplitChild] = []
+        /// VX-038: `true` ONLY for a split that is STILL exactly what
+        /// `CalendarPlanningCoordinationService.suggestedSplit(for:source:)`
+        /// proposed — cleared the instant the Parent edits any child
+        /// (see `updateSplitChild(_:for:)`/`addSplitChild(for:)`/
+        /// `removeSplitChild(_:for:)`), mirroring `suggestionKind`'s own
+        /// "no longer describes what is on screen" rule. Presentation
+        /// label only ("Suggested Split") — never itself a gate on
+        /// import, which always requires the same explicit Ready/import
+        /// action regardless of this flag.
+        public var isSuggestedSplitPrefill: Bool = false
+
+        public var splitChildrenAreValid: Bool {
+            !splitChildren.isEmpty && splitChildren.allSatisfy(\.isValid)
+        }
         /// Live Suggested Ignore re-evaluation follow-up: `true` the
         /// moment the Parent has explicitly changed ANY of Athlete/Sport/
         /// Activity Type for this event, via `updateStaged(for:_:)` — the
@@ -164,12 +224,15 @@ public final class CalendarImportReviewViewModel {
         /// struct.
         public var hasUserInteraction: Bool = false
 
-        /// The canonical minimum requirement `classifyAndImport` actually
-        /// needs: Athlete must resolve/be selected. `activityType`
-        /// always carries a valid selectable value; `sportId` is
-        /// legitimately optional ("no specific Sport") — neither ever
-        /// blocks readiness on its own.
-        public var satisfiesMinimumImportRequirements: Bool { athleteId != nil }
+        /// The canonical minimum requirement `classifyAndImport` (or,
+        /// when `isSplitEnabled`, `classifyAndImportSplit`) actually
+        /// needs: an Athlete must resolve/be selected for every relevant
+        /// child. `activityType` always carries a valid selectable
+        /// value; `sportId` is legitimately optional ("no specific
+        /// Sport") — neither ever blocks readiness on its own.
+        public var satisfiesMinimumImportRequirements: Bool {
+            isSplitEnabled ? splitChildrenAreValid : athleteId != nil
+        }
 
         /// Shown collapsed in "Ready to Import" — requires BOTH the
         /// Parent's own explicit confirmation AND the classification
@@ -310,6 +373,48 @@ public final class CalendarImportReviewViewModel {
         updateStaged(for: externalEventKey) { $0.activityType = activityType }
     }
 
+    // MARK: - VX-038: Split activity (inline staging only — same "no persistence" contract)
+
+    /// The explicit "Split activity" toggle. Turning split ON with no
+    /// children yet seeds exactly one empty child, so the View always
+    /// has something to show/edit immediately — never an empty split
+    /// with no rows at all. Turning split OFF preserves any
+    /// already-entered children untouched (so toggling back on restores
+    /// them) — this method only ever changes `isSplitEnabled` itself.
+    /// Never sets `isConfirmedReady`, matching every other staging
+    /// mutation's own "selecting/changing something never auto-confirms
+    /// Ready" rule.
+    public func setSplitEnabled(_ isEnabled: Bool, for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { staged in
+            staged.isSplitEnabled = isEnabled
+            if isEnabled && staged.splitChildren.isEmpty {
+                staged.splitChildren = [StagedClassification.SplitChild()]
+            }
+        }
+    }
+
+    public func addSplitChild(for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { staged in
+            staged.splitChildren.append(StagedClassification.SplitChild())
+            staged.isSuggestedSplitPrefill = false
+        }
+    }
+
+    public func removeSplitChild(_ childId: UUID, for externalEventKey: String) {
+        updateStaged(for: externalEventKey) { staged in
+            staged.splitChildren.removeAll { $0.id == childId }
+            staged.isSuggestedSplitPrefill = false
+        }
+    }
+
+    public func updateSplitChild(_ childId: UUID, for externalEventKey: String, mutate: (inout StagedClassification.SplitChild) -> Void) {
+        updateStaged(for: externalEventKey) { staged in
+            guard let index = staged.splitChildren.firstIndex(where: { $0.id == childId }) else { return }
+            mutate(&staged.splitChildren[index])
+            staged.isSuggestedSplitPrefill = false
+        }
+    }
+
     /// Lead Review follow-up: the ONE explicit Parent action that moves a
     /// staged event into "Ready to Import" — never an automatic side
     /// effect of selecting a value. A no-op if the classification does
@@ -415,11 +520,33 @@ public final class CalendarImportReviewViewModel {
         var sourceBecameUnavailable = false
 
         for item in readyItems {
-            guard let staged = stagedClassifications[item.externalEventKey], let athleteId = staged.athleteId else { continue }
+            guard let staged = stagedClassifications[item.externalEventKey] else { continue }
+            // VX-038: a split-enabled, Ready item imports through the
+            // SEPARATE `classifyAndImportSplit` path — never a bypass of
+            // the ordinary `classifyAndImport` guards, just the correct
+            // canonical path for "this event is more than one training
+            // unit." `staged.splitChildrenAreValid` already gates
+            // `isReady`/`readyToImportItems` above, so every child here
+            // has a resolved athleteId.
+            guard staged.isSplitEnabled || staged.athleteId != nil else { continue }
             do {
-                _ = try calendarPlanningCoordinationService.classifyAndImport(
-                    item, for: source, athleteId: athleteId, sportId: staged.sportId, activityType: staged.activityType, decidedBy: actorId
-                )
+                if staged.isSplitEnabled {
+                    _ = try calendarPlanningCoordinationService.classifyAndImportSplit(
+                        item, for: source,
+                        children: staged.splitChildren.compactMap { child -> CalendarPlanningCoordinationService.DecomposedChildInput? in
+                            guard let athleteId = child.athleteId else { return nil }
+                            return CalendarPlanningCoordinationService.DecomposedChildInput(
+                                athleteId: athleteId, sportId: child.sportId, activityType: child.activityType,
+                                startOffsetMinutes: child.startOffsetMinutes, durationMinutes: child.durationMinutes
+                            )
+                        },
+                        decidedBy: actorId
+                    )
+                } else if let athleteId = staged.athleteId {
+                    _ = try calendarPlanningCoordinationService.classifyAndImport(
+                        item, for: source, athleteId: athleteId, sportId: staged.sportId, activityType: staged.activityType, decidedBy: actorId
+                    )
+                }
                 stagedClassifications.removeValue(forKey: item.externalEventKey)
                 failedImportReasons.removeValue(forKey: item.externalEventKey)
                 importedCount += 1
@@ -674,6 +801,7 @@ public final class CalendarImportReviewViewModel {
         staged.hasUserInteraction
             || staged.isConfirmedReady
             || staged.suggestionKind != .none
+            || staged.isSplitEnabled
             || failedImportReasons[externalEventKey] != nil
     }
 
@@ -748,6 +876,29 @@ public final class CalendarImportReviewViewModel {
             if let existing = stagedClassifications[item.externalEventKey],
                hasMeaningfulStaging(existing, externalEventKey: item.externalEventKey) {
                 rebuiltStaging[item.externalEventKey] = existing
+                continue
+            }
+            // VX-038 (Suggested Split): checked BEFORE exact/similar
+            // classification prefill and BEFORE Suggested Ignore —
+            // decomposition evidence for this exact event means "this
+            // event is actually more than one training unit," which the
+            // single-activity classification chain below cannot
+            // correctly represent. Never sets isConfirmedReady — like
+            // every other suggestion, the Parent's own explicit
+            // Ready/import action is still required. Read-only; never
+            // creates or mutates anything by itself.
+            if let suggested = try? calendarPlanningCoordinationService.suggestedSplit(for: item.event, source: source),
+               !suggested.children.isEmpty {
+                rebuiltStaging[item.externalEventKey] = StagedClassification(
+                    isSplitEnabled: true,
+                    splitChildren: suggested.children.map { child in
+                        StagedClassification.SplitChild(
+                            athleteId: child.athleteId, sportId: child.sportId, activityType: child.activityType,
+                            startOffsetMinutes: child.startOffsetMinutes, durationMinutes: child.durationMinutes
+                        )
+                    },
+                    isSuggestedSplitPrefill: true
+                )
                 continue
             }
             // Remembered Exact Choices (V1.1): PREFILL only — a safe

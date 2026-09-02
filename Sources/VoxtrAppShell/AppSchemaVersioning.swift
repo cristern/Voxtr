@@ -1213,11 +1213,59 @@ public enum AppSchemaV8: VersionedSchema {
 /// literal V8 always actually had, plus a nested, frozen V8-era
 /// `CalendarImportDecision` copy (see that type's own doc comment
 /// immediately above), following this file's own "HOW TO ADD A NEW
-/// VERSION" step 1, same as every version before it. See `AppSchemaV9`
-/// immediately below for the new latest version.
+/// VERSION" step 1, same as every version before it. See `AppSchemaV10`
+/// (below `AppSchemaV9`) for the new latest version — VX-038 froze
+/// `AppSchemaV9` in turn once it was no longer the latest.
 public enum AppSchemaV9: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(9, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+            CalendarPlanningMapping.self,
+            ExternalPlanningSource.self,
+            CalendarImportDecision.self,
+        ]
+    }
+}
+
+/// VX-038 (External Event Decomposition / Suggested Split): adds THREE
+/// model types, `DecomposedActivityLink.self`, `DecompositionEvidence.self`,
+/// and `DecompositionEvidenceChild.self` (`VoxtrCalendarPlanningDomain`)
+/// — see `AppSchema.modelTypes`'s own doc comment for the full product
+/// rationale. Purely additive: no existing entity or property is
+/// renamed, removed, or changed in place, the same class of change as
+/// every prior "new model type(s)" version bump in this file's history
+/// (most directly `AppSchemaV8`'s own two-type addition immediately
+/// above).
+///
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V9
+/// was the latest version; this round now freezes it to the exact
+/// 22-entity literal V9 always actually had, following this file's own
+/// "HOW TO ADD A NEW VERSION" step 1, same as every version before it.
+public enum AppSchemaV10: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(10, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1278,7 +1326,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
         [
             AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self,
-            AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self, AppSchemaV9.self,
+            AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self, AppSchemaV9.self, AppSchemaV10.self,
         ]
     }
 
@@ -1404,6 +1452,11 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             .lightweight(fromVersion: AppSchemaV6.self, toVersion: AppSchemaV7.self),
             .lightweight(fromVersion: AppSchemaV7.self, toVersion: AppSchemaV8.self),
             .lightweight(fromVersion: AppSchemaV8.self, toVersion: AppSchemaV9.self),
+            // VX-038: purely additive (three new tables) — no existing
+            // entity or property is renamed, removed, or changed in
+            // place, so a `.lightweight` stage is sufficient (same
+            // reasoning as every prior new-model-type version above).
+            .lightweight(fromVersion: AppSchemaV9.self, toVersion: AppSchemaV10.self),
         ]
     }
 }

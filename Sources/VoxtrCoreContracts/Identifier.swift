@@ -93,6 +93,28 @@ public typealias ExternalPlanningSourceId = Identifier<ExternalPlanningSourceTag
 public enum CalendarImportDecisionTag {}
 public typealias CalendarImportDecisionId = Identifier<CalendarImportDecisionTag>
 
+/// VX-038 (External Event Decomposition / Suggested Split): identifies
+/// one persisted link from a `CalendarImportDecision` to ONE child
+/// `PlannedActivity` it produced (see
+/// `VoxtrCalendarPlanningDomain.DecomposedActivityLink`'s own doc
+/// comment).
+public enum DecomposedActivityLinkTag {}
+public typealias DecomposedActivityLinkId = Identifier<DecomposedActivityLinkTag>
+
+/// VX-038: identifies one persisted, reusable decomposition-evidence
+/// row — the durable record of ONE explicit Parent-approved split,
+/// used only to propose a Suggested Split for a later matching event
+/// (see `VoxtrCalendarPlanningDomain.DecompositionEvidence`'s own doc
+/// comment).
+public enum DecompositionEvidenceTag {}
+public typealias DecompositionEvidenceId = Identifier<DecompositionEvidenceTag>
+
+/// VX-038: identifies one child row within a `DecompositionEvidence`
+/// (see `VoxtrCalendarPlanningDomain.DecompositionEvidenceChild`'s own
+/// doc comment).
+public enum DecompositionEvidenceChildTag {}
+public typealias DecompositionEvidenceChildId = Identifier<DecompositionEvidenceChildTag>
+
 /// v1.3 Section 3: "String wrapper. Opaque platform account identifier;
 /// never used as email." Deliberately NOT built on the UUID-based
 /// `Identifier<Tag>` generic — its representation is genuinely different.

@@ -75,6 +75,12 @@ struct CalendarPlanningCoordinationServiceTests {
         let sourceRepository: ExternalPlanningSourceRepository
         let importDecisionRepository: CalendarImportDecisionRepository
         let legacyMappingRepository: CalendarPlanningMappingRepository
+        /// VX-038: exposed so a test can directly inspect persisted
+        /// decomposition evidence (e.g. "editing a suggested split for a
+        /// later occurrence does not rewrite the original evidence row")
+        /// without a second, parallel read path.
+        let decomposedActivityLinkRepository: DecomposedActivityLinkRepository
+        let decompositionEvidenceRepository: DecompositionEvidenceRepository
         let calendarProvider: FakeCalendarEventProvider
         let coordinationService: CalendarPlanningCoordinationService
         /// Family isolation test only — `CalendarImportReviewViewModel`'s
@@ -94,6 +100,8 @@ struct CalendarPlanningCoordinationServiceTests {
         let sourceRepository = ExternalPlanningSourceRepository(modelContext: container.mainContext)
         let importDecisionRepository = CalendarImportDecisionRepository(modelContext: container.mainContext)
         let legacyMappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+        let decomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: container.mainContext)
+        let decompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: container.mainContext)
         let sportRepository = SportRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
@@ -102,6 +110,8 @@ struct CalendarPlanningCoordinationServiceTests {
             sourceRepository: sourceRepository,
             importDecisionRepository: importDecisionRepository,
             legacyMappingRepository: legacyMappingRepository,
+            decomposedActivityLinkRepository: decomposedActivityLinkRepository,
+            decompositionEvidenceRepository: decompositionEvidenceRepository,
             calendarEventProvider: calendarProvider,
             planningService: planningService,
             trainingService: trainingService,
@@ -123,6 +133,8 @@ struct CalendarPlanningCoordinationServiceTests {
             sourceRepository: sourceRepository,
             importDecisionRepository: importDecisionRepository,
             legacyMappingRepository: legacyMappingRepository,
+            decomposedActivityLinkRepository: decomposedActivityLinkRepository,
+            decompositionEvidenceRepository: decompositionEvidenceRepository,
             calendarProvider: calendarProvider,
             coordinationService: coordinationService,
             sportRepository: sportRepository,
@@ -2056,6 +2068,442 @@ struct CalendarPlanningCoordinationServiceTests {
         #expect(events.count == CalendarPlanningCoordinationService.diagnosticEventLimit)
         #expect(events.allSatisfy { $0.notes == nil && $0.location == nil && $0.url == nil })
         #expect(events == events.sorted { $0.startDate < $1.startDate })
+    }
+}
+
+extension CalendarPlanningCoordinationServiceTests {
+    // MARK: - VX-038: External Event Decomposition / Suggested Split
+
+    /// Test requirement 1: the ordinary one-event -> one-activity path
+    /// is completely unchanged by this feature.
+    @Test("VX-038: ordinary classifyAndImport still creates exactly one PlannedActivity, unaffected by decomposition")
+    @MainActor
+    func ordinaryImportStillCreatesOnePlannedActivity() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Football",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let activity = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+        #expect(try fixture.coordinationService.plannedActivityIds(for: decision) == [activity.plannedActivityId])
+        #expect(try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).isEmpty)
+    }
+
+    /// Test requirements 2, 3, 4, 5: an explicit split creates the
+    /// correct number of distinct PlannedActivities, each preserving the
+    /// SAME external-event provenance while carrying its own stable ID,
+    /// with correct offset-derived start times and preserved durations.
+    @Test("VX-038: classifyAndImportSplit creates distinct PlannedActivities with correct offsets, durations, and shared provenance")
+    @MainActor
+    func explicitSplitCreatesDistinctChildrenWithCorrectTimingAndProvenance() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: secondAthleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        let created = try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+
+        #expect(created.count == 2)
+        #expect(created[0].plannedActivityId != created[1].plannedActivityId)
+        #expect(created[0].externalSourceId == item.externalEventKey)
+        #expect(created[1].externalSourceId == item.externalEventKey)
+        #expect(created[0].athleteId == fixture.athleteId.rawValue)
+        #expect(created[0].plannedDurationMinutes == 40)
+        #expect(created[0].startLocalTime == LocalTime(hour: 2, minute: 0))
+        #expect(created[1].athleteId == secondAthleteId.rawValue)
+        #expect(created[1].plannedDurationMinutes == 60)
+        // start + 70 min offset => 3h10m after Self.referenceDate.
+        #expect(created[1].startLocalTime == LocalTime(hour: 3, minute: 10))
+
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+        let linkedIds = try fixture.coordinationService.plannedActivityIds(for: decision)
+        #expect(Set(linkedIds) == Set(created.map(\.plannedActivityId)))
+    }
+
+    /// Test requirement 6: invalid child data fails safely, without
+    /// leaving a partial split — no PlannedActivity from the batch
+    /// survives, and no CalendarImportDecision is created.
+    @Test("VX-038: classifyAndImportSplit with an invalid child fails safely, leaving no partial split")
+    @MainActor
+    func invalidSplitChildFailsWithoutPartialState() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            // Invalid: zero duration.
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 70, durationMinutes: 0
+            )
+        ]
+        #expect(throws: CalendarPlanningCoordinationError.invalidSplitChildDuration(index: 1)) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+        }
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+        // Still pending — the event remains reviewable, not stuck.
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).count == 1)
+    }
+
+    /// Test requirement 7: recurring-series evidence from an explicitly
+    /// imported split produces a Suggested Split for a LATER occurrence
+    /// sharing the same source + recurring eventIdentifier.
+    @Test("VX-038: an explicit split's evidence produces a Suggested Split for a later occurrence of the same recurring series")
+    @MainActor
+    func recurringSeriesEvidenceProducesSuggestedSplitForLaterOccurrence() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let firstOccurrence = Self.referenceDate.addingTimeInterval(3600)
+        let secondOccurrence = firstOccurrence.addingTimeInterval(7 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: firstOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: firstOccurrence, endDate: firstOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: secondOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondOccurrence, endDate: secondOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let firstItem = try #require(queue.first { $0.event.occurrenceDate == firstOccurrence })
+        let secondItem = try #require(queue.first { $0.event.occurrenceDate == secondOccurrence })
+
+        // Test requirement 8: no evidence yet -> no Suggested Split.
+        #expect(try fixture.coordinationService.suggestedSplit(for: secondItem.event, source: source) == nil)
+
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            ),
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+            )
+        ]
+        try fixture.coordinationService.classifyAndImportSplit(firstItem, for: source, children: children, decidedBy: ActorId())
+
+        // Test requirement 8 (continued): Suggested Split never itself
+        // creates a PlannedActivity for the second, still-pending
+        // occurrence — it is a pure read.
+        let suggested = try #require(try fixture.coordinationService.suggestedSplit(for: secondItem.event, source: source))
+        #expect(suggested.children.count == 2)
+        #expect(suggested.children[0].startOffsetMinutes == 0)
+        #expect(suggested.children[0].durationMinutes == 40)
+        #expect(suggested.children[1].startOffsetMinutes == 70)
+        #expect(suggested.children[1].durationMinutes == 60)
+        #expect(try fixture.coordinationService.fetchReviewQueue(for: source).contains { $0.externalEventKey == secondItem.externalEventKey })
+
+        // Test requirement 9: accepting the suggestion creates the
+        // expected children for the NEW occurrence.
+        let acceptedChildren = suggested.children.map {
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: $0.athleteId, sportId: $0.sportId, activityType: $0.activityType,
+                startOffsetMinutes: $0.startOffsetMinutes, durationMinutes: $0.durationMinutes
+            )
+        }
+        let secondCreated = try fixture.coordinationService.classifyAndImportSplit(secondItem, for: source, children: acceptedChildren, decidedBy: ActorId())
+        #expect(secondCreated.count == 2)
+        #expect(secondCreated[0].externalSourceId == secondItem.externalEventKey)
+    }
+
+    /// Test requirement 10: a later, EDITED split for a second occurrence
+    /// of the same series does not silently rewrite the original
+    /// evidence — the historical evidence row (and its children) stay
+    /// exactly as first learned.
+    @Test("VX-038: an edited split for a later occurrence does not rewrite the original recurring-series evidence")
+    @MainActor
+    func editedLaterSplitDoesNotRewriteOriginalEvidence() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let firstOccurrence = Self.referenceDate.addingTimeInterval(3600)
+        let secondOccurrence = firstOccurrence.addingTimeInterval(7 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: firstOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: firstOccurrence, endDate: firstOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: secondOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondOccurrence, endDate: secondOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let firstItem = try #require(queue.first { $0.event.occurrenceDate == firstOccurrence })
+        let secondItem = try #require(queue.first { $0.event.occurrenceDate == secondOccurrence })
+
+        try fixture.coordinationService.classifyAndImportSplit(
+            firstItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+        let evidenceBefore = try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(evidenceBefore.count == 1)
+        let childrenBefore = try fixture.decompositionEvidenceRepository.fetchChildren(forEvidence: evidenceBefore[0].decompositionEvidenceId)
+        #expect(childrenBefore.map(\.durationMinutes) == [40, 60])
+
+        // A DIFFERENT, explicitly EDITED split for the second occurrence.
+        try fixture.coordinationService.classifyAndImportSplit(
+            secondItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 90
+                )
+            ],
+            decidedBy: ActorId()
+        )
+
+        let evidenceAfter = try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(evidenceAfter.count == 1)
+        #expect(evidenceAfter[0].decompositionEvidenceId == evidenceBefore[0].decompositionEvidenceId)
+        let childrenAfter = try fixture.decompositionEvidenceRepository.fetchChildren(forEvidence: evidenceAfter[0].decompositionEvidenceId)
+        #expect(childrenAfter.map(\.durationMinutes) == [40, 60])
+    }
+
+    /// Test requirement 11: a non-recurring event's exact title can
+    /// surface a Suggested Split, scoped to the SAME source only.
+    /// Test requirement 12: the SAME title from a DIFFERENT source never
+    /// reuses that evidence.
+    @Test("VX-038: non-recurring exact-title fallback surfaces a Suggested Split only within the same source")
+    @MainActor
+    func nonRecurringTitleFallbackIsScopedToSameSourceOnly() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let otherSource = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-other", displayName: "Other"
+        )
+        try fixture.coordinationService.setSourceEnabled(otherSource.externalPlanningSourceId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        try fixture.coordinationService.classifyAndImportSplit(
+            item, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+
+        // Same source, different (non-recurring) event, same exact title
+        // -> Suggested Split via the title fallback.
+        let laterEvent = ExternalCalendarEvent(
+            eventIdentifier: "evt-2", calendarIdentifier: "cal-familie", title: "Hockey training",
+            startDate: start.addingTimeInterval(7 * 24 * 3600), endDate: nil, isAllDay: false, isRecurring: false
+        )
+        let suggestedSameSource = try fixture.coordinationService.suggestedSplit(for: laterEvent, source: source)
+        #expect(suggestedSameSource?.children.count == 2)
+
+        // Same exact title, DIFFERENT source -> no reuse.
+        let suggestedOtherSource = try fixture.coordinationService.suggestedSplit(for: laterEvent, source: otherSource)
+        #expect(suggestedOtherSource == nil)
+    }
+
+    /// Test requirement 14 (existing exact/similar classification
+    /// behavior unregressed): decomposition evidence for one event never
+    /// interferes with the UNRELATED exact-remembered-classification
+    /// evidence `historicalTitleClassifications(for:)` already provides
+    /// for a different, ordinarily-imported title.
+    @Test("VX-038: decomposition evidence does not interfere with existing exact-title classification evidence")
+    @MainActor
+    func decompositionEvidenceDoesNotInterfereWithExistingClassificationEvidence() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-split", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-ordinary", calendarIdentifier: "cal-familie", title: "Swim practice",
+                startDate: start.addingTimeInterval(10800), endDate: start.addingTimeInterval(14400), isAllDay: false, isRecurring: false
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let splitItem = try #require(queue.first { $0.event.eventIdentifier == "evt-split" })
+        let ordinaryItem = try #require(queue.first { $0.event.eventIdentifier == "evt-ordinary" })
+
+        try fixture.coordinationService.classifyAndImportSplit(
+            splitItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+        _ = try fixture.coordinationService.classifyAndImport(
+            ordinaryItem, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+
+        let historicalTitles = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        // Only the ORDINARY import qualifies as classification evidence
+        // (decomposed decisions carry no single unambiguous
+        // athlete/sport/activityType/plannedActivityId meaningful as a
+        // single-activity remembered choice for that shared title).
+        #expect(historicalTitles.contains { $0.normalizedTitle == "swim practice" })
+    }
+
+    /// Test requirement 15: decomposition evidence for one title never
+    /// suppresses or interferes with a genuine Suggested Ignore
+    /// candidate — a DIFFERENT title, explicitly ignored, still
+    /// surfaces via `historicalIgnoredTitles(for:)` unchanged.
+    @Test("VX-038: decomposition evidence does not regress existing Suggested Ignore evidence")
+    @MainActor
+    func decompositionEvidenceDoesNotRegressSuggestedIgnoreEvidence() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-split", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-ignored", calendarIdentifier: "cal-familie", title: "Team meeting",
+                startDate: start.addingTimeInterval(10800), endDate: start.addingTimeInterval(14400), isAllDay: false, isRecurring: false
+            )
+        ]
+        let queue = try fixture.coordinationService.fetchReviewQueue(for: source)
+        let splitItem = try #require(queue.first { $0.event.eventIdentifier == "evt-split" })
+        let ignoredItem = try #require(queue.first { $0.event.eventIdentifier == "evt-ignored" })
+
+        try fixture.coordinationService.classifyAndImportSplit(
+            splitItem, for: source,
+            children: [
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+                ),
+                CalendarPlanningCoordinationService.DecomposedChildInput(
+                    athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60
+                )
+            ],
+            decidedBy: ActorId()
+        )
+        _ = try fixture.coordinationService.ignore(ignoredItem, for: source, decidedBy: ActorId())
+
+        let ignoredTitles = try fixture.coordinationService.historicalIgnoredTitles(for: source)
+        #expect(ignoredTitles == ["Team meeting"])
+    }
+
+    /// Test requirement 16: `classifyAndImportSplit` respects the exact
+    /// same disabled/disconnected source boundary every other mutating
+    /// action already enforces — no PlannedActivity, CalendarImportDecision,
+    /// or DecompositionEvidence is created.
+    @Test("VX-038: classifyAndImportSplit throws sourceDisabled for a disabled or disconnected source, creating no activities/decision/evidence")
+    @MainActor
+    func splitRespectsDisabledAndDisconnectedSourceBoundary() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(7200), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let children = [
+            CalendarPlanningCoordinationService.DecomposedChildInput(
+                athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40
+            )
+        ]
+
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: false)
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+        }
+
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        try fixture.coordinationService.disconnectSource(source.externalPlanningSourceId)
+        #expect(throws: CalendarPlanningCoordinationError.sourceDisabled) {
+            try fixture.coordinationService.classifyAndImportSplit(item, for: source, children: children, decidedBy: ActorId())
+        }
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) == nil)
+        #expect(try fixture.decompositionEvidenceRepository.fetchAll(forSource: source.externalPlanningSourceId).isEmpty)
     }
 }
 

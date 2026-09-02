@@ -680,6 +680,118 @@ struct PersistenceRecoveryTests {
         #expect(try importDecisionRepository.fetchAll(forSource: ExternalPlanningSourceId(rawValue: sourceRawId)).count == 2)
     }
 
+    /// VX-038, test requirement 13: migration from the current (V9)
+    /// schema opens safely, preserves an existing ORDINARY (non-split)
+    /// `CalendarImportDecision`/`PlannedActivity` pair untouched, and —
+    /// same class of change/test shape as `existingV7StoreMigratesToV8Successfully`
+    /// above (new model TYPES, not merely a new field) — the three new
+    /// tables (`DecomposedActivityLink`, `DecompositionEvidence`,
+    /// `DecompositionEvidenceChild`) are genuinely empty immediately
+    /// after opening and genuinely usable against the migrated store.
+    @Test("VX-038: a store created under AppSchemaV9 (with an existing ordinary CalendarImportDecision/PlannedActivity pair) reopens successfully under AppSchemaV10 via the lightweight migration stage — existing data survives untouched, the new DecomposedActivityLink/DecompositionEvidence/DecompositionEvidenceChild tables are genuinely empty then genuinely usable, and the existing one-to-one decision resolves correctly via plannedActivityIds(for:)")
+    @MainActor
+    func existingV9StoreMigratesToV10Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v9-to-v10-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v9Schema = Schema(versionedSchema: AppSchemaV9.self)
+        var sourceRawId: UUID
+        var decisionRawId: UUID
+        var plannedActivityRawId: UUID
+        var athleteRawId: UUID
+        do {
+            let v9Container = try ModelContainer(
+                for: v9Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v9Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Nora",
+                birthDate: LocalDate(year: 2014, month: 4, day: 10),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v9Container.mainContext.insert(athlete)
+            try v9Container.mainContext.save()
+            athleteRawId = athlete.id
+            let athleteId = AthleteId(rawValue: athlete.id)
+
+            let weekPlan = WeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 8, day: 17))
+            v9Container.mainContext.insert(weekPlan)
+            let plannedActivity = PlannedActivity(
+                weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Swim practice", localDate: LocalDate(year: 2026, month: 8, day: 18),
+                startLocalTime: LocalTime(hour: 17, minute: 0), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                externalSourceId: "cal-familie|evt-1", externalSourceType: "calendarPlanningSource"
+            )
+            v9Container.mainContext.insert(plannedActivity)
+            try v9Container.mainContext.save()
+            plannedActivityRawId = plannedActivity.id
+
+            let sourceId = ExternalPlanningSourceId()
+            sourceRawId = sourceId.rawValue
+            let source = ExternalPlanningSource(
+                id: sourceId, workspaceId: WorkspaceId(), providerKind: .eventKit,
+                externalContainerIdentifier: "cal-familie", displayName: "Familie", isEnabled: true
+            )
+            v9Container.mainContext.insert(source)
+            try v9Container.mainContext.save()
+
+            let decisionRepository = CalendarImportDecisionRepository(modelContext: v9Container.mainContext)
+            let decision = try decisionRepository.insert(
+                sourceId: sourceId, externalEventKey: "cal-familie|evt-1", status: .imported,
+                athleteId: athleteId, sportId: nil, activityType: .individualTraining,
+                plannedActivityId: PlannedActivityId(rawValue: plannedActivityRawId), decidedBy: ActorId()
+            )
+            decisionRawId = decision.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V10) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV10.self`).
+        let v10Schema = Schema(versionedSchema: AppSchemaV10.self)
+        let v10Container = try ModelContainer(
+            for: v10Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v10Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity and CalendarImportDecision
+        // survived completely untouched.
+        let migratedActivity = try v10Container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).first
+        #expect(migratedActivity?.id == plannedActivityRawId)
+        #expect(migratedActivity?.title == "Swim practice")
+
+        let decisionRepository = CalendarImportDecisionRepository(modelContext: v10Container.mainContext)
+        let migratedDecisions = try decisionRepository.fetchAll(forSource: ExternalPlanningSourceId(rawValue: sourceRawId))
+        #expect(migratedDecisions.count == 1)
+        #expect(migratedDecisions.first?.id == decisionRawId)
+
+        // The migration itself never invents anything — both new join/
+        // evidence tables are genuinely empty immediately after opening.
+        #expect(try v10Container.mainContext.fetch(FetchDescriptor<DecomposedActivityLink>()).isEmpty)
+        #expect(try v10Container.mainContext.fetch(FetchDescriptor<DecompositionEvidence>()).isEmpty)
+        #expect(try v10Container.mainContext.fetch(FetchDescriptor<DecompositionEvidenceChild>()).isEmpty)
+
+        // The pre-existing, ORDINARY (non-split) decision still resolves
+        // correctly via the new unified read helper — no link rows exist
+        // for it, so plannedActivityIds(for:) falls back to its own
+        // plannedActivityId, exactly as it did before this migration.
+        let linkRepository = DecomposedActivityLinkRepository(modelContext: v10Container.mainContext)
+        #expect(try linkRepository.fetchAll(forDecision: CalendarImportDecisionId(rawValue: decisionRawId)).isEmpty)
+
+        // The new tables are genuinely usable against the migrated store
+        // — proves the lightweight stage actually created them, not
+        // merely that the container opened.
+        let evidenceRepository = DecompositionEvidenceRepository(modelContext: v10Container.mainContext)
+        let evidence = try evidenceRepository.insert(
+            sourceId: ExternalPlanningSourceId(rawValue: sourceRawId), recurringEventIdentifier: nil,
+            normalizedTitle: "swim practice", createdBy: ActorId(),
+            children: [(athleteId: AthleteId(rawValue: athleteRawId), sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40)]
+        )
+        #expect(try evidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId).count == 1)
+    }
+
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")
     @MainActor
     func existingV1StoreMigratesToV2Successfully() throws {

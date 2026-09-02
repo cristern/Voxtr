@@ -442,4 +442,43 @@ public enum CalendarPlanningStrings {
     public static func familyScheduleCalendarReviewPrompt(count: Int) -> String {
         String(localized: "calendarPlanning.familyScheduleCalendarReviewPrompt", defaultValue: "\(count) calendar events to review")
     }
+
+    // MARK: - VX-038 (External Event Decomposition / Suggested Split)
+
+    public static var splitActivityToggle: String {
+        String(localized: "calendarPlanning.splitActivityToggle", defaultValue: "Split activity")
+    }
+
+    /// Calm label only — no confidence score, no "AI" framing, per this
+    /// feature's own contract.
+    public static var suggestedSplitLabel: String {
+        String(localized: "calendarPlanning.suggestedSplitLabel", defaultValue: "Suggested split, based on a previous import")
+    }
+
+    public static func splitChildStartOffset(minutes: Int) -> String {
+        String(localized: "calendarPlanning.splitChildStartOffset", defaultValue: "Starts \(minutes) min after event start")
+    }
+
+    public static func splitChildDuration(minutes: Int) -> String {
+        String(localized: "calendarPlanning.splitChildDuration", defaultValue: "Duration \(minutes) min")
+    }
+
+    public static var addSplitChildButton: String {
+        String(localized: "calendarPlanning.addSplitChildButton", defaultValue: "Add another")
+    }
+
+    public static var removeSplitChildButton: String {
+        String(localized: "calendarPlanning.removeSplitChildButton", defaultValue: "Remove")
+    }
+
+    /// "Ready to Import" row summary for a split-enabled event — never
+    /// a numeric-only count on its own; names the athlete(s) involved
+    /// when known.
+    public static func splitReadySummary(childCount: Int, athleteNames: [String]) -> String {
+        let countPhrase = childCount == 1
+            ? String(localized: "calendarPlanning.splitReadySummary.oneActivity", defaultValue: "1 activity")
+            : String(localized: "calendarPlanning.splitReadySummary.manyActivities", defaultValue: "\(childCount) activities")
+        guard !athleteNames.isEmpty else { return countPhrase }
+        return "\(countPhrase) · \(athleteNames.joined(separator: ", "))"
+    }
 }

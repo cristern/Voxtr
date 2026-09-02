@@ -76,6 +76,8 @@ struct CalendarImportReviewViewModelTests {
         let sourceRepository = ExternalPlanningSourceRepository(modelContext: container.mainContext)
         let importDecisionRepository = CalendarImportDecisionRepository(modelContext: container.mainContext)
         let legacyMappingRepository = CalendarPlanningMappingRepository(modelContext: container.mainContext)
+        let decomposedActivityLinkRepository = DecomposedActivityLinkRepository(modelContext: container.mainContext)
+        let decompositionEvidenceRepository = DecompositionEvidenceRepository(modelContext: container.mainContext)
         let sportRepository = SportRepository(modelContext: container.mainContext)
         let planningService = PlanningService(repository: planningRepository)
         let trainingService = TrainingService(repository: trainingRepository)
@@ -84,6 +86,8 @@ struct CalendarImportReviewViewModelTests {
             sourceRepository: sourceRepository,
             importDecisionRepository: importDecisionRepository,
             legacyMappingRepository: legacyMappingRepository,
+            decomposedActivityLinkRepository: decomposedActivityLinkRepository,
+            decompositionEvidenceRepository: decompositionEvidenceRepository,
             calendarEventProvider: calendarProvider,
             planningService: planningService,
             trainingService: trainingService,
