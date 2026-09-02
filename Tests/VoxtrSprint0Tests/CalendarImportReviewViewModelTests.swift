@@ -2202,6 +2202,558 @@ struct CalendarImportReviewViewModelTests {
         #expect(secondStaged.splitAthleteId == fixture.athleteId)
         #expect(secondStaged.splitChildren.map(\.durationMinutes) == [40, 60])
     }
+
+    // MARK: - VX-038 TestFlight follow-up: helpers
+
+    /// Like `addEvent`, but with a caller-controlled duration — needed
+    /// for Part 3's sequential timing assistance tests, which depend on
+    /// the external event's own end time.
+    private func addTimedEvent(_ fixture: Fixture, identifier: String, title: String, hoursFromReference: Double, durationMinutes: Double, isRecurring: Bool = false) {
+        let start = Self.referenceDate.addingTimeInterval(hoursFromReference * 3600)
+        var existing = fixture.calendarProvider.eventsByCalendar["cal-familie"] ?? []
+        existing.append(
+            ExternalCalendarEvent(
+                eventIdentifier: identifier, calendarIdentifier: "cal-familie", title: title,
+                startDate: start, endDate: start.addingTimeInterval(durationMinutes * 60), isAllDay: false, isRecurring: isRecurring
+            )
+        )
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = existing
+    }
+
+    // MARK: - VX-038 TestFlight follow-up: classification preservation (Part 1/2)
+
+    @Test("VX-038 TestFlight follow-up test 1: ordinary Athlete/Sport/Activity Type are inherited on first Split activation")
+    @MainActor
+    func firstSplitActivationInheritsOrdinaryClassification() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.setStagedActivityType(.teamTraining, for: item.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitAthleteId == fixture.athleteId)
+        #expect(staged.splitChildren.count == 1)
+        #expect(staged.splitChildren[0].activityType == .teamTraining)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 2: ordinary values remain intact underneath after Split activation, and Split OFF falls back to them exactly")
+    @MainActor
+    func ordinaryClassificationSurvivesUnderneathSplitActivation() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.setStagedActivityType(.teamTraining, for: item.externalEventKey)
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.athleteId == fixture.athleteId)
+        #expect(staged.activityType == .teamTraining)
+
+        viewModel.setSplitEnabled(false, for: item.externalEventKey)
+        let stagedAfterOff = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(stagedAfterOff.athleteId == fixture.athleteId)
+        #expect(stagedAfterOff.activityType == .teamTraining)
+        #expect(!stagedAfterOff.isSplitEnabled)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 3: Split edits survive Split OFF -> ON")
+    @MainActor
+    func splitEditsSurviveOffThenOnToggle() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.durationMinutes = 55 }
+
+        viewModel.setSplitEnabled(false, for: item.externalEventKey)
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitChildren.count == 2)
+        #expect(staged.splitChildren[1].durationMinutes == 55)
+        #expect(staged.splitAthleteId == fixture.athleteId)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 4: reactivation never re-seeds prior split state from ordinary fields, even when the ordinary fields changed in between")
+    @MainActor
+    func reactivationDoesNotReseedFromChangedOrdinaryFields() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitAthleteId == fixture.athleteId)
+
+        viewModel.setSplitEnabled(false, for: item.externalEventKey)
+        // The Parent changes the ORDINARY athlete while Split is off.
+        viewModel.setStagedAthlete(secondAthleteId, for: item.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+
+        // Reactivation must NOT re-seed splitAthleteId from the
+        // now-changed ordinary athlete — the Parent's own prior split
+        // choice wins untouched.
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitAthleteId == fixture.athleteId)
+        #expect(staged.splitChildren.count == 2)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 5: partial ordinary classification inherits only the available values")
+    @MainActor
+    func partialOrdinaryClassificationInheritsOnlyAvailableValues() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        // Only Activity Type set — no Athlete, no Sport.
+        viewModel.setStagedActivityType(.teamTraining, for: item.externalEventKey)
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.splitAthleteId == nil)
+        #expect(staged.splitSportId == nil)
+        #expect(staged.splitChildren[0].activityType == .teamTraining)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 6: optional Sport remains optional through Split activation, editing, and import")
+    @MainActor
+    func optionalSportRemainsOptionalAfterSplitActivation() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitSportId == nil)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+    }
+
+    // MARK: - VX-038 TestFlight follow-up: sequential split timing assistance (Part 3)
+
+    @Test("VX-038 TestFlight follow-up test 7: a 90-minute event with first child 0/30 defaults the second child to 30/60")
+    @MainActor
+    func secondChildDefaultsToRemainingEventTime() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        let first = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0]
+        #expect(first.startOffsetMinutes == 0)
+        #expect(first.durationMinutes == 30)
+
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 30)
+        #expect(second.durationMinutes == 60)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 8: moving the derived second child's start from 30 to 40 recalculates its duration from 60 to 50")
+    @MainActor
+    func movingDerivedChildStartRecalculatesDuration() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 40 }
+
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 40)
+        #expect(second.durationMinutes == 50)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 9: moving the derived second child's start again keeps its duration anchored to the event end")
+    @MainActor
+    func movingDerivedChildStartAgainStaysAnchoredToEventEnd() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 40 }
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 50 }
+
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 50)
+        #expect(second.durationMinutes == 40)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 10: an explicit duration edit converts the child's duration to Parent-owned")
+    @MainActor
+    func explicitDurationEditBecomesParentOwned() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.durationMinutes = 45 }
+        // A subsequent start-offset change must NOT recalculate this
+        // Parent-owned duration back to the event remainder.
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 40 }
+
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 40)
+        #expect(second.durationMinutes == 45)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 11: after a Parent duration edit, repeated start-offset changes keep preserving the manual duration")
+    @MainActor
+    func repeatedStartOffsetChangesPreserveManualDuration() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 90)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.durationMinutes = 45 }
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 35 }
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.startOffsetMinutes = 60 }
+
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 60)
+        #expect(second.durationMinutes == 45)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 12: a third child starts where the second one ends and receives the event's remaining time")
+    @MainActor
+    func thirdChildStartsAtPreviousChildEndAndReceivesRemainder() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 120)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        // child1 = 0/30 (safe default).
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        // Parent explicitly sets child2 = 30/40.
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { $0.durationMinutes = 40 }
+
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let third = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[2]
+        #expect(third.startOffsetMinutes == 70)
+        #expect(third.durationMinutes == 50)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 13: a missing event end time falls back to the safe existing split defaults")
+    @MainActor
+    func missingEventEndFallsBackToSafeDefaults() throws {
+        let fixture = try makeFixture()
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-1", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: nil, isAllDay: false, isRecurring: false
+            )
+        ]
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 30)
+        #expect(second.durationMinutes == 30)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 14: no automatic calculation ever creates a zero or negative duration")
+    @MainActor
+    func neverGeneratesZeroOrNegativeDuration() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 60)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
+        // Parent explicitly stretches the first child to consume the
+        // WHOLE event.
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 60 }
+
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.durationMinutes > 0)
+        #expect(second.startOffsetMinutes == 60)
+        #expect(second.durationMinutes == 30)
+        #expect(!second.isDurationDerivedFromEventRemainder)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 15: adding a child after the previous one already exceeds the event end still produces a safe, non-negative fallback")
+    @MainActor
+    func addingChildPastEventEndProducesSafeFallback() throws {
+        let fixture = try makeFixture()
+        addTimedEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1, durationMinutes: 60)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
+        // Parent explicitly extends the first child PAST the event's own
+        // end — Parent judgement wins on the resulting overlap/gap.
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 90 }
+
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let second = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1]
+        #expect(second.startOffsetMinutes == 90)
+        #expect(second.durationMinutes > 0)
+        #expect(second.durationMinutes == 30)
+        #expect(!second.isDurationDerivedFromEventRemainder)
+    }
+
+    // MARK: - VX-038 TestFlight follow-up: real Suggested Split root cause (Part 4)
+
+    /// THE root-cause regression test. Every earlier Suggested Split test
+    /// (PR #54 and before) set up a CLEAN event — one with no prior
+    /// classification history at all — so `stagedClassifications` had NO
+    /// existing entry for the "next occurrence" before the split import,
+    /// and `hasMeaningfulStaging` was trivially `false` for a missing
+    /// key. That is why those tests missed this bug entirely.
+    ///
+    /// The REAL TestFlight sequence is different: the Parent has ALREADY
+    /// imported earlier occurrences of this recurring event ORDINARILY
+    /// (non-split) at some point before trying Split — completely
+    /// realistic, since Split is a new feature layered onto an existing
+    /// workflow. That leaves durable V1.1 Remembered Exact Choice
+    /// history for this title. The very first time Review is opened
+    /// after that, EVERY still-pending occurrence — including one the
+    /// Parent has not looked at yet — gets an immediate, already-Ready,
+    /// system-generated `.exactRemembered` prefill (never touched by the
+    /// Parent — `hasUserInteraction` stays `false`). Before this round's
+    /// fix, that untouched prefill was (incorrectly) treated as
+    /// permanently "meaningful" by `hasMeaningfulStaging` (via the old
+    /// `isConfirmedReady`/`suggestionKind != .none` checks) the instant
+    /// it was first computed — so when the Parent later explicitly
+    /// splits an EARLIER occurrence and new decomposition evidence is
+    /// written, the LATER occurrence's stale exact-remembered staging
+    /// was preserved untouched forever, and `suggestedSplit(for:source:)`
+    /// was never even called for it again. This test reproduces that
+    /// exact sequence and proves the later occurrence now correctly
+    /// receives the Suggested Split.
+    @Test("VX-038 TestFlight follow-up (root cause): a later occurrence carrying a stale, untouched Remembered Exact Choice prefill is superseded by newly-learned Suggested Split evidence")
+    @MainActor
+    func staleRememberedChoicePrefillIsSupersededByNewlyLearnedSuggestedSplit() throws {
+        let fixture = try makeFixture()
+
+        // Prior history: an EARLIER occurrence of "Hockey training",
+        // imported ORDINARILY (non-split) before Split was ever used —
+        // this is what makes V1.1 remembered-exact history exist for
+        // this title.
+        addEvent(fixture, identifier: "evt-0", title: "Hockey training", hoursFromReference: 1)
+        let historyViewModel = makeViewModel(fixture)
+        historyViewModel.load()
+        let historyItem = try #require(historyViewModel.reviewQueue.first)
+        historyViewModel.setStagedAthlete(fixture.athleteId, for: historyItem.externalEventKey)
+        historyViewModel.markReady(for: historyItem.externalEventKey)
+        historyViewModel.bulkImportReadyItems()
+
+        // Two MORE future occurrences of the same title — evt-A (about
+        // to be explicitly split) and evt-B (the untouched "next
+        // matching calendar activity" from the TestFlight report).
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 48)
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
+
+        // Precondition: BOTH evt-A and evt-B immediately received the
+        // system-generated exact-remembered prefill on this very first
+        // load() — neither has been touched by the Parent yet.
+        #expect(viewModel.stagedClassification(for: itemA.externalEventKey).suggestionKind == .exactRemembered)
+        #expect(viewModel.stagedClassification(for: itemA.externalEventKey).isConfirmedReady)
+        let itemBPreStaged = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(itemBPreStaged.suggestionKind == .exactRemembered)
+        #expect(itemBPreStaged.isConfirmedReady)
+        #expect(!itemBPreStaged.isSplitEnabled)
+
+        // The Parent explicitly decides to Split evt-A instead of
+        // accepting its exact-remembered prefill (Part 1: this inherits
+        // the already-prefilled ordinary Athlete into the shared split
+        // Athlete).
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: itemA.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: itemA.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        // evt-B, still pending and NEVER touched by the Parent, must now
+        // be superseded by the freshly-learned Suggested Split — not
+        // left stuck on its stale, untouched exact-remembered prefill.
+        let itemBStaged = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(itemBStaged.isSplitEnabled)
+        #expect(itemBStaged.isSuggestedSplitPrefill)
+        #expect(itemBStaged.splitAthleteId == fixture.athleteId)
+        #expect(itemBStaged.splitChildren.map(\.durationMinutes) == [30, 60])
+    }
+
+    /// Bounded-audit follow-up to the `hasMeaningfulStaging` fix above:
+    /// since a bare system-generated suggestion is no longer sticky on
+    /// its own, tapping "Edit" must itself count as Parent interaction —
+    /// otherwise an unrelated refresh mid-edit could silently wipe and
+    /// re-derive (and potentially re-confirm Ready) a row the Parent is
+    /// actively reconsidering. `beginEditing(for:)` now also sets
+    /// `hasUserInteraction = true` to close that gap.
+    @Test("VX-038 TestFlight follow-up: tapping Edit on an exact-remembered Ready item protects it from an unrelated refresh re-deriving/re-confirming it before the Parent acts again")
+    @MainActor
+    func editOnRememberedItemSurvivesUnrelatedRefresh() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-history", title: "Hockey training", hoursFromReference: 1)
+        let historyViewModel = makeViewModel(fixture)
+        historyViewModel.load()
+        let historyItem = try #require(historyViewModel.reviewQueue.first)
+        historyViewModel.setStagedAthlete(fixture.athleteId, for: historyItem.externalEventKey)
+        historyViewModel.markReady(for: historyItem.externalEventKey)
+        historyViewModel.bulkImportReadyItems()
+
+        addEvent(fixture, identifier: "evt-remembered", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-unrelated", title: "Piano Lesson", hoursFromReference: 25)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let rememberedItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-remembered" })
+        let unrelatedItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+        #expect(viewModel.stagedClassification(for: rememberedItem.externalEventKey).isConfirmedReady)
+
+        viewModel.beginEditing(for: rememberedItem.externalEventKey)
+        #expect(!viewModel.stagedClassification(for: rememberedItem.externalEventKey).isConfirmedReady)
+
+        // An unrelated action elsewhere triggers another refresh cycle.
+        viewModel.ignore(unrelatedItem)
+
+        // The item being actively edited must still show NOT Ready — it
+        // must never silently snap back to auto-Ready underneath the
+        // Parent mid-edit.
+        #expect(!viewModel.stagedClassification(for: rememberedItem.externalEventKey).isConfirmedReady)
+        #expect(viewModel.stagedClassification(for: rememberedItem.externalEventKey).athleteId == fixture.athleteId)
+    }
+
+    @Test("VX-038 TestFlight follow-up test 17: a fresh CalendarImportReviewViewModel against the SAME persistence derives Suggested Split from durable evidence")
+    @MainActor
+    func freshViewModelAgainstSamePersistenceDerivesSuggestedSplit() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+
+        firstViewModel.setSplitEnabled(true, for: firstItem.externalEventKey)
+        firstViewModel.setSplitAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.addSplitChild(for: firstItem.externalEventKey)
+        let secondChildId = firstViewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[1].id
+        firstViewModel.updateSplitChild(secondChildId, for: firstItem.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        // DISCARD firstViewModel entirely — a genuinely fresh ViewModel
+        // instance, same coordination service, same persisted store.
+        addEvent(fixture, identifier: "evt-2", title: "Hockey training", hoursFromReference: 24 * 7)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        let staged = secondViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.isSplitEnabled)
+        #expect(staged.isSuggestedSplitPrefill)
+        #expect(staged.splitAthleteId == fixture.athleteId)
+        #expect(staged.splitChildren.map(\.durationMinutes) == [30, 60])
+    }
+
+    @Test("VX-038 TestFlight follow-up test 24: Suggested Split never itself imports anything — the Parent's own explicit Ready/import action is still required")
+    @MainActor
+    func suggestedSplitNeverAutoImports() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(staged.isSplitEnabled)
+        #expect(staged.isSuggestedSplitPrefill)
+        // A Suggested Split prefill NEVER auto-confirms Ready.
+        #expect(!staged.isConfirmedReady)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.reviewQueue.count == 1)
+
+        #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
+    }
 }
 
 private extension Date {
