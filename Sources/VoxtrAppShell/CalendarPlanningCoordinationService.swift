@@ -736,27 +736,35 @@ public final class CalendarPlanningCoordinationService {
 
         // Step 1: an existing decision for this exact event.
         //
-        // Lead Review follow-up (Blocker 2, bounded-audit finding —
-        // documented, not fixed, deliberately out of this fix's scope):
-        // this read trusts `existingDecision.plannedActivityId` directly
-        // and does NOT check for `DecomposedActivityLink` rows. If this
-        // method were ever called for an `externalEventKey` that
-        // already has a DECOMPOSED decision, it would silently return
-        // only that decision's mirrored FIRST child, never surfacing the
-        // other children. This is currently UNREACHABLE in production:
-        // `fetchReviewQueue(for:)` excludes any event with an existing
-        // decision (of either kind) from the pending queue, and this
-        // method's only call site (`CalendarImportReviewViewModel.bulkImportReadyItems()`)
-        // only ever calls it for items still in that queue — so a
-        // decomposed decision can never reach this branch through the
-        // approved UI flow. `classifyAndImport` is intentionally
-        // UNCHANGED by VX-038 (contract item 2: the ordinary path stays
-        // the untouched default fast path) — closing this theoretical
-        // gap would mean adding decomposition awareness to a method this
-        // feature explicitly promised not to modify, so it is reported
-        // here rather than fixed.
+        // Lead Review follow-up (single-activity boundary guard): this
+        // used to trust `existingDecision.plannedActivityId` directly,
+        // with no check for `DecomposedActivityLink` rows — a
+        // theoretical gap where a call against an already-DECOMPOSED
+        // decision would silently return only that decision's mirrored
+        // FIRST child as though it were a successful ordinary import,
+        // never surfacing the other children. ONE TRUTH requires this
+        // guarded at the service boundary itself, not merely because
+        // today's only caller (`CalendarImportReviewViewModel.bulkImportReadyItems()`,
+        // via `fetchReviewQueue(for:)`'s own already-decided exclusion)
+        // happens to never reach it in practice. A decomposed decision
+        // (any `DecomposedActivityLink` rows at all) therefore now falls
+        // through to the SAME `.alreadyDecided` this method already
+        // throws for a decision whose activity no longer resolves —
+        // "this event is already decided, and not by this path" is
+        // exactly as true for a decomposed decision as for one whose
+        // `PlannedActivity` was deleted elsewhere. Never a bypass or
+        // conversion from split back to ordinary import. An ORDINARY
+        // historical decision (zero link rows) resolves exactly as
+        // before — this guard changes nothing for that case.
         if let existingDecision = try importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey) {
-            guard existingDecision.status == .imported, let plannedActivityId = existingDecision.plannedActivityId,
+            guard existingDecision.status == .imported else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            let existingLinks = try decomposedActivityLinkRepository.fetchAll(forDecision: existingDecision.calendarImportDecisionId)
+            guard existingLinks.isEmpty else {
+                throw CalendarPlanningCoordinationError.alreadyDecided
+            }
+            guard let plannedActivityId = existingDecision.plannedActivityId,
                   let plannedActivity = try planningService.fetchPlannedActivity(byId: PlannedActivityId(rawValue: plannedActivityId)) else {
                 throw CalendarPlanningCoordinationError.alreadyDecided
             }
@@ -781,8 +789,27 @@ public final class CalendarPlanningCoordinationService {
         // Step 2: an existing PlannedActivity with this exact external
         // identity but no decision yet (legacy V1 import, or a prior
         // partially-failed classifyAndImport).
+        //
+        // Lead Review follow-up (single-activity boundary guard): more
+        // than one `PlannedActivity` sharing this exact
+        // `externalSourceId` is a legitimate DECOMPOSED shape after
+        // VX-038 (a healthy completed split), but ALSO the exact shape
+        // a corrupt/partially-rolled-back split provenance state could
+        // leave behind with no decision at all. Either way, this
+        // ORDINARY path must never arbitrarily adopt ONE of several
+        // matches via `.first(where:)` — that would silently create an
+        // ordinary `CalendarImportDecision` "owning" one activity out of
+        // what may actually be several sibling children. `> 1` matches
+        // therefore fails safely with the same `.existingActivityConflict`
+        // already used for a single mismatched match, adopting nothing;
+        // exactly one match preserves this path's existing
+        // adoption/conflict behavior unchanged.
         let existingActivities = try planningService.fetchPlannedActivities(externalSourceType: Self.externalSourceType)
-        if let existingActivity = existingActivities.first(where: { $0.externalSourceId == item.externalEventKey }) {
+        let matchingActivities = existingActivities.filter { $0.externalSourceId == item.externalEventKey }
+        guard matchingActivities.count <= 1 else {
+            throw CalendarPlanningCoordinationError.existingActivityConflict
+        }
+        if let existingActivity = matchingActivities.first {
             guard existingActivity.athleteId == athleteId.rawValue,
                   existingActivity.sportId == sportId?.rawValue,
                   existingActivity.activityType == activityType else {
