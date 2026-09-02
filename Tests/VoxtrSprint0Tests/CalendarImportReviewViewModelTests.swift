@@ -60,6 +60,13 @@ struct CalendarImportReviewViewModelTests {
         let athleteRepository: AthleteRepository
         let sportRepository: SportRepository
         let importDecisionRepository: CalendarImportDecisionRepository
+        /// Runtime follow-up (evidence backward compatibility): exposed
+        /// so a test can directly construct historical-shape evidence
+        /// (e.g. children carrying DIFFERENT athleteIds, as pre-this-
+        /// round evidence legitimately could) without going through
+        /// classifyAndImportSplit, which would never itself produce that
+        /// shape anymore.
+        let decompositionEvidenceRepository: DecompositionEvidenceRepository
         let calendarProvider: FakeCalendarEventProvider
         let coordinationService: CalendarPlanningCoordinationService
         let workspaceId: WorkspaceId
@@ -112,6 +119,7 @@ struct CalendarImportReviewViewModelTests {
             athleteRepository: athleteRepository,
             sportRepository: sportRepository,
             importDecisionRepository: importDecisionRepository,
+            decompositionEvidenceRepository: decompositionEvidenceRepository,
             calendarProvider: calendarProvider,
             coordinationService: coordinationService,
             workspaceId: workspaceId,
@@ -1906,24 +1914,22 @@ struct CalendarImportReviewViewModelTests {
         // Toggling Split on starts with exactly ONE editable child —
         // never auto-created as a second classified child.
         #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildren.count == 1)
-        viewModel.updateSplitChild(
-            viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id, for: item.externalEventKey
-        ) { child in
-            child.athleteId = fixture.athleteId
-        }
+        viewModel.setSplitAthlete(fixture.athleteId, for: item.externalEventKey)
         #expect(!viewModel.stagedClassification(for: item.externalEventKey).splitChildrenAreValid)
         #expect(!viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
 
-        // markReady is a no-op with only one valid child.
+        // markReady is a no-op with only one child, even with the shared
+        // Athlete already set.
         viewModel.markReady(for: item.externalEventKey)
         #expect(viewModel.readyToImportItems.isEmpty)
         #expect(viewModel.needsReviewItems.count == 1)
 
-        // Adding a second, valid child makes it eligible for Ready.
+        // Adding a second, valid child (Activity Type/timing only —
+        // runtime follow-up: shared Athlete/Sport) makes it eligible for
+        // Ready.
         viewModel.addSplitChild(for: item.externalEventKey)
         let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
         viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { child in
-            child.athleteId = fixture.athleteId
             child.startOffsetMinutes = 70
             child.durationMinutes = 60
         }
@@ -1933,6 +1939,268 @@ struct CalendarImportReviewViewModelTests {
         viewModel.markReady(for: item.externalEventKey)
         #expect(viewModel.readyToImportItems.count == 1)
         #expect(viewModel.needsReviewItems.isEmpty)
+    }
+
+    /// Runtime follow-up (split UX — shared Athlete/Sport), test
+    /// requirement 5: two valid children are NOT enough on their own —
+    /// the ONE shared `splitAthleteId` is required before a split can
+    /// become Ready, mirroring the ordinary path's own `athleteId != nil`
+    /// requirement.
+    @Test("Runtime follow-up: a split with two valid children but no shared Athlete never becomes Ready")
+    @MainActor
+    func splitWithTwoChildrenButNoSharedAthleteNeverBecomesReady() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { child in
+            child.startOffsetMinutes = 70
+            child.durationMinutes = 60
+        }
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitChildrenAreValid)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).splitAthleteId == nil)
+        #expect(!viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.isEmpty)
+        #expect(viewModel.needsReviewItems.count == 1)
+
+        viewModel.setSplitAthlete(fixture.athleteId, for: item.externalEventKey)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).satisfiesMinimumImportRequirements)
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.readyToImportItems.count == 1)
+    }
+
+    /// Runtime follow-up (split UX — shared Athlete/Sport), test
+    /// requirement 3: `bulkImportReadyItems()` expands the ONE shared
+    /// `splitAthleteId`/`splitSportId` into EVERY imported child at the
+    /// service boundary — the service's own `DecomposedChildInput` stays
+    /// fully explicit per child, never weakened.
+    @Test("Runtime follow-up: bulk import expands the shared Athlete/Sport into every split child")
+    @MainActor
+    func bulkImportExpandsSharedAthleteSportIntoEveryChild() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        // Sport left nil (legitimately optional, same as the ordinary
+        // path's own sportId) — still proves the shared value is
+        // expanded uniformly into every child, not just the first.
+        viewModel.setSplitEnabled(true, for: item.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: item.externalEventKey)
+        viewModel.addSplitChild(for: item.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
+        let secondChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { child in
+            child.activityType = .individualTraining
+            child.startOffsetMinutes = 0
+            child.durationMinutes = 40
+        }
+        viewModel.updateSplitChild(secondChildId, for: item.externalEventKey) { child in
+            child.activityType = .teamTraining
+            child.startOffsetMinutes = 70
+            child.durationMinutes = 60
+        }
+        viewModel.markReady(for: item.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        let imported = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        #expect(imported.count == 2)
+        #expect(imported.allSatisfy { $0.athleteId == fixture.athleteId.rawValue })
+        #expect(imported.allSatisfy { $0.sportId == nil })
+        #expect(Set(imported.map(\.plannedDurationMinutes)) == [40, 60])
+    }
+
+    /// Runtime follow-up (evidence backward compatibility), test
+    /// requirement 6: historical evidence whose children all agree on
+    /// athleteId/sportId loads correctly into the new shared-context
+    /// staging — proven with evidence written DIRECTLY through the
+    /// repository (not `classifyAndImportSplit`), so this proves the
+    /// READ side works independently of how the evidence was produced.
+    @Test("Runtime follow-up: existing evidence where all children share Athlete/Sport loads into the new shared-context staging")
+    @MainActor
+    func agreeingHistoricalEvidenceLoadsIntoSharedContextStaging() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+
+        #expect(staged.isSplitEnabled)
+        #expect(staged.isSuggestedSplitPrefill)
+        #expect(staged.splitAthleteId == fixture.athleteId)
+        #expect(staged.splitSportId == nil)
+        #expect(staged.splitChildren.map(\.durationMinutes) == [40, 60])
+    }
+
+    /// Runtime follow-up (evidence backward compatibility), test
+    /// requirement 7: historical evidence whose children carry DIFFERENT
+    /// athleteIds (a shape only possible from before this round, since
+    /// every current split now shares one athlete across its children)
+    /// must never be silently collapsed into a single-athlete
+    /// suggestion — the event is left unsuggested, falling through to
+    /// its ordinary blank staging.
+    @Test("Runtime follow-up: incompatible historical evidence with different child Athletes is not silently collapsed")
+    @MainActor
+    func disagreeingHistoricalEvidenceIsNotSilentlyCollapsed() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: secondAthleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+
+        #expect(!staged.isSplitEnabled)
+        #expect(!staged.isSuggestedSplitPrefill)
+        #expect(staged.splitAthleteId == nil)
+    }
+
+    /// Runtime follow-up (Part 2 — missing Suggested Split), test
+    /// requirements 8 and 10: importing an explicit split for the first
+    /// occurrence of a recurring series makes an untouched, later
+    /// occurrence of the SAME series receive a Suggested Split on the
+    /// SAME refresh cycle (the one `bulkImportReadyItems()` itself
+    /// triggers) — never requiring a second `load()` / new ViewModel
+    /// instance. A THIRD, unrelated event carrying genuine Parent-owned
+    /// staging (an explicit Athlete selection) is untouched by this same
+    /// refresh — meaningful staging is never overwritten by a newly
+    /// learned suggestion.
+    @Test("Runtime follow-up: after importing one split, an untouched later same-series occurrence gets Suggested Split on the same refresh cycle, and Parent-owned staging elsewhere is preserved")
+    @MainActor
+    func laterOccurrenceGetsSuggestedSplitOnSameRefreshCycleAfterImport() throws {
+        let fixture = try makeFixture()
+        let firstOccurrence = Self.referenceDate.addingTimeInterval(3600)
+        let secondOccurrence = firstOccurrence.addingTimeInterval(7 * 24 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: firstOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: firstOccurrence, endDate: firstOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-series", occurrenceDate: secondOccurrence, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondOccurrence, endDate: secondOccurrence.addingTimeInterval(7200), isAllDay: false, isRecurring: true
+            )
+        ]
+        addEvent(fixture, identifier: "evt-unrelated", title: "Swim practice", hoursFromReference: 5)
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let firstItem = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == firstOccurrence })
+        let secondItem = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == secondOccurrence })
+        let unrelatedItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+
+        // Parent-owned staging on the unrelated item, BEFORE the split
+        // import below.
+        viewModel.setStagedAthlete(fixture.athleteId, for: unrelatedItem.externalEventKey)
+        viewModel.setStagedActivityType(.individualTraining, for: unrelatedItem.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: firstItem.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        viewModel.addSplitChild(for: firstItem.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[0].id
+        let secondChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(firstChildId, for: firstItem.externalEventKey) { $0.durationMinutes = 40 }
+        viewModel.updateSplitChild(secondChildId, for: firstItem.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        viewModel.markReady(for: firstItem.externalEventKey)
+
+        viewModel.bulkImportReadyItems()
+
+        // Requirement 8: the untouched SECOND occurrence, still pending,
+        // already carries the Suggested Split — no second refresh
+        // needed.
+        let secondStaged = viewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(secondStaged.isSplitEnabled)
+        #expect(secondStaged.isSuggestedSplitPrefill)
+        #expect(secondStaged.splitAthleteId == fixture.athleteId)
+        #expect(secondStaged.splitChildren.map(\.durationMinutes) == [40, 60])
+
+        // Requirement 10: the unrelated item's own Parent-owned staging
+        // survived this same refresh untouched.
+        let unrelatedStaged = viewModel.stagedClassification(for: unrelatedItem.externalEventKey)
+        #expect(unrelatedStaged.athleteId == fixture.athleteId)
+        #expect(unrelatedStaged.activityType == .individualTraining)
+        #expect(!unrelatedStaged.isSplitEnabled)
+    }
+
+    /// Runtime follow-up (Part 2 — missing Suggested Split), test
+    /// requirement 9: when the later occurrence's recurring identity
+    /// does NOT match (a genuinely different, non-recurring event), the
+    /// same-source exact-title fallback still surfaces a Suggested
+    /// Split on the same refresh cycle.
+    @Test("Runtime follow-up: exact-title fallback surfaces Suggested Split on the same refresh cycle when recurring identity does not match")
+    @MainActor
+    func exactTitleFallbackSurfacesSuggestedSplitOnSameRefreshCycle() throws {
+        let fixture = try makeFixture()
+        let firstStart = Self.referenceDate.addingTimeInterval(3600)
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let firstItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-1" })
+
+        viewModel.setSplitEnabled(true, for: firstItem.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        viewModel.addSplitChild(for: firstItem.externalEventKey)
+        let firstChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[0].id
+        let secondChildId = viewModel.stagedClassification(for: firstItem.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(firstChildId, for: firstItem.externalEventKey) { $0.durationMinutes = 40 }
+        viewModel.updateSplitChild(secondChildId, for: firstItem.externalEventKey) {
+            $0.startOffsetMinutes = 70
+            $0.durationMinutes = 60
+        }
+        viewModel.markReady(for: firstItem.externalEventKey)
+
+        // A SECOND, non-recurring event added only AFTER the first
+        // import — same exact title, different eventIdentifier, no
+        // recurring identity in common at all.
+        let secondStart = firstStart.addingTimeInterval(7 * 24 * 3600)
+        var events = fixture.calendarProvider.eventsByCalendar["cal-familie"] ?? []
+        events.append(
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-2", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: secondStart, endDate: secondStart.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        )
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = events
+
+        viewModel.bulkImportReadyItems()
+
+        let secondItem = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        let secondStaged = viewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(secondStaged.isSplitEnabled)
+        #expect(secondStaged.isSuggestedSplitPrefill)
+        #expect(secondStaged.splitAthleteId == fixture.athleteId)
+        #expect(secondStaged.splitChildren.map(\.durationMinutes) == [40, 60])
     }
 }
 
