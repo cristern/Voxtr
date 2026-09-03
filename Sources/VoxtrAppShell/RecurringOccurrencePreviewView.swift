@@ -125,8 +125,8 @@ public struct RecurringOccurrencePreviewView: View {
                 LabeledContent("Athlete", value: athleteDisplayName)
                 LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: suggestion))
                 LabeledContent("Date", value: suggestion.occurrenceDate.isoString)
-                if let startTime = suggestion.startLocalTime {
-                    LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
+                if let timeLabel = PlannedTimeRangeFormatter.label(start: suggestion.startLocalTime, durationMinutes: suggestion.plannedDurationMinutes) {
+                    LabeledContent("Time", value: timeLabel)
                 }
                 if let location = suggestion.location, !location.isEmpty {
                     LabeledContent("Location", value: location)

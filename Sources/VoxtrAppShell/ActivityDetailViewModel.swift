@@ -100,6 +100,28 @@ public final class ActivityDetailViewModel {
     /// requires, never a separately maintained flag.
     public var canSetReminder: Bool { activity.startLocalTime != nil }
 
+    /// Planned Activity Time Range Presentation: `18:00–19:30` when the
+    /// plan has both a start time and a planned duration, `18:00` when
+    /// only a start time is known, `nil` when there is no start time at
+    /// all. Always derived from `activity` — the canonical
+    /// `PlannedActivity` — via the one shared `PlannedTimeRangeFormatter`
+    /// every other AppShell surface reuses, never a second, view-local
+    /// end-time calculation. This is PLANNED schedule time only; it
+    /// never reads `LoggedActivity.durationMinutes` (Planning proposes,
+    /// Training proves — a later logged duration must not silently
+    /// rewrite what was planned).
+    public var plannedTimeRangeLabel: String? {
+        PlannedTimeRangeFormatter.label(start: activity.startLocalTime, durationMinutes: activity.plannedDurationMinutes)
+    }
+
+    /// The plan's own duration, shown explicitly (e.g. "90 min") — `nil`
+    /// when no planned duration exists, never a fabricated default.
+    /// Same PLANNED-only boundary as `plannedTimeRangeLabel` above.
+    public var plannedDurationLabel: String? {
+        guard let duration = activity.plannedDurationMinutes else { return nil }
+        return "\(duration) min"
+    }
+
     /// Sprint 1.1, P1 (athlete context): passed in by the caller, which
     /// already has the athlete's name (a `FamilyHomeRow`, an
     /// `athleteDisplayName` property, etc.) — no repository re-fetch or

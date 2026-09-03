@@ -143,6 +143,21 @@ public struct LocalTime: Hashable, Codable, Sendable, Comparable {
     public static func < (lhs: LocalTime, rhs: LocalTime) -> Bool {
         (lhs.hour, lhs.minute) < (rhs.hour, rhs.minute)
     }
+
+    /// Planned Activity Time Range Presentation: this time of day plus
+    /// `minutes`, wrapped correctly across hour and midnight boundaries —
+    /// pure modular arithmetic on (hour, minute), deliberately never
+    /// going through `Date`/`Calendar`/a time zone, since "what clock
+    /// time is N minutes after this one" needs none of those. Crossing
+    /// midnight wraps back to `00:00` rather than producing an
+    /// out-of-range hour or crashing — this intentionally does not
+    /// track which calendar day the result falls on; callers needing
+    /// that would need a `LocalDate` too, which this type has no
+    /// knowledge of.
+    public func adding(minutes: Int) -> LocalTime {
+        let totalMinutes = ((hour * 60 + minute + minutes) % 1440 + 1440) % 1440
+        return LocalTime(hour: totalMinutes / 60, minute: totalMinutes % 60)
+    }
 }
 
 /// v1.3 Section 3: "IANA string. Example: Europe/Oslo."

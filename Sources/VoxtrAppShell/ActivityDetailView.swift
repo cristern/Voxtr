@@ -85,8 +85,12 @@ public struct ActivityDetailView: View {
                 LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
                 LabeledContent("Identity", value: ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: viewModel.activity))
                 LabeledContent("Date", value: viewModel.activity.localDate.isoString)
-                if let startTime = viewModel.activity.startLocalTime {
-                    LabeledContent("Time", value: String(format: "%02d:%02d", startTime.hour, startTime.minute))
+                if let timeLabel = viewModel.plannedTimeRangeLabel {
+                    LabeledContent("Time", value: timeLabel)
+                }
+                if let durationLabel = viewModel.plannedDurationLabel {
+                    LabeledContent("Duration", value: durationLabel)
+                        .accessibilityIdentifier("activityDetail.plannedDurationRow")
                 }
                 if let location = viewModel.activity.location, !location.isEmpty {
                     LabeledContent("Location", value: location)
