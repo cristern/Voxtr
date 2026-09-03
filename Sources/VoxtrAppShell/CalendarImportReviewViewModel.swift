@@ -1129,17 +1129,43 @@ public final class CalendarImportReviewViewModel {
     /// Every existing call site that sets `isConfirmedReady = true` was
     /// checked: `markReady(for:)` (an explicit Parent action) can only
     /// ever run on a staging whose `athleteId`/`splitAthleteId` already
-    /// came from `updateStaged` (`hasUserInteraction == true`) or from a
-    /// suggestion prefill captured by `isSplitEnabled`/re-derivation
-    /// below — never from a bare `isConfirmedReady` with neither.
-    /// Dropping both fields from this OR-list therefore never discards a
-    /// genuine Parent "Ready" tap: it is always already covered by
-    /// `hasUserInteraction` or `isSplitEnabled`. A not-yet-imported
-    /// Remembered/Similar prefill re-deriving identically (when nothing
-    /// changed) is invisible to the Parent; re-deriving to a NEW, more
-    /// specific Suggested Split (when a split was just learned) is
-    /// exactly the fix — and still requires the Parent's own explicit
-    /// Ready/import action before anything is committed, same as before.
+    /// came from `updateStaged` (`hasUserInteraction == true`) — never
+    /// from a bare `isConfirmedReady` with `hasUserInteraction == false`.
+    /// Dropping it from this OR-list therefore never discards a genuine
+    /// Parent "Ready" tap: it is always already covered by
+    /// `hasUserInteraction`. A not-yet-imported Remembered/Similar
+    /// prefill re-deriving identically (when nothing changed) is
+    /// invisible to the Parent; re-deriving to a NEW, more specific
+    /// Suggested Split (when a split was just learned, or newly
+    /// conflicting Ready evidence withdraws a stale one) is exactly the
+    /// fix — and still requires the Parent's own explicit Ready/import
+    /// action before anything is committed, same as before.
+    ///
+    /// Lead Review follow-up (PR #56 — Split ownership asymmetry): a bare
+    /// `staged.isSplitEnabled` was PREVIOUSLY also included here, which
+    /// made EVERY Split staging sticky purely because of its shape — a
+    /// Split produced entirely by system recognition (session Ready
+    /// evidence, or durable Suggested Split evidence — both construct
+    /// `StagedClassification` directly, bypassing `updateStaged`, so
+    /// `hasUserInteraction` stays `false`) became permanently immune to
+    /// re-evaluation the instant it was first applied, even though the
+    /// equivalent system-generated SINGLE recognition was never sticky
+    /// on its own. This defeated the whole point of the recurring
+    /// conflict-veto logic in `ReadyRecognitionIndex`: newer conflicting
+    /// Ready evidence could correctly mark a key conflicted, but an
+    /// untouched system-generated Split that had already been applied to
+    /// some OTHER pending row would never be re-evaluated again to see
+    /// that conflict, because `hasMeaningfulStaging` short-circuited
+    /// before `sessionReadyShape` was ever consulted for it. Genuine
+    /// Parent-built Split state is unaffected by removing it: every
+    /// explicit Split mutation (`setSplitEnabled`/`setSplitAthlete`/
+    /// `setSplitSport`/`addSplitChild`/`removeSplitChild`/
+    /// `updateSplitChild`) already goes through `updateStaged`, which
+    /// sets `hasUserInteraction = true` — `isSplitEnabled` was never
+    /// actually protecting anything `hasUserInteraction` didn't already
+    /// cover for real Parent work; it only ever mattered for the two
+    /// system-generated cases this fix intentionally re-exposes to
+    /// re-evaluation.
     ///
     /// Deliberately does NOT inspect `athleteId`/`sportId`/`activityType`
     /// values themselves — `sportId == nil`, the default
@@ -1150,7 +1176,6 @@ public final class CalendarImportReviewViewModel {
     /// Suggested Ignore (or Suggested Split) evidence.
     private func hasMeaningfulStaging(_ staged: StagedClassification, externalEventKey: String) -> Bool {
         staged.hasUserInteraction
-            || staged.isSplitEnabled
             || failedImportReasons[externalEventKey] != nil
     }
 
@@ -1226,11 +1251,22 @@ public final class CalendarImportReviewViewModel {
     /// or taps "Ready" themselves — `setStagedAthlete`/`setStagedSport`/
     /// `setStagedActivityType`/the whole Split editing surface, and
     /// `markReady(for:)` itself, all set `hasUserInteraction = true`).
-    /// A Split shape is unaffected in practice: it can only ever become
-    /// Ready through genuine Parent-driven staging (`setSplitEnabled`/
-    /// `addSplitChild`/`updateSplitChild`/`markReady`), so
-    /// `hasUserInteraction` is always already `true` by the time a split
-    /// is Ready — Suggested Split itself never sets `isConfirmedReady`.
+    /// A Split shape's own CONTRIBUTION to the index is unaffected in
+    /// practice, even though `isConfirmedReady == true` for a split now
+    /// arises from two different places (Lead Review follow-up, PR #56):
+    /// genuine Parent-driven staging (`setSplitEnabled`/`addSplitChild`/
+    /// `updateSplitChild`/`markReady`, which always sets
+    /// `hasUserInteraction = true` by construction), OR an exact session
+    /// match arriving pre-confirmed via `stagedClassification(fromReadyShape:)`
+    /// (which does NOT set `hasUserInteraction`). Only the FIRST case
+    /// passes this guard and contributes further — an untouched
+    /// system-arrived Split, exactly like an untouched system-arrived
+    /// Single, must itself be explicitly acted on before it becomes
+    /// evidence for a THIRD event (Part 12, unchanged). Durable
+    /// Suggested Split evidence (the tier below, read from
+    /// `CalendarPlanningCoordinationService.suggestedSplit(for:source:)`)
+    /// is a separate, still-unchanged case that never sets
+    /// `isConfirmedReady` at all.
     private static func readyRecognitionShape(for staged: StagedClassification) -> ReadyRecognitionShape? {
         guard staged.isConfirmedReady, staged.hasUserInteraction else { return nil }
         if staged.isSplitEnabled {
@@ -1488,12 +1524,22 @@ public final class CalendarImportReviewViewModel {
             // TRANSIENT Ready evidence from elsewhere in THIS active
             // Review workflow wins ahead of durable evidence — it
             // reflects the Parent's own most current explicit decision.
-            // Represents EITHER shape uniformly (single or split); never
-            // sets `isConfirmedReady` for a split shape (Part 6 — "B
-            // remains unconfirmed until the Parent explicitly marks it
-            // Ready"), matching Suggested Split's own existing contract
-            // exactly. Read-only; never itself creates or mutates
-            // Planning/evidence truth.
+            // Represents EITHER shape uniformly (single or split).
+            // Lead Review follow-up (Blocker 1, PR #56): confirmation
+            // status is driven by `MatchedReadyRecognition.isExactMatch`
+            // — evidence strength, never shape — so an exact session
+            // match arrives ALREADY Ready for BOTH single and split
+            // alike (see `stagedClassification(fromReadyShape:)`'s own
+            // doc comment). This is a DIFFERENT tier from durable
+            // Suggested Split evidence just below, which still never
+            // auto-confirms — that tier's own "B remains unconfirmed
+            // until the Parent explicitly marks it Ready" contract is
+            // unchanged. Either way this branch is read-only; never
+            // itself creates or mutates Planning/evidence truth, and the
+            // resulting staging is never itself "meaningful"/sticky
+            // (`hasMeaningfulStaging` no longer treats `isSplitEnabled`
+            // alone as Parent ownership) until the Parent genuinely acts
+            // on it.
             if let sessionMatch = Self.sessionReadyShape(for: item.event, index: readyRecognitionIndex) {
                 rebuiltStaging[item.externalEventKey] = Self.stagedClassification(fromReadyShape: sessionMatch)
                 continue
