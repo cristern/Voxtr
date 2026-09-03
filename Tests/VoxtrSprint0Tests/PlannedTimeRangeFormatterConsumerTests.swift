@@ -77,6 +77,109 @@ struct PlannedTimeRangeFormatterConsumerTests {
         #expect(FamilyHomeContentView.rowSubtitle(for: row) == "Ready to log")
     }
 
+    /// PR #57 follow-up: a `LoggedActivity` with the given outcome
+    /// `status` — `durationMinutes` deliberately differs from the
+    /// planned duration used in these tests (90) so a test can prove
+    /// the logged value is never substituted for the planned one.
+    private func loggedActivity(status: ActivityStatus, durationMinutes: Int = 45) -> LoggedActivity {
+        LoggedActivity(
+            athleteId: AthleteId(), activityType: .individualTraining, title: "Hockey practice",
+            startedAt: .now, durationMinutes: durationMinutes, status: status, source: "manual"
+        )
+    }
+
+    @Test("Family Home planned row retains the planned time range once completed")
+    func familyHomeRowSubtitleRetainsRangeWhenCompleted() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        let row = FamilyHomeRow(
+            id: "row-completed", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+            isCompleted: true, loggedActivity: loggedActivity(status: .completed)
+        )
+        #expect(FamilyHomeContentView.rowSubtitle(for: row).contains("18:00–19:30"))
+    }
+
+    @Test("Family Home planned row retains the planned time range when partially completed")
+    func familyHomeRowSubtitleRetainsRangeWhenPartiallyCompleted() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        let row = FamilyHomeRow(
+            id: "row-partial", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+            isCompleted: true, loggedActivity: loggedActivity(status: .partiallyCompleted)
+        )
+        #expect(FamilyHomeContentView.rowSubtitle(for: row).contains("18:00–19:30"))
+    }
+
+    @Test("Family Home planned row retains the planned time range when missed")
+    func familyHomeRowSubtitleRetainsRangeWhenMissed() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        let row = FamilyHomeRow(
+            id: "row-missed", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+            isCompleted: true, loggedActivity: loggedActivity(status: .missed)
+        )
+        #expect(FamilyHomeContentView.rowSubtitle(for: row).contains("18:00–19:30"))
+    }
+
+    @Test("Family Home planned row retains the planned time range when cancelled")
+    func familyHomeRowSubtitleRetainsRangeWhenCancelled() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        let row = FamilyHomeRow(
+            id: "row-cancelled", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+            isCompleted: true, loggedActivity: loggedActivity(status: .cancelled)
+        )
+        #expect(FamilyHomeContentView.rowSubtitle(for: row).contains("18:00–19:30"))
+    }
+
+    @Test("The same planned time range renders identically regardless of outcome status — outcome never feeds the range computation")
+    func familyHomeRowSubtitlePlannedRangeIsIndependentOfOutcome() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        let statuses: [ActivityStatus] = [.completed, .partiallyCompleted, .missed, .cancelled]
+        let labels = statuses.map { status -> String in
+            let row = FamilyHomeRow(
+                id: "row-\(status)", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+                isCompleted: true, loggedActivity: loggedActivity(status: status)
+            )
+            return FamilyHomeContentView.rowSubtitle(for: row)
+        }
+        #expect(labels.allSatisfy { $0.contains("18:00–19:30") })
+    }
+
+    @Test("The planned range is built from PlannedActivity's own duration, never LoggedActivity.durationMinutes")
+    func familyHomeRowSubtitleNeverUsesLoggedDuration() {
+        let activity = PlannedActivity(
+            weekPlanId: WeekPlanId(), athleteId: AthleteId(), activityType: .individualTraining,
+            title: "Hockey practice", localDate: LocalDate(year: 2026, month: 3, day: 3),
+            startLocalTime: LocalTime(hour: 18, minute: 0), timeZoneId: Self.oslo, plannedDurationMinutes: 90
+        )
+        // Logged duration (45) deliberately differs from planned (90) —
+        // the rendered range must reflect the PLANNED interval only.
+        let row = FamilyHomeRow(
+            id: "row-logged-mismatch", athleteId: AthleteId(), athleteName: "Oliver", plannedActivity: activity,
+            isCompleted: true, loggedActivity: loggedActivity(status: .completed, durationMinutes: 45)
+        )
+        let subtitle = FamilyHomeContentView.rowSubtitle(for: row)
+        #expect(subtitle.contains("18:00–19:30"))
+        #expect(!subtitle.contains("18:00–18:45"))
+    }
+
     @Test("Family Home recurring-occurrence row shows a time range when start + planned duration exist")
     func familyHomeRecurringRowSubtitleShowsRange() {
         let suggestion = RecurringActivitySuggestion(

@@ -650,19 +650,31 @@ public struct FamilyHomeContentView: View {
     /// brittle rendered-view assertion.
     static func rowSubtitle(for row: FamilyHomeRow) -> String {
         var parts: [String] = []
-        // Activity outcome consistency closeout (item B): the planned
-        // duration summary is only meaningful for a GENUINELY completed
-        // outcome — showing "30 min" next to a Cancelled/Missed activity
-        // (even though 30 is the plan's own value, never the placeholder)
-        // would still read as if training happened. Same root cause as
-        // the trailing label above, in this same function.
+        // PR #57 follow-up: the planned schedule interval (start–end, or
+        // start alone) is factual PLANNING information — it must remain
+        // visible after a Training outcome exists, not only while
+        // unresolved. Always derived from `row.plannedActivity`, never
+        // `row.loggedActivity` (Planning proposes; Training proves — a
+        // later logged duration must never substitute for the planned
+        // one here). `outcomeStatus` below only ever selects what
+        // ADDITIONALLY appends alongside the planned time — it never
+        // feeds into the time/range computation itself.
         switch row.outcomeStatus {
         case .completed, .partiallyCompleted:
-            if let duration = row.plannedActivity.plannedDurationMinutes {
+            if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
+                // The range itself already conveys the planned duration —
+                // a separate standalone "X min" alongside it would be a
+                // duplicate schedule fact. Only shown as a fallback (see
+                // below) when there is no start time to build a range from.
+                parts.append(timeLabel)
+            } else if let duration = row.plannedActivity.plannedDurationMinutes {
                 parts.append("\(duration) min")
             }
             parts.append(row.plannedActivity.localDate.isoString)
         case .missed, .cancelled:
+            if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
+                parts.append(timeLabel)
+            }
             parts.append(row.plannedActivity.localDate.isoString)
         case .none, .scheduled:
             if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
