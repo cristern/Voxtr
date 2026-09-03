@@ -1190,6 +1190,28 @@ public final class CalendarImportReviewViewModel {
         }
     }
 
+    /// Lead Review follow-up (PR #56 — Blocker 1, single/split Ready
+    /// semantic parity): the confirmation status a matched
+    /// `ReadyRecognitionShape` arrives with must be driven by EVIDENCE
+    /// STRENGTH, never by shape. `isExactMatch` carries that strength
+    /// explicitly rather than letting `stagedClassification(fromReadyShape:)`
+    /// branch on `.single` vs `.split` — today every match this
+    /// TRANSIENT session tier produces IS exact (both
+    /// `ReadyRecognitionIndex` lookups below are exact-key matches —
+    /// `recurringEventIdentifier` or the SAME normalized-title equality
+    /// Remembered Exact Choice already uses — never fuzzy, never a
+    /// `.first`-among-many pick), so `isExactMatch` is always `true` for
+    /// every value this file currently constructs. It exists as an
+    /// explicit field, not a hardcoded literal at the call site, so a
+    /// genuinely weaker future tier (if this pipeline is ever extended)
+    /// could arrive `false` without changing `stagedClassification(fromReadyShape:)`
+    /// at all — that function only ever reads this field, never the
+    /// shape, to decide confirmation.
+    private struct MatchedReadyRecognition {
+        let shape: ReadyRecognitionShape
+        let isExactMatch: Bool
+    }
+
     /// `nil` unless `staged` resolves to a complete, valid shape AND is
     /// GENUINELY Parent-approved — `isConfirmedReady` alone is not
     /// enough (Part 12: "B must not become new evidence merely because
@@ -1266,47 +1288,92 @@ public final class CalendarImportReviewViewModel {
             }
         }
 
-        /// `nil` for both "no Ready evidence at all" and "conflicting
-        /// Ready evidence" (Part 9 — never arbitrarily pick one).
-        func agreedShape(forRecurringId recurringId: String) -> ReadyRecognitionShape? {
-            conflictedRecurringIds.contains(recurringId) ? nil : byRecurringId[recurringId]
+        /// Lead Review follow-up (PR #56 — Blocker 2, recurring conflict
+        /// must veto title fallback): tri-state, so a caller can tell
+        /// "no Ready evidence at all" (`.none` — safe to keep looking in
+        /// a WEAKER tier) apart from "Ready evidence exists here but
+        /// conflicts" (`.conflict` — this key is a proven ambiguity;
+        /// stop, never silently fall through to a weaker tier that might
+        /// otherwise resolve). Both `byRecurringId`/`byNormalizedTitle`
+        /// lookups share this same result shape for a single, consistent
+        /// caller-side veto rule (Blocker 2's own required correction).
+        enum LookupResult {
+            case none
+            case agreed(ReadyRecognitionShape)
+            case conflict
         }
 
-        func agreedShape(forNormalizedTitle title: String) -> ReadyRecognitionShape? {
-            conflictedTitles.contains(title) ? nil : byNormalizedTitle[title]
+        func lookup(forRecurringId recurringId: String) -> LookupResult {
+            if conflictedRecurringIds.contains(recurringId) { return .conflict }
+            if let shape = byRecurringId[recurringId] { return .agreed(shape) }
+            return .none
+        }
+
+        func lookup(forNormalizedTitle title: String) -> LookupResult {
+            if conflictedTitles.contains(title) { return .conflict }
+            if let shape = byNormalizedTitle[title] { return .agreed(shape) }
+            return .none
         }
     }
 
     /// Same recurring-series-first, exact-title-fallback precedence
     /// `CalendarPlanningCoordinationService.suggestedSplit(for:source:)`
     /// already uses for durable evidence (Part 8).
-    private static func sessionReadyShape(for event: ExternalCalendarEvent, index: ReadyRecognitionIndex) -> ReadyRecognitionShape? {
-        if event.isRecurring, let shape = index.agreedShape(forRecurringId: event.eventIdentifier) {
-            return shape
+    ///
+    /// Lead Review follow-up (PR #56 — Blocker 2): for a RECURRING
+    /// event, a recurring-tier CONFLICT is a terminal veto — stronger
+    /// conflicting evidence (the same recurring series) must never be
+    /// silently bypassed in favor of a weaker tier (exact title) that
+    /// happens to still resolve unambiguously for unrelated reasons.
+    /// Title fallback only ever runs when the recurring tier has NO
+    /// evidence at all (`.none`) — never after a `.conflict`. A
+    /// non-recurring event only ever consults the title tier, unchanged.
+    private static func sessionReadyShape(for event: ExternalCalendarEvent, index: ReadyRecognitionIndex) -> MatchedReadyRecognition? {
+        if event.isRecurring {
+            switch index.lookup(forRecurringId: event.eventIdentifier) {
+            case .agreed(let shape):
+                return MatchedReadyRecognition(shape: shape, isExactMatch: true)
+            case .conflict:
+                return nil
+            case .none:
+                break
+            }
         }
         guard let normalizedTitle = ExternalEventTitleNormalization.normalize(event.title) else { return nil }
-        return index.agreedShape(forNormalizedTitle: normalizedTitle)
+        guard case .agreed(let shape) = index.lookup(forNormalizedTitle: normalizedTitle) else { return nil }
+        return MatchedReadyRecognition(shape: shape, isExactMatch: true)
     }
 
-    /// Translates a `ReadyRecognitionShape` into the SAME staging shapes
-    /// the durable-evidence tiers already construct — `.single` mirrors
-    /// Remembered Exact Choice's own "MAY arrive already Ready" contract
-    /// (V1.1, unchanged); `.split` mirrors Suggested Split's own "NEVER
-    /// arrives Ready" contract (VX-038, unchanged) — same shapes, same
-    /// Ready-ness rules, regardless of whether the evidence is this
-    /// session's own transient Ready staging or durable persisted
-    /// evidence. Either way this is presentation assistance only: never
-    /// itself a `CalendarImportDecision`/`PlannedActivity`/
-    /// `DecompositionEvidence` write.
-    private static func stagedClassification(fromReadyShape shape: ReadyRecognitionShape) -> StagedClassification {
-        switch shape {
+    /// Translates a `MatchedReadyRecognition` into the SAME staging
+    /// shapes the durable-evidence tiers already construct.
+    ///
+    /// Lead Review follow-up (PR #56 — Blocker 1): confirmation status
+    /// (`isConfirmedReady`) is driven ENTIRELY by `matched.isExactMatch`
+    /// — the evidence's own strength — never by whether `shape` is
+    /// `.single` or `.split`. This is the fix for the single/split Ready
+    /// semantic inconsistency the Lead Review flagged: previously
+    /// `.single` always arrived confirmed and `.split` never did, purely
+    /// because of shape. Every value this pipeline constructs today is
+    /// `isExactMatch == true` (see `MatchedReadyRecognition`'s own doc
+    /// comment), so BOTH shapes now arrive already Ready — the SAME
+    /// "MAY arrive already Ready" contract Remembered Exact Choice
+    /// (V1.1) already established, generalized to Split per the Product
+    /// Owner's explicit decision that recognition flow must not differ
+    /// merely because the activity is split. Either way this is
+    /// presentation assistance only: never itself a
+    /// `CalendarImportDecision`/`PlannedActivity`/`DecompositionEvidence`
+    /// write, and the Parent's own explicit bulk-import action is still
+    /// what actually persists anything.
+    private static func stagedClassification(fromReadyShape matched: MatchedReadyRecognition) -> StagedClassification {
+        switch matched.shape {
         case .single(let athleteId, let sportId, let activityType):
             return StagedClassification(
                 athleteId: athleteId, sportId: sportId, activityType: activityType,
-                isConfirmedReady: true, suggestionKind: .exactRemembered
+                isConfirmedReady: matched.isExactMatch, suggestionKind: .exactRemembered
             )
         case .split(let athleteId, let sportId, let children):
             return StagedClassification(
+                isConfirmedReady: matched.isExactMatch,
                 splitAthleteId: athleteId,
                 splitSportId: sportId,
                 isSplitEnabled: true,
@@ -1427,8 +1494,8 @@ public final class CalendarImportReviewViewModel {
             // Ready"), matching Suggested Split's own existing contract
             // exactly. Read-only; never itself creates or mutates
             // Planning/evidence truth.
-            if let sessionShape = Self.sessionReadyShape(for: item.event, index: readyRecognitionIndex) {
-                rebuiltStaging[item.externalEventKey] = Self.stagedClassification(fromReadyShape: sessionShape)
+            if let sessionMatch = Self.sessionReadyShape(for: item.event, index: readyRecognitionIndex) {
+                rebuiltStaging[item.externalEventKey] = Self.stagedClassification(fromReadyShape: sessionMatch)
                 continue
             }
             // VX-038 (Suggested Split): checked BEFORE exact/similar
