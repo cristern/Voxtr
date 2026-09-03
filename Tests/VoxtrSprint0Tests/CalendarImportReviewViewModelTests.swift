@@ -3082,34 +3082,69 @@ struct CalendarImportReviewViewModelTests {
         #expect(!viewModel.stagedClassification(for: itemC.externalEventKey).isSplitEnabled)
     }
 
-    @Test("VX-038 unified test 15: conflicting Ready Split shapes for the same title produce no automatic Split suggestion")
+    /// Lead Review follow-up (PR #56, second round — sticky-Split
+    /// ownership bug): this test's ORIGINAL sequence (both A's and B's
+    /// conflicting Ready Split existed BEFORE itemC was ever evaluated
+    /// for the first time) could never actually exercise the sticky-
+    /// Split bug: since `stagedClassifications[itemC.key]` had NO prior
+    /// entry at all, `hasMeaningfulStaging` was trivially `false`
+    /// regardless of whether it also checked `isSplitEnabled` — the
+    /// conflict was correctly detected on C's OWN first-ever evaluation
+    /// either way. It therefore passed against BOTH the buggy and the
+    /// fixed implementation, and could not have caught the bug. The
+    /// CONCRETE failure only appears when C receives an untouched
+    /// system-generated Split suggestion on an EARLIER refresh (from A
+    /// alone), and the CONFLICT is introduced only afterward (by B) —
+    /// exactly the sequence below. Under the OLD `hasMeaningfulStaging`
+    /// (`hasUserInteraction || isSplitEnabled || ...`), C's own
+    /// `isSplitEnabled == true` from the FIRST refresh would have made
+    /// it permanently sticky, so the SECOND refresh (triggered by B's
+    /// own `markReady`) would never re-consult `sessionReadyShape` for
+    /// C at all — C would incorrectly keep showing A's stale Split
+    /// forever. Corrected here (rather than left as a weaker duplicate)
+    /// to actually exercise that sequence.
+    @Test("VX-038 unified test 15 / Lead Review follow-up: an untouched system-generated Split suggestion is withdrawn once newer Ready evidence makes it conflict")
     @MainActor
     func conflictingReadySplitShapesProduceNoAutomaticSuggestion() throws {
         let fixture = try makeFixture()
         let secondAthleteId = try addSecondAthlete(fixture)
         addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
-        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
-        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 48)
+        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 48)
         let viewModel = makeViewModel(fixture)
         viewModel.load()
         let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
-        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
         let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-C" })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
 
+        // A: Parent explicitly configures Split X, marks Ready.
         viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
         viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
         viewModel.addSplitChild(for: itemA.externalEventKey)
         viewModel.markReady(for: itemA.externalEventKey)
 
-        // A conflicting shared Athlete, marked Ready on a DIFFERENT
-        // occurrence of the SAME title.
+        // Untouched C receives Split X from session Ready recognition on
+        // THIS refresh — purely system-generated, never touched by the
+        // Parent.
+        let stagedCBefore = viewModel.stagedClassification(for: itemC.externalEventKey)
+        #expect(stagedCBefore.isSplitEnabled)
+        #expect(stagedCBefore.splitAthleteId == fixture.athleteId)
+        #expect(!stagedCBefore.hasUserInteraction)
+
+        // B: Parent explicitly configures a CONFLICTING Split Y (a
+        // DIFFERENT shared Athlete), marks Ready — this makes the Ready
+        // evidence for "Hockey training" ambiguous.
         viewModel.setSplitEnabled(true, for: itemB.externalEventKey)
         viewModel.setSplitAthlete(secondAthleteId, for: itemB.externalEventKey)
         viewModel.addSplitChild(for: itemB.externalEventKey)
         viewModel.markReady(for: itemB.externalEventKey)
 
-        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
-        #expect(!stagedC.isSplitEnabled)
+        // The untouched, system-generated Split on C must be WITHDRAWN
+        // — conflicting Ready evidence produces no automatic suggestion,
+        // and C was never Parent-owned in the first place.
+        let stagedCAfter = viewModel.stagedClassification(for: itemC.externalEventKey)
+        #expect(!stagedCAfter.isSplitEnabled)
+        #expect(stagedCAfter.splitAthleteId == nil)
     }
 
     // MARK: - VX-038 unified recognition follow-up: refresh/state safety (required tests 16-20)
@@ -3657,6 +3692,189 @@ struct CalendarImportReviewViewModelTests {
         let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
         #expect(stagedC.athleteId == fixture.athleteId)
         #expect(stagedC.isConfirmedReady)
+    }
+
+    // MARK: - Lead Review follow-up (PR #56, second round): Parent-owned Split state remains protected
+
+    /// Required test 6: a Parent-manually-created Split remains
+    /// untouched across an unrelated refresh — `hasUserInteraction`
+    /// alone (no longer `isSplitEnabled`) is what protects it.
+    @Test("VX-038 Lead Review test 6: a Parent-manually-created Split remains untouched across an unrelated refresh")
+    @MainActor
+    func parentManuallyCreatedSplitRemainsUntouchedAcrossUnrelatedRefresh() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-unrelated", title: "Piano Lesson", hoursFromReference: 2)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        let itemUnrelated = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+
+        viewModel.setSplitEnabled(true, for: itemA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.addSplitChild(for: itemA.externalEventKey)
+        let secondChildId = viewModel.stagedClassification(for: itemA.externalEventKey).splitChildren[1].id
+        viewModel.updateSplitChild(secondChildId, for: itemA.externalEventKey) { $0.durationMinutes = 55 }
+
+        // An UNRELATED action triggers a refresh.
+        viewModel.ignore(itemUnrelated)
+
+        let stagedA = viewModel.stagedClassification(for: itemA.externalEventKey)
+        #expect(stagedA.isSplitEnabled)
+        #expect(stagedA.splitAthleteId == fixture.athleteId)
+        #expect(stagedA.splitChildren.count == 2)
+        #expect(stagedA.splitChildren[1].durationMinutes == 55)
+    }
+
+    /// Required test 7: a durable Suggested Split (from persisted
+    /// DecompositionEvidence) survives an unrelated refresh
+    /// SEMANTICALLY — it may be re-derived from the same unchanged
+    /// evidence, but the same values remain visible either way.
+    @Test("VX-038 Lead Review test 7: a durable Suggested Split survives an unrelated refresh semantically")
+    @MainActor
+    func durableSuggestedSplitSurvivesUnrelatedRefreshSemantically() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-unrelated", title: "Piano Lesson", hoursFromReference: 2)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-1" })
+        let itemUnrelated = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+
+        let stagedBefore = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(stagedBefore.isSplitEnabled)
+
+        viewModel.ignore(itemUnrelated)
+
+        let stagedAfter = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(stagedAfter.isSplitEnabled)
+        #expect(stagedAfter.splitAthleteId == fixture.athleteId)
+        #expect(stagedAfter.splitChildren.map(\.durationMinutes) == [40, 60])
+    }
+
+    /// Required test 8: once the Parent edits a Suggested Split, the
+    /// edited Parent-owned state survives an unrelated refresh.
+    @Test("VX-038 Lead Review test 8: once the Parent edits a Suggested Split, the edited Parent-owned state survives an unrelated refresh")
+    @MainActor
+    func parentEditedSuggestedSplitSurvivesUnrelatedRefresh() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-unrelated", title: "Piano Lesson", hoursFromReference: 2)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-1" })
+        let itemUnrelated = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+
+        // The Parent explicitly edits the suggested split.
+        let firstChildId = viewModel.stagedClassification(for: item.externalEventKey).splitChildren[0].id
+        viewModel.updateSplitChild(firstChildId, for: item.externalEventKey) { $0.durationMinutes = 45 }
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).hasUserInteraction)
+
+        viewModel.ignore(itemUnrelated)
+
+        let stagedAfter = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(stagedAfter.splitChildren[0].durationMinutes == 45)
+    }
+
+    /// Required test 9: once the Parent explicitly marks a Suggested
+    /// Split Ready, it remains protected as Parent-owned state across
+    /// an unrelated refresh (`markReady` sets `hasUserInteraction`).
+    @Test("VX-038 Lead Review test 9: once the Parent marks a Suggested Split Ready, it remains protected across an unrelated refresh")
+    @MainActor
+    func parentConfirmedSuggestedSplitRemainsProtectedAcrossUnrelatedRefresh() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockey training", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-unrelated", title: "Piano Lesson", hoursFromReference: 2)
+        try fixture.decompositionEvidenceRepository.insert(
+            sourceId: fixture.source.externalPlanningSourceId, recurringEventIdentifier: nil, normalizedTitle: "hockey training",
+            createdBy: ActorId(),
+            children: [
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40),
+                (athleteId: fixture.athleteId, sportId: nil, activityType: .teamTraining, startOffsetMinutes: 70, durationMinutes: 60)
+            ]
+        )
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-1" })
+        let itemUnrelated = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-unrelated" })
+
+        viewModel.markReady(for: item.externalEventKey)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).isConfirmedReady)
+        #expect(viewModel.stagedClassification(for: item.externalEventKey).hasUserInteraction)
+
+        viewModel.ignore(itemUnrelated)
+
+        let stagedAfter = viewModel.stagedClassification(for: item.externalEventKey)
+        #expect(stagedAfter.isConfirmedReady)
+        #expect(stagedAfter.splitAthleteId == fixture.athleteId)
+    }
+
+    /// Required test 10: equivalent system-generated Single and Split
+    /// recognition both remain re-evaluable until the Parent interacts
+    /// with them — proven side by side, with a conflicting classification
+    /// introduced for EACH shape after an untouched sibling already
+    /// received the first one.
+    @Test("VX-038 Lead Review test 10: equivalent system-generated Single and Split recognition both remain re-evaluable until Parent interaction")
+    @MainActor
+    func systemGeneratedSingleAndSplitBothRemainReEvaluableUntilParentInteraction() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        addEvent(fixture, identifier: "evt-single-A", title: "Swim practice", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-single-C", title: "Swim practice", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-single-B", title: "Swim practice", hoursFromReference: 25)
+        addEvent(fixture, identifier: "evt-split-A", title: "Hockey training", hoursFromReference: 2)
+        addEvent(fixture, identifier: "evt-split-C", title: "Hockey training", hoursFromReference: 26)
+        addEvent(fixture, identifier: "evt-split-B", title: "Hockey training", hoursFromReference: 27)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemSingleA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single-A" })
+        let itemSplitA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split-A" })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemSingleA.externalEventKey)
+        viewModel.markReady(for: itemSingleA.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: itemSplitA.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemSplitA.externalEventKey)
+        viewModel.addSplitChild(for: itemSplitA.externalEventKey)
+        viewModel.markReady(for: itemSplitA.externalEventKey)
+
+        let itemSingleC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single-C" })
+        let itemSplitC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split-C" })
+        #expect(viewModel.stagedClassification(for: itemSingleC.externalEventKey).athleteId == fixture.athleteId)
+        #expect(viewModel.stagedClassification(for: itemSplitC.externalEventKey).isSplitEnabled)
+
+        // A DIFFERENT, conflicting Ready classification for EACH title.
+        let itemSingleB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single-B" })
+        let itemSplitB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split-B" })
+        viewModel.setStagedAthlete(secondAthleteId, for: itemSingleB.externalEventKey)
+        viewModel.markReady(for: itemSingleB.externalEventKey)
+        viewModel.setSplitEnabled(true, for: itemSplitB.externalEventKey)
+        viewModel.setSplitAthlete(secondAthleteId, for: itemSplitB.externalEventKey)
+        viewModel.addSplitChild(for: itemSplitB.externalEventKey)
+        viewModel.markReady(for: itemSplitB.externalEventKey)
+
+        // Both untouched system-generated C's must be withdrawn
+        // identically — shape never determines re-evaluability.
+        let stagedSingleC = viewModel.stagedClassification(for: itemSingleC.externalEventKey)
+        let stagedSplitC = viewModel.stagedClassification(for: itemSplitC.externalEventKey)
+        #expect(stagedSingleC.athleteId == nil)
+        #expect(!stagedSplitC.isSplitEnabled)
     }
 }
 
