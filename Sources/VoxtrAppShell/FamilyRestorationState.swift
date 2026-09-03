@@ -50,22 +50,37 @@ public enum FamilyRestorationState {
 public struct RestoredFamily {
     public let parent: ParentProfile
     public let workspace: FamilyWorkspace
+    /// The sole `.workspaceOwner` participant — unchanged meaning from
+    /// before Athlete Connection Foundation A. ParentApp continues to
+    /// act as this participant; see `currentActor` below.
     public let participant: WorkspaceParticipant
     public let athletes: [AthleteProfile]
     public let grants: [AthleteAccessGrant]
+    /// Athlete Connection Foundation A: every `role == .athlete`
+    /// `WorkspaceParticipant` in this workspace, in ANY lifecycle state
+    /// (invited/active/declined/revoked) — the membership graph, not a
+    /// filtered "currently usable" view. `FamilyRestorationService`
+    /// guarantees each one's `linkedAthleteId` resolves to a real
+    /// `AthleteProfile` present in `athletes`, in this same workspace.
+    /// A Parent-only athlete simply has no entry here at all — this
+    /// array is deliberately allowed to be empty. Deterministically
+    /// ordered by `FamilyRestorationService` (`createdAt`, then `id`).
+    public let athleteParticipants: [WorkspaceParticipant]
 
     public init(
         parent: ParentProfile,
         workspace: FamilyWorkspace,
         participant: WorkspaceParticipant,
         athletes: [AthleteProfile],
-        grants: [AthleteAccessGrant]
+        grants: [AthleteAccessGrant],
+        athleteParticipants: [WorkspaceParticipant] = []
     ) {
         self.parent = parent
         self.workspace = workspace
         self.participant = participant
         self.athletes = athletes
         self.grants = grants
+        self.athleteParticipants = athleteParticipants
     }
 
     /// Athletes that should actually appear anywhere in the product —
@@ -74,5 +89,17 @@ public struct RestoredFamily {
     /// why it's never removed), but it is never "active."
     public var activeAthletes: [AthleteProfile] {
         athletes.filter { !$0.isArchived }
+    }
+
+    /// Athlete Connection Foundation A: the canonical current-session
+    /// actor for this restored family — resolved once, from the
+    /// workspace-owner participant, since ParentApp is the only
+    /// production actor this PR wires in. Every AppShell business
+    /// mutation that previously constructed `ActorId(rawValue:
+    /// family.participant.id)` directly should read `currentActor.actorId`
+    /// here instead. See `CurrentSessionActor`'s own doc comment for why
+    /// this is never derived from the selected athlete or screen state.
+    public var currentActor: CurrentSessionActor {
+        CurrentSessionActor.resolve(from: participant)
     }
 }

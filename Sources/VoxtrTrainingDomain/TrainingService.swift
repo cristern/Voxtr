@@ -61,6 +61,12 @@ public final class TrainingService {
 
     /// Creates a `LoggedActivity`, optionally linked to a
     /// `PlannedActivity` by typed ID.
+    /// Athlete Connection Foundation A: `loggedByActorId` — see
+    /// `LoggedActivity.loggedByActorId`'s own doc comment for the exact
+    /// semantics and why this stays optional at this layer (the
+    /// non-optional requirement lives at
+    /// `TrainingReflectionCoordinationService.logActivity`, the one
+    /// method every production call site actually calls).
     public func logActivity(
         athleteId: AthleteId,
         plannedActivityId: PlannedActivityId? = nil,
@@ -74,7 +80,8 @@ public final class TrainingService {
         status: ActivityStatus = .completed,
         perceivedExertion: Int? = nil,
         source: String = "manual",
-        notes: String? = nil
+        notes: String? = nil,
+        loggedByActorId: ActorId? = nil
     ) throws -> LoggedActivity {
         // Sport / Activity Identity domain foundation: the ONE canonical
         // rule (`ActivityIdentity`), checked here as a catchable error —
@@ -111,7 +118,8 @@ public final class TrainingService {
             status: status,
             perceivedExertion: perceivedExertion,
             source: source,
-            notes: notes
+            notes: notes,
+            loggedByActorId: loggedByActorId
         )
 
         // Notifications V1 Activity Reminder Foundation (PR #36

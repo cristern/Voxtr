@@ -123,6 +123,12 @@ import VoxtrCalendarPlanningDomain
 /// completely unchanged and never writes to any of these three tables.
 /// Purely additive (`AppSchemaV10`, see `AppSchemaVersioning.swift`): no
 /// existing entity or property is renamed, removed, or changed in place.
+///
+/// Athlete Connection Foundation A adds `LoggedActivity.loggedByActorId:
+/// UUID?` — a field-level change to an already-listed live type, not a
+/// new model type, so this array itself is UNCHANGED by that round (see
+/// `AppSchemaVersioning.swift`'s `AppSchemaV11` for the version bump
+/// this still requires).
 public enum AppSchema {
     public static var modelTypes: [any PersistentModel.Type] {
         [

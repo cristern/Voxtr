@@ -1259,20 +1259,143 @@ public enum AppSchemaV9: VersionedSchema {
 /// (most directly `AppSchemaV8`'s own two-type addition immediately
 /// above).
 ///
-/// `models` stays a LIVE passthrough to `AppSchema.modelTypes` — V10 is
-/// the new latest version (see `AppSchemaV9`'s own doc comment
-/// immediately above for that version's own freeze, step 1 of this
-/// file's "HOW TO ADD A NEW VERSION" recipe). This passthrough is what
-/// `CompositionRoot.build`'s default `versionedSchema:` targets, and
-/// what `container.schema.entities.count` must equal
-/// `AppSchema.modelTypes.count` against in
-/// `PersistenceRecoveryTests.compositionRootDefaultPersistenceConstructsSuccessfully` —
-/// that test's own literal must be updated to `AppSchemaV10.self` here,
-/// same as every prior version bump (see that test's own doc comment
-/// for the exact class of bug this guards against).
+/// `models` was a live passthrough to `AppSchema.modelTypes` while V10
+/// was the latest version; Athlete Connection Foundation A now freezes
+/// it to the exact 25-entity literal V10 always actually had, following
+/// this file's own "HOW TO ADD A NEW VERSION" step 1, same as every
+/// version bump before it. This round ALSO adds a nested, frozen
+/// V10-era `LoggedActivity` copy (see that type's own doc comment
+/// below) — the live `LoggedActivity` gains `loggedByActorId: UUID?`
+/// in `AppSchemaV11`, and every version through V10 had bare-referenced
+/// the live type directly (no field-level change to it since V3), so
+/// leaving V10 pointed at the live type here would have silently
+/// changed what V10's own fixed identity describes the moment the live
+/// type's shape changed — exactly the landmine this file's own opening
+/// doc comment warns against. See `AppSchemaV11` immediately below for
+/// the new latest version.
 public enum AppSchemaV10: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
         Schema.Version(10, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            PlannedActivity.self,
+            AppSchemaV10.LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+            CalendarPlanningMapping.self,
+            ExternalPlanningSource.self,
+            CalendarImportDecision.self,
+            DecomposedActivityLink.self,
+            DecompositionEvidence.self,
+            DecompositionEvidenceChild.self,
+        ]
+    }
+
+    /// FROZEN — the V10-era shape of `LoggedActivity`, before Athlete
+    /// Connection Foundation A added `loggedByActorId: UUID?`. Exists
+    /// ONLY to give `AppSchemaV10.models` above an accurate historical
+    /// shape for migration purposes — nothing in this codebase's live
+    /// repositories/services/UI may construct or read it; see
+    /// `VoxtrTrainingDomain.LoggedActivity` for the real, live, current
+    /// type. Plain raw `UUID`/`String`/`Int` fields and no business
+    /// preconditions, matching every other frozen historical type in
+    /// this file (e.g. `AppSchemaV5.ActivityReminder` above) — this type
+    /// is never constructed by application code, only referenced by
+    /// `Schema(versionedSchema:)`.
+    @Model
+    public final class LoggedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var athleteId: UUID
+        public var plannedActivityId: UUID?
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String?
+        public var startedAt: Date
+        public var endedAt: Date?
+        public var durationMinutes: Int
+        public var status: ActivityStatus
+        public var perceivedExertion: Int?
+        public var source: String
+        public var notes: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            athleteId: UUID,
+            plannedActivityId: UUID? = nil,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String?,
+            startedAt: Date,
+            endedAt: Date? = nil,
+            durationMinutes: Int,
+            status: ActivityStatus,
+            perceivedExertion: Int? = nil,
+            source: String,
+            notes: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.athleteId = athleteId
+            self.plannedActivityId = plannedActivityId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.startedAt = startedAt
+            self.endedAt = endedAt
+            self.durationMinutes = durationMinutes
+            self.status = status
+            self.perceivedExertion = perceivedExertion
+            self.source = source
+            self.notes = notes
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+    }
+}
+
+/// Athlete Connection Foundation A: the current, live version. Adds ONE
+/// field to an already-listed live type — `LoggedActivity
+/// .loggedByActorId: UUID?` — no model *type* addition/removal, so
+/// `AppSchema.modelTypes` itself is unchanged by this round (see that
+/// file's own doc comment: a field-level change does not touch that
+/// array). `models` stays a LIVE passthrough to `AppSchema.modelTypes`
+/// — V11 is the new latest version (see `AppSchemaV10`'s own doc
+/// comment immediately above for that version's own freeze). This
+/// passthrough is what `CompositionRoot.build`'s default
+/// `versionedSchema:` targets, and what `container.schema.entities.count`
+/// must equal `AppSchema.modelTypes.count` against in
+/// `PersistenceRecoveryTests.compositionRootDefaultPersistenceConstructsSuccessfully` —
+/// that test's own literal must be updated to `AppSchemaV11.self` here,
+/// same as every prior version bump.
+public enum AppSchemaV11: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(11, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1334,6 +1457,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
         [
             AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self,
             AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self, AppSchemaV9.self, AppSchemaV10.self,
+            AppSchemaV11.self,
         ]
     }
 
@@ -1449,6 +1573,23 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
     /// new code path. Every existing decision's `status`/`athleteId`/
     /// `sportId`/`activityType`/`plannedActivityId` is completely
     /// untouched; only this one new field starts unset on old rows.
+    /// V10 ("10.0.0", 25 entities) → V11 ("11.0.0", same 25 entities —
+    /// adds `LoggedActivity.loggedByActorId: UUID?`, Athlete Connection
+    /// Foundation A). `.lightweight` again: the exact same class of
+    /// change as V2→V3's `AthleteSettings.preferredColor` addition, V5→V6's
+    /// `ActivityReminder.reminderText` addition, and V8→V9's
+    /// `CalendarImportDecision.ignoredEventTitle` addition — a genuinely
+    /// new, genuinely optional column with no other value it could infer
+    /// for an existing row than `nil`, which is exactly what this
+    /// migration needs: every `LoggedActivity` row logged before actor
+    /// attribution existed migrates with `loggedByActorId == nil`,
+    /// honestly representing "no actor was ever recorded for this log"
+    /// rather than inventing one (e.g. assuming the sole Parent owner
+    /// merely because ParentApp was the only UI at the time — that fact
+    /// is not something this migration can prove per-record, so it does
+    /// not claim it). Every existing logged activity's `athleteId`/
+    /// `durationMinutes`/`status`/every other field is completely
+    /// untouched; only this one new column starts unset on old rows.
     public static var stages: [MigrationStage] {
         [
             .lightweight(fromVersion: AppCurrentSchema.self, toVersion: AppSchemaV2.self),
@@ -1464,6 +1605,9 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             // place, so a `.lightweight` stage is sufficient (same
             // reasoning as every prior new-model-type version above).
             .lightweight(fromVersion: AppSchemaV9.self, toVersion: AppSchemaV10.self),
+            // Athlete Connection Foundation A: purely additive (one new
+            // optional column) — see this stage's own doc comment above.
+            .lightweight(fromVersion: AppSchemaV10.self, toVersion: AppSchemaV11.self),
         ]
     }
 }

@@ -83,17 +83,19 @@ public final class CompositionRoot {
     /// same 22 entities — adds
     /// `CalendarImportDecision.ignoredEventTitle: String?`). VX-038
     /// (External Event Decomposition / Suggested Split): `AppSchemaV9`
-    /// is now itself FROZEN and this default targets `AppSchemaV10`
-    /// ("10.0.0", 25 entities — activates
-    /// `DecomposedActivityLink.self`/`DecompositionEvidence.self`/
-    /// `DecompositionEvidenceChild.self`), the current genuine version.
-    /// This parameter must be updated at every future schema version
-    /// bump; see that same file's own "HOW TO ADD A NEW VERSION"
-    /// instructions — missing this exact step is the documented root
-    /// cause of the V1-V6 history above.
+    /// was then FROZEN and this default targeted `AppSchemaV10` ("10.0.0",
+    /// 25 entities — activates `DecomposedActivityLink.self`/
+    /// `DecompositionEvidence.self`/`DecompositionEvidenceChild.self`).
+    /// Athlete Connection Foundation A: `AppSchemaV10` is now itself
+    /// FROZEN and this default targets `AppSchemaV11` ("11.0.0", same 25
+    /// entities — adds `LoggedActivity.loggedByActorId: UUID?`), the
+    /// current genuine version. This parameter must be updated at every
+    /// future schema version bump; see that same file's own "HOW TO ADD
+    /// A NEW VERSION" instructions — missing this exact step is the
+    /// documented root cause of the V1-V6 history above.
     public static func build(
         persistence: PersistenceProviding = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV10.self,
+            versionedSchema: AppSchemaV11.self,
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),

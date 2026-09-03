@@ -37,6 +37,18 @@ public final class TrainingRepository {
     /// scope; nothing here verifies that `PlannedActivity` exists
     /// (that's a later story's concern, same principle S2.0 applied to
     /// `insertPlannedActivity` not verifying its `WeekPlan`).
+    /// Athlete Connection Foundation A: `loggedByActorId` defaults to
+    /// `nil` at this repository layer — see `LoggedActivity
+    /// .loggedByActorId`'s own doc comment for why the entity itself
+    /// stays permissive. The real, non-optional requirement ("every new
+    /// manually-created record receives the current actor") is enforced
+    /// one layer up, at `TrainingReflectionCoordinationService.logActivity`,
+    /// which every production call site already goes through and which
+    /// already requires a non-optional `authorId: ActorId` — this
+    /// repository/service pair stays permissive here specifically so the
+    /// many existing tests exercising `TrainingService`/`TrainingRepository`
+    /// directly for other Training behavior are not forced to supply an
+    /// actor unrelated to what they're testing.
     public func insertLoggedActivity(
         athleteId: AthleteId,
         plannedActivityId: PlannedActivityId? = nil,
@@ -50,7 +62,8 @@ public final class TrainingRepository {
         status: ActivityStatus,
         perceivedExertion: Int? = nil,
         source: String,
-        notes: String? = nil
+        notes: String? = nil,
+        loggedByActorId: ActorId? = nil
     ) throws -> LoggedActivity {
         let activity = LoggedActivity(
             athleteId: athleteId,
@@ -65,7 +78,8 @@ public final class TrainingRepository {
             status: status,
             perceivedExertion: perceivedExertion,
             source: source,
-            notes: notes
+            notes: notes,
+            loggedByActorId: loggedByActorId
         )
         modelContext.insert(activity)
         try modelContext.save()

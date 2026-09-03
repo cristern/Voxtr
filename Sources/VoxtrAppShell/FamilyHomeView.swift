@@ -137,7 +137,7 @@ public struct FamilyHomeView: View {
                         athleteRepository: athleteRepository,
                         sportRepository: sportRepository,
                         workspaceId: WorkspaceId(rawValue: family.workspace.id),
-                        actorId: ActorId(rawValue: family.participant.id)
+                        actorId: family.currentActor.actorId
                     )
                 )
             }
