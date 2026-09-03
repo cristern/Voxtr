@@ -45,7 +45,7 @@ struct CalendarDiagnosticEventsView: View {
             Text(event.title?.isEmpty == false ? event.title! : "(no title)")
                 .font(VoxtrTypography.cardTitle)
                 .foregroundStyle(VoxtrColor.textPrimary)
-            Text(event.startDate.formatted(date: .abbreviated, time: .shortened))
+            Text(ExternalEventTimeRangeFormatter.label(for: event))
                 .font(VoxtrTypography.metadata)
                 .foregroundStyle(VoxtrColor.textSecondary)
             if let notes = event.notes, !notes.isEmpty {

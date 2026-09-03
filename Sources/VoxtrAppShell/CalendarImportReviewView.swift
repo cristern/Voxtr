@@ -282,7 +282,7 @@ struct CalendarImportReviewView: View {
                 Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
                     .font(VoxtrTypography.cardTitle)
                     .foregroundStyle(VoxtrColor.textPrimary)
-                Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+                Text(ExternalEventTimeRangeFormatter.label(for: item.event))
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
                 Text(readySummary(staged))
@@ -328,7 +328,7 @@ struct CalendarImportReviewView: View {
                 Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
-                Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+                Text(ExternalEventTimeRangeFormatter.label(for: item.event))
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
             }
@@ -366,7 +366,7 @@ struct CalendarImportReviewView: View {
                 Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
                     .font(VoxtrTypography.cardTitle)
                     .foregroundStyle(VoxtrColor.textPrimary)
-                Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+                Text(ExternalEventTimeRangeFormatter.label(for: item.event))
                     .font(VoxtrTypography.metadata)
                     .foregroundStyle(VoxtrColor.textSecondary)
             }
@@ -696,7 +696,7 @@ private struct NeedsReviewRow: View {
             Text(item.event.title?.isEmpty == false ? item.event.title! : "(no title)")
                 .font(VoxtrTypography.cardTitle)
                 .foregroundStyle(VoxtrColor.textPrimary)
-            Text(item.event.startDate.formatted(date: .abbreviated, time: .shortened))
+            Text(ExternalEventTimeRangeFormatter.label(for: item.event))
                 .font(VoxtrTypography.metadata)
                 .foregroundStyle(VoxtrColor.textSecondary)
         }
