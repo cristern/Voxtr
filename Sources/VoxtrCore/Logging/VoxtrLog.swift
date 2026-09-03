@@ -20,6 +20,11 @@ public enum VoxtrLog {
         case core, athlete, parent, planning, training
         case reflection, development, decisionSupport, notifications, settings
         case appShell
+        /// Athlete Connection Foundation B1: the explicit CloudKit
+        /// transport layer (`CloudKitTransport`) — kept distinct from
+        /// `.core` so CloudKit diagnostic noise can be filtered
+        /// separately in Console.app during Internal Alpha bring-up.
+        case cloudKit
     }
 
     public static func logger(_ category: Category) -> Logger {

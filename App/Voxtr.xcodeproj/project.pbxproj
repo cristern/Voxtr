@@ -62,6 +62,7 @@
 		C593119F30B5ED9DE7B8011B /* CoachingApplicationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */; };
 		062C778F5E2A19CD67EBD0B6 /* HomeDashboardViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */; };
 		DBE5067DB7E1AD876D727B3B /* DailyFocusComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71016B54502164681527C81 /* DailyFocusComposerTests.swift */; };
+		B1B2B3B4B5B6B7B8B9BAB1B2 /* CloudKitTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1C2C3C4C5C6C7C8C9CAC1C2 /* CloudKitTransportTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -85,6 +86,8 @@
 		757E65D1420834776229303B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		365F56B57BBC3934DECCC815 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C5ED9EAB52F2089B524DF858 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A1B2C3D4E5F2 /* AthleteApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = AthleteApp.entitlements; sourceTree = "<group>"; };
+		A1B2C3D4E5F6A1B2C3D4E5F1 /* ParentApp.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ParentApp.entitlements; sourceTree = "<group>"; };
 		EBB26390B97A837AB448B151 /* DomainModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DomainModelTests.swift; sourceTree = "<group>"; };
 		3B8978A97683057A40946EF8 /* EventBusTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventBusTests.swift; sourceTree = "<group>"; };
 		58D01CF5CF81A61955C123A3 /* ModuleRegistryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModuleRegistryTests.swift; sourceTree = "<group>"; };
@@ -134,6 +137,7 @@
 		3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachingApplicationServiceTests.swift; sourceTree = "<group>"; };
 		5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDashboardViewModelTests.swift; sourceTree = "<group>"; };
 		A71016B54502164681527C81 /* DailyFocusComposerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyFocusComposerTests.swift; sourceTree = "<group>"; };
+		C1C2C3C4C5C6C7C8C9CAC1C2 /* CloudKitTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudKitTransportTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -198,6 +202,7 @@
 			children = (
 				833AD0C6928D0F0CC690D25E /* AthleteApp.swift */,
 				365F56B57BBC3934DECCC815 /* Info.plist */,
+				A1B2C3D4E5F6A1B2C3D4E5F2 /* AthleteApp.entitlements */,
 				887C5393CCCAFF3047798746 /* Assets.xcassets */,
 			);
 			path = AthleteApp;
@@ -208,6 +213,7 @@
 			children = (
 				D919B9677AFCD056440AF16C /* ParentApp.swift */,
 				C5ED9EAB52F2089B524DF858 /* Info.plist */,
+				A1B2C3D4E5F6A1B2C3D4E5F1 /* ParentApp.entitlements */,
 				757E65D1420834776229303B /* Assets.xcassets */,
 			);
 			path = ParentApp;
@@ -265,6 +271,7 @@
 				3803AC3039B01BD7632C488E /* CoachingApplicationServiceTests.swift */,
 				5FADCE37D712DC69D3CB1EC4 /* HomeDashboardViewModelTests.swift */,
 				A71016B54502164681527C81 /* DailyFocusComposerTests.swift */,
+				C1C2C3C4C5C6C7C8C9CAC1C2 /* CloudKitTransportTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -486,6 +493,7 @@
 				C593119F30B5ED9DE7B8011B /* CoachingApplicationServiceTests.swift in Sources */,
 				062C778F5E2A19CD67EBD0B6 /* HomeDashboardViewModelTests.swift in Sources */,
 				DBE5067DB7E1AD876D727B3B /* DailyFocusComposerTests.swift in Sources */,
+				B1B2B3B4B5B6B7B8B9BAB1B2 /* CloudKitTransportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -556,6 +564,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = AthleteApp/AthleteApp.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = AthleteApp/Info.plist;
@@ -578,6 +587,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = AthleteApp/AthleteApp.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = AthleteApp/Info.plist;
@@ -600,6 +610,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = ParentApp/ParentApp.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ParentApp/Info.plist;
@@ -622,6 +633,7 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGNING_ALLOWED = NO;
 				DEVELOPMENT_TEAM = "";
+				CODE_SIGN_ENTITLEMENTS = ParentApp/ParentApp.entitlements;
 				CURRENT_PROJECT_VERSION = 1;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ParentApp/Info.plist;
