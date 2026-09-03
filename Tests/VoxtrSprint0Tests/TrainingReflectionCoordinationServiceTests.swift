@@ -75,6 +75,153 @@ struct TrainingReflectionCoordinationServiceTests {
         #expect(try reflectionService.fetchActivityReflections(forAthlete: athleteId).isEmpty)
     }
 
+    // MARK: - Athlete Connection Foundation A: LoggedActivity actor attribution
+
+    @Test("A manual log created via the real production path (TrainingReflectionCoordinationService.logActivity) stores the caller's own ActorId as loggedByActorId — e.g. the Parent workspace-owner participant's ActorId")
+    @MainActor
+    func manualLogStoresCallerActorId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        // Simulates the Parent owner participant's own ActorId, exactly
+        // as `CurrentSessionActor.actorId` resolves it in production.
+        let parentActorId = ActorId()
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, authorId: parentActorId, sessionForm: nil
+        )
+
+        #expect(result.loggedActivity.loggedByActorId == parentActorId.rawValue)
+    }
+
+    @Test("Actor attribution survives a repository fetch/reload — not merely present on the in-memory object returned at creation")
+    @MainActor
+    func actorAttributionSurvivesRepositoryFetch() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let actorId = ActorId()
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, authorId: actorId, sessionForm: nil
+        )
+
+        let refetched = try trainingRepository.fetchLoggedActivity(byId: result.loggedActivity.loggedActivityId)
+        #expect(refetched?.loggedByActorId == actorId.rawValue)
+    }
+
+    @Test("loggedByActorId is independent of athleteId — the activity's subject never changes regardless of who logged it")
+    @MainActor
+    func athleteIdRemainsIndependentOfLoggedByActorId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        // athleteId and actorId are deliberately unrelated identifiers —
+        // proving neither is derived from the other.
+        let athleteId = AthleteId()
+        let actorId = ActorId()
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, authorId: actorId, sessionForm: nil
+        )
+
+        #expect(result.loggedActivity.athleteId == athleteId.rawValue)
+        #expect(result.loggedActivity.loggedByActorId == actorId.rawValue)
+        #expect(result.loggedActivity.athleteId != result.loggedActivity.loggedByActorId)
+    }
+
+    @Test("Regression: ActivityReflection.authorId attribution is unaffected by LoggedActivity's new loggedByActorId field — the existing, proven Reflection pattern this round reused is unchanged")
+    @MainActor
+    func reflectionAuthorAttributionUnchangedByLoggedActivityAttribution() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let authorId = ActorId()
+
+        let result = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, authorId: authorId, sessionForm: 3
+        )
+
+        guard case .saved(let reflection) = result.sessionFormOutcome else {
+            Issue.record("Expected .saved"); return
+        }
+        #expect(reflection.authorId == authorId.rawValue)
+        #expect(result.loggedActivity.loggedByActorId == authorId.rawValue)
+    }
+
+    @Test("A deliberately different actor can log an activity for the same AthleteProfile without creating a duplicate LoggedActivity model or changing the athlete's identity — actor attribution is provenance, never object ownership")
+    @MainActor
+    func differentActorLoggingSameAthleteCreatesNoDuplicateIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionRepository = ReflectionRepository(modelContext: container.mainContext)
+        let reflectionService = ReflectionService(repository: reflectionRepository)
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let parentActorId = ActorId()
+        // A second, distinct actor — simulating a future Athlete
+        // participant logging for their OWN existing AthleteProfile;
+        // this test only proves the actor-attribution mechanism itself
+        // is actor-agnostic, not any Athlete-session UI.
+        let secondActorId = ActorId()
+        #expect(parentActorId != secondActorId)
+
+        let first = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Morning run",
+            startedAt: .now, authorId: parentActorId, sessionForm: nil
+        )
+        let second = try coordinator.logActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Evening run",
+            startedAt: .now.addingTimeInterval(3600), authorId: secondActorId, sessionForm: nil
+        )
+
+        // Two distinct LoggedActivity records, same athlete subject,
+        // different actor attribution — never a second AthleteProfile,
+        // never the same LoggedActivity id.
+        #expect(first.loggedActivity.id != second.loggedActivity.id)
+        #expect(first.loggedActivity.athleteId == athleteId.rawValue)
+        #expect(second.loggedActivity.athleteId == athleteId.rawValue)
+        #expect(first.loggedActivity.loggedByActorId == parentActorId.rawValue)
+        #expect(second.loggedActivity.loggedByActorId == secondActorId.rawValue)
+        let allForAthlete = try trainingService.fetchLoggedActivities(forAthlete: athleteId)
+        #expect(allForAthlete.count == 2)
+    }
+
     /// Sport / Activity Identity domain foundation, Part 6: traces the
     /// full Planned -> Logged lifecycle exactly as
     /// `LogActivityViewModel.save()` drives it (copying the planned

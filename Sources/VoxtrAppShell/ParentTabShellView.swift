@@ -156,7 +156,7 @@ public struct ParentTabShellView: View {
                 activityChangeBroadcaster: activityChangeBroadcaster,
                 sportRepository: sportRepository,
                 calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                actorId: ActorId(rawValue: family.participant.id)
+                actorId: family.currentActor.actorId
             )
             .tabItem { Label("Plan", systemImage: "calendar") }
             .accessibilityIdentifier("parentTabs.plan")
@@ -183,7 +183,7 @@ public struct ParentTabShellView: View {
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
-                actorId: ActorId(rawValue: family.participant.id)
+                actorId: family.currentActor.actorId
             )
             .tabItem { Label("Training", systemImage: "figure.run") }
             .accessibilityIdentifier("parentTabs.training")
@@ -237,7 +237,7 @@ public struct ParentTabShellView: View {
                         athleteRepository: athleteRepository,
                         sportRepository: sportRepository,
                         workspaceId: WorkspaceId(rawValue: family.workspace.id),
-                        actorId: ActorId(rawValue: family.participant.id)
+                        actorId: family.currentActor.actorId
                     )
                 )
             }

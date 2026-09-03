@@ -8,6 +8,7 @@ import VoxtrAthleteDomain
 import VoxtrParentDomain
 import VoxtrReflectionDomain
 import VoxtrPlanningDomain
+import VoxtrTrainingDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
 import VoxtrCalendarPlanningDomain
@@ -198,12 +199,13 @@ struct PersistenceRecoveryTests {
         // AppSchemaV8. PR #48 follow-up (durable Suggested Ignore
         // evidence): updated again to AppSchemaV9. VX-038 (External
         // Event Decomposition / Suggested Split): updated again to
-        // AppSchemaV10, matching CompositionRoot.build's own real
+        // AppSchemaV10. Athlete Connection Foundation A: updated again to
+        // AppSchemaV11, matching CompositionRoot.build's own real
         // default after that round's bump. Keep this literal in
         // lockstep with CompositionRoot's own default on every future
         // version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV10.self,
+            versionedSchema: AppSchemaV11.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -792,6 +794,88 @@ struct PersistenceRecoveryTests {
             children: [(athleteId: AthleteId(rawValue: athleteRawId), sportId: nil, activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 40)]
         )
         #expect(try evidenceRepository.fetchChildren(forEvidence: evidence.decompositionEvidenceId).count == 1)
+    }
+
+    /// Athlete Connection Foundation A: mirrors `existingV9StoreMigratesToV10Successfully`
+    /// immediately above exactly, one version later — proves the
+    /// `loggedByActorId` migration's own explicit contract: a
+    /// `LoggedActivity` row logged before this field existed survives
+    /// completely intact, with `loggedByActorId == nil` (never a
+    /// fabricated actor, never silently assumed to be the Parent owner
+    /// merely because ParentApp was the only UI at the time), and the
+    /// new column is genuinely usable — not merely present — against
+    /// the migrated store: a NEW log created post-migration correctly
+    /// carries a real, explicit actor.
+    @Test("Athlete Connection Foundation A: a store created under AppSchemaV10 (with an existing LoggedActivity that has no loggedByActorId concept at all) reopens successfully under AppSchemaV11 via the lightweight migration stage — the existing log survives untouched with loggedByActorId == nil (never fabricated), and a newly logged activity against the migrated store correctly carries an explicit actor")
+    @MainActor
+    func existingV10StoreMigratesToV11Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v10-to-v11-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v10Schema = Schema(versionedSchema: AppSchemaV10.self)
+        var athleteRawId: UUID
+        var loggedActivityRawId: UUID
+        do {
+            let v10Container = try ModelContainer(
+                for: v10Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v10Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Sindre",
+                birthDate: LocalDate(year: 2013, month: 6, day: 2),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v10Container.mainContext.insert(athlete)
+            try v10Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            // Constructed via the FROZEN V10-era LoggedActivity type
+            // directly — this is exactly what an existing row looks
+            // like on disk before this migration: no loggedByActorId
+            // concept exists for it at all.
+            let legacyLog = AppSchemaV10.LoggedActivity(
+                athleteId: athlete.id, activityType: .individualTraining,
+                title: "Swim practice", startedAt: .now, durationMinutes: 40, status: .completed, source: "manual"
+            )
+            v10Container.mainContext.insert(legacyLog)
+            try v10Container.mainContext.save()
+            loggedActivityRawId = legacyLog.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V11) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV11.self`).
+        let v11Schema = Schema(versionedSchema: AppSchemaV11.self)
+        let v11Container = try ModelContainer(
+            for: v11Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v11Schema, url: storeURL)]
+        )
+
+        // The pre-existing LoggedActivity survived completely untouched
+        // except for the new column, which honestly starts unset.
+        let trainingRepository = TrainingRepository(modelContext: v11Container.mainContext)
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let migratedLogs = try trainingRepository.fetchLoggedActivities(forAthlete: athleteId)
+        #expect(migratedLogs.count == 1)
+        #expect(migratedLogs.first?.id == loggedActivityRawId)
+        #expect(migratedLogs.first?.title == "Swim practice")
+        #expect(migratedLogs.first?.loggedByActorId == nil)
+
+        // The new column is genuinely usable against the migrated store
+        // — proves the lightweight stage actually created it, not
+        // merely that the container opened. A newly logged activity
+        // against the SAME migrated store correctly carries a real,
+        // explicit actor.
+        let actorId = ActorId()
+        let newLog = try trainingRepository.insertLoggedActivity(
+            athleteId: athleteId, activityType: .individualTraining, title: "Track session",
+            startedAt: .now, durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: actorId
+        )
+        #expect(newLog.loggedByActorId == actorId.rawValue)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

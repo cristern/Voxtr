@@ -25,6 +25,22 @@ public final class LoggedActivity {
     public var perceivedExertion: Int?
     public var source: String // manual, planned, imported (v1.3 Section 9.1)
     public var notes: String?
+    /// Athlete Connection Foundation A: which `WorkspaceParticipant`
+    /// performed the logging action that created this record — provenance
+    /// of the LOGGING ACTION, never the athlete this activity belongs to
+    /// (`athleteId` above is unaffected and unrelated), never who
+    /// physically trained, and never inferred from `athleteId`. Optional
+    /// because every `LoggedActivity` row created before this field
+    /// existed has no reliable actor to attribute — `nil` here means
+    /// exactly "historically unknown," never "assumed Parent." The
+    /// production creation boundary (`TrainingService.logActivity`/
+    /// `TrainingRepository.insertLoggedActivity`) takes a REQUIRED
+    /// `ActorId` and always supplies a real value for every new record;
+    /// this stays optional at the raw entity level only so a genuinely
+    /// unattributed historical row remains constructible/representable,
+    /// the same reasoning `ActivityReminder.reminderText`'s own
+    /// migration-era optionality already established for this codebase.
+    public var loggedByActorId: UUID?
     public var createdAt: Date
     public var updatedAt: Date
     public var schemaVersion: Int
@@ -44,6 +60,7 @@ public final class LoggedActivity {
         perceivedExertion: Int? = nil,
         source: String,
         notes: String? = nil,
+        loggedByActorId: ActorId? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         schemaVersion: Int = 1
@@ -74,6 +91,7 @@ public final class LoggedActivity {
         self.perceivedExertion = perceivedExertion
         self.source = source
         self.notes = notes
+        self.loggedByActorId = loggedByActorId?.rawValue
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.schemaVersion = schemaVersion

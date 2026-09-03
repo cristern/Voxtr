@@ -165,6 +165,13 @@ public final class TrainingReflectionCoordinationService {
         sessionForm: Int?,
         sessionFormVisibility: VisibilityPolicy = .sharedWithGuardians
     ) throws -> LoggedActivityWithSessionForm {
+        // Athlete Connection Foundation A: `authorId` was already
+        // required here (used for the Session Form's `ActivityReflection
+        // .authorId` below) — now ALSO forwarded into Training's own
+        // `loggedByActorId`, so the one actor this caller already
+        // supplies attributes both canonical records it can produce,
+        // rather than Training silently having none while Reflection
+        // already had one.
         let loggedActivity = try trainingService.logActivity(
             athleteId: athleteId,
             plannedActivityId: plannedActivityId,
@@ -178,7 +185,8 @@ public final class TrainingReflectionCoordinationService {
             status: status,
             perceivedExertion: perceivedExertion,
             source: source,
-            notes: notes
+            notes: notes,
+            loggedByActorId: authorId
         )
         // The canonical write already succeeded — broadcast now,
         // regardless of the Session Form sub-write's own outcome below

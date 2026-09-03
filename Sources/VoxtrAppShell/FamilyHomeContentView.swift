@@ -315,7 +315,7 @@ public struct FamilyHomeContentView: View {
                         trainingService: trainingService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                         notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
-                        actorId: ActorId(rawValue: family.participant.id),
+                        actorId: family.currentActor.actorId,
                         onActivityLogged: { viewModel.refresh() }
                     )
                 case .familySchedule:
@@ -326,7 +326,7 @@ public struct FamilyHomeContentView: View {
                             planningService: planningService,
                             resolveAthleteColor: viewModel.resolvedAthleteColor
                         ),
-                        actorId: ActorId(rawValue: family.participant.id),
+                        actorId: family.currentActor.actorId,
                         planningService: planningService,
                         trainingService: trainingService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
@@ -919,7 +919,7 @@ public struct FamilyHomeContentView: View {
             weeklyReflectionService: weeklyReflectionService,
             coachingApplicationService: coachingApplicationService,
             athleteId: athlete.athleteId,
-            committedByActorId: ActorId(rawValue: family.participant.id),
+            committedByActorId: family.currentActor.actorId,
             athleteManagementViewModel: athleteManagementViewModel,
             activityChangeBroadcaster: activityChangeBroadcaster,
             sleepCoordinationService: sleepCoordinationService,
@@ -936,7 +936,7 @@ public struct FamilyHomeContentView: View {
             plannedActivity: row.plannedActivity,
             athleteId: row.athleteId,
             athleteDisplayName: row.athleteName,
-            actorId: ActorId(rawValue: family.participant.id),
+            actorId: family.currentActor.actorId,
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
