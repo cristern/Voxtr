@@ -1845,7 +1845,7 @@ struct Sprint1CoreFlowCompletionTests {
         let completedLogged = try TrainingService(repository: TrainingRepository(modelContext: container.mainContext)).logActivity(
             athleteId: athleteId, plannedActivityId: completedActivity.plannedActivityId,
             activityType: .individualTraining, title: completedActivity.title, startedAt: .now,
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed, loggedByActorId: ActorId()
         )
         let completedViewModel = ActivityDetailViewModel(
             activity: completedActivity, isCompleted: true, loggedActivity: completedLogged,
