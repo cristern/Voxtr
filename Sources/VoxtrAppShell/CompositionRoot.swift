@@ -35,17 +35,28 @@ public final class CompositionRoot {
     /// `FamilyRestorationState`'s doc comment for the three possible
     /// states.
     public let restorationState: FamilyRestorationState
+    /// Athlete Connection Foundation B1: the explicit CloudKit transport
+    /// infrastructure (see `CloudKitTransport`'s own doc comment for the
+    /// architecture boundaries it preserves). Constructed and registered
+    /// here purely to prove it CAN be constructed as part of real app
+    /// composition — nothing in `build()` calls
+    /// `CloudKitTransport.refreshAvailability()` or otherwise triggers a
+    /// CloudKit network call; doing so remains a later slice's explicit
+    /// choice (B3), not an automatic side effect of every app launch.
+    public let cloudKitTransport: CloudKitTransport
 
     private init(
         container: DIContainer,
         eventBus: EventBus,
         modelContainer: ModelContainer,
-        restorationState: FamilyRestorationState
+        restorationState: FamilyRestorationState,
+        cloudKitTransport: CloudKitTransport
     ) {
         self.container = container
         self.eventBus = eventBus
         self.modelContainer = modelContainer
         self.restorationState = restorationState
+        self.cloudKitTransport = cloudKitTransport
     }
 
     /// CRITICAL PERSISTENCE RECOVERY: this default previously targeted
@@ -99,13 +110,15 @@ public final class CompositionRoot {
             migrationPlan: AppSchemaMigrationPlan.self
         ),
         sync: SyncProviding = NoopSyncProvider(),
-        featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider()
+        featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider(),
+        cloudKitTransport: CloudKitTransport = CloudKitTransport()
     ) async throws -> CompositionRoot {
         let container = DIContainer()
         let eventBus = EventBus()
 
         container.register(SyncProviding.self) { sync }
         container.register(FeatureFlagProviding.self) { featureFlags }
+        container.register(CloudKitTransport.self) { cloudKitTransport }
 
         let modelContainer = try persistence.makeModelContainer()
 
@@ -294,7 +307,8 @@ public final class CompositionRoot {
             container: container,
             eventBus: eventBus,
             modelContainer: modelContainer,
-            restorationState: restorationState
+            restorationState: restorationState,
+            cloudKitTransport: cloudKitTransport
         )
     }
 }
