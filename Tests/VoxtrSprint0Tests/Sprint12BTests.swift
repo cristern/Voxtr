@@ -299,7 +299,8 @@ struct Sprint12BTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Spontaneous run",
-            startedAt: .now, durationMinutes: 30
+            startedAt: .now, durationMinutes: 30,
+            loggedByActorId: ActorId()
         )
 
         let composer = TodayActivityComposer(
@@ -341,7 +342,8 @@ struct Sprint12BTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         let composer = TodayActivityComposer(
@@ -435,7 +437,8 @@ struct Sprint12BTests {
         let materialized = try planningService.materializeOrFetchExisting(suggestion, forWeekPlan: weekPlan.weekPlanId)
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
-            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90
+            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90,
+            loggedByActorId: ActorId()
         )
 
         let composer = TodayActivityComposer(
@@ -472,7 +475,8 @@ struct Sprint12BTests {
 
         _ = try trainingService.logActivity(
             athleteId: oliverId, activityType: .individualTraining, title: "Oliver's run",
-            startedAt: .now, durationMinutes: 30
+            startedAt: .now, durationMinutes: 30,
+            loggedByActorId: ActorId()
         )
 
         let composer = TodayActivityComposer(
@@ -588,13 +592,15 @@ struct Sprint12BTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         #expect(throws: TrainingServiceError.plannedActivityAlreadyLinked) {
             try trainingService.logActivity(
                 athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-                activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+                activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+                loggedByActorId: ActorId()
             )
         }
     }
@@ -701,7 +707,8 @@ struct Sprint12BTests {
         // Stage 3: actually logged.
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: materialized.plannedActivityId,
-            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90
+            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90,
+            loggedByActorId: ActorId()
         )
         #expect(try !trainingService.fetchLoggedActivities(forPlannedActivity: materialized.plannedActivityId).isEmpty)
     }

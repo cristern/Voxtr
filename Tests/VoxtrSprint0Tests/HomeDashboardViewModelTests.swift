@@ -206,7 +206,8 @@ struct HomeDashboardViewModelTests {
         )
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: plannedActivity.plannedActivityId,
-            activityType: .individualTraining, title: "Endurance run", startedAt: .now
+            activityType: .individualTraining, title: "Endurance run", startedAt: .now,
+            loggedByActorId: ActorId()
         )
         let viewModel = HomeDashboardViewModel(
             trainingPlanningCoordinationService: trainingPlanningCoordinationService,
@@ -692,7 +693,8 @@ struct HomeDashboardViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: "Evening swim", startedAt: .now,
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let homeDashboardViewModel = HomeDashboardViewModel(
@@ -968,7 +970,8 @@ struct HomeDashboardViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
         // Mirrors HomeDashboardView's onActivityLogged reload exactly —
         // this is what used to blank the already-pushed destination.

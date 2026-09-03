@@ -690,7 +690,8 @@ struct TrainingReflectionCoordinationServiceTests {
             title: "Same label",
             startedAt: sameInstant,
             durationMinutes: 30,
-            status: .completed
+            status: .completed,
+            loggedByActorId: ActorId()
         )
         let standalone = try trainingService.logActivity(
             athleteId: athleteId,
@@ -698,7 +699,8 @@ struct TrainingReflectionCoordinationServiceTests {
             title: "Same label",
             startedAt: sameInstant,
             durationMinutes: 45,
-            status: .completed
+            status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let linkedDetail = try coordinator.loggedActivityDetail(
@@ -784,7 +786,8 @@ struct TrainingReflectionCoordinationServiceTests {
             title: "Rest day",
             startedAt: .now,
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId,
@@ -826,7 +829,8 @@ struct TrainingReflectionCoordinationServiceTests {
             title: "Mistaken cancellation",
             startedAt: .now,
             durationMinutes: 1,
-            status: .cancelled
+            status: .cancelled,
+            loggedByActorId: ActorId()
         )
         let original = try reflectionService.recordActivityReflection(
             athleteId: athleteId,
@@ -896,7 +900,8 @@ struct TrainingReflectionCoordinationServiceTests {
                 title: "No reflection",
                 startedAt: .now,
                 durationMinutes: 1,
-                status: status
+                status: status,
+                loggedByActorId: ActorId()
             )
             try coordinator.reopenNoTrainingOutcome(logged.loggedActivityId, athleteId: athleteId)
             #expect(throws: TrainingServiceError.loggedActivityNotFound) {

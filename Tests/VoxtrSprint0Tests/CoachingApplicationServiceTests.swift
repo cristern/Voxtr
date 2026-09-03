@@ -76,7 +76,8 @@ struct CoachingApplicationServiceTests {
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: plannedActivity.plannedActivityId,
             activityType: .individualTraining, title: "Endurance run",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            loggedByActorId: ActorId()
         )
 
         let presentation = try applicationService.coachingPresentation(forAthlete: athleteId, weekStart: Self.weekStart)

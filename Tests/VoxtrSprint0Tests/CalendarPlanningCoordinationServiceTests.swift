@@ -906,7 +906,8 @@ struct CalendarPlanningCoordinationServiceTests {
         )
         _ = try fixture.trainingService.logActivity(
             athleteId: fixture.athleteId, plannedActivityId: imported.plannedActivityId,
-            activityType: .individualTraining, title: "Team Practice", startedAt: start
+            activityType: .individualTraining, title: "Team Practice", startedAt: start,
+            loggedByActorId: ActorId()
         )
 
         try fixture.coordinationService.disconnectSource(source.externalPlanningSourceId)
@@ -1944,7 +1945,8 @@ struct CalendarPlanningCoordinationServiceTests {
         )
         _ = try fixture.trainingService.logActivity(
             athleteId: fixture.athleteId, plannedActivityId: imported.plannedActivityId,
-            activityType: .individualTraining, title: "Practice", startedAt: start
+            activityType: .individualTraining, title: "Practice", startedAt: start,
+            loggedByActorId: ActorId()
         )
 
         let outcome = try fixture.coordinationService.removeImportedActivities(for: source, removedBy: ActorId())

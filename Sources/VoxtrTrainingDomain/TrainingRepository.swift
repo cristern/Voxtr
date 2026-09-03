@@ -37,18 +37,18 @@ public final class TrainingRepository {
     /// scope; nothing here verifies that `PlannedActivity` exists
     /// (that's a later story's concern, same principle S2.0 applied to
     /// `insertPlannedActivity` not verifying its `WeekPlan`).
-    /// Athlete Connection Foundation A: `loggedByActorId` defaults to
-    /// `nil` at this repository layer — see `LoggedActivity
-    /// .loggedByActorId`'s own doc comment for why the entity itself
-    /// stays permissive. The real, non-optional requirement ("every new
-    /// manually-created record receives the current actor") is enforced
-    /// one layer up, at `TrainingReflectionCoordinationService.logActivity`,
-    /// which every production call site already goes through and which
-    /// already requires a non-optional `authorId: ActorId` — this
-    /// repository/service pair stays permissive here specifically so the
-    /// many existing tests exercising `TrainingService`/`TrainingRepository`
-    /// directly for other Training behavior are not forced to supply an
-    /// actor unrelated to what they're testing.
+    /// Athlete Connection Foundation A / PR #59 follow-up:
+    /// `loggedByActorId` is a REQUIRED `ActorId` — this is the canonical
+    /// write boundary for new `LoggedActivity` rows, and every new
+    /// human-created record must carry explicit actor provenance. This
+    /// repository does not fabricate one, default to Parent, or derive
+    /// one from `athleteId`; it persists `loggedByActorId.rawValue`
+    /// exactly as supplied. This is distinct from `LoggedActivity
+    /// .loggedByActorId`'s own `UUID?` storage staying optional at the
+    /// entity level (see that property's doc comment) — that optionality
+    /// exists ONLY to represent historical rows migrated before this
+    /// field existed, never to make new writes through this method
+    /// omissible.
     public func insertLoggedActivity(
         athleteId: AthleteId,
         plannedActivityId: PlannedActivityId? = nil,
@@ -63,7 +63,7 @@ public final class TrainingRepository {
         perceivedExertion: Int? = nil,
         source: String,
         notes: String? = nil,
-        loggedByActorId: ActorId? = nil
+        loggedByActorId: ActorId
     ) throws -> LoggedActivity {
         let activity = LoggedActivity(
             athleteId: athleteId,

@@ -1258,7 +1258,8 @@ struct NotificationsProductionEventPipelineTests {
         _ = try fixture.trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
             title: "Endurance run", startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-            durationMinutes: 45, status: .completed, source: "manual"
+            durationMinutes: 45, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
 
         #expect(try fixture.activityReminderRepository.fetchAll(forPlannedActivity: activity.plannedActivityId).isEmpty)

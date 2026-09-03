@@ -61,12 +61,19 @@ public final class TrainingService {
 
     /// Creates a `LoggedActivity`, optionally linked to a
     /// `PlannedActivity` by typed ID.
-    /// Athlete Connection Foundation A: `loggedByActorId` — see
-    /// `LoggedActivity.loggedByActorId`'s own doc comment for the exact
-    /// semantics and why this stays optional at this layer (the
-    /// non-optional requirement lives at
-    /// `TrainingReflectionCoordinationService.logActivity`, the one
-    /// method every production call site actually calls).
+    /// Athlete Connection Foundation A / PR #59 follow-up:
+    /// `loggedByActorId` is a REQUIRED `ActorId` — every new
+    /// human-created `LoggedActivity` written through this canonical
+    /// write API must carry explicit actor provenance. This is distinct
+    /// from `LoggedActivity.loggedByActorId`'s own `UUID?` storage
+    /// staying optional at the entity level (see that property's doc
+    /// comment) — that optionality exists ONLY to represent historical
+    /// rows migrated before this field existed, never to make new writes
+    /// through this method omissible. Do not fabricate an actor here,
+    /// default to Parent, or derive one from `athleteId` — the caller
+    /// (ultimately `TrainingReflectionCoordinationService.logActivity`,
+    /// which every production call site already goes through) supplies
+    /// the real `CurrentSessionActor`-derived value.
     public func logActivity(
         athleteId: AthleteId,
         plannedActivityId: PlannedActivityId? = nil,
@@ -81,7 +88,7 @@ public final class TrainingService {
         perceivedExertion: Int? = nil,
         source: String = "manual",
         notes: String? = nil,
-        loggedByActorId: ActorId? = nil
+        loggedByActorId: ActorId
     ) throws -> LoggedActivity {
         // Sport / Activity Identity domain foundation: the ONE canonical
         // rule (`ActivityIdentity`), checked here as a catchable error —

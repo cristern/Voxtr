@@ -443,11 +443,13 @@ struct DevelopmentTimelinePointProjectionTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
         _ = try planningService.addPlannedActivity(
@@ -526,7 +528,8 @@ struct DevelopmentTimelinePointProjectionTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordSleep(
             athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),

@@ -48,7 +48,8 @@ struct WeeklyReviewCoordinationServiceTests {
         )
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Easy jog",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now,
+            loggedByActorId: ActorId()
         )
         _ = try reflection.recordWeeklyReflection(
             athleteId: athleteId, weekStart: Self.weekStart, authorId: ActorId(),
@@ -122,7 +123,8 @@ struct WeeklyReviewCoordinationServiceTests {
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: plannedActivity.plannedActivityId,
             activityType: .individualTraining, title: "Endurance run",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            loggedByActorId: ActorId()
         )
 
         let result = try coordinator.weeklyReview(forAthlete: athleteId, weekStart: Self.weekStart)
@@ -153,7 +155,8 @@ struct WeeklyReviewCoordinationServiceTests {
         _ = try planning.getOrCreateWeekPlan(athleteId: athleteId, weekStart: Self.weekStart)
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Spontaneous run",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now,
+            loggedByActorId: ActorId()
         )
 
         let result = try coordinator.weeklyReview(forAthlete: athleteId, weekStart: Self.weekStart)
@@ -191,7 +194,8 @@ struct WeeklyReviewCoordinationServiceTests {
         )
         _ = try training.logActivity(
             athleteId: otherAthleteId, activityType: .individualTraining, title: "Other athlete's log",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now,
+            loggedByActorId: ActorId()
         )
         _ = try reflection.recordWeeklyReflection(
             athleteId: otherAthleteId, weekStart: Self.weekStart, authorId: ActorId(), visibility: .privateToAthlete
@@ -233,7 +237,8 @@ struct WeeklyReviewCoordinationServiceTests {
         )
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Next week's log",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 13)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 13)) ?? .now,
+            loggedByActorId: ActorId()
         )
         _ = try reflection.recordWeeklyReflection(
             athleteId: athleteId, weekStart: otherWeekStart, authorId: ActorId(), visibility: .privateToAthlete
@@ -328,11 +333,13 @@ struct WeeklyReviewCoordinationServiceTests {
         )
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Wednesday log",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now,
+            loggedByActorId: ActorId()
         )
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Monday log",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            loggedByActorId: ActorId()
         )
 
         let first = try coordinator.weeklyReview(forAthlete: athleteId, weekStart: Self.weekStart)
