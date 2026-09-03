@@ -2973,7 +2973,7 @@ struct CalendarImportReviewViewModelTests {
         #expect(stagedB.athleteId == nil)
     }
 
-    @Test("VX-038 unified test 9/10/11/12: a Parent-confirmed Ready Split — WITHOUT importing first — teaches a matching untouched event within the same Review workflow, with correct shared Athlete/Sport, child count/order, Activity Types, offsets and durations, and it does not arrive auto-Ready")
+    @Test("VX-038 unified test 9/10/11/12: a Parent-confirmed Ready Split — WITHOUT importing first — teaches a matching untouched event within the same Review workflow, with correct shared Athlete/Sport, child count/order, Activity Types, offsets and durations, and (Lead Review Blocker 1) arrives already Ready — the SAME confirmation status the equivalent ordinary exact match already gets")
     @MainActor
     func readySplitTeachesMatchingEventWithoutImportFirst() throws {
         let fixture = try makeFixture()
@@ -3009,13 +3009,18 @@ struct CalendarImportReviewViewModelTests {
         #expect(stagedB.splitSportId == sport.sportId)
         #expect(stagedB.splitChildren.map(\.startOffsetMinutes) == [0, 70])
         #expect(stagedB.splitChildren.map(\.durationMinutes) == [40, 60])
-        // Never arrives auto-Ready — the Parent must still confirm it.
-        #expect(!stagedB.isConfirmedReady)
+        // Lead Review follow-up (Blocker 1 — single/split Ready semantic
+        // parity): this exact session-ready match arrives ALREADY Ready,
+        // exactly like the equivalent ordinary exact match does — shape
+        // must never determine confirmation status, only evidence
+        // strength does, and this match is exact either way.
+        #expect(stagedB.isConfirmedReady)
+        #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(itemB.externalEventKey))
     }
 
-    @Test("VX-038 unified test 13: explicitly marking the Suggested Split event B Ready makes it itself eligible as Parent-approved evidence for a THIRD matching event C")
+    @Test("VX-038 unified test 13: a Split classification derived from session Ready evidence arrives already Ready (Blocker 1 parity), but only becomes GENUINE session evidence itself once the Parent explicitly acts on it (hasUserInteraction, Part 12)")
     @MainActor
-    func markingSuggestedSplitReadyMakesItEligibleAsEvidenceForThirdEvent() throws {
+    func sessionDerivedSplitBecomesGenuineEvidenceOnlyAfterExplicitParentAction() throws {
         let fixture = try makeFixture()
         addEvent(fixture, identifier: "evt-A", title: "Hockey training", hoursFromReference: 1)
         addEvent(fixture, identifier: "evt-B", title: "Hockey training", hoursFromReference: 24)
@@ -3029,22 +3034,21 @@ struct CalendarImportReviewViewModelTests {
         viewModel.addSplitChild(for: itemA.externalEventKey)
         viewModel.markReady(for: itemA.externalEventKey)
 
-        // B received the Suggested Split (not yet confirmed).
-        #expect(!viewModel.stagedClassification(for: itemB.externalEventKey).isConfirmedReady)
+        // B arrives already Ready (Blocker 1 — same confirmation status
+        // as the equivalent ordinary exact match), but purely as a
+        // system prefill it never itself confirmed.
+        let stagedBBeforeTouch = viewModel.stagedClassification(for: itemB.externalEventKey)
+        #expect(stagedBBeforeTouch.isConfirmedReady)
+        #expect(!stagedBBeforeTouch.hasUserInteraction)
 
-        // The Parent explicitly confirms B Ready.
+        // The Parent explicitly re-confirms B — this is the ONE thing
+        // that makes B itself genuinely Parent-approved evidence,
+        // exactly like `markReady(for:)`'s own doc comment describes
+        // (Part 12: a bare system-arrived Ready state must not itself
+        // teach a third event until the Parent does something explicit
+        // with it).
         viewModel.markReady(for: itemB.externalEventKey)
-        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).isConfirmedReady)
-
-        // A THIRD matching event C now appears — it must also receive
-        // the Suggested Split, proving B's own confirmation propagated.
-        addEvent(fixture, identifier: "evt-C", title: "Hockey training", hoursFromReference: 48)
-        viewModel.load()
-        let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-C" })
-        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
-        #expect(stagedC.isSplitEnabled)
-        #expect(stagedC.isSuggestedSplitPrefill)
-        #expect(stagedC.splitAthleteId == fixture.athleteId)
+        #expect(viewModel.stagedClassification(for: itemB.externalEventKey).hasUserInteraction)
     }
 
     @Test("VX-038 unified test 14: editing a Ready Split invalidates its evidence eligibility until Ready is explicitly confirmed again")
@@ -3423,7 +3427,7 @@ struct CalendarImportReviewViewModelTests {
         #expect(staged.splitChildren.map(\.durationMinutes) == [30, 60])
     }
 
-    @Test("VX-038 unified test 30: no automatic Import occurs anywhere in the Ready-time recognition flow")
+    @Test("VX-038 unified test 30: no automatic Import occurs anywhere in the Ready-time recognition flow, even once both A and B legitimately appear Ready")
     @MainActor
     func noAutomaticImportOccursInReadyTimeRecognitionFlow() throws {
         let fixture = try makeFixture()
@@ -3440,10 +3444,219 @@ struct CalendarImportReviewViewModelTests {
 
         let itemB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-B" })
         #expect(viewModel.stagedClassification(for: itemB.externalEventKey).isSuggestedSplitPrefill)
-        // Neither A nor B was ever imported by this flow alone.
+        // Lead Review follow-up (Blocker 1): B now arrives already Ready
+        // too — the SAME confirmation status as the ordinary case — so
+        // it legitimately appears in readyToImportItems alongside A.
+        // Neither was ever imported by this flow alone, though: no
+        // PlannedActivity exists until the Parent's own explicit
+        // bulkImportReadyItems() call, which this test never makes.
         #expect(try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType).isEmpty)
         #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(itemA.externalEventKey))
-        #expect(!viewModel.readyToImportItems.map(\.externalEventKey).contains(itemB.externalEventKey))
+        #expect(viewModel.readyToImportItems.map(\.externalEventKey).contains(itemB.externalEventKey))
+    }
+
+    // MARK: - Lead Review follow-up (PR #56): Ready semantic parity (Blocker 1)
+
+    /// Required tests 1-4/6: Single and Split Ready-time recognition
+    /// must share the SAME confirmation/import-workflow lifecycle —
+    /// proven BEHAVIORALLY (a single bulk-import call imports both
+    /// without any further Parent action on either), not merely by
+    /// comparing boolean fields.
+    @Test("VX-038 Lead Review (Blocker 1) test: Single and Split Ready-time recognition share the SAME confirmation and import-workflow lifecycle")
+    @MainActor
+    func singleAndSplitReadyRecognitionShareTheSameLifecycle() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-single-A", title: "Swim practice", hoursFromReference: 1)
+        addEvent(fixture, identifier: "evt-single-B", title: "Swim practice", hoursFromReference: 24)
+        addEvent(fixture, identifier: "evt-split-C", title: "Hockey training", hoursFromReference: 2)
+        addEvent(fixture, identifier: "evt-split-D", title: "Hockey training", hoursFromReference: 25)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemSingleA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single-A" })
+        let itemSplitC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split-C" })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemSingleA.externalEventKey)
+        viewModel.markReady(for: itemSingleA.externalEventKey)
+
+        viewModel.setSplitEnabled(true, for: itemSplitC.externalEventKey)
+        viewModel.setSplitAthlete(fixture.athleteId, for: itemSplitC.externalEventKey)
+        viewModel.addSplitChild(for: itemSplitC.externalEventKey)
+        viewModel.markReady(for: itemSplitC.externalEventKey)
+
+        let itemSingleB = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-single-B" })
+        let itemSplitD = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-split-D" })
+
+        // Field-level parity: shape alone never determines readiness.
+        let stagedB = viewModel.stagedClassification(for: itemSingleB.externalEventKey)
+        let stagedD = viewModel.stagedClassification(for: itemSplitD.externalEventKey)
+        #expect(stagedB.isConfirmedReady == stagedD.isConfirmedReady)
+        #expect(stagedB.isConfirmedReady)
+
+        // Behavioral parity: WITHOUT any further Parent action on B or
+        // D, one bulk import call imports every currently-Ready item —
+        // including both B and D, exactly like it already does for A
+        // and C. This is the actual workflow proof, not just a field
+        // comparison.
+        viewModel.bulkImportReadyItems()
+        let imported = try fixture.planningService.fetchPlannedActivities(externalSourceType: CalendarPlanningCoordinationService.externalSourceType)
+        let importedKeys = Set(imported.map(\.externalSourceId))
+        #expect(importedKeys.contains(itemSingleA.externalEventKey))
+        #expect(importedKeys.contains(itemSingleB.externalEventKey))
+        #expect(importedKeys.contains(itemSplitC.externalEventKey))
+        #expect(importedKeys.contains(itemSplitD.externalEventKey))
+    }
+
+    /// Required test 5: a WEAK Similar-Event Suggestion (V1.2 — no exact
+    /// match) must still arrive un-confirmed — this round only changes
+    /// the session-Ready tier's own confirmation rule for an EXACT
+    /// match; weaker evidence is untouched.
+    @Test("VX-038 Lead Review test: a weak Similar-Event Suggestion still arrives NOT Ready — evidence strength, not shape, controls confirmation")
+    @MainActor
+    func weakSimilarEventSuggestionStillArrivesNotReady() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14 tirsdag", hoursFromReference: 24)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+        let staged = secondViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.athleteId == fixture.athleteId)
+        #expect(!staged.isConfirmedReady)
+    }
+
+    // MARK: - Lead Review follow-up (PR #56): recurring conflict must veto title fallback (Blocker 2)
+
+    /// Required tests 7/8: two Parent-confirmed Ready events sharing the
+    /// SAME recurring eventIdentifier but carrying DIFFERENT shapes make
+    /// the recurring tier conflicted for that series — evaluating a
+    /// LATER occurrence of that same series must receive NO recognition
+    /// at all, even though its own exact title ("Hockey" — shared with
+    /// occurrence A only, not B) would otherwise resolve unambiguously
+    /// through the title tier alone. Stronger conflicting evidence must
+    /// veto the weaker fallback, never be silently bypassed by it.
+    @Test("VX-038 Lead Review (Blocker 2) test 7/8: a recurring-series conflict vetoes exact-title fallback, even when the title index alone would otherwise resolve unambiguously")
+    @MainActor
+    func recurringConflictVetoesTitleFallback() throws {
+        let fixture = try makeFixture()
+        let secondAthleteId = try addSecondAthlete(fixture)
+        let occurrenceA = Self.referenceDate.addingTimeInterval(3600)
+        let occurrenceB = occurrenceA.addingTimeInterval(24 * 3600)
+        let occurrenceC = occurrenceA.addingTimeInterval(48 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-1", occurrenceDate: occurrenceA, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceA, endDate: occurrenceA.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-1", occurrenceDate: occurrenceB, calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: occurrenceB, endDate: occurrenceB.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-1", occurrenceDate: occurrenceC, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceC, endDate: occurrenceC.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            )
+        ]
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceA })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceB })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        // A DIFFERENT shape, marked Ready on ANOTHER occurrence of the
+        // SAME recurring series — this is what makes the recurring tier
+        // conflicted for "SERIES-1".
+        viewModel.setStagedAthlete(secondAthleteId, for: itemB.externalEventKey)
+        viewModel.markReady(for: itemB.externalEventKey)
+
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceC })
+        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
+        // NO recognition at all — the recurring conflict vetoes the
+        // exact-title fallback, even though "Hockey" alone (shared only
+        // with occurrence A's own title) would otherwise resolve
+        // unambiguously via the title tier.
+        #expect(stagedC.athleteId == nil)
+        #expect(!stagedC.isConfirmedReady)
+    }
+
+    /// Required test 9: when the recurring tier has NO evidence at all
+    /// (a genuinely different series with no Ready siblings of its
+    /// own), the exact-title fallback still applies normally.
+    @Test("VX-038 Lead Review (Blocker 2) test 9: exact-title fallback still applies when the recurring tier has no evidence at all")
+    @MainActor
+    func titleFallbackAppliesWhenRecurringTierHasNoEvidence() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-A", title: "Hockey", hoursFromReference: 1)
+        let occurrenceC = Self.referenceDate.addingTimeInterval(48 * 3600)
+        var events = fixture.calendarProvider.eventsByCalendar["cal-familie"] ?? []
+        events.append(
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-2", occurrenceDate: occurrenceC, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceC, endDate: occurrenceC.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            )
+        )
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = events
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-A" })
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.eventIdentifier == "SERIES-2" })
+        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
+        // itemC is recurring ("SERIES-2"), which has NO Ready evidence
+        // of its own — falls through cleanly to the exact-title
+        // fallback, which DOES resolve (A shares the same "Hockey" title).
+        #expect(stagedC.athleteId == fixture.athleteId)
+        #expect(stagedC.isConfirmedReady)
+    }
+
+    /// Required test 10: two AGREEING Ready shapes for the SAME
+    /// recurring series (no conflict) still produce recognition
+    /// normally through the recurring tier.
+    @Test("VX-038 Lead Review (Blocker 2) test 10: two agreeing Ready shapes for the same recurring series still produce recognition normally")
+    @MainActor
+    func agreeingRecurringReadyShapesStillProduceRecognition() throws {
+        let fixture = try makeFixture()
+        let occurrenceA = Self.referenceDate.addingTimeInterval(3600)
+        let occurrenceB = occurrenceA.addingTimeInterval(24 * 3600)
+        let occurrenceC = occurrenceA.addingTimeInterval(48 * 3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-3", occurrenceDate: occurrenceA, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceA, endDate: occurrenceA.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-3", occurrenceDate: occurrenceB, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceB, endDate: occurrenceB.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            ),
+            ExternalCalendarEvent(
+                eventIdentifier: "SERIES-3", occurrenceDate: occurrenceC, calendarIdentifier: "cal-familie", title: "Hockey",
+                startDate: occurrenceC, endDate: occurrenceC.addingTimeInterval(3600), isAllDay: false, isRecurring: true
+            )
+        ]
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let itemA = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceA })
+        let itemB = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceB })
+
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemA.externalEventKey)
+        viewModel.markReady(for: itemA.externalEventKey)
+        viewModel.setStagedAthlete(fixture.athleteId, for: itemB.externalEventKey)
+        viewModel.markReady(for: itemB.externalEventKey)
+
+        let itemC = try #require(viewModel.reviewQueue.first { $0.event.occurrenceDate == occurrenceC })
+        let stagedC = viewModel.stagedClassification(for: itemC.externalEventKey)
+        #expect(stagedC.athleteId == fixture.athleteId)
+        #expect(stagedC.isConfirmedReady)
     }
 }
 
