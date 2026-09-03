@@ -75,7 +75,8 @@ struct TrainingPlanningCoordinationServiceTests {
             plannedActivityId: plannedActivity.plannedActivityId,
             activityType: .individualTraining,
             title: "Endurance run",
-            startedAt: referenceDate
+            startedAt: referenceDate,
+            loggedByActorId: ActorId()
         )
 
         let results = try coordinationService.todaysPlannedActivitiesWithCompletion(

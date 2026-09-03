@@ -124,12 +124,14 @@ struct StatisticsViewModelTests {
         // Outside the Last 4 Weeks window ending 2026-03-31 (window starts 2026-03-09).
         _ = try trainingService.logActivity(
             athleteId: athlete.athlete.athleteId, activityType: .individualTraining, title: "Too old",
-            startedAt: Self.date(2026, 2, 1), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 2, 1), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Inside the window.
         _ = try trainingService.logActivity(
             athleteId: athlete.athlete.athleteId, activityType: .individualTraining, title: "Recent",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 25, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 25, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
@@ -315,7 +317,8 @@ struct StatisticsViewModelTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Old training",
-            startedAt: Self.date(2019, 6, 15), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2019, 6, 15), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -395,16 +398,19 @@ struct StatisticsViewModelTests {
         // Just outside the month on both sides — must not contribute.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Last day of January",
-            startedAt: Self.date(2026, 1, 31), durationMinutes: 50, status: .completed
+            startedAt: Self.date(2026, 1, 31), durationMinutes: 50, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "First day of March",
-            startedAt: Self.date(2026, 3, 1), durationMinutes: 60, status: .completed
+            startedAt: Self.date(2026, 3, 1), durationMinutes: 60, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Inside the month.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Mid-February",
-            startedAt: Self.date(2026, 2, 14), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 2, 14), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -453,7 +459,8 @@ struct StatisticsViewModelTests {
         // matching how the Sport filter Menu is actually populated.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -503,7 +510,8 @@ struct StatisticsViewModelTests {
         let football = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -546,7 +554,8 @@ struct StatisticsViewModelTests {
         let neverRecorded = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -597,7 +606,8 @@ struct StatisticsViewModelTests {
         let football = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -648,15 +658,18 @@ struct StatisticsViewModelTests {
         let football = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .match, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .strength, title: "Gym",
-            startedAt: Self.date(2026, 3, 7), durationMinutes: 25, status: .completed
+            startedAt: Self.date(2026, 3, 7), durationMinutes: 25, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -691,7 +704,8 @@ struct StatisticsViewModelTests {
         let athleteId = AthleteId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -734,7 +748,8 @@ struct StatisticsViewModelTests {
         let athleteId = AthleteId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -777,7 +792,8 @@ struct StatisticsViewModelTests {
         let sportId = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: sportId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(
@@ -916,7 +932,8 @@ struct StatisticsViewModelTests {
         // own filter-snapshot assertion below.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
-            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = AthleteStatisticsViewModel(

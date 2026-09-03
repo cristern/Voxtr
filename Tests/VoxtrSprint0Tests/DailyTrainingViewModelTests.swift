@@ -297,7 +297,8 @@ struct DailyTrainingViewModelTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: plannedActivity.plannedActivityId,
-            activityType: .individualTraining, title: "Endurance run", startedAt: referenceDate
+            activityType: .individualTraining, title: "Endurance run", startedAt: referenceDate,
+            loggedByActorId: ActorId()
         )
         let viewModel = DailyTrainingViewModel(
             trainingService: trainingService,

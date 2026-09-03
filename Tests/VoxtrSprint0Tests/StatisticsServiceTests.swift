@@ -56,11 +56,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .teamTraining, title: "Match",
-            startedAt: Self.date(2026, 3, 10), durationMinutes: 20, status: .partiallyCompleted
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 20, status: .partiallyCompleted,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -95,15 +97,18 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Missed session",
-            startedAt: Self.date(2026, 3, 12), durationMinutes: 1, status: .missed
+            startedAt: Self.date(2026, 3, 12), durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Cancelled session",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 1, status: .cancelled
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -139,7 +144,8 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: nil, activityType: .individualTraining, title: "Unplanned swim",
-            startedAt: Self.date(2026, 3, 7), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 7), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -174,11 +180,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -212,11 +220,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .strength, title: "Strength session",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 25, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 25, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .recovery, title: "Recovery session",
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 15, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 15, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -252,17 +262,20 @@ struct StatisticsServiceTests {
         // Matches both.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Right Sport, wrong Activity Type.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Right Activity Type, wrong Sport.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: SportId(), activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 7), durationMinutes: 50, status: .completed
+            startedAt: Self.date(2026, 3, 7), durationMinutes: 50, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -300,11 +313,13 @@ struct StatisticsServiceTests {
         // No Sport at all — title carries identity instead (ActivityIdentity's own rule).
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let unfiltered = try statisticsService.athleteSummary(
@@ -349,11 +364,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Week 1 run",
-            startedAt: Self.date(2026, 3, 2), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 2), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Week 3 run",
-            startedAt: Self.date(2026, 3, 22), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 22), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -397,16 +414,19 @@ struct StatisticsServiceTests {
 
         let logged1 = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 1",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         let logged2 = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 2",
-            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Third performed activity deliberately gets no reflection at all.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 3",
-            startedAt: Self.date(2026, 3, 15), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 15), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         _ = try reflectionService.recordActivityReflection(
@@ -492,7 +512,8 @@ struct StatisticsServiceTests {
 
         let logged = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "My run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
@@ -505,7 +526,8 @@ struct StatisticsServiceTests {
 
         let siblingLogged = try trainingService.logActivity(
             athleteId: siblingId, activityType: .teamTraining, title: "Sibling match",
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 90, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 90, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: siblingId, loggedActivityId: siblingLogged.loggedActivityId, authorId: ActorId(),
@@ -576,14 +598,16 @@ struct StatisticsServiceTests {
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Last instant of the interval",
             startedAt: Self.exactDate(2026, 3, 31, hour: 23, minute: 59, second: 59, nanosecond: 500_000_000),
-            durationMinutes: 10, status: .completed
+            durationMinutes: 10, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Midnight at the start of the NEXT day — a distinct calendar
         // day outside the interval — must be excluded.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Start of the next day",
             startedAt: Self.exactDate(2026, 4, 1, hour: 0, minute: 0, second: 0),
-            durationMinutes: 20, status: .completed
+            durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -631,7 +655,8 @@ struct StatisticsServiceTests {
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: planned.plannedActivityId,
             activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 35, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -709,7 +734,8 @@ struct StatisticsServiceTests {
 
         let logged = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Legally valid reflection: energy recorded, bodyFeeling omitted.
         _ = try reflectionService.recordActivityReflection(
@@ -754,16 +780,19 @@ struct StatisticsServiceTests {
 
         let logged1 = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 1",
-            startedAt: Self.date(2026, 3, 2), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 2), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         let logged2 = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 2",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Third performed activity in the SAME week deliberately gets no reflection.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run 3",
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: logged1.loggedActivityId, authorId: ActorId(),
@@ -809,11 +838,13 @@ struct StatisticsServiceTests {
 
         let matching = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         let nonMatching = try trainingService.logActivity(
             athleteId: athleteId, sportId: SportId(), activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: matching.loggedActivityId, authorId: ActorId(),
@@ -912,7 +943,8 @@ struct StatisticsServiceTests {
         // Only swimming activity exists — a football filter matches nothing.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordSleep(
             athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
@@ -961,7 +993,8 @@ struct StatisticsServiceTests {
 
         let logged = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "My run",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
@@ -974,7 +1007,8 @@ struct StatisticsServiceTests {
 
         let siblingLogged = try trainingService.logActivity(
             athleteId: siblingId, activityType: .teamTraining, title: "Sibling match",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: siblingId, loggedActivityId: siblingLogged.loggedActivityId, authorId: ActorId(),
@@ -1062,15 +1096,18 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: running, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1108,15 +1145,18 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .strength, title: "Strength",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .recovery, title: "Recovery",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .strength, title: "Strength again",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1157,11 +1197,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 120, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 80, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1236,11 +1278,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1284,11 +1328,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Planned-only: a PlannedActivity for Running with no corresponding
         // LoggedActivity at all — never reaches Statistics truth.
@@ -1302,7 +1348,8 @@ struct StatisticsServiceTests {
         // a non-performed status — excluded from availability too.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 8), durationMinutes: 1, status: .missed
+            startedAt: Self.date(2026, 3, 8), durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableSportIds(forAthlete: athleteId)
@@ -1334,11 +1381,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 12), durationMinutes: 30, status: .partiallyCompleted
+            startedAt: Self.date(2026, 3, 12), durationMinutes: 30, status: .partiallyCompleted,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableSportIds(forAthlete: athleteId)
@@ -1367,7 +1416,8 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableSportIds(forAthlete: athleteId)
@@ -1401,12 +1451,14 @@ struct StatisticsServiceTests {
         // Hockey: old history, well over a year before "today" below.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2023, 1, 10), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2023, 1, 10), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Football: recent.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableSportIds(forAthlete: athleteId)
@@ -1439,19 +1491,23 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .teamTraining, title: "Team session",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .strength, title: "Strength session",
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 20, status: .partiallyCompleted
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 20, status: .partiallyCompleted,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .match, title: "Missed match",
-            startedAt: Self.date(2026, 3, 7), durationMinutes: 1, status: .missed
+            startedAt: Self.date(2026, 3, 7), durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .recovery, title: "Cancelled recovery",
-            startedAt: Self.date(2026, 3, 8), durationMinutes: 1, status: .cancelled
+            startedAt: Self.date(2026, 3, 8), durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableActivityTypes(forAthlete: athleteId)
@@ -1482,11 +1538,13 @@ struct StatisticsServiceTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .teamTraining, title: "Session 1",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .teamTraining, title: "Session 2",
-            startedAt: Self.date(2026, 3, 12), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 12), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableActivityTypes(forAthlete: athleteId)
@@ -1518,12 +1576,14 @@ struct StatisticsServiceTests {
         // Team Training: old history, well over a year before "today".
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .teamTraining, title: "Old session",
-            startedAt: Self.date(2023, 1, 10), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2023, 1, 10), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Match: recent.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .match, title: "Recent match",
-            startedAt: Self.date(2026, 3, 20), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 20), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let available = try statisticsService.availableActivityTypes(forAthlete: athleteId)
@@ -1670,11 +1730,13 @@ struct StatisticsServiceTests {
         }
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 50, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 50, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 50, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 50, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1722,7 +1784,8 @@ struct StatisticsServiceTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 10), durationMinutes: 25, status: .completed
+            startedAt: Self.date(2026, 3, 10), durationMinutes: 25, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -1783,11 +1846,13 @@ struct StatisticsServiceTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .teamTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let filter = StatisticsFilter(sportId: hockey, activityType: .teamTraining)
@@ -1824,7 +1889,8 @@ struct StatisticsServiceTests {
         // No WeekPlan is ever created for this athlete/week.
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let summary = try statisticsService.athleteSummary(
@@ -2071,11 +2137,13 @@ struct StatisticsWeekDetailTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Late July run",
-            startedAt: Self.date(2026, 7, 29), durationMinutes: 25, status: .completed
+            startedAt: Self.date(2026, 7, 29), durationMinutes: 25, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "August run",
-            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed
+            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -2158,19 +2226,23 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Completed",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Partial",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .partiallyCompleted
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .partiallyCompleted,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Missed",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 1, status: .missed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Cancelled",
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 1, status: .cancelled
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -2223,11 +2295,13 @@ struct StatisticsWeekDetailTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .teamTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -2268,11 +2342,13 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         let hockeyActivity = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Match",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed,
+            loggedByActorId: ActorId()
         )
         let swimActivity = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: hockeyActivity.loggedActivityId, authorId: ActorId(),
@@ -2317,7 +2393,8 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordSleep(
             athleteId: athleteId, localDate: LocalDate(year: 2026, month: 3, day: 3),
@@ -2458,11 +2535,13 @@ struct StatisticsWeekDetailTests {
         )
         let later = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Later",
-            startedAt: Self.date(2026, 3, 4, hour: 18), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 4, hour: 18), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         let earlier = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Earlier",
-            startedAt: Self.date(2026, 3, 4, hour: 7), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 4, hour: 7), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -2520,7 +2599,8 @@ struct StatisticsWeekDetailTests {
         let weekStartB = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteB, activityType: .individualTraining, title: "Actual only",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         let detailB = try statisticsService.weekDetail(
             forAthlete: athleteB, weekStart: weekStartB, within: weekStartB, through: weekStartB.adding(days: 6),
@@ -2582,7 +2662,8 @@ struct StatisticsWeekDetailTests {
         )
         let logged = try trainingService.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Run",
-            startedAt: Self.date(2026, 3, 11), durationMinutes: 35, status: .completed
+            startedAt: Self.date(2026, 3, 11), durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
@@ -2909,7 +2990,8 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         let logged = try trainingService.logActivity(
             athleteId: athleteId, sportId: swimming, activityType: .individualTraining, title: "Swim",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId, loggedActivityId: logged.loggedActivityId, authorId: ActorId(),
@@ -3055,11 +3137,13 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Practice",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Game",
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3098,15 +3182,18 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 240, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 240, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: strength, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 45, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3143,7 +3230,8 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: "General fitness",
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3182,15 +3270,18 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .partiallyCompleted
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .partiallyCompleted,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 15, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3228,11 +3319,13 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: football, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 90, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3269,11 +3362,13 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 60, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 60, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3311,15 +3406,18 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 999, status: .missed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 999, status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 999, status: .cancelled
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 999, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3363,11 +3461,13 @@ struct StatisticsWeekDetailTests {
         let augustIntervalEnd = LocalDate(year: 2026, month: 8, day: 31)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Late July, outside effective interval",
-            startedAt: Self.date(2026, 7, 28), durationMinutes: 50, status: .completed
+            startedAt: Self.date(2026, 7, 28), durationMinutes: 50, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: hockey, activityType: .teamTraining, title: "Inside effective interval",
-            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed
+            startedAt: Self.date(2026, 8, 2), durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3411,7 +3511,8 @@ struct StatisticsWeekDetailTests {
         let weekStart = LocalDate(year: 2026, month: 3, day: 2)
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: unresolvableSportId, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 55, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(
@@ -3457,23 +3558,27 @@ struct StatisticsWeekDetailTests {
         // must sort first between them.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: tieSportHigher, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 3), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: tieSportLower, activityType: .individualTraining, title: nil,
-            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         // No-Sport bucket also has 20 minutes — must still sort AFTER
         // both real Sports despite the tie.
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: nil, activityType: .other, title: nil,
-            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed
+            startedAt: Self.date(2026, 3, 5), durationMinutes: 20, status: .completed,
+            loggedByActorId: ActorId()
         )
         // The clear largest contributor — must sort first overall.
         let biggestSport = SportId()
         _ = try trainingService.logActivity(
             athleteId: athleteId, sportId: biggestSport, activityType: .teamTraining, title: nil,
-            startedAt: Self.date(2026, 3, 6), durationMinutes: 100, status: .completed
+            startedAt: Self.date(2026, 3, 6), durationMinutes: 100, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let detail = try statisticsService.weekDetail(

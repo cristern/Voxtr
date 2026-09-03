@@ -56,12 +56,14 @@ struct WeeklyHistoryViewModelTests {
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: planned.plannedActivityId,
             activityType: .individualTraining, title: "Endurance run",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
+            loggedByActorId: ActorId()
         )
         // Genuinely unplanned — no plannedActivityId at all.
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Unplanned jog",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = WeeklyHistoryViewModel(coordinationService: coordinator, athleteId: athleteId, weekStart: Self.weekStart)
@@ -114,19 +116,22 @@ struct WeeklyHistoryViewModelTests {
             athleteId: athleteId, plannedActivityId: completed.plannedActivityId,
             activityType: .individualTraining, title: "Completed run",
             startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: cancelled.plannedActivityId,
             activityType: .individualTraining, title: "Cancelled swim",
             startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
         _ = try training.logActivity(
             athleteId: athleteId, plannedActivityId: missed.plannedActivityId,
             activityType: .individualTraining, title: "Missed session",
             startedAt: Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 5)) ?? .now,
-            durationMinutes: 1, status: .missed
+            durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = WeeklyHistoryViewModel(coordinationService: coordinator, athleteId: athleteId, weekStart: Self.weekStart)
@@ -262,7 +267,8 @@ struct WeeklyHistoryListViewModelTests {
         )
         _ = try training.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Logged only",
-            startedAt: Calendar.current.date(from: DateComponents(year: 2025, month: 12, day: 30)) ?? .now
+            startedAt: Calendar.current.date(from: DateComponents(year: 2025, month: 12, day: 30)) ?? .now,
+            loggedByActorId: ActorId()
         )
         // emptyWeek: deliberately nothing at all.
         _ = try reflection.recordWeeklyReflection(

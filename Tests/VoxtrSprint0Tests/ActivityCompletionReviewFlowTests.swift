@@ -42,13 +42,15 @@ struct ActivityCompletionReviewFlowTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         #expect(throws: TrainingServiceError.plannedActivityAlreadyLinked) {
             try trainingService.logActivity(
                 athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-                activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+                activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+                loggedByActorId: ActorId()
             )
         }
 
@@ -86,7 +88,8 @@ struct ActivityCompletionReviewFlowTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         let before = try coordinationService.plannedActivitiesWithCompletion([activity])
@@ -94,7 +97,8 @@ struct ActivityCompletionReviewFlowTests {
 
         _ = try? trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 99
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 99,
+            loggedByActorId: ActorId()
         )
 
         let after = try coordinationService.plannedActivitiesWithCompletion([activity])
@@ -127,7 +131,8 @@ struct ActivityCompletionReviewFlowTests {
 
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         let todaysLogs = try trainingService.fetchTodaysLoggedActivities(forAthlete: athleteId)
@@ -167,7 +172,8 @@ struct ActivityCompletionReviewFlowTests {
 
         _ = try trainingService.logActivity(
             athleteId: oliverId, plannedActivityId: oliverActivity.plannedActivityId,
-            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45
+            activityType: .individualTraining, title: "Run", startedAt: .now, durationMinutes: 45,
+            loggedByActorId: ActorId()
         )
 
         let oliverCompletion = try coordinationService.plannedActivitiesWithCompletion([oliverActivity])
@@ -212,7 +218,8 @@ struct ActivityCompletionReviewFlowTests {
         _ = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: plannedA.plannedActivityId,
             activityType: .individualTraining, title: "Training", startedAt: .now,
-            durationMinutes: 45, perceivedExertion: 7
+            durationMinutes: 45, perceivedExertion: 7,
+            loggedByActorId: ActorId()
         )
 
         let completions = try coordinationService.plannedActivitiesWithCompletion([plannedA, plannedB])

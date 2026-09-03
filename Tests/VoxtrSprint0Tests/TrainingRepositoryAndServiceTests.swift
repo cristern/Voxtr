@@ -50,7 +50,8 @@ struct TrainingRepositoryAndServiceTests {
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 45,
             status: .completed,
-            source: "manual"
+            source: "manual",
+            loggedByActorId: ActorId()
         )
 
         #expect(logged.title == "Endurance run")
@@ -87,7 +88,8 @@ struct TrainingRepositoryAndServiceTests {
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 45,
             status: .completed,
-            source: "manual"
+            source: "manual",
+            loggedByActorId: ActorId()
         )
 
         #expect(recorder.events.count == 1)
@@ -112,7 +114,8 @@ struct TrainingRepositoryAndServiceTests {
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 60,
             status: .completed,
-            source: "manual"
+            source: "manual",
+            loggedByActorId: ActorId()
         )
 
         #expect(logged.plannedActivityId == nil)
@@ -137,7 +140,8 @@ struct TrainingRepositoryAndServiceTests {
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 45,
             status: .completed,
-            source: "manual"
+            source: "manual",
+            loggedByActorId: ActorId()
         )
 
         #expect(logged.title == nil)
@@ -160,7 +164,8 @@ struct TrainingRepositoryAndServiceTests {
                 startedAt: Date(timeIntervalSince1970: 1_767_000_000),
                 durationMinutes: 45,
                 status: .completed,
-                source: "manual"
+                source: "manual",
+                loggedByActorId: ActorId()
             )
         }
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 0)
@@ -182,7 +187,8 @@ struct TrainingRepositoryAndServiceTests {
                 startedAt: Date(timeIntervalSince1970: 1_767_000_000),
                 durationMinutes: 45,
                 status: .completed,
-                source: "manual"
+                source: "manual",
+                loggedByActorId: ActorId()
             )
         }
     }
@@ -201,19 +207,23 @@ struct TrainingRepositoryAndServiceTests {
         // Inserted out of chronological order deliberately.
         _ = try service.logActivity(
             athleteId: firstAthlete, activityType: .individualTraining, title: "Thursday",
-            startedAt: base.addingTimeInterval(3 * 86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(3 * 86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: firstAthlete, activityType: .individualTraining, title: "Monday",
-            startedAt: base, durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base, durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: secondAthlete, activityType: .individualTraining, title: "Other athlete",
-            startedAt: base.addingTimeInterval(86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: firstAthlete, activityType: .individualTraining, title: "Wednesday",
-            startedAt: base.addingTimeInterval(2 * 86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(2 * 86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
 
         let first = try service.fetchLoggedActivities(forAthlete: firstAthlete)
@@ -235,15 +245,18 @@ struct TrainingRepositoryAndServiceTests {
 
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Before range",
-            startedAt: base.addingTimeInterval(-86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(-86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "In range",
-            startedAt: base.addingTimeInterval(1 * 86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(1 * 86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "After range",
-            startedAt: base.addingTimeInterval(10 * 86_400), durationMinutes: 30, status: .completed, source: "manual"
+            startedAt: base.addingTimeInterval(10 * 86_400), durationMinutes: 30, status: .completed, source: "manual",
+            loggedByActorId: ActorId()
         )
 
         let inRange = try service.fetchLoggedActivities(
@@ -270,7 +283,8 @@ struct TrainingRepositoryAndServiceTests {
             title: "Easy jog",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             perceivedExertion: 4,
-            notes: "Felt good"
+            notes: "Felt good",
+            loggedByActorId: ActorId()
         )
 
         #expect(logged.plannedActivityId == nil)
@@ -296,7 +310,8 @@ struct TrainingRepositoryAndServiceTests {
             activityType: .individualTraining,
             title: "Easy jog",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-            durationMinutes: 40
+            durationMinutes: 40,
+            loggedByActorId: ActorId()
         )
 
         #expect(logged.plannedActivityId == plannedActivityId.rawValue)
@@ -318,15 +333,18 @@ struct TrainingRepositoryAndServiceTests {
 
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Today's run",
-            startedAt: today
+            startedAt: today,
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Yesterday's run",
-            startedAt: yesterday
+            startedAt: yesterday,
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: otherAthleteId, activityType: .individualTraining, title: "Other athlete, today",
-            startedAt: today
+            startedAt: today,
+            loggedByActorId: ActorId()
         )
 
         let todays = try service.fetchTodaysLoggedActivities(forAthlete: athleteId, referenceDate: today, calendar: calendar)
@@ -350,11 +368,13 @@ struct TrainingRepositoryAndServiceTests {
         // Inserted out of chronological order deliberately.
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Evening",
-            startedAt: startOfDay.addingTimeInterval(18 * 3_600)
+            startedAt: startOfDay.addingTimeInterval(18 * 3_600),
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: athleteId, activityType: .individualTraining, title: "Morning",
-            startedAt: startOfDay.addingTimeInterval(7 * 3_600)
+            startedAt: startOfDay.addingTimeInterval(7 * 3_600),
+            loggedByActorId: ActorId()
         )
 
         let first = try service.fetchTodaysLoggedActivities(forAthlete: athleteId, referenceDate: today, calendar: calendar)
@@ -375,14 +395,16 @@ struct TrainingRepositoryAndServiceTests {
         _ = try service.logActivity(
             athleteId: AthleteId(), plannedActivityId: plannedActivityId,
             activityType: .individualTraining, title: "First log",
-            startedAt: Date(timeIntervalSince1970: 1_767_000_000)
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            loggedByActorId: ActorId()
         )
 
         #expect(throws: TrainingServiceError.plannedActivityAlreadyLinked) {
             try service.logActivity(
                 athleteId: AthleteId(), plannedActivityId: plannedActivityId,
                 activityType: .individualTraining, title: "Second log",
-                startedAt: Date(timeIntervalSince1970: 1_767_100_000)
+                startedAt: Date(timeIntervalSince1970: 1_767_100_000),
+                loggedByActorId: ActorId()
             )
         }
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 1)
@@ -398,11 +420,13 @@ struct TrainingRepositoryAndServiceTests {
 
         _ = try service.logActivity(
             athleteId: AthleteId(), activityType: .individualTraining, title: "First",
-            startedAt: Date(timeIntervalSince1970: 1_767_000_000)
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            loggedByActorId: ActorId()
         )
         _ = try service.logActivity(
             athleteId: AthleteId(), activityType: .individualTraining, title: "Second",
-            startedAt: Date(timeIntervalSince1970: 1_767_100_000)
+            startedAt: Date(timeIntervalSince1970: 1_767_100_000),
+            loggedByActorId: ActorId()
         )
 
         #expect(try container.mainContext.fetch(FetchDescriptor<LoggedActivity>()).count == 2)
@@ -423,7 +447,8 @@ struct TrainingRepositoryAndServiceTests {
             athleteId: athleteId, plannedActivityId: plannedActivityId,
             activityType: .individualTraining, title: "Evening swim",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         try service.reopenNoTrainingOutcome(cancelled.loggedActivityId, athleteId: athleteId)
@@ -435,7 +460,8 @@ struct TrainingRepositoryAndServiceTests {
             athleteId: athleteId, plannedActivityId: plannedActivityId,
             activityType: .individualTraining, title: "Evening swim",
             startedAt: Date(timeIntervalSince1970: 1_767_100_000),
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         let linksAfter = try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId)
         #expect(linksAfter.count == 1)
@@ -460,7 +486,8 @@ struct TrainingRepositoryAndServiceTests {
             athleteId: athleteId, plannedActivityId: materializedPlannedActivityId,
             activityType: .teamTraining, title: "Saturday match",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         try service.reopenNoTrainingOutcome(cancelled.loggedActivityId, athleteId: athleteId)
@@ -487,7 +514,8 @@ struct TrainingRepositoryAndServiceTests {
             athleteId: athleteId, plannedActivityId: plannedActivityId,
             activityType: .individualTraining, title: "Evening swim",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         #expect(throws: TrainingServiceError.loggedActivityNotFound) {
@@ -512,7 +540,8 @@ struct TrainingRepositoryAndServiceTests {
                 athleteId: athleteId, plannedActivityId: plannedActivityId,
                 activityType: .individualTraining, title: "Session",
                 startedAt: Date(timeIntervalSince1970: 1_767_000_000),
-                durationMinutes: 30, status: status
+                durationMinutes: 30, status: status,
+                loggedByActorId: ActorId()
             )
 
             #expect(throws: TrainingServiceError.activityNotReopenable) {
@@ -539,11 +568,57 @@ struct TrainingRepositoryAndServiceTests {
             title: "Missed session",
             startedAt: Date(timeIntervalSince1970: 1_767_000_000),
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
 
         try service.reopenNoTrainingOutcome(missed.loggedActivityId, athleteId: athleteId)
 
         #expect(try repository.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty)
+    }
+
+    // MARK: - PR #59 follow-up: required loggedByActorId write boundary
+
+    /// PR #59 follow-up: `TrainingService.logActivity` requiring `ActorId`
+    /// (no `nil` default) is already proven by API shape — every call
+    /// site in this file, and every other test file in the repo, now
+    /// fails to compile without one. This test proves the runtime half
+    /// of the contract instead: the exact `ActorId` supplied to
+    /// `TrainingService.logActivity` is the one that ends up persisted
+    /// on the created `LoggedActivity`, at this canonical write boundary
+    /// itself (`TrainingRepository.insertLoggedActivity` persists
+    /// `loggedByActorId.rawValue` unchanged). The complementary half of
+    /// this contract — a pre-existing V10 row migrating to `AppSchemaV11`
+    /// with `loggedByActorId == nil`, never a fabricated actor — is
+    /// already covered by `PersistenceRecoveryTests
+    /// .existingV10StoreMigratesToV11Successfully`, so it is not
+    /// duplicated here.
+    @Test("The ActorId supplied to TrainingService.logActivity is exactly the value persisted as LoggedActivity.loggedByActorId")
+    @MainActor
+    func logActivityPersistsTheSuppliedActorId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = TrainingRepository(modelContext: container.mainContext)
+        let service = TrainingService(repository: repository)
+        let athleteId = AthleteId()
+        let actorId = ActorId()
+
+        let logged = try service.logActivity(
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Evening run",
+            startedAt: Date(timeIntervalSince1970: 1_767_000_000),
+            durationMinutes: 30,
+            status: .completed,
+            source: "manual",
+            loggedByActorId: actorId
+        )
+
+        #expect(logged.loggedByActorId == actorId.rawValue)
+
+        // Also true after a fresh fetch — not merely the in-memory value
+        // handed back from the insert.
+        let refetched = try service.fetchLoggedActivity(byId: logged.loggedActivityId, athleteId: athleteId)
+        #expect(refetched.loggedByActorId == actorId.rawValue)
     }
 }

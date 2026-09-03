@@ -870,7 +870,8 @@ struct Sprint1CoreFlowCompletionTests {
         )
         let logged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
-            activityType: .individualTraining, title: "Morning run", startedAt: .now
+            activityType: .individualTraining, title: "Morning run", startedAt: .now,
+            loggedByActorId: ActorId()
         )
         // A genuine, valid ActivityReflection whose meaningful content
         // is text, not bodyFeeling — proves ReflectionService still
@@ -1153,7 +1154,8 @@ struct Sprint1CoreFlowCompletionTests {
         let logged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         let detail = try coordinator.loggedActivityDetail(forPlannedActivity: activity.plannedActivityId)
 
@@ -1211,7 +1213,8 @@ struct Sprint1CoreFlowCompletionTests {
         let logged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 1, status: .missed
+            durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = ActivityDetailViewModel(
@@ -1265,12 +1268,14 @@ struct Sprint1CoreFlowCompletionTests {
         let completedLogged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: completedActivity.plannedActivityId,
             activityType: .individualTraining, title: completedActivity.title, startedAt: .now,
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         let missedLogged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: missedActivity.plannedActivityId,
             activityType: .individualTraining, title: missedActivity.title, startedAt: .now,
-            durationMinutes: 1, status: .missed
+            durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
 
         let completedViewModel = ActivityDetailViewModel(
@@ -1327,7 +1332,8 @@ struct Sprint1CoreFlowCompletionTests {
         let logged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 35, status: .completed
+            durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = ActivityDetailViewModel(
@@ -1380,7 +1386,8 @@ struct Sprint1CoreFlowCompletionTests {
         let logged = try trainingService.logActivity(
             athleteId: athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 35, status: .completed
+            durationMinutes: 35, status: .completed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = ActivityDetailViewModel(
@@ -1598,7 +1605,8 @@ struct Sprint1CoreFlowCompletionTests {
                 title: activity.title,
                 startedAt: .now,
                 durationMinutes: status == .missed ? 1 : 30,
-                status: status
+                status: status,
+                loggedByActorId: ActorId()
             )
             let viewModel = ActivityDetailViewModel(
                 activity: activity,
@@ -1659,7 +1667,8 @@ struct Sprint1CoreFlowCompletionTests {
             title: activity.title,
             startedAt: .now,
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
         var hostReloads = 0
         let viewModel = ActivityDetailViewModel(

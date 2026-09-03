@@ -122,12 +122,14 @@ struct FamilyHomeViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: oliver.athleteId, plannedActivityId: oliverActivity.plannedActivityId,
             activityType: .individualTraining, title: "Oliver's run", startedAt: .now,
-            durationMinutes: 40, status: .completed
+            durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
         )
         _ = try trainingService.logActivity(
             athleteId: emma.athleteId, plannedActivityId: emmaActivity.plannedActivityId,
             activityType: .individualTraining, title: "Emma's swim", startedAt: .now,
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = FamilyHomeViewModel(
@@ -201,7 +203,8 @@ struct FamilyHomeViewModelTests {
         )
         _ = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: completed.plannedActivityId,
-            activityType: .strength, title: "Strength", startedAt: .now
+            activityType: .strength, title: "Strength", startedAt: .now,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = FamilyHomeViewModel(
@@ -378,7 +381,8 @@ struct FamilyHomeViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: activity.plannedActivityId,
             activityType: .individualTraining, title: activity.title, startedAt: .now,
-            durationMinutes: 30, status: .completed
+            durationMinutes: 30, status: .completed,
+            loggedByActorId: ActorId()
         )
         // Mirrors onActivityLogged's reload exactly — this is what used
         // to blank the already-pushed destination.
@@ -884,7 +888,8 @@ struct FamilyHomeViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: cancelledActivity.plannedActivityId,
             activityType: .individualTraining, title: "Cancelled run", startedAt: .now,
-            durationMinutes: 1, status: .cancelled
+            durationMinutes: 1, status: .cancelled,
+            loggedByActorId: ActorId()
         )
         let missedActivity = try planningService.addPlannedActivity(
             toWeekPlan: weekPlan.weekPlanId, athleteId: athlete.athleteId, activityType: .individualTraining,
@@ -894,7 +899,8 @@ struct FamilyHomeViewModelTests {
         _ = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: missedActivity.plannedActivityId,
             activityType: .individualTraining, title: "Missed session", startedAt: .now,
-            durationMinutes: 1, status: .missed
+            durationMinutes: 1, status: .missed,
+            loggedByActorId: ActorId()
         )
 
         let viewModel = FamilyHomeViewModel(
@@ -1397,7 +1403,8 @@ struct FamilyHomeViewModelTests {
         // successful save produces.
         let logged = try trainingService.logActivity(
             athleteId: athlete.athleteId, plannedActivityId: materialized.plannedActivityId,
-            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90
+            activityType: .teamTraining, title: "Hockey Camp", startedAt: .now, durationMinutes: 90,
+            loggedByActorId: ActorId()
         )
         #expect(logged.plannedActivityId == materialized.plannedActivityId.rawValue)
 

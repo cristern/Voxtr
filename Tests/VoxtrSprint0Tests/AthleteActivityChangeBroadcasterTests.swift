@@ -132,7 +132,8 @@ struct AthleteActivityChangeBroadcasterTests {
             title: planned.title,
             startedAt: .now,
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
 
         #expect(!container.mainContext.hasChanges)
@@ -160,7 +161,8 @@ struct AthleteActivityChangeBroadcasterTests {
             title: "Mistaken missed",
             startedAt: .now,
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
         _ = try reflectionService.recordActivityReflection(
             athleteId: athleteId,
@@ -202,7 +204,8 @@ struct AthleteActivityChangeBroadcasterTests {
             title: "Canonical missed",
             startedAt: .now,
             durationMinutes: 1,
-            status: .missed
+            status: .missed,
+            loggedByActorId: ActorId()
         )
         let reflection = try reflectionService.recordActivityReflection(
             athleteId: athleteId,
