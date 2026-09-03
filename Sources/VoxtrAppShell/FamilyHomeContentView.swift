@@ -574,10 +574,13 @@ public struct FamilyHomeContentView: View {
     /// `VoxtrTypography.metadata`/`textSecondary` styling as the rest
     /// of the line, no badge, no separate chevron. Recurrence semantics
     /// themselves are untouched; only where this text renders changed.
-    private static func recurringRowSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
+    /// Not `private`: `@testable import` exercises this directly (see
+    /// `PlannedTimeRangeFormatterConsumerTests`) rather than through a
+    /// brittle rendered-view assertion.
+    static func recurringRowSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
         var parts: [String] = []
-        if let startTime = suggestion.startLocalTime {
-            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+        if let timeLabel = PlannedTimeRangeFormatter.label(start: suggestion.startLocalTime, durationMinutes: suggestion.plannedDurationMinutes) {
+            parts.append(timeLabel)
         }
         if let location = suggestion.location, !location.isEmpty {
             parts.append(location)
@@ -642,7 +645,10 @@ public struct FamilyHomeContentView: View {
     /// Sprint 1 completion package, Item 5: location is now included
     /// where available — the field genuinely didn't exist when this
     /// comment previously said so.
-    private static func rowSubtitle(for row: FamilyHomeRow) -> String {
+    /// Not `private`: `@testable import` exercises this directly (see
+    /// `PlannedTimeRangeFormatterConsumerTests`) rather than through a
+    /// brittle rendered-view assertion.
+    static func rowSubtitle(for row: FamilyHomeRow) -> String {
         var parts: [String] = []
         // Activity outcome consistency closeout (item B): the planned
         // duration summary is only meaningful for a GENUINELY completed
@@ -659,8 +665,8 @@ public struct FamilyHomeContentView: View {
         case .missed, .cancelled:
             parts.append(row.plannedActivity.localDate.isoString)
         case .none, .scheduled:
-            if let startTime = row.plannedActivity.startLocalTime {
-                parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+            if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
+                parts.append(timeLabel)
             } else {
                 parts.append("Ready to log")
             }

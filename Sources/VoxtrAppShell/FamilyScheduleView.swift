@@ -362,6 +362,7 @@ public struct FamilyScheduleView: View {
                     title: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: familyRow.plannedActivity),
                     subtitle: Self.rowSubtitle(
                         startLocalTime: familyRow.plannedActivity.startLocalTime,
+                        plannedDurationMinutes: familyRow.plannedActivity.plannedDurationMinutes,
                         location: familyRow.plannedActivity.location,
                         outcomeStatus: familyRow.outcomeStatus
                     )
@@ -391,7 +392,11 @@ public struct FamilyScheduleView: View {
                     // this row's single chevron — folded into the same
                     // metadata subtitle line instead, matching Family
                     // Home's `.recurringOccurrence` row exactly.
-                    subtitle: Self.recurringRowSubtitle(startLocalTime: suggestion.startLocalTime, location: suggestion.location)
+                    subtitle: Self.recurringRowSubtitle(
+                        startLocalTime: suggestion.startLocalTime,
+                        plannedDurationMinutes: suggestion.plannedDurationMinutes,
+                        location: suggestion.location
+                    )
                 )
             }
             .voxtrAthleteIdentityOutline(viewModel.resolvedAthleteColor(for: athleteId).color)
@@ -443,10 +448,10 @@ public struct FamilyScheduleView: View {
     /// logged, including every recurring suggestion — inherently
     /// unresolved) appends nothing, matching this function's prior
     /// behavior for that exact case.
-    private static func rowSubtitle(startLocalTime: LocalTime?, location: String?, outcomeStatus: ActivityStatus?) -> String {
+    private static func rowSubtitle(startLocalTime: LocalTime?, plannedDurationMinutes: Int?, location: String?, outcomeStatus: ActivityStatus?) -> String {
         var parts: [String] = []
-        if let startLocalTime {
-            parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
+        if let timeLabel = PlannedTimeRangeFormatter.label(start: startLocalTime, durationMinutes: plannedDurationMinutes) {
+            parts.append(timeLabel)
         }
         if let location, !location.isEmpty {
             parts.append(location)
@@ -463,10 +468,10 @@ public struct FamilyScheduleView: View {
     /// as its own separate trailing label — the exact local hard-coded
     /// styling this round's same-pattern audit flags. Recurrence
     /// semantics are unchanged; only where this text renders changed.
-    private static func recurringRowSubtitle(startLocalTime: LocalTime?, location: String?) -> String {
+    private static func recurringRowSubtitle(startLocalTime: LocalTime?, plannedDurationMinutes: Int?, location: String?) -> String {
         var parts: [String] = []
-        if let startLocalTime {
-            parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
+        if let timeLabel = PlannedTimeRangeFormatter.label(start: startLocalTime, durationMinutes: plannedDurationMinutes) {
+            parts.append(timeLabel)
         }
         if let location, !location.isEmpty {
             parts.append(location)

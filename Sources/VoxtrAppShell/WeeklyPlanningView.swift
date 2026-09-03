@@ -359,8 +359,8 @@ public struct WeeklyPlanningView: View {
     /// date text rather than adding to it, so nothing is duplicated.
     private static func rowSubtitle(for activity: PlannedActivity) -> String {
         var parts: [String] = [weekdayLabel(for: activity.localDate.weekday)]
-        if let startTime = activity.startLocalTime {
-            parts.append(String(format: "%02d:%02d", startTime.hour, startTime.minute))
+        if let timeLabel = PlannedTimeRangeFormatter.label(start: activity.startLocalTime, durationMinutes: activity.plannedDurationMinutes) {
+            parts.append(timeLabel)
         }
         if let location = activity.location, !location.isEmpty {
             parts.append(location)
@@ -380,10 +380,11 @@ public struct WeeklyPlanningView: View {
     /// `rowSubtitle(for:)` above now also settles on.
     private static func suggestionSubtitle(for suggestion: RecurringActivitySuggestion) -> String {
         var parts: [String] = [weekdayLabel(for: suggestion.occurrenceDate.weekday)]
-        if let startLocalTime = suggestion.startLocalTime {
-            parts.append(String(format: "%02d:%02d", startLocalTime.hour, startLocalTime.minute))
-        }
-        if let duration = suggestion.plannedDurationMinutes {
+        if let timeLabel = PlannedTimeRangeFormatter.label(start: suggestion.startLocalTime, durationMinutes: suggestion.plannedDurationMinutes) {
+            parts.append(timeLabel)
+        } else if let duration = suggestion.plannedDurationMinutes {
+            // Duration known, no start time: never invent an end time —
+            // the existing duration-only presentation is preserved.
             parts.append("\(duration) min")
         }
         return parts.joined(separator: " · ")
