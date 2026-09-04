@@ -177,16 +177,16 @@ struct AthleteConnectionIdentityBindingServiceTests {
         }
     }
 
-    @Test("An eligible participant with no linkedAthleteId fails with athleteLinkMissing")
-    func missingAthleteLinkFailsExplicitly() {
-        let workspace = Self.makeWorkspace()
-        let participant = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active, linkedAthleteId: nil)
-        let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [])
-
-        #expect(throws: AthleteConnectionIdentityBindingError.athleteLinkMissing) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
-        }
-    }
+    // NOTE: there is deliberately no test constructing an eligible
+    // (.athlete, .active) participant with `linkedAthleteId == nil`.
+    // `WorkspaceParticipant`'s own canonical initializer (ParentEntities
+    // .swift) enforces `precondition(role != .athlete || linkedAthleteId
+    // != nil, ...)` — that state cannot be constructed at all, not even
+    // as a pure in-memory fixture, so a test attempting it would crash
+    // the test process rather than exercise `resolve(...)`. See
+    // `AthleteConnectionIdentityBindingService.resolve`'s own comment
+    // at the `linkedAthleteId` access for how this is handled in
+    // production code.
 
     @Test("An eligible participant whose linkedAthleteId does not resolve to any AthleteProfile in the family fails with athleteNotFound")
     func unresolvedAthleteLinkFailsExplicitly() {

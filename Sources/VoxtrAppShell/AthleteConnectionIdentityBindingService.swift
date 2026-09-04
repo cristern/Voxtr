@@ -157,14 +157,23 @@ public final class AthleteConnectionIdentityBindingService {
             throw AthleteConnectionIdentityBindingError.ambiguousAthleteParticipant
         }
 
-        // The remaining checks are structurally guaranteed to pass by
-        // FamilyRestorationService's own consistency rules for any
-        // participant drawn from `family.athleteParticipants` — kept as
-        // explicit, defensive guards (not `precondition`s) rather than
-        // trusted silently, so a future weakening of that guarantee fails
-        // loudly here instead of force-unwrapping or mismatching identity.
+        // `participant` is `role == .athlete` (it was drawn from
+        // `family.athleteParticipants`), so `linkedAthleteId` is
+        // guaranteed non-nil twice over: `WorkspaceParticipant`'s own
+        // canonical initializer (ParentEntities.swift) enforces
+        // `precondition(role != .athlete || linkedAthleteId != nil, ...)`
+        // at construction time — an `.athlete` participant with a nil
+        // link cannot exist as an object at all — and `RestoredFamily`'s
+        // own doc comment additionally guarantees `FamilyRestorationService`
+        // already validated this before ever constructing this value.
+        // A nil value here would mean that invariant was violated
+        // upstream, not a legitimate binding outcome — matching this
+        // codebase's own established pattern for role-dependent
+        // invariants (see `ParentWorkspaceRepository.acceptInvitation`'s
+        // doc comment: "crashes rather than throws ... represents a
+        // caller error, not a runtime/environment failure").
         guard let linkedAthleteIdRaw = participant.linkedAthleteId else {
-            throw AthleteConnectionIdentityBindingError.athleteLinkMissing
+            preconditionFailure("role == .athlete WorkspaceParticipant must have a non-nil linkedAthleteId (WorkspaceParticipant's own initializer precondition, v1.3 Section 7.3)")
         }
 
         let matchingAthletes = family.athletes.filter { $0.id == linkedAthleteIdRaw }
@@ -226,13 +235,12 @@ public enum AthleteConnectionIdentityBindingError: Error, Sendable, Equatable {
     /// this type's own ELIGIBILITY doc comment for why this slice does
     /// not auto-transition `.invited → .active` itself.
     case participantNotEligible
-    /// The eligible participant has no `linkedAthleteId` — structurally
-    /// guaranteed not to happen by `FamilyRestorationService`'s own
-    /// consistency rules; surfaced explicitly rather than force-unwrapped.
-    case athleteLinkMissing
     /// The participant's `linkedAthleteId` does not resolve to any
-    /// `AthleteProfile` in the restored family — same structural
-    /// guarantee as `athleteLinkMissing` above.
+    /// `AthleteProfile` in the restored family — structurally guaranteed
+    /// not to happen by `FamilyRestorationService`'s own consistency
+    /// rules (it validates every `.athlete` participant's link before
+    /// ever constructing a `RestoredFamily`), but surfaced explicitly
+    /// as defense-in-depth rather than force-unwrapped.
     case athleteNotFound
     /// More than one `AthleteProfile` shares the same `id` — should be
     /// structurally impossible given SwiftData's own uniqueness
@@ -241,6 +249,6 @@ public enum AthleteConnectionIdentityBindingError: Error, Sendable, Equatable {
     case duplicateAthleteIdentity
     /// The resolved `AthleteProfile.workspaceId` does not match the
     /// accepted share's `workspaceId` — same structural guarantee as
-    /// `athleteLinkMissing`/`athleteNotFound` above.
+    /// `athleteNotFound` above.
     case athleteWorkspaceMismatch
 }
