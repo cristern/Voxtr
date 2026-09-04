@@ -129,7 +129,7 @@ struct AthleteConnectionLifecycleServiceTests {
 
     @Test("connect(acceptedShare:) sequences B2.3 -> B2.4 and returns exactly B2.4's own CurrentSessionActor, creating/mutating nothing")
     func successfulSequenceProducesCanonicalActor() throws {
-        let fixture = try makeFixture()
+        let fixture = try Self.makeFixture()
         let accepted = Self.makeAcceptedShare(workspaceId: fixture.created.workspace.id)
 
         let participantCountBefore = try fixture.parentWorkspaceRepository.fetchAllParticipants().count
