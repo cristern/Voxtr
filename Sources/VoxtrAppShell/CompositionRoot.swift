@@ -173,6 +173,17 @@ public final class CompositionRoot {
         container.register(FamilyRestorationService.self) { restorationService }
         let restorationState = try restorationService.restoreState()
 
+        // Athlete Connection Foundation B2.4: registered so a later
+        // slice's explicit AthleteApp connection flow can resolve it —
+        // never invoked here. Depends only on ParentWorkspaceRepository
+        // (already registered by ParentModule.configure above); does
+        // NOT activate any session as part of building the composition
+        // root itself.
+        let athleteSessionActivationService = AthleteSessionActivationService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self)
+        )
+        container.register(AthleteSessionActivationService.self) { athleteSessionActivationService }
+
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's
         // own doc comment for why this can't live in either domain
