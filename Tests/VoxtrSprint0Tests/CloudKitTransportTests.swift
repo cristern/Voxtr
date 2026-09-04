@@ -164,12 +164,28 @@ struct CloudKitFoundationRegressionTests {
         let url = repositoryRoot().appendingPathComponent("Sources/VoxtrCore/Persistence/SwiftDataPersistenceController.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
 
+        // Scope to SwiftDataPersistenceController's own body only. This
+        // file also declares InMemoryPersistenceController — explicitly
+        // in-memory test infrastructure that intentionally never sets
+        // cloudKitDatabase at all — which must not be held to a
+        // production "must be .none" invariant that doesn't apply to it.
+        guard let productionStart = source.range(of: "public final class SwiftDataPersistenceController") else {
+            Issue.record("Could not locate SwiftDataPersistenceController in source")
+            return
+        }
+        let productionSection: Substring
+        if let inMemoryStart = source.range(of: "public final class InMemoryPersistenceController", range: productionStart.upperBound..<source.endIndex) {
+            productionSection = source[productionStart.lowerBound..<inMemoryStart.lowerBound]
+        } else {
+            productionSection = source[productionStart.lowerBound...]
+        }
+
         // Only reason about actual code, not doc/line comments that merely
         // mention `cloudKitDatabase: .none` in prose (e.g. this file's own
         // "ENGINEERING TRADE-OFF" header) — counting those would make this
         // guard brittle against harmless documentation edits, and it isn't
         // the invariant this test exists to protect.
-        let codeLines = source
+        let codeLines = productionSection
             .components(separatedBy: .newlines)
             .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
         let code = codeLines.joined(separator: "\n")
@@ -179,7 +195,7 @@ struct CloudKitFoundationRegressionTests {
         #expect(constructorCount > 0, "Expected at least one ModelConfiguration construction")
         #expect(
             noneOccurrences == constructorCount,
-            "Expected every ModelConfiguration construction to pass cloudKitDatabase: .none"
+            "Expected every ModelConfiguration construction in SwiftDataPersistenceController to pass cloudKitDatabase: .none"
         )
         #expect(!code.contains("cloudKitDatabase: .automatic"))
         #expect(!code.contains("cloudKitDatabase: .private("))
