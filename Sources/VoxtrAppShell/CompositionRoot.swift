@@ -184,6 +184,32 @@ public final class CompositionRoot {
         )
         container.register(AthleteSessionActivationService.self) { athleteSessionActivationService }
 
+        // Athlete Connection Foundation B2.5: registers the remaining
+        // pieces of the B2.2 -> B2.3 -> B2.4 chain and composes the one
+        // orchestration service that sequences them. Registration only —
+        // none of these constructors perform CloudKit I/O
+        // (FamilyWorkspaceParticipantShareCoordinator.init just stores a
+        // transport reference, matching B1's lazy CKContainer
+        // realization), and nothing here calls
+        // AthleteConnectionLifecycleService.connect(...) or activates
+        // any session. AthleteApp is the only caller that ever resolves
+        // AthleteConnectionLifecycleService, from AthleteRootView, after
+        // this build() call already returned.
+        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: cloudKitTransport)
+        container.register(FamilyWorkspaceParticipantShareCoordinator.self) { participantShareCoordinator }
+
+        let athleteConnectionIdentityBindingService = AthleteConnectionIdentityBindingService(
+            familyRestorationService: restorationService
+        )
+        container.register(AthleteConnectionIdentityBindingService.self) { athleteConnectionIdentityBindingService }
+
+        let athleteConnectionLifecycleService = AthleteConnectionLifecycleService(
+            participantShareCoordinator: participantShareCoordinator,
+            identityBindingService: athleteConnectionIdentityBindingService,
+            sessionActivationService: athleteSessionActivationService
+        )
+        container.register(AthleteConnectionLifecycleService.self) { athleteConnectionLifecycleService }
+
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's
         // own doc comment for why this can't live in either domain
