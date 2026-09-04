@@ -60,7 +60,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         let database = transport.database(for: .private)
         let zoneID = try await ensureZone(workspaceId: workspaceId, database: database)
         let rootRecord = try await ensureRootRecord(workspaceId: workspaceId, zoneID: zoneID, database: database)
-        let share = try await ensureShare(rootRecord: rootRecord, database: database)
+        let share = try await ensureShare(rootRecord: rootRecord, workspaceId: workspaceId, zoneID: zoneID, database: database)
 
         return FamilyWorkspaceSharingRoot(
             workspaceId: workspaceId,
@@ -155,7 +155,21 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
     /// participants and builds no invitation flow, so the share must not
     /// be openly joinable by anyone who finds the link — B3 owns
     /// deciding actual participant permissions when invitation exists.
-    private func ensureShare(rootRecord: CKRecord, database: CKDatabase) async throws -> CKShare {
+    ///
+    /// PR #63 follow-up (concurrent-creation race): the sequential check
+    /// above (`rootRecord.share`) only helps when the record we already
+    /// hold is caught up. Two concurrent `ensure` calls can both observe
+    /// no share, both construct their own `CKShare`, and both attempt to
+    /// save `[rootRecord, share]` against the SAME `rootRecord` change
+    /// tag — the loser's save is rejected as a conflict, not because
+    /// there's a genuine failure, but because the winner already moved
+    /// the root record forward. `isRecoverableShareCreationConflict(code:)`
+    /// recognizes that shape of failure; on a match, the authoritative
+    /// root record is refetched by its own deterministic ID and its
+    /// (now up to date) `share` reference is followed — converging on
+    /// the WINNER's share rather than treating the loser's save as a
+    /// terminal error.
+    private func ensureShare(rootRecord: CKRecord, workspaceId: UUID, zoneID: CKRecordZone.ID, database: CKDatabase) async throws -> CKShare {
         if let shareReference = rootRecord.share {
             return try await fetchExistingShare(recordID: shareReference.recordID, database: database)
         }
@@ -178,10 +192,90 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             return share
         } catch let error as FamilyWorkspaceSharingError {
             throw error
+        } catch let error as CKError where Self.isRecoverableShareCreationConflict(code: error.code) {
+            return try await convergeOnExistingShareAfterCreationConflict(
+                workspaceId: workspaceId,
+                zoneID: zoneID,
+                database: database,
+                underlyingError: error
+            )
         } catch {
             log.error("FamilyWorkspace share save failed: \(error.localizedDescription, privacy: .public)")
             throw FamilyWorkspaceSharingError.shareFailed(error)
         }
+    }
+
+    /// PURE decision only — no CloudKit I/O, so it is directly unit
+    /// testable against plain `CKError.Code` values (themselves a plain
+    /// enum, safe to construct in XCTest with no entitlement). Kept
+    /// deliberately conservative/broad rather than trying to pinpoint the
+    /// exact single code CloudKit reports for this specific batch shape
+    /// (which this repo's own tooling cannot verify without a real
+    /// compiler+server round trip — see this file's own XCTEST-SAFETY
+    /// note): `.serverRecordChanged` is the direct per-record conflict
+    /// code; `.partialFailure`/`.batchRequestFailed` are the documented
+    /// codes CloudKit uses for the OVERALL operation and for sibling
+    /// records respectively when an atomic batch fails because one
+    /// record in it (here, the stale `rootRecord`) lost a write race.
+    /// Recognizing all three as "worth refetching and converging on" is
+    /// safe even if broader than strictly necessary: refetching the
+    /// deterministic root record and checking its `share` reference is
+    /// itself side-effect-free, so a false-positive match here costs one
+    /// extra fetch, never a duplicate share or a masked real failure —
+    /// `convergeOnExistingShareAfterCreationConflict` still surfaces the
+    /// original error explicitly if the refetched root has no share.
+    static func isRecoverableShareCreationConflict(code: CKError.Code) -> Bool {
+        switch code {
+        case .serverRecordChanged, .partialFailure, .batchRequestFailed:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Refetches the deterministic root record — the one thing every
+    /// concurrent `ensure` call agrees on regardless of which one "won"
+    /// — and follows its `share` reference if the winner has since
+    /// populated one. Only ever called after a save that this coordinator
+    /// itself judged to be a recoverable creation-race shape; still does
+    /// not retry unboundedly: if the refetch itself fails, or the
+    /// authoritative root record still has no share, the ORIGINAL
+    /// underlying error is surfaced rather than looping or inventing a
+    /// share.
+    private func convergeOnExistingShareAfterCreationConflict(
+        workspaceId: UUID,
+        zoneID: CKRecordZone.ID,
+        database: CKDatabase,
+        underlyingError: CKError
+    ) async throws -> CKShare {
+        let recordID = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID)
+
+        // `fetchExistingRootRecord` itself already returns `CKRecord?`
+        // (nil = legitimately not found) while THROWING on a genuine
+        // fetch failure — deliberately not `try?` here, which would
+        // collapse those two different outcomes into the same `nil` and
+        // silently discard a genuine failure. Either outcome converges
+        // on the same result below: surface the ORIGINAL share-save
+        // conflict, not a fresh error about the refetch itself, since
+        // that conflict is the actual problem a caller needs to see.
+        let refetchedRoot: CKRecord?
+        do {
+            refetchedRoot = try await fetchExistingRootRecord(recordID: recordID, database: database)
+        } catch {
+            log.error("FamilyWorkspace share creation conflict: refetching the authoritative root record failed; surfacing the original conflict.")
+            throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
+        }
+        guard let refetchedRoot, let shareReference = refetchedRoot.share else {
+            // Either the root genuinely vanished (should not happen — we
+            // just successfully fetched/created it earlier in this same
+            // call), or whatever conflicted with our save was not
+            // another writer's share creation. Either way, there is
+            // nothing to converge on — surface the real failure rather
+            // than retrying indefinitely.
+            log.error("FamilyWorkspace share creation conflict did not resolve to an existing share on refetch.")
+            throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
+        }
+        return try await fetchExistingShare(recordID: shareReference.recordID, database: database)
     }
 
     private func fetchExistingShare(recordID: CKRecord.ID, database: CKDatabase) async throws -> CKShare {
