@@ -163,10 +163,26 @@ struct CloudKitFoundationRegressionTests {
     func swiftDataPersistenceControllerStaysLocalOnly() throws {
         let url = repositoryRoot().appendingPathComponent("Sources/VoxtrCore/Persistence/SwiftDataPersistenceController.swift")
         let source = try String(contentsOf: url, encoding: .utf8)
-        let noneOccurrences = source.components(separatedBy: "cloudKitDatabase: .none").count - 1
-        #expect(noneOccurrences == 2, "Expected both ModelConfiguration initializers to pass cloudKitDatabase: .none")
-        #expect(!source.contains("cloudKitDatabase: .automatic"))
-        #expect(!source.contains("cloudKitDatabase: .private("))
+
+        // Only reason about actual code, not doc/line comments that merely
+        // mention `cloudKitDatabase: .none` in prose (e.g. this file's own
+        // "ENGINEERING TRADE-OFF" header) — counting those would make this
+        // guard brittle against harmless documentation edits, and it isn't
+        // the invariant this test exists to protect.
+        let codeLines = source
+            .components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+        let code = codeLines.joined(separator: "\n")
+
+        let constructorCount = code.components(separatedBy: "ModelConfiguration(").count - 1
+        let noneOccurrences = code.components(separatedBy: "cloudKitDatabase: .none").count - 1
+        #expect(constructorCount > 0, "Expected at least one ModelConfiguration construction")
+        #expect(
+            noneOccurrences == constructorCount,
+            "Expected every ModelConfiguration construction to pass cloudKitDatabase: .none"
+        )
+        #expect(!code.contains("cloudKitDatabase: .automatic"))
+        #expect(!code.contains("cloudKitDatabase: .private("))
     }
 
     @Test("CompositionRoot.build() still constructs successfully with the new CloudKitTransport parameter, without requiring live CloudKit account/network success")
