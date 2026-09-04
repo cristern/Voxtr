@@ -132,6 +132,21 @@ public final class AthleteConnectionLifecycleService {
 /// the full rationale. `AthleteSessionActivationService` (B2.4, unmodified)
 /// conforms below and is the only production implementation ever passed
 /// in (`CompositionRoot`).
+///
+/// `@MainActor`: matches `AthleteSessionActivationService.activate(
+/// boundIdentity:)`'s own isolation exactly — that service is
+/// `@MainActor` (it touches `ParentWorkspaceRepository`, itself
+/// `@MainActor` because it touches `ModelContext`), so its conformance
+/// below would otherwise need to satisfy a `nonisolated` protocol
+/// requirement with a main-actor-isolated method, which Swift 6 rejects
+/// as a potential data race. Isolating the protocol itself — not
+/// `@preconcurrency`, not `nonisolated` on the service — is the correct
+/// fix: every real and fake conformer in this codebase already runs on
+/// `@MainActor` (`AthleteConnectionLifecycleService` itself is
+/// `@MainActor`, and so is every test that constructs a fake), so this
+/// isolation reflects how the type is actually used, not an artificial
+/// constraint.
+@MainActor
 public protocol AthleteSessionActivating {
     func activate(boundIdentity: BoundAthleteIdentity) throws -> CurrentSessionActor
 }

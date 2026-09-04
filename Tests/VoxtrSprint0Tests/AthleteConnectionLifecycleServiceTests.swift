@@ -222,6 +222,7 @@ struct AthleteConnectionLifecycleServiceTests {
     /// to move an already-`.active` `WorkspaceParticipant` into a state
     /// B2.4 itself would reject, so this test cannot legitimately
     /// reproduce a real B2.4 failure through persistence alone).
+    @MainActor
     private struct FailingSessionActivator: AthleteSessionActivating {
         let error: AthleteSessionActivationError
         func activate(boundIdentity: BoundAthleteIdentity) throws -> CurrentSessionActor {
