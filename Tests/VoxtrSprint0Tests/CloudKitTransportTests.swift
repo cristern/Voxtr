@@ -204,11 +204,21 @@ struct CloudKitFoundationRegressionTests {
 /// Pure test double proving `CloudKitTransport` only loads state for a
 /// scope once that scope's engine is actually constructed (lazily), not
 /// eagerly for both scopes at `init` time.
+// PR #61 follow-up: `@unchecked Sendable` here is backed by an actual
+// `NSLock`, not an unsynchronized `var` — matching this project's own
+// established pattern (`DIContainer`, `ActivityLoggedRecorder`) for a
+// mutable `@unchecked Sendable` type, rather than an unaudited claim.
 private final class RecordingCloudKitSyncEngineStateStore: CloudKitSyncEngineStateStoring, @unchecked Sendable {
-    private(set) var loadedScopes: [CloudKitDatabaseScope] = []
+    private let lock = NSLock()
+    private var _loadedScopes: [CloudKitDatabaseScope] = []
+    var loadedScopes: [CloudKitDatabaseScope] {
+        lock.lock(); defer { lock.unlock() }
+        return _loadedScopes
+    }
 
     func loadState(for scope: CloudKitDatabaseScope) -> CKSyncEngine.State.Serialization? {
-        loadedScopes.append(scope)
+        lock.lock(); defer { lock.unlock() }
+        _loadedScopes.append(scope)
         return nil
     }
 

@@ -25,7 +25,21 @@ public protocol CloudKitSyncEngineStateStoring: Sendable {
 /// state is not a Vǫxtr business entity, so it does not belong in
 /// `AppSchema`, and `UserDefaults` already is this project's established
 /// place for small local-only, non-synced device state.
-public final class UserDefaultsCloudKitSyncEngineStateStore: CloudKitSyncEngineStateStoring {
+///
+/// PR #61 follow-up (Codemagic Swift 6 fix): `@unchecked Sendable` is
+/// required here because `Foundation.UserDefaults` itself does not
+/// conform to `Sendable` (it has not been audited by Apple as such),
+/// which the compiler cannot verify automatically even though this type
+/// stores nothing else. This is justified, not mechanical: `UserDefaults`
+/// is Apple's own long-documented thread-safe type — every method used
+/// here (`data(forKey:)`, `set(_:forKey:)`) is explicitly safe to call
+/// concurrently from any thread. `defaults` itself is `let`-bound
+/// (assigned once, at `init`, never reassigned), and this type stores no
+/// OTHER mutable state that would need synchronizing — there is nothing
+/// for `@unchecked` to actually be unsafe about beyond the compiler's
+/// inability to see through `UserDefaults`'s own (real, documented)
+/// thread safety.
+public final class UserDefaultsCloudKitSyncEngineStateStore: CloudKitSyncEngineStateStoring, @unchecked Sendable {
 
     private let defaults: UserDefaults
 
