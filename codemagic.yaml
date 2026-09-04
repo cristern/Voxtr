@@ -360,6 +360,22 @@ workflows:
   #    by NAME. See README.md → "Codemagic Setup Requirements" for what
   #    you must configure in the Codemagic UI before this workflow can
   #    run — none of it goes in this repo.
+  #
+  #    KNOWN GAP (PR #62 follow-up): this workflow's `ios_signing` block
+  #    below declares only `bundle_identifier: $ATHLETE_BUNDLE_ID` —
+  #    Codemagic's documented schema does not support a list of bundle
+  #    identifiers there, so it cannot also intentionally declare
+  #    ParentApp's. ParentApp's "Archive and export ParentApp" step below
+  #    therefore signs using whatever `xcode-project use-profiles` can
+  #    resolve from the keychain at that point, not an explicit
+  #    declaration in this workflow — unverified, not "fixed" by this
+  #    follow-up. The two proven, single-target manual workflows
+  #    (`testflight-parent`, `testflight-athlete`) are each intentionally
+  #    signed and are the acceptance gate for the AthleteApp signing fix.
+  #    Correctly declaring both targets here would need Codemagic's
+  #    documented multi-profile mechanism (explicit `provisioning_profiles`/
+  #    `certificates` reference lists), whose real names for this account
+  #    are not yet known/verified — do not invent them.
   # =======================================================================
   testflight-release:
     name: Vǫxtr — TestFlight release (AthleteApp + ParentApp)
@@ -388,20 +404,27 @@ workflows:
       # Automatic code signing through Codemagic: distribution_type +
       # bundle_identifier is enough for Codemagic to resolve the signing
       # identity via the app_store_connect integration above — no manual
-      # certificate/profile files anywhere in this repo. This workflow
-      # archives BOTH AthleteApp and ParentApp (see the two "Archive and
-      # export" steps below), so both bundle identifiers are listed here
-      # — a single bundle_identifier previously covered only AthleteApp,
-      # leaving ParentApp's signing to whatever `xcode-project
-      # use-profiles` happened to already have available rather than an
-      # intentional declaration. `ios_signing.bundle_identifier` accepts
-      # a list for exactly this case (signing more than one target's
-      # bundle ID from one workflow).
+      # certificate/profile files anywhere in this repo.
+      #
+      # PR #62 follow-up: a prior revision of this comment/config listed
+      # BOTH $ATHLETE_BUNDLE_ID and $PARENT_BUNDLE_ID here on the
+      # assumption that `ios_signing.bundle_identifier` accepts a list.
+      # Codemagic's documented schema defines `bundle_identifier` as a
+      # SINGLE bundle identifier string — a generic YAML parse does not
+      # validate that, so this repo should not rely on an undocumented
+      # list value here. Reverted to the single, documented form this
+      # workflow already shipped with (Athlete only). This means this
+      # workflow's own `ios_signing` block is NOT a verified, intentional
+      # signing declaration for ParentApp's archive step below — see the
+      # header comment above this workflow, and the PR #62 follow-up
+      # delivery report, for what that means and what remains an open
+      # decision (Codemagic's documented multi-profile mechanism is
+      # explicit `provisioning_profiles`/`certificates` reference lists,
+      # which this repo does not yet have verified names for — inventing
+      # them here would be worse than leaving this honestly unresolved).
       ios_signing:
         distribution_type: app_store
-        bundle_identifier:
-          - $ATHLETE_BUNDLE_ID
-          - $PARENT_BUNDLE_ID
+        bundle_identifier: $ATHLETE_BUNDLE_ID
 
     triggering:
       events:
