@@ -67,36 +67,66 @@ import os
 public final class CloudKitTransport {
 
     public let containerIdentifier: String
-    private let container: CKContainer
+    private let containerProvider: CloudKitContainerProviding
     private let stateStore: CloudKitSyncEngineStateStoring
     private let log = VoxtrLog.logger(.cloudKit)
 
-    public private(set) lazy var privateEngine: CKSyncEngine = makeEngine(scope: .private, database: container.privateCloudDatabase)
-    public private(set) lazy var sharedEngine: CKSyncEngine = makeEngine(scope: .shared, database: container.sharedCloudDatabase)
+    public private(set) lazy var privateEngine: CKSyncEngine = makeEngine(scope: .private)
+    public private(set) lazy var sharedEngine: CKSyncEngine = makeEngine(scope: .shared)
 
     /// `containerIdentifier` defaults to the one real Vǫxtr container
     /// (`CloudKitContainerIdentifier.voxtrFamily`) — overridable only so
     /// tests can construct this type without depending on a hardcoded
     /// literal matching production exactly, per this repo's existing
-    /// testability conventions. Constructing `CKContainer`/`CKDatabase`
-    /// objects is a local, synchronous operation — it does not itself
-    /// make a network call or require a live iCloud account, so this
-    /// initializer is safe to call unconditionally at composition-root
-    /// time without querying account status or contacting CloudKit.
-    public init(
+    /// testability conventions.
+    ///
+    /// PR #61 follow-up (Codemagic XCTest host crash fix): this
+    /// initializer previously constructed a real `CKContainer`
+    /// immediately, on the (incorrect) assumption that doing so was a
+    /// side-effect-free local operation — Codemagic proved otherwise
+    /// (`CKContainer.m:748`, "your process must have a
+    /// com.apple.developer.icloud-services entitlement", fired merely
+    /// from construction, no network call involved). `CKContainer`
+    /// realization is now routed entirely through
+    /// `CloudKitContainerProviding` (see that type's own doc comment) —
+    /// the default `CloudKitContainerProvider` defers actually
+    /// constructing `CKContainer` until `database(for:)`/
+    /// `refreshAvailability()` is genuinely called, so plain
+    /// construction of `CloudKitTransport` remains safe in an
+    /// entitlement-less process (e.g. XCTest) as long as nothing then
+    /// asks it to realize CloudKit.
+    public convenience init(
         containerIdentifier: String = CloudKitContainerIdentifier.voxtrFamily,
         stateStore: CloudKitSyncEngineStateStoring = UserDefaultsCloudKitSyncEngineStateStore()
     ) {
+        self.init(
+            containerIdentifier: containerIdentifier,
+            stateStore: stateStore,
+            containerProvider: CloudKitContainerProvider(containerIdentifier: containerIdentifier)
+        )
+    }
+
+    /// Test-only injection point (internal, reached via `@testable
+    /// import` — see `CloudKitTransportTests.swift`): lets a unit test
+    /// supply a `CloudKitContainerProviding` double that never realizes a
+    /// real `CKContainer`, instead of the production
+    /// `CloudKitContainerProvider`. Not `public` — external callers
+    /// (`CompositionRoot`, ParentApp/AthleteApp) only ever need the
+    /// production default above. This is the DESIGNATED initializer
+    /// (assigns every stored property directly); the `public` one above
+    /// is a `convenience init` that delegates here.
+    init(
+        containerIdentifier: String,
+        stateStore: CloudKitSyncEngineStateStoring,
+        containerProvider: CloudKitContainerProviding
+    ) {
         self.containerIdentifier = containerIdentifier
-        self.container = CKContainer(identifier: containerIdentifier)
         self.stateStore = stateStore
+        self.containerProvider = containerProvider
     }
 
     public func database(for scope: CloudKitDatabaseScope) -> CKDatabase {
-        switch scope {
-        case .private: container.privateCloudDatabase
-        case .shared: container.sharedCloudDatabase
-        }
+        containerProvider.database(for: scope)
     }
 
     public func syncEngine(for scope: CloudKitDatabaseScope) -> CKSyncEngine {
@@ -115,7 +145,7 @@ public final class CloudKitTransport {
     /// where this actually gets called.
     public func refreshAvailability() async -> CloudKitAvailability {
         do {
-            let status = try await container.accountStatus()
+            let status = try await containerProvider.accountStatus()
             log.info("CloudKit account status resolved.")
             return CloudKitAvailability(status)
         } catch {
@@ -127,10 +157,10 @@ public final class CloudKitTransport {
         }
     }
 
-    private func makeEngine(scope: CloudKitDatabaseScope, database: CKDatabase) -> CKSyncEngine {
+    private func makeEngine(scope: CloudKitDatabaseScope) -> CKSyncEngine {
         let delegate = ScopedDelegate(scope: scope, stateStore: stateStore, log: log)
         let configuration = CKSyncEngine.Configuration(
-            database: database,
+            database: containerProvider.database(for: scope),
             stateSerialization: stateStore.loadState(for: scope),
             delegate: delegate
         )
@@ -142,8 +172,8 @@ public final class CloudKitTransport {
         return CKSyncEngine(configuration)
     }
 
-    /// See `makeEngine(scope:database:)`'s own comment — one retained
-    /// delegate per engine, for the lifetime of this `CloudKitTransport`.
+    /// See `makeEngine(scope:)`'s own comment — one retained delegate
+    /// per engine, for the lifetime of this `CloudKitTransport`.
     private var retainedDelegates: [ScopedDelegate] = []
 
     /// Athlete Connection Foundation B1: the smallest CKSyncEngineDelegate
