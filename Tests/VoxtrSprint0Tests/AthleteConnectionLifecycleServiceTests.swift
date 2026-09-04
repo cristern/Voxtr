@@ -37,18 +37,43 @@ import VoxtrAthleteDomain
 struct AthleteConnectionLifecycleServiceTests {
 
     private struct Fixture {
+        // Retained for the fixture's entire lifetime: an in-memory
+        // ModelContainer that nothing else keeps alive gets deallocated
+        // once the factory function returns, which invalidates every
+        // @Model instance fetched through it (SwiftData resets/destroys
+        // the backing context) — the exact cause of the
+        // "This model instance was destroyed by calling ModelContext
+        // .reset" crash this fixture previously produced. Every other
+        // persistence-backed test in this suite avoids this by
+        // constructing `container` directly inside the test function
+        // itself (so its scope IS the test); this factory function
+        // needed the container to outlive its own return, so it is
+        // carried here instead.
+        let container: ModelContainer
         let service: AthleteConnectionLifecycleService
         let parentWorkspaceRepository: ParentWorkspaceRepository
         let athleteRepository: AthleteRepository
-        let created: FamilyOnboardingCoordinator.Result
-        let acceptedAthleteParticipant: WorkspaceParticipant
+        // Snapshotted stable IDs rather than the managed `@Model`
+        // instances themselves — the test only ever needs identity
+        // values for comparison, not continued live access to the
+        // objects.
+        let workspaceRawId: UUID
+        let expectedParticipantId: UUID
+        let expectedWorkspaceId: WorkspaceId
+        let expectedAthleteId: AthleteId
     }
 
     /// Builds a real, canonically-created family with an invited AND
     /// accepted `.athlete` participant — the same fixture shape B2.3/B2.4's
     /// own integration tests use — wired into a real
-    /// `AthleteConnectionLifecycleService`.
-    private static func makeFixture() throws -> Fixture {
+    /// `AthleteConnectionLifecycleService`. `sessionActivationService`
+    /// defaults to the real B2.4 implementation; a test proving a GENUINE
+    /// later B2.4 failure (after this real, successful B2.3-eligible
+    /// setup) substitutes a fake conforming to `AthleteSessionActivating`
+    /// instead — see that protocol's own doc comment for why.
+    private static func makeFixture(
+        sessionActivationService: AthleteSessionActivating? = nil
+    ) throws -> Fixture {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
@@ -93,7 +118,7 @@ struct AthleteConnectionLifecycleServiceTests {
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
-        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
+        let realSessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         // Never actually exercised by connect(acceptedShare:) — only
         // required to satisfy AthleteConnectionLifecycleService's own
         // initializer. Constructing CloudKitTransport performs no
@@ -103,15 +128,18 @@ struct AthleteConnectionLifecycleServiceTests {
         let service = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
             identityBindingService: identityBindingService,
-            sessionActivationService: sessionActivationService
+            sessionActivationService: sessionActivationService ?? realSessionActivationService
         )
 
         return Fixture(
+            container: container,
             service: service,
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
-            created: created,
-            acceptedAthleteParticipant: acceptedParticipant
+            workspaceRawId: created.workspace.id,
+            expectedParticipantId: acceptedParticipant.id,
+            expectedWorkspaceId: created.workspace.workspaceId,
+            expectedAthleteId: created.athlete.athleteId
         )
     }
 
@@ -130,7 +158,7 @@ struct AthleteConnectionLifecycleServiceTests {
     @Test("connect(acceptedShare:) sequences B2.3 -> B2.4 and returns exactly B2.4's own CurrentSessionActor, creating/mutating nothing")
     func successfulSequenceProducesCanonicalActor() throws {
         let fixture = try Self.makeFixture()
-        let accepted = Self.makeAcceptedShare(workspaceId: fixture.created.workspace.id)
+        let accepted = Self.makeAcceptedShare(workspaceId: fixture.workspaceRawId)
 
         let participantCountBefore = try fixture.parentWorkspaceRepository.fetchAllParticipants().count
         let athleteCountBefore = try fixture.athleteRepository.fetchAllAthletes().count
@@ -138,10 +166,10 @@ struct AthleteConnectionLifecycleServiceTests {
 
         let actor = try fixture.service.connect(acceptedShare: accepted)
 
-        #expect(actor.participantId == fixture.acceptedAthleteParticipant.id)
-        #expect(actor.workspaceId == fixture.created.workspace.workspaceId)
+        #expect(actor.participantId == fixture.expectedParticipantId)
+        #expect(actor.workspaceId == fixture.expectedWorkspaceId)
         #expect(actor.role == .athlete)
-        #expect(actor.linkedAthleteId == fixture.created.athlete.athleteId)
+        #expect(actor.linkedAthleteId == fixture.expectedAthleteId)
 
         #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == participantCountBefore)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountBefore)
@@ -187,53 +215,34 @@ struct AthleteConnectionLifecycleServiceTests {
 
     // MARK: - 4: B2.4 failure surfaces correctly
 
+    /// Test seam: throws a fixed, real `AthleteSessionActivationError`
+    /// regardless of the (already-valid) `BoundAthleteIdentity` it
+    /// receives — see `AthleteSessionActivating`'s own doc comment for
+    /// why this is necessary (no canonical repository/domain path exists
+    /// to move an already-`.active` `WorkspaceParticipant` into a state
+    /// B2.4 itself would reject, so this test cannot legitimately
+    /// reproduce a real B2.4 failure through persistence alone).
+    private struct FailingSessionActivator: AthleteSessionActivating {
+        let error: AthleteSessionActivationError
+        func activate(boundIdentity: BoundAthleteIdentity) throws -> CurrentSessionActor {
+            throw error
+        }
+    }
+
     @Test("connect(acceptedShare:) wraps a B2.4 (session activation) failure as sessionActivationFailed after B2.3 already succeeded")
     func sessionActivationFailureSurfacesCorrectly() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
-        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
-        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
-        let coordinator = FamilyOnboardingCoordinator(
-            modelContext: container.mainContext,
-            parentWorkspaceRepository: parentWorkspaceRepository,
-            athleteRepository: athleteRepository,
-            athleteAccessGrantRepository: athleteAccessGrantRepository
+        // B2.3 runs for real, against the same genuinely-`.active`
+        // participant `makeFixture()` always builds — B2.3 succeeds
+        // exactly as it does in `successfulSequenceProducesCanonicalActor`.
+        // Only B2.4 is substituted, with a fake that fails regardless of
+        // the BoundAthleteIdentity B2.3 legitimately produced.
+        let fixture = try Self.makeFixture(
+            sessionActivationService: FailingSessionActivator(error: .participantNotActive)
         )
-        let created = try coordinator.createFamily(
-            parentGivenName: "Kari",
-            athleteGivenName: "Jonas",
-            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
-            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
-            athleteDevelopmentStage: .parentLed
-        )
-        let ownerActorId = ActorId(rawValue: created.participant.id)
-        // Invited, but never accepted — B2.3 still succeeds (the
-        // participant exists and links correctly), but B2.4 fails with
-        // participantNotActive since it is still .invited.
-        _ = try parentWorkspaceRepository.createInvitedAthleteParticipant(
-            workspaceId: created.workspace.workspaceId,
-            linkedAthleteId: created.athlete.athleteId,
-            invitedBy: ownerActorId
-        )
-
-        let restorationService = FamilyRestorationService(
-            parentWorkspaceRepository: parentWorkspaceRepository,
-            athleteRepository: athleteRepository,
-            athleteAccessGrantRepository: athleteAccessGrantRepository
-        )
-        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
-        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
-        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
-        let service = AthleteConnectionLifecycleService(
-            participantShareCoordinator: participantShareCoordinator,
-            identityBindingService: identityBindingService,
-            sessionActivationService: sessionActivationService
-        )
-        let accepted = Self.makeAcceptedShare(workspaceId: created.workspace.id)
+        let accepted = Self.makeAcceptedShare(workspaceId: fixture.workspaceRawId)
 
         do {
-            _ = try service.connect(acceptedShare: accepted)
+            _ = try fixture.service.connect(acceptedShare: accepted)
             Issue.record("Expected connect(acceptedShare:) to throw")
         } catch let error as AthleteConnectionLifecycleError {
             guard case .sessionActivationFailed = error else {

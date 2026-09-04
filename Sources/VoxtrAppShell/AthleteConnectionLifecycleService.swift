@@ -35,8 +35,34 @@ import VoxtrCore
 /// conforming to any protocol could ever be exercised via `connect(from:)`
 /// in a test either way; introducing one would be an abstraction with no
 /// testing payoff. `connect(acceptedShare:)` below is the actual,
-/// fully-testable seam this service exposes — see this file's own test
-/// file for exactly what is and is not covered, and why.
+/// fully-testable seam this service exposes for B2.3 sequencing — see
+/// this file's own test file for exactly what is and is not covered, and
+/// why.
+///
+/// `sessionActivationService`, by contrast, IS typed against the
+/// `AthleteSessionActivating` protocol below rather than the concrete
+/// `AthleteSessionActivationService` (a `final class`, so no subclass
+/// seam is possible either way). Reason: proving this service correctly
+/// wraps a GENUINE later B2.4 failure (distinct from a B2.3 failure)
+/// requires a participant that is `.active` at B2.3 bind time but
+/// rejected at B2.4 activation time — e.g. revoked or re-linked between
+/// the two calls. No canonical repository/domain transition exists yet
+/// to move an already-`.active` `WorkspaceParticipant` into such a state
+/// (`ParentWorkspaceRepository`'s `acceptInvitation`/`declineInvitation`/
+/// `revokeInvitation` all require `state == .invited`), so fabricating
+/// that persisted state directly would mean mutating a `@Model` field in
+/// a way production code itself cannot reach — exactly what this
+/// codebase's own conventions forbid. The protocol seam instead lets a
+/// test run B2.3 for real (a genuinely `.active` participant, never an
+/// impossible domain state) and substitute a fake B2.4 collaborator that
+/// throws a real `AthleteSessionActivationError` case — proving this
+/// service's own wrapping/sequencing, not re-testing B2.4's internal
+/// validation (already covered by B2.4's own test suite). The one
+/// production conformance is `AthleteSessionActivationService` itself
+/// (below); nothing about B2.4's own contract, validation, or call sites
+/// changed to introduce this — it remains the sole real implementation
+/// this service is ever constructed with in production
+/// (`CompositionRoot`).
 ///
 /// ACTOR ISOLATION: `@MainActor`, matching all three collaborators.
 @MainActor
@@ -44,12 +70,12 @@ public final class AthleteConnectionLifecycleService {
 
     private let participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator
     private let identityBindingService: AthleteConnectionIdentityBindingService
-    private let sessionActivationService: AthleteSessionActivationService
+    private let sessionActivationService: AthleteSessionActivating
 
     public init(
         participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator,
         identityBindingService: AthleteConnectionIdentityBindingService,
-        sessionActivationService: AthleteSessionActivationService
+        sessionActivationService: AthleteSessionActivating
     ) {
         self.participantShareCoordinator = participantShareCoordinator
         self.identityBindingService = identityBindingService
@@ -97,6 +123,20 @@ public final class AthleteConnectionLifecycleService {
         }
     }
 }
+
+/// Test seam ONLY: lets `AthleteConnectionLifecycleServiceTests`
+/// substitute a fake B2.4 collaborator so a genuine LATER activation
+/// failure (after a real, successful B2.3 bind) can be tested without
+/// fabricating a persisted domain state production code itself cannot
+/// reach — see `AthleteConnectionLifecycleService`'s own doc comment for
+/// the full rationale. `AthleteSessionActivationService` (B2.4, unmodified)
+/// conforms below and is the only production implementation ever passed
+/// in (`CompositionRoot`).
+public protocol AthleteSessionActivating {
+    func activate(boundIdentity: BoundAthleteIdentity) throws -> CurrentSessionActor
+}
+
+extension AthleteSessionActivationService: AthleteSessionActivating {}
 
 /// Explicit, differentiated failure semantics — never flattened into a
 /// generic string. Each case wraps the real underlying typed error from
