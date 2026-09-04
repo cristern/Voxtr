@@ -29,6 +29,13 @@ import VoxtrAthleteDomain
 struct AthleteRuntimeSessionTests {
 
     private struct SuccessFixture {
+        // Retained for the fixture's entire lifetime — see
+        // AthleteConnectionLifecycleServiceTests.Fixture's own doc
+        // comment for why an in-memory ModelContainer built inside a
+        // static factory function must be carried out of it rather than
+        // left to go out of scope, or SwiftData invalidates every
+        // @Model instance fetched through it.
+        let container: ModelContainer
         let session: AthleteRuntimeSession
         let acceptedShare: AcceptedFamilyWorkspaceShare
         let expectedParticipantId: UUID
@@ -106,6 +113,7 @@ struct AthleteRuntimeSessionTests {
         session.configure(lifecycleService: lifecycleService)
 
         return SuccessFixture(
+            container: container,
             session: session,
             acceptedShare: Self.makeAcceptedShare(workspaceId: created.workspace.id),
             expectedParticipantId: acceptedParticipant.id,
