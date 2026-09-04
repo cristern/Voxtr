@@ -38,6 +38,12 @@ import Foundation
 protocol CloudKitContainerProviding {
     func database(for scope: CloudKitDatabaseScope) -> CKDatabase
     func accountStatus() async throws -> CKAccountStatus
+    /// Athlete Connection Foundation B2.2: accepts an incoming `CKShare`
+    /// (participant-side) into THIS provider's own configured container —
+    /// realizes the real `CKContainer` exactly like `database(for:)`/
+    /// `accountStatus()` already do, so it inherits the same lazy-
+    /// realization/XCTest-safety contract as every other method here.
+    func accept(_ metadata: CKShare.Metadata) async throws -> CKShare
 }
 
 /// The one production implementation. `CKContainer` itself is realized
@@ -87,6 +93,10 @@ final class CloudKitContainerProvider: CloudKitContainerProviding {
 
     func accountStatus() async throws -> CKAccountStatus {
         try await container.accountStatus()
+    }
+
+    func accept(_ metadata: CKShare.Metadata) async throws -> CKShare {
+        try await container.accept(metadata)
     }
 }
 
