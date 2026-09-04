@@ -212,6 +212,13 @@ struct FamilyWorkspaceCloudZoneIdentifierTests {
 //   against Apple's real CloudKit servers;
 // - the root-record fetch-then-save-then-serverRecordChanged-fallback
 //   sequence actually converging under real concurrent "ensure" calls;
+// - the concurrent-share-creation-race convergence path (PR #63 follow-up:
+//   `ensureShare`'s save-conflict catch clause ->
+//   `convergeOnExistingShareAfterCreationConflict`) actually resolving to
+//   the winner's real CKShare under a genuine concurrent write race — what
+//   IS covered directly below is the PURE decision this path depends on,
+//   `isRecoverableShareCreationConflict(code:)`, which needs no CKDatabase
+//   at all;
 // - the CKShare creation/fetch round trip (`rootRecord.share` reference
 //   resolution, `modifyRecords` batch save) against a real database.
 @Suite("Athlete Connection Foundation B2.1: FamilyWorkspace CloudKit record mapping")
@@ -286,6 +293,29 @@ struct FamilyWorkspaceCloudRecordMappingTests {
         let transport = CloudKitTransport()
         let coordinator = FamilyWorkspaceOwnerShareCoordinator(transport: transport)
         _ = coordinator
+    }
+
+    // PR #63 follow-up: `isRecoverableShareCreationConflict(code:)` is the
+    // pure decision `ensureShare`'s concurrent-creation-race handling
+    // depends on — recognizing the shape of CKError CloudKit reports when
+    // two concurrent `ensureSharingRoot` calls both try to save a new
+    // CKShare against the same (now-stale, for the loser) root record.
+    // Needs no CKDatabase/CKContainer: `CKError.Code` is a plain enum.
+
+    @Test("isRecoverableShareCreationConflict(code:) recognizes every documented CloudKit code for a losing concurrent share-creation save — .serverRecordChanged (the direct per-record conflict), and .partialFailure/.batchRequestFailed (the codes an atomic batch save reports for the overall operation and for sibling records)")
+    func recognizesRecoverableShareCreationConflictCodes() {
+        let recoverableCodes: [CKError.Code] = [.serverRecordChanged, .partialFailure, .batchRequestFailed]
+        for code in recoverableCodes {
+            #expect(FamilyWorkspaceOwnerShareCoordinator.isRecoverableShareCreationConflict(code: code))
+        }
+    }
+
+    @Test("isRecoverableShareCreationConflict(code:) does NOT treat unrelated CloudKit failures as a recoverable creation race — those must still surface as an explicit share error, not silently retry")
+    func rejectsUnrelatedFailureCodesAsRecoverable() {
+        let unrelatedCodes: [CKError.Code] = [.networkUnavailable, .notAuthenticated, .zoneNotFound, .unknownItem, .permissionFailure]
+        for code in unrelatedCodes {
+            #expect(!FamilyWorkspaceOwnerShareCoordinator.isRecoverableShareCreationConflict(code: code))
+        }
     }
 }
 
