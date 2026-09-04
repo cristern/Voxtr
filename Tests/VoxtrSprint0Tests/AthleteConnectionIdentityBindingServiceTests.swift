@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import SwiftData
 import VoxtrCore
 import VoxtrCoreContracts
