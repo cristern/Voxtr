@@ -4,17 +4,25 @@ import Foundation
 /// transport infrastructure targets. A small, project-owned enum rather
 /// than exposing `CKDatabase.Scope` directly at every call site — this is
 /// the "small provider/factory abstraction" the B1 task scope asked for,
-/// kept intentionally tiny (two cases, matching exactly what Foundation B
-/// discovery's zone model needs) rather than a larger protocol hierarchy.
+/// kept intentionally tiny (two cases) rather than a larger protocol
+/// hierarchy.
 ///
-/// Maps 1:1 onto Foundation B discovery's two CloudKit-backed placements:
-/// - `.private` → the current user's own private database. Foundation B's
-///   Athlete Private Zone (raw `summaryOnly`/`privateToAthlete` Reflection
-///   content) lives here — never shared with the Parent's `CKShare`.
-/// - `.shared` → the CloudKit shared database, where an accepted `CKShare`
-///   (rooted at the `FamilyWorkspace` record, per DDM-006) actually lives
-///   once B2 creates it. B1 does not create any zone or share yet — this
-///   only identifies which database a later operation targets.
+/// PR #61 follow-up: this type names CloudKit DATABASE scope only — the
+/// CURRENT device's own private database, or the CURRENT device's own
+/// shared database (zones another owner has shared TO it). It
+/// deliberately encodes no Parent/Athlete role assumption and no claim
+/// about which zone lives in which database, because that depends on
+/// which role the current device is actually playing:
+/// - `.private` → the current user's own private database. What a Parent
+///   device stores here differs from what an Athlete device stores here
+///   (see `CloudKitTransport`'s own doc comment for the full, corrected
+///   explanation) — this type itself makes no distinction.
+/// - `.shared` → the current user's own shared database — zones shared
+///   TO the current user by some other owner, never zones the current
+///   user itself created/owns.
+///
+/// B1 does not create any zone or share yet — this only identifies which
+/// database a later operation targets.
 public enum CloudKitDatabaseScope: Sendable, Equatable, CaseIterable {
     case `private`
     case shared

@@ -29,19 +29,40 @@ import os
 ///   anywhere in this codebase) — B2 owns that.
 /// - No `CKShare` is created, distributed, or accepted — B2/B3 own that.
 /// - No `CKRecordZone` is created on CloudKit's servers yet — this type
-///   only knows how to ADDRESS the zone a `FamilyWorkspace` will
-///   eventually own (`FamilyWorkspaceCloudZoneIdentifier`), not how to
-///   create or populate it.
+///   only knows how to ADDRESS the two DATABASES a zone can live in
+///   (`database(for:)`/`syncEngine(for:)`), and (via
+///   `FamilyWorkspaceCloudZoneIdentifier`) the deterministic NAME a
+///   `FamilyWorkspace` zone will use — not how to create, populate, or
+///   fully identify a specific zone across devices; see that type's own
+///   doc comment for exactly why a full `CKRecordZone.ID` cannot be
+///   reconstructed locally on every device.
 ///
 /// Two independent `CKSyncEngine` instances are used, per Foundation B
 /// discovery's own finding: an app may run multiple `CKSyncEngine`
 /// instances in one process, each targeting a different database, but a
 /// single database must never be driven by more than one engine
-/// instance at a time (they would race each other). `privateEngine`
-/// targets `CKContainer.privateCloudDatabase` (Foundation B's Athlete
-/// Private Zone lives here, once B2/B4 populate it); `sharedEngine`
-/// targets `CKContainer.sharedCloudDatabase` (Foundation B's Family
-/// Shared Zone, DDM-006, lives here once B2 creates the `CKShare`).
+/// instance at a time (they would race each other).
+///
+/// CORRECTED OWNERSHIP SEMANTICS (PR #61 follow-up — `.private`/`.shared`
+/// name CloudKit DATABASE scope, never a Parent/Athlete ROLE; do not
+/// encode role assumptions into `CloudKitDatabaseScope` itself):
+/// - `privateEngine` targets `CKContainer.privateCloudDatabase` — the
+///   CURRENT device's own private database. What actually lives there
+///   depends on which role the current device is playing: a Parent
+///   device creates/owns its `FamilyWorkspace` zone here (a shareable
+///   custom zone is always created by its owner in the owner's OWN
+///   private database — this is a real CloudKit constraint, not a Vǫxtr
+///   choice); an Athlete device's own Athlete Private Zone (Foundation B
+///   discovery) also lives here, on the Athlete's device.
+/// - `sharedEngine` targets `CKContainer.sharedCloudDatabase` — the
+///   CURRENT device's own shared database, i.e. zones SHARED TO the
+///   current user by another owner. In the Parent-invites/Athlete-accepts
+///   flow: once the Athlete accepts the Parent's `CKShare`, the Athlete's
+///   device addresses the Parent-owned `FamilyWorkspace` zone through
+///   ITS OWN `sharedEngine`/`sharedCloudDatabase` — never through
+///   `privateEngine`. The Parent's device never accesses its own
+///   `FamilyWorkspace` zone via `sharedCloudDatabase` at all — it already
+///   owns that zone in its own private database.
 @MainActor
 public final class CloudKitTransport {
 

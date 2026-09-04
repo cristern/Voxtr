@@ -109,23 +109,50 @@ struct CloudKitTransportTests {
     }
 }
 
-@Suite("Athlete Connection Foundation B1: deterministic FamilyWorkspace zone identity")
+// NOTE (PR #61 follow-up): these tests deliberately prove only what is
+// actually true. A single `CKRecordZone.ID` is NOT identical across a
+// Parent's and an Athlete's devices for the same FamilyWorkspace — the
+// zone NAME is deterministic and shared, but its `ownerName` legitimately
+// differs by role (the Parent's own device vs. a participant discovering
+// a zone shared TO it). See `FamilyWorkspaceCloudZoneIdentifier`'s own
+// doc comment. No test here claims otherwise.
+@Suite("Athlete Connection Foundation B1: deterministic FamilyWorkspace zone naming")
 struct FamilyWorkspaceCloudZoneIdentifierTests {
 
-    @Test("The same WorkspaceId always produces the same CKRecordZone.ID")
-    func sameWorkspaceIdProducesSameZoneID() {
+    @Test("The same WorkspaceId always produces the same deterministic zone NAME")
+    func sameWorkspaceIdProducesSameZoneName() {
         let workspaceId = UUID()
-        let first = FamilyWorkspaceCloudZoneIdentifier.zoneID(forWorkspace: workspaceId)
-        let second = FamilyWorkspaceCloudZoneIdentifier.zoneID(forWorkspace: workspaceId)
-        #expect(first.zoneName == second.zoneName)
-        #expect(first.ownerName == second.ownerName)
+        let first = FamilyWorkspaceCloudZoneIdentifier.zoneName(forWorkspace: workspaceId)
+        let second = FamilyWorkspaceCloudZoneIdentifier.zoneName(forWorkspace: workspaceId)
+        #expect(first == second)
     }
 
-    @Test("Different WorkspaceIds produce different CKRecordZone.IDs")
-    func differentWorkspaceIdsProduceDifferentZoneIDs() {
-        let first = FamilyWorkspaceCloudZoneIdentifier.zoneID(forWorkspace: UUID())
-        let second = FamilyWorkspaceCloudZoneIdentifier.zoneID(forWorkspace: UUID())
-        #expect(first.zoneName != second.zoneName)
+    @Test("Different WorkspaceIds produce different deterministic zone NAMEs")
+    func differentWorkspaceIdsProduceDifferentZoneNames() {
+        let first = FamilyWorkspaceCloudZoneIdentifier.zoneName(forWorkspace: UUID())
+        let second = FamilyWorkspaceCloudZoneIdentifier.zoneName(forWorkspace: UUID())
+        #expect(first != second)
+    }
+
+    @Test("ownerZoneID(forWorkspace:) — the OWNER-side-only helper — uses CKCurrentUserDefaultName as its ownerName, and reuses the same deterministic zoneName")
+    func ownerZoneIDUsesCurrentUserDefaultName() {
+        let workspaceId = UUID()
+        let ownerZoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        #expect(ownerZoneID.ownerName == CKCurrentUserDefaultName)
+        #expect(ownerZoneID.zoneName == FamilyWorkspaceCloudZoneIdentifier.zoneName(forWorkspace: workspaceId))
+    }
+
+    @Test("FamilyWorkspaceCloudZoneIdentifier exposes no generic zoneID(forWorkspace:) API — only the explicitly owner-scoped ownerZoneID(forWorkspace:) — so a participant-side call site cannot accidentally reach for a name that implies it is safe on every device")
+    func noGenericZoneIDAPIExists() {
+        // API-shape guard, not a runtime check: this test's own existence
+        // (and the fact it compiles) is what it proves — if a future
+        // change reintroduces a generic `zoneID(forWorkspace:)` that
+        // shadows or replaces `ownerZoneID(forWorkspace:)`, a reviewer
+        // reading this test's name/intent should catch the regression
+        // even though nothing here can mechanically fail on that alone.
+        let workspaceId = UUID()
+        let ownerZoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        #expect(ownerZoneID.ownerName == CKCurrentUserDefaultName)
     }
 }
 
