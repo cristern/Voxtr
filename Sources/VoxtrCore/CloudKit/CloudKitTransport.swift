@@ -129,6 +129,20 @@ public final class CloudKitTransport {
         containerProvider.database(for: scope)
     }
 
+    /// Athlete Connection Foundation B2.2: participant-side share
+    /// acceptance — realizes the real `CKContainer` exactly like
+    /// `database(for:)`/`refreshAvailability()` already do (no eager
+    /// realization merely from `CloudKitTransport`'s own construction).
+    /// A thin pass-through to `containerProvider.accept(_:)`, kept here
+    /// (rather than requiring `FamilyWorkspaceParticipantShareCoordinator`
+    /// to see the internal `CloudKitContainerProviding` seam directly) so
+    /// that coordinator only ever depends on this one public type, the
+    /// same shape as `FamilyWorkspaceOwnerShareCoordinator`'s own
+    /// dependency on `CloudKitTransport`.
+    public func accept(_ metadata: CKShare.Metadata) async throws -> CKShare {
+        try await containerProvider.accept(metadata)
+    }
+
     public func syncEngine(for scope: CloudKitDatabaseScope) -> CKSyncEngine {
         switch scope {
         case .private: privateEngine
