@@ -474,6 +474,52 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         let coordinator = FamilyWorkspaceParticipantShareCoordinator(transport: transport)
         _ = coordinator
     }
+
+    // PR #64 follow-up: `action(forParticipantStatus:)` is the pure
+    // decision resolveAcceptedShare(from:) uses to decide whether a
+    // share needs accepting, is already established, or must be
+    // rejected — needs no CKContainer/CKDatabase/CKShare.Metadata:
+    // `CKShare.ParticipantAcceptanceStatus` is a plain enum.
+
+    @Test("action(forParticipantStatus: .pending) resolves to .accept — a share not yet accepted must actually be accepted")
+    func pendingParticipantStatusResolvesToAccept() {
+        #expect(FamilyWorkspaceParticipantShareCoordinator.action(forParticipantStatus: .pending) == .accept)
+    }
+
+    @Test("action(forParticipantStatus: .accepted) resolves to .resolveExisting — an already-established participant must NOT be re-accepted")
+    func acceptedParticipantStatusResolvesToResolveExisting() {
+        #expect(FamilyWorkspaceParticipantShareCoordinator.action(forParticipantStatus: .accepted) == .resolveExisting)
+    }
+
+    @Test("action(forParticipantStatus:) rejects every other status (.unknown, .removed) rather than silently inferring successful participation")
+    func otherParticipantStatusesResolveToReject() {
+        let unsupportedStatuses: [CKShare.ParticipantAcceptanceStatus] = [.unknown, .removed]
+        for status in unsupportedStatuses {
+            #expect(FamilyWorkspaceParticipantShareCoordinator.action(forParticipantStatus: status) == .reject)
+        }
+    }
+
+    // PR #64 follow-up: `isSharedRootNotYetAvailable(code:)` is the pure
+    // decision `fetchSharedRootRecord` uses to distinguish CloudKit's own
+    // documented post-acceptance propagation delay from a genuine
+    // failure — needs no CKDatabase/CKContainer: `CKError.Code` is a
+    // plain enum.
+
+    @Test("isSharedRootNotYetAvailable(code:) recognizes .zoneNotFound and .unknownItem as CloudKit's own 'not visible yet from this side' signal")
+    func recognizesSharedRootNotYetAvailableCodes() {
+        let notYetAvailableCodes: [CKError.Code] = [.zoneNotFound, .unknownItem]
+        for code in notYetAvailableCodes {
+            #expect(FamilyWorkspaceParticipantShareCoordinator.isSharedRootNotYetAvailable(code: code))
+        }
+    }
+
+    @Test("isSharedRootNotYetAvailable(code:) does NOT treat unrelated failures as a propagation delay")
+    func rejectsUnrelatedCodesAsNotYetAvailable() {
+        let unrelatedCodes: [CKError.Code] = [.networkUnavailable, .notAuthenticated, .permissionFailure]
+        for code in unrelatedCodes {
+            #expect(!FamilyWorkspaceParticipantShareCoordinator.isSharedRootNotYetAvailable(code: code))
+        }
+    }
 }
 
 @Suite("Athlete Connection Foundation B1: regression guards")

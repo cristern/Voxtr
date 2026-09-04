@@ -69,17 +69,23 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
         self.transport = transport
     }
 
-    /// Idempotency: CloudKit's own documented behavior for accepting a
-    /// share the current user already accepted is what actually
-    /// determines whether a repeat call here converges cleanly — this
-    /// slice does not add its own retry/reconciliation logic on top, and
-    /// that specific behavior is a TestFlight/signed-build validation
-    /// item (see the suite-level NOTE in `CloudKitTransportTests.swift`).
-    /// What this method DOES guarantee itself: given the SAME accepted
-    /// share and the SAME fetched root record, `resolveAcceptedShare(share:rootRecord:)`
-    /// is a pure function and always produces the identical
-    /// `AcceptedFamilyWorkspaceShare` — no random/derived identity is
-    /// ever introduced on the participant side.
+    /// Idempotency (PR #64 follow-up): does NOT depend on however
+    /// CloudKit happens to respond to a repeated `accept` call against an
+    /// already-accepted share — that was undocumented behavior this
+    /// slice should not lean on. Instead, `metadata.participantStatus`
+    /// (Apple's own documented signal for exactly this) is inspected
+    /// FIRST, via the pure `action(forParticipantStatus:)` below:
+    /// `.pending` calls `transport.accept(metadata)` exactly once;
+    /// `.accepted` skips acceptance entirely and resolves directly from
+    /// `metadata.share` (the participant is already established — no
+    /// second acceptance call is made or needed); any other status fails
+    /// explicitly rather than silently assuming success. What this
+    /// method ALSO still guarantees itself: given the SAME accepted
+    /// share and the SAME fetched root record,
+    /// `resolveAcceptedShare(share:rootRecord:)` is a pure function and
+    /// always produces the identical `AcceptedFamilyWorkspaceShare` — no
+    /// random/derived identity is ever introduced on the participant
+    /// side.
     public func resolveAcceptedShare(from metadata: CKShare.Metadata) async throws -> AcceptedFamilyWorkspaceShare {
         guard metadata.containerIdentifier == transport.containerIdentifier else {
             throw FamilyWorkspaceShareAcceptanceError.containerMismatch(
@@ -94,26 +100,106 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
         }
 
         let acceptedShare: CKShare
-        do {
-            acceptedShare = try await transport.accept(metadata)
-        } catch {
-            log.error("FamilyWorkspace share acceptance failed: \(error.localizedDescription, privacy: .public)")
-            throw FamilyWorkspaceShareAcceptanceError.shareAcceptanceFailed(error)
+        switch Self.action(forParticipantStatus: metadata.participantStatus) {
+        case .accept:
+            do {
+                acceptedShare = try await transport.accept(metadata)
+            } catch {
+                log.error("FamilyWorkspace share acceptance failed: \(error.localizedDescription, privacy: .public)")
+                throw FamilyWorkspaceShareAcceptanceError.shareAcceptanceFailed(error)
+            }
+        case .resolveExisting:
+            // Already an established participant — `metadata.share` is
+            // CloudKit's own record for this share, no different from
+            // what a fresh `accept` call would hand back; calling
+            // `accept` again is neither necessary nor something this
+            // slice should rely on behaving safely.
+            acceptedShare = metadata.share
+        case .reject:
+            log.error("FamilyWorkspace share metadata reported an unsupported participant status.")
+            throw FamilyWorkspaceShareAcceptanceError.unsupportedParticipantStatus(metadata.participantStatus)
+        }
+
+        // Vǫxtr's B2.1 sharing contract is a single-record hierarchy
+        // rooted on the FamilyWorkspace record (`CKShare(rootRecord:)`).
+        // `hierarchicalRootRecordID` is the current, non-deprecated API
+        // for that root's identity — `rootRecordID` is deprecated and
+        // deliberately not used. It is optional; metadata that lacks it
+        // does not describe the shared-record hierarchy Vǫxtr expects,
+        // so that is rejected explicitly rather than fabricating a root
+        // ID or falling back to owner-side deterministic zone
+        // construction (which participant-side code must never do at all
+        // — see this file's own CRITICAL IDENTITY RULE above).
+        guard let rootRecordID = metadata.hierarchicalRootRecordID else {
+            throw FamilyWorkspaceShareAcceptanceError.missingHierarchicalRootRecordID
         }
 
         // Athlete-side access to the Parent-owned FamilyWorkspace root
         // MUST go through the shared database — the Parent's own private
         // database is never reachable from the Athlete's device at all.
         let database = transport.database(for: .shared)
-        let rootRecord: CKRecord
+        let rootRecord = try await fetchSharedRootRecord(recordID: rootRecordID, database: database)
+
+        return try Self.resolveAcceptedShare(share: acceptedShare, rootRecord: rootRecord)
+    }
+
+    /// PURE decision only — no CloudKit I/O, so directly unit testable
+    /// against plain `CKShare.ParticipantAcceptanceStatus` values.
+    /// `nonisolated` for the same reason as every other pure decision in
+    /// this codebase's CloudKit layer (see
+    /// `FamilyWorkspaceOwnerShareCoordinator.isRecoverableShareCreationConflict(code:)`'s
+    /// own PR #63 doc comment): touches no instance state, and declaring
+    /// it inside an `@MainActor` type would otherwise make it uncallable
+    /// from plain, synchronous, nonisolated unit tests.
+    enum ParticipantAcceptanceAction: Equatable {
+        case accept
+        case resolveExisting
+        case reject
+    }
+
+    nonisolated static func action(forParticipantStatus status: CKShare.ParticipantAcceptanceStatus) -> ParticipantAcceptanceAction {
+        switch status {
+        case .pending: .accept
+        case .accepted: .resolveExisting
+        case .unknown, .removed: .reject
+        @unknown default: .reject
+        }
+    }
+
+    /// Distinguishes "CloudKit has not yet finished propagating the
+    /// newly-accepted share's data into the shared database" (Apple
+    /// documents this residual server-side work can continue briefly
+    /// after acceptance completes) from a genuinely malformed/missing
+    /// root identity or an unrelated failure. Deliberately does NOT
+    /// retry, sleep, or poll here — per this follow-up's own explicit
+    /// constraint, that residual-propagation race is left as an
+    /// explicit, recoverable error a later lifecycle/sync integration
+    /// can re-resolve, not something this slice solves with a timing
+    /// hack. `.zoneNotFound`/`.unknownItem` are the fetch-time codes that
+    /// legitimately mean "not visible from this side yet," mirroring how
+    /// B2.1's own `fetchExistingRootRecord` already treats `.unknownItem`
+    /// as a distinct, non-generic-failure case.
+    private func fetchSharedRootRecord(recordID: CKRecord.ID, database: CKDatabase) async throws -> CKRecord {
         do {
-            rootRecord = try await database.record(for: metadata.rootRecordID)
+            return try await database.record(for: recordID)
+        } catch let error as CKError where Self.isSharedRootNotYetAvailable(code: error.code) {
+            log.error("FamilyWorkspace shared root record not yet available in the shared database.")
+            throw FamilyWorkspaceShareAcceptanceError.sharedRootNotYetAvailable(error)
         } catch {
             log.error("FamilyWorkspace root record fetch from shared database failed: \(error.localizedDescription, privacy: .public)")
             throw FamilyWorkspaceShareAcceptanceError.rootRecordUnavailable(error)
         }
+    }
 
-        return try Self.resolveAcceptedShare(share: acceptedShare, rootRecord: rootRecord)
+    /// PURE decision only — no CloudKit I/O. See `fetchSharedRootRecord(recordID:database:)`'s
+    /// own doc comment for what this distinguishes and why.
+    nonisolated static func isSharedRootNotYetAvailable(code: CKError.Code) -> Bool {
+        switch code {
+        case .zoneNotFound, .unknownItem:
+            true
+        default:
+            false
+        }
     }
 
     /// PURE decode/validation only — no CloudKit I/O. See this file's own
@@ -206,7 +292,23 @@ public enum FamilyWorkspaceShareAcceptanceError: Error {
     /// `accountUnavailable` case.
     case accountUnavailable(CloudKitAvailability)
     case shareAcceptanceFailed(Error)
+    /// The share metadata's `participantStatus` was neither `.pending`
+    /// (acceptable) nor `.accepted` (already established) — e.g.
+    /// `.removed` or `.unknown` — so Vǫxtr cannot safely treat
+    /// participation as established without silently inferring success.
+    case unsupportedParticipantStatus(CKShare.ParticipantAcceptanceStatus)
+    /// `metadata.hierarchicalRootRecordID` was `nil` — this metadata does
+    /// not describe the single-record shared hierarchy Vǫxtr's B2.1
+    /// sharing contract expects.
+    case missingHierarchicalRootRecordID
     case rootRecordUnavailable(Error)
+    /// CloudKit accepted the share, but the shared root record is not
+    /// yet visible in the shared database — Apple documents this
+    /// residual propagation can briefly continue after acceptance
+    /// completes. Recoverable: a later attempt (lifecycle/sync
+    /// integration, not this slice) may succeed without anything else
+    /// changing.
+    case sharedRootNotYetAvailable(Error)
     /// The fetched root record's zone did not match the accepted share's
     /// own zone — should not happen given both come from the same
     /// CloudKit-reported share, but surfaced explicitly rather than
