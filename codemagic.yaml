@@ -388,10 +388,20 @@ workflows:
       # Automatic code signing through Codemagic: distribution_type +
       # bundle_identifier is enough for Codemagic to resolve the signing
       # identity via the app_store_connect integration above — no manual
-      # certificate/profile files anywhere in this repo.
+      # certificate/profile files anywhere in this repo. This workflow
+      # archives BOTH AthleteApp and ParentApp (see the two "Archive and
+      # export" steps below), so both bundle identifiers are listed here
+      # — a single bundle_identifier previously covered only AthleteApp,
+      # leaving ParentApp's signing to whatever `xcode-project
+      # use-profiles` happened to already have available rather than an
+      # intentional declaration. `ios_signing.bundle_identifier` accepts
+      # a list for exactly this case (signing more than one target's
+      # bundle ID from one workflow).
       ios_signing:
         distribution_type: app_store
-        bundle_identifier: $ATHLETE_BUNDLE_ID
+        bundle_identifier:
+          - $ATHLETE_BUNDLE_ID
+          - $PARENT_BUNDLE_ID
 
     triggering:
       events:
@@ -448,12 +458,6 @@ workflows:
 
       - name: Initialize keychain for code signing
         script: keychain initialize
-
-      - name: Fetch or generate signing files — AthleteApp
-        script: |
-          app-store-connect fetch-signing-files "$ATHLETE_BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
 
       - name: Add certificates to keychain and apply provisioning profiles
         script: |
@@ -710,12 +714,6 @@ workflows:
 
       - name: Initialize keychain for code signing
         script: keychain initialize
-
-      - name: Fetch or generate signing files — AthleteApp
-        script: |
-          app-store-connect fetch-signing-files "$ATHLETE_BUNDLE_ID" \
-            --type IOS_APP_STORE \
-            --create
 
       - name: Add certificates to keychain and apply provisioning profiles
         script: |
