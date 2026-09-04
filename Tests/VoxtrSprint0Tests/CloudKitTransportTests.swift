@@ -195,6 +195,100 @@ struct FamilyWorkspaceCloudZoneIdentifierTests {
     }
 }
 
+// NOTE (B2.1): `FamilyWorkspaceOwnerShareCoordinator.ensureSharingRoot(forWorkspace:)`
+// itself is NOT unit-tested here, for the same reason `CloudKitTransport`'s
+// own engine/database realization is not (see the `CloudKitContainerRoutingTests`
+// suite-level NOTE above): it performs real CloudKit network I/O and
+// realizes a real CKContainer via `CloudKitTransport.refreshAvailability()`,
+// which crashes the entitlement-less XCTest host. What IS covered here is
+// everything that orchestration actually depends on to converge correctly
+// without duplication: the deterministic, pure record-mapping layer it
+// reads/writes through (`FamilyWorkspaceCloudRecordMapping`), and that
+// constructing the coordinator itself is side-effect-free — mirroring
+// `CloudKitTransport()`'s own construction-safety test. The following
+// integration facts remain unverified by XCTest and are TestFlight/
+// signed-build validation items instead:
+// - the zone-save-is-idempotent claim (`ensureZone`'s own doc comment)
+//   against Apple's real CloudKit servers;
+// - the root-record fetch-then-save-then-serverRecordChanged-fallback
+//   sequence actually converging under real concurrent "ensure" calls;
+// - the CKShare creation/fetch round trip (`rootRecord.share` reference
+//   resolution, `modifyRecords` batch save) against a real database.
+@Suite("Athlete Connection Foundation B2.1: FamilyWorkspace CloudKit record mapping")
+struct FamilyWorkspaceCloudRecordMappingTests {
+
+    @Test("The same WorkspaceId always produces the same deterministic root record NAME")
+    func sameWorkspaceIdProducesSameRecordName() {
+        let workspaceId = UUID()
+        let first = FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: workspaceId)
+        let second = FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: workspaceId)
+        #expect(first == second)
+    }
+
+    @Test("Different WorkspaceIds produce different deterministic root record NAMEs — no random identity is ever introduced")
+    func differentWorkspaceIdsProduceDifferentRecordNames() {
+        let first = FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: UUID())
+        let second = FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: UUID())
+        #expect(first != second)
+    }
+
+    @Test("recordID(forWorkspace:zoneID:) places the root record in exactly the zone ID it was given — repeated calls with the same inputs produce an identical CKRecord.ID")
+    func recordIDIsPlacedInGivenZoneAndIsDeterministic() {
+        let workspaceId = UUID()
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+
+        let first = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID)
+        let second = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID)
+
+        #expect(first == second)
+        #expect(first.zoneID == zoneID)
+        #expect(first.recordName == FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: workspaceId))
+    }
+
+    @Test("makeRecord(for:zoneID:) produces a record of the FamilyWorkspace record type, in the given zone, carrying the workspace's stable identity")
+    func makeRecordCarriesExpectedTypeZoneAndIdentity() {
+        let workspaceId = UUID()
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        let payload = FamilyWorkspaceCloudRecordPayload(workspaceId: workspaceId)
+
+        let record = FamilyWorkspaceCloudRecordMapping.makeRecord(for: payload, zoneID: zoneID)
+
+        #expect(record.recordType == FamilyWorkspaceCloudRecordSchema.recordType)
+        #expect(record.recordID == FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID))
+        #expect(record[FamilyWorkspaceCloudRecordSchema.workspaceIdFieldKey] as? String == workspaceId.uuidString)
+        #expect(record[FamilyWorkspaceCloudRecordSchema.mappingVersionFieldKey] as? Int64 == FamilyWorkspaceCloudRecordSchema.mappingVersion)
+    }
+
+    @Test("payload(from:) is the exact inverse of makeRecord(for:zoneID:) — round-tripping a record recovers the same stable workspace identity, proving no identity is lost or randomized in transit")
+    func payloadRoundTripsThroughMakeRecord() throws {
+        let payload = FamilyWorkspaceCloudRecordPayload(workspaceId: UUID())
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: payload.workspaceId)
+
+        let record = FamilyWorkspaceCloudRecordMapping.makeRecord(for: payload, zoneID: zoneID)
+        let decoded = try FamilyWorkspaceCloudRecordMapping.payload(from: record)
+
+        #expect(decoded == payload)
+    }
+
+    @Test("payload(from:) rejects a record of the wrong record type rather than silently decoding garbage")
+    func payloadRejectsWrongRecordType() {
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: UUID())
+        let wrongTypeRecord = CKRecord(recordType: "NotAFamilyWorkspace", recordID: CKRecord.ID(recordName: "irrelevant", zoneID: zoneID))
+
+        #expect(throws: FamilyWorkspaceCloudRecordMapping.DecodeError.unexpectedRecordType("NotAFamilyWorkspace")) {
+            try FamilyWorkspaceCloudRecordMapping.payload(from: wrongTypeRecord)
+        }
+    }
+
+    @Test("Constructing FamilyWorkspaceOwnerShareCoordinator never realizes a real CKContainer merely to do so — mirrors CloudKitTransport()'s own construction safety")
+    @MainActor
+    func constructingCoordinatorIsSideEffectFree() {
+        let transport = CloudKitTransport()
+        let coordinator = FamilyWorkspaceOwnerShareCoordinator(transport: transport)
+        _ = coordinator
+    }
+}
+
 @Suite("Athlete Connection Foundation B1: regression guards")
 struct CloudKitFoundationRegressionTests {
 
