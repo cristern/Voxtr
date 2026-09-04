@@ -207,7 +207,17 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
 
     /// PURE decision only — no CloudKit I/O, so it is directly unit
     /// testable against plain `CKError.Code` values (themselves a plain
-    /// enum, safe to construct in XCTest with no entitlement). Kept
+    /// enum, safe to construct in XCTest with no entitlement).
+    /// `nonisolated` (PR #63 Codemagic follow-up): this helper touches no
+    /// coordinator instance state (`transport`, `log`) and performs no
+    /// CloudKit I/O — it would otherwise inherit `@MainActor` isolation
+    /// from the enclosing type merely by being declared inside it, which
+    /// is not warranted here and is exactly what made the synchronous,
+    /// nonisolated unit tests below fail to compile under Swift 6 ("Call
+    /// to main actor-isolated static method ... in a synchronous
+    /// nonisolated context"). Marking it `nonisolated` is the correct,
+    /// minimal fix — not a broadening of actor isolation, since nothing
+    /// about this specific function's body needs MainActor at all. Kept
     /// deliberately conservative/broad rather than trying to pinpoint the
     /// exact single code CloudKit reports for this specific batch shape
     /// (which this repo's own tooling cannot verify without a real
@@ -224,7 +234,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
     /// extra fetch, never a duplicate share or a masked real failure —
     /// `convergeOnExistingShareAfterCreationConflict` still surfaces the
     /// original error explicitly if the refetched root has no share.
-    static func isRecoverableShareCreationConflict(code: CKError.Code) -> Bool {
+    nonisolated static func isRecoverableShareCreationConflict(code: CKError.Code) -> Bool {
         switch code {
         case .serverRecordChanged, .partialFailure, .batchRequestFailed:
             true
