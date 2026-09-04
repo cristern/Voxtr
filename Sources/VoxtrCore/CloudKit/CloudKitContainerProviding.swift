@@ -21,6 +21,20 @@ import Foundation
 /// as a side effect of being constructed or unit-tested — it goes
 /// through this protocol instead, so a test-only implementation can
 /// stand in without ever touching real CloudKit runtime state.
+///
+/// PR #61 follow-up (Codemagic Swift 6 actor-isolation fix): this
+/// protocol is `@MainActor` because its one real caller,
+/// `CloudKitTransport`, is itself `@MainActor` and this seam exists
+/// purely to serve that type — B1 has no requirement for CloudKit
+/// realization from any other actor. Making the protocol (and its
+/// production conformance) MainActor-isolated, rather than leaving it
+/// `nonisolated` and marking the concrete provider `@unchecked Sendable`,
+/// means `CloudKitTransport.refreshAvailability()`'s `await
+/// containerProvider.accountStatus()` never "sends" a non-Sendable
+/// reference across an actor boundary in the first place — caller and
+/// callee share the same isolation domain throughout, which is what
+/// Swift 6 actually requires here, not an unchecked escape hatch.
+@MainActor
 protocol CloudKitContainerProviding {
     func database(for scope: CloudKitDatabaseScope) -> CKDatabase
     func accountStatus() async throws -> CKAccountStatus
@@ -31,6 +45,7 @@ protocol CloudKitContainerProviding {
 /// constructing `CloudKitContainerProvider` itself only stores a
 /// container identifier string, so it is always safe regardless of
 /// entitlement.
+@MainActor
 final class CloudKitContainerProvider: CloudKitContainerProviding {
 
     private let containerIdentifier: String
@@ -49,7 +64,14 @@ final class CloudKitContainerProvider: CloudKitContainerProviding {
     /// (`container.privateCloudDatabase`/`.sharedCloudDatabase`) ever
     /// running. See `CloudKitContainerRoutingTests` in
     /// `CloudKitTransportTests.swift`.
-    static func selection(for scope: CloudKitDatabaseScope) -> CloudKitDatabaseSelection {
+    ///
+    /// `nonisolated` deliberately: this switch touches no CloudKit
+    /// runtime state and no property of `self` (`containerIdentifier`/
+    /// `container`) — it is pure, so it does not need to inherit
+    /// `CloudKitContainerProvider`'s `@MainActor` isolation, and keeping
+    /// it `nonisolated` lets the routing unit tests call it synchronously
+    /// without themselves needing to run on `@MainActor`.
+    nonisolated static func selection(for scope: CloudKitDatabaseScope) -> CloudKitDatabaseSelection {
         switch scope {
         case .private: .privateDatabase
         case .shared: .sharedDatabase
@@ -72,7 +94,10 @@ final class CloudKitContainerProvider: CloudKitContainerProviding {
 /// resolves to — the LOGICAL half of `CloudKitContainerProvider.database(for:)`,
 /// deliberately kept free of any real `CKDatabase`/`CKContainer` type so
 /// it can be exercised by a plain unit test with no CloudKit entitlement.
-enum CloudKitDatabaseSelection: Equatable {
+/// `Sendable`: a plain, payload-free enum — trivially safe to cross any
+/// actor boundary, and returned by the `nonisolated` `selection(for:)`
+/// above.
+enum CloudKitDatabaseSelection: Equatable, Sendable {
     case privateDatabase
     case sharedDatabase
 }
