@@ -190,13 +190,13 @@ public final class CloudSharingAnchorViewController: UIViewController {
     weak var delegate: CloudSharingPresenter.Coordinator?
     private var hasPresented = false
 
-    override func viewDidLoad() {
+    public override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
     }
 
-    override func viewDidAppear(_ animated: Bool) {
+    public override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         presentCloudSharingControllerIfNeeded()
     }
