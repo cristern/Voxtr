@@ -26,6 +26,18 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- ParentApp CloudKit sharing runtime fix: Apple's own CKShare class
+	     documentation states, in the same passage that covers creating a
+	     share and presenting UICloudSharingController — the exact ParentApp
+	     owner-side workflow this app implements — "You must add the
+	     CKSharingSupported key to your app's Info.plist file with a value
+	     of true." This is a requirement on any app that implements CloudKit
+	     Sharing at all, not only the app that later accepts a share link;
+	     TestFlight evidence (identical CloudKit.framework crash signature
+	     before and after the presentation-mechanics fix) is consistent with
+	     this configuration having been the actual, still-uncorrected gap. -->
+	<key>CKSharingSupported</key>
+	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Vǫxtr can read a calendar you choose to bring its events into your athlete's plan automatically. This is only used if you connect a calendar yourself.</string>
 	<key>UILaunchScreen</key>

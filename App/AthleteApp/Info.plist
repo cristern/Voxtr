@@ -26,14 +26,15 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<!-- Athlete Connection Foundation B1: AthleteApp is the CKShare
-	     ACCEPTING app in Foundation B's Parent-invites/Athlete-accepts
-	     flow (Parent creates and distributes the share; only the
-	     accepting app needs this key to handle incoming share URLs).
-	     ParentApp does not accept shares in this flow, so it does not
-	     carry this key. No CKShare creation/acceptance flow is
-	     implemented yet (B2/B3) - this is only the static capability
-	     declaration required later. -->
+	<!-- Athlete Connection Foundation B1 (corrected — ParentApp CloudKit
+	     sharing runtime fix): AthleteApp is the CKShare ACCEPTING app in
+	     the Parent-invites/Athlete-accepts flow, so it needs this key to
+	     handle incoming share URLs. Apple's own CKShare documentation
+	     states this key is required by any app that implements CloudKit
+	     Sharing at all — including the app that creates/presents a share
+	     via UICloudSharingController — so ParentApp ALSO declares it (see
+	     App/ParentApp/Info.plist's own comment); this is not an
+	     accepting-app-only requirement. -->
 	<key>CKSharingSupported</key>
 	<true/>
 	<key>UILaunchScreen</key>

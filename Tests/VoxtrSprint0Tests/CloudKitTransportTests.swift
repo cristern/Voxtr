@@ -57,6 +57,32 @@ struct CloudKitCapabilityConfigurationTests {
         #expect(infoPlist["CKSharingSupported"] as? Bool == true)
     }
 
+    /// ParentApp CloudKit sharing runtime follow-up: ParentApp build 507
+    /// reproduced the identical CloudKit.framework crash signature (same
+    /// four frame offsets, same trap PC) that build 502 hit, even after the
+    /// PR #69 presentation-mechanics fix — proving that fix alone was
+    /// insufficient. Apple's own `CKShare` class documentation, in the same
+    /// passage describing creating a share and presenting it via
+    /// `UICloudSharingController`, states: "You must add the
+    /// CKSharingSupported key to your app's Info.plist file with a value of
+    /// true." That is a requirement on any app that implements CloudKit
+    /// Sharing at all — including ParentApp, which creates/presents a share
+    /// here even though it never itself accepts one — not only the
+    /// accepting app. (A prior investigation read only the narrower,
+    /// separate `CKSharingSupported` key-only documentation page, which
+    /// frames the key around "launch your app when a share URL is tapped,"
+    /// and concluded ParentApp could omit it; that conclusion is superseded
+    /// by the `CKShare` class's own broader contract and by the build 507
+    /// evidence.) ParentApp and AthleteApp both declare this key — for
+    /// distinct reasons tied to their distinct roles (present vs. accept) —
+    /// but both are required to satisfy the same underlying CloudKit
+    /// Sharing capability.
+    @Test("ParentApp declares CKSharingSupported — it creates/presents CloudKit shares via UICloudSharingController, which Apple's own CKShare documentation requires this key for")
+    func parentAppDeclaresCKSharingSupported() throws {
+        let infoPlist = try plist(atRepositoryRelativePath: "App/ParentApp/Info.plist")
+        #expect(infoPlist["CKSharingSupported"] as? Bool == true)
+    }
+
     /// PR #69 lead review follow-up: runtime evidence strongly indicates
     /// `CloudSharingPresenter` returning `UICloudSharingController` itself
     /// as its own `UIViewControllerRepresentable.UIViewControllerType`,
