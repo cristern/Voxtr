@@ -633,14 +633,19 @@ struct AthleteSettingsView: View {
         // `UICloudSharingController` must be genuinely `present()`-ed via
         // UIKit, and SwiftUI's `.sheet` does not do that for a
         // `UIViewControllerRepresentable`'s own returned controller (it
-        // embeds it as a child instead), which is what caused the
-        // confirmed EXC_BREAKPOINT/SIGTRAP crash inside CloudKit.framework
-        // on tapping "Connect Athlete App" (ParentApp TestFlight build
-        // 502). `CloudSharingPresenter` itself performs the real
-        // `present()`/`dismiss()` calls once embedded here; presented only
-        // once a real `AthleteConnectionInvitationHandoff` exists — never
-        // eagerly, so there is no CloudKit work here until the Parent's
-        // own "Connect Athlete App" tap already completed successfully.
+        // embeds it as a child instead). Runtime evidence strongly
+        // indicates this is what caused the EXC_BREAKPOINT/SIGTRAP crash
+        // observed inside CloudKit.framework on tapping "Connect Athlete
+        // App" (ParentApp TestFlight build 502); this fix targets that
+        // observed CloudKit presentation failure and is confirmed once a
+        // new TestFlight build repeats the same action successfully.
+        // `CloudSharingPresenter` itself performs the real
+        // `present()`/`dismiss()` calls (from its own anchor's
+        // `viewDidAppear`, never from arbitrary SwiftUI update timing) once
+        // embedded here; presented only once a real
+        // `AthleteConnectionInvitationHandoff` exists — never eagerly, so
+        // there is no CloudKit work here until the Parent's own "Connect
+        // Athlete App" tap already completed successfully.
         .background {
             if let handoff = viewModel.pendingInvitationHandoff {
                 CloudSharingPresenter(
