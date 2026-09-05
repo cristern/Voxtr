@@ -57,6 +57,54 @@ struct CloudKitCapabilityConfigurationTests {
         #expect(infoPlist["CKSharingSupported"] as? Bool == true)
     }
 
+    /// TestFlight runtime crash follow-up (ParentApp build 502,
+    /// EXC_BREAKPOINT/SIGTRAP inside CloudKit.framework on "Connect Athlete
+    /// App"): investigation confirmed Apple's own `CKSharingSupported`
+    /// documentation ties this key exclusively to "launch your app when the
+    /// user taps or clicks a share's URL" — i.e. the ACCEPTING side. Apple's
+    /// own "Sharing CloudKit Data with Other iCloud Users" documentation
+    /// states this requirement "applies specifically to apps receiving
+    /// shared records" via a tapped share link. ParentApp never accepts or
+    /// launches from a share link in this architecture — it only ever
+    /// CREATES and PRESENTS a share (see `AthleteConnectionOwnerHandoffService`/
+    /// `CloudSharingPresenter`) — so it correctly omits this key. This test
+    /// exists so a future change does not "fix" a ParentApp CloudKit crash
+    /// by adding this key on the same mistaken assumption this
+    /// investigation already ruled out; the real defect that caused this
+    /// crash was `CloudSharingPresenter`'s own presentation mechanics — see
+    /// `cloudSharingPresenterPresentsControllerGenuinely` below.
+    @Test("ParentApp correctly does NOT declare CKSharingSupported — it only creates/presents shares, never accepts them")
+    func parentAppDoesNotDeclareCKSharingSupported() throws {
+        let infoPlist = try plist(atRepositoryRelativePath: "App/ParentApp/Info.plist")
+        #expect(infoPlist["CKSharingSupported"] == nil)
+    }
+
+    /// TestFlight runtime crash follow-up: the confirmed root cause was
+    /// `CloudSharingPresenter` returning `UICloudSharingController` itself
+    /// as its own `UIViewControllerRepresentable.UIViewControllerType`,
+    /// relying on SwiftUI's `.sheet` to display it. SwiftUI embeds a
+    /// representable's own returned controller as a CHILD view controller
+    /// rather than genuinely `present()`-ing it — `UICloudSharingController`
+    /// requires genuine presentation per Apple's own documentation ("You
+    /// must set the popoverPresentationController before presenting"), and
+    /// crashed with EXC_BREAKPOINT/SIGTRAP inside CloudKit.framework when it
+    /// was not. There is no way to reproduce a real, signed-device
+    /// `UICloudSharingController` presentation from XCTest (matching every
+    /// other CloudKit UI-adjacent XCTEST-SAFETY note in this file), so —
+    /// exactly like this file's own entitlements/Info.plist checks above —
+    /// this is a source-of-truth text check on the one fact that actually
+    /// matters: the representable's own `UIViewControllerType` must NOT be
+    /// `UICloudSharingController`, and a genuine `.present(` call must
+    /// exist.
+    @Test("CloudSharingPresenter presents UICloudSharingController via a genuine UIKit present(_:animated:) call, never as its own UIViewControllerRepresentable.UIViewControllerType")
+    func cloudSharingPresenterPresentsControllerGenuinely() throws {
+        let url = repositoryRoot().appendingPathComponent("Sources/VoxtrAppShell/CloudSharingPresenter.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+
+        #expect(!source.contains("-> UICloudSharingController"), "CloudSharingPresenter must not return UICloudSharingController directly from makeUIViewController — SwiftUI would embed it as a child rather than genuinely presenting it")
+        #expect(source.contains(".present(") && source.contains("animated: true"), "CloudSharingPresenter must genuinely present UICloudSharingController via UIKit's present(_:animated:completion:), matching Apple's own documented usage contract")
+    }
+
     @Test("AthleteApp still does NOT gain Calendar permission/configuration — Calendar import stays a Parent-only capability")
     func athleteAppStillHasNoCalendarPermission() throws {
         let infoPlist = try plist(atRepositoryRelativePath: "App/AthleteApp/Info.plist")
