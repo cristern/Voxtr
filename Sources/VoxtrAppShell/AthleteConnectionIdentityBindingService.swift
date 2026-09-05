@@ -14,11 +14,23 @@ import VoxtrAthleteDomain
 /// comment; a later slice resolves it FROM this result, never the other
 /// way around) and does NOT build Athlete Home. `CKShare`/CloudKit types
 /// never appear anywhere in this file — see this type's own `bind(
-/// acceptedWorkspaceId:)` signature, which takes a raw `UUID`, exactly
-/// the provider-neutral shape `FamilyWorkspaceParticipantShareCoordinator`
-/// (B2.2, `VoxtrCore`) already produces as `AcceptedFamilyWorkspaceShare
-/// .workspaceId` — the caller (a later slice) is expected to pass that
-/// field, not the whole B2.2 result.
+/// acceptedWorkspaceId:intendedParticipantId:)` signature, which takes two
+/// raw `UUID`s, exactly the provider-neutral shape
+/// `FamilyWorkspaceParticipantShareCoordinator` (B2.2, `VoxtrCore`)
+/// already produces as `AcceptedFamilyWorkspaceShare.workspaceId`/
+/// `.intendedParticipantId` — the caller (a later slice) is expected to
+/// pass those two fields, not the whole B2.2 result.
+///
+/// Athlete Connection Foundation B2.6: `intendedParticipantId` closes the
+/// architectural gap this type's own AMBIGUITY doc comment (below)
+/// originally identified — a `workspaceId` alone cannot say WHICH athlete
+/// in a multi-athlete family a share-acceptance corresponds to. That
+/// signal now travels alongside the share as a separate CloudKit child
+/// record (`AthleteConnectionInvitationCloudRecordMapping`, B2.2/B2.6);
+/// this type only ever sees the already-decoded stable `UUID`, never any
+/// CloudKit-specific type. This is an EXACT-ID lookup, not a heuristic:
+/// no display name, order, age, or CloudKit-participant identity is ever
+/// consulted.
 ///
 /// READ-ONLY: this type creates or mutates nothing. It answers "does an
 /// existing, locally consistent Vǫxtr identity already match this
@@ -36,7 +48,7 @@ import VoxtrAthleteDomain
 /// resolving to a real `AthleteProfile` in the same workspace, and the
 /// `AthleteAccessGrant` set corresponding exactly to the `AthleteProfile`
 /// set. This service calls it rather than re-deriving any of that
-/// consistency logic itself — see `bind(acceptedWorkspaceId:)`.
+/// consistency logic itself — see `bind(acceptedWorkspaceId:intendedParticipantId:)`.
 ///
 /// ATHLETEACCESSGRANT: deliberately NOT part of this binding chain.
 /// Confirmed by inspection of `AthleteAccessGrantRepository` and
@@ -63,15 +75,19 @@ import VoxtrAthleteDomain
 /// is left as an explicit open question for the next bounded slice — see
 /// this PR's own delivery report.
 ///
-/// AMBIGUITY: a `workspaceId` alone carries no signal about WHICH athlete
-/// in a multi-athlete family this specific share-acceptance corresponds
-/// to (B2.1's `CKShare` is rooted on the `FamilyWorkspace` record, not on
-/// any specific athlete). If more than one `.athlete`-role participant in
-/// the workspace is currently `.active`, this method fails explicitly
-/// with `ambiguousAthleteParticipant` rather than guessing — a real
-/// architectural gap for a genuinely multi-athlete family that a later
-/// slice must close with an additional disambiguating signal, not
-/// something this slice invents a heuristic for.
+/// AMBIGUITY (CLOSED by B2.6): a `workspaceId` alone carries no signal
+/// about WHICH athlete in a multi-athlete family this specific
+/// share-acceptance corresponds to (B2.1's `CKShare` is rooted on the
+/// `FamilyWorkspace` record, not on any specific athlete). `resolve(...)`
+/// now matches the EXACT `intendedParticipantId` the invitation-intent
+/// record carried, rather than filtering to "the one `.active`
+/// participant" and failing if more than one exists. A duplicate
+/// `WorkspaceParticipant.id` within a workspace should be structurally
+/// impossible (SwiftData's own uniqueness enforcement), but is still
+/// surfaced explicitly as `duplicateWorkspaceParticipantIdentity` rather
+/// than silently picking a first match, matching this file's own
+/// established defense-in-depth pattern for `AthleteProfile.id`
+/// (`duplicateAthleteIdentity`, unchanged below).
 ///
 /// ACTOR ISOLATION: `@MainActor`, matching its one dependency
 /// (`FamilyRestorationService`, itself `@MainActor` because it ultimately
@@ -95,13 +111,13 @@ public final class AthleteConnectionIdentityBindingService {
     }
 
     /// Idempotent by construction: this method never mutates anything,
-    /// so repeated calls with the same `workspaceId` against unchanged
-    /// local persistence always resolve the same `BoundAthleteIdentity`
-    /// (or the same failure) — no state to converge, nothing to
-    /// duplicate.
-    public func bind(acceptedWorkspaceId workspaceId: UUID) throws -> BoundAthleteIdentity {
+    /// so repeated calls with the same `workspaceId`/`intendedParticipantId`
+    /// against unchanged local persistence always resolve the same
+    /// `BoundAthleteIdentity` (or the same failure) — no state to
+    /// converge, nothing to duplicate.
+    public func bind(acceptedWorkspaceId workspaceId: UUID, intendedParticipantId: UUID) throws -> BoundAthleteIdentity {
         let restorationState = try familyRestorationService.restoreState()
-        return try Self.resolve(acceptedWorkspaceId: workspaceId, restorationState: restorationState)
+        return try Self.resolve(acceptedWorkspaceId: workspaceId, intendedParticipantId: intendedParticipantId, restorationState: restorationState)
     }
 
     /// PURE matching/validation only — no persistence I/O. See this
@@ -111,6 +127,7 @@ public final class AthleteConnectionIdentityBindingService {
     /// first-match winner).
     nonisolated static func resolve(
         acceptedWorkspaceId workspaceId: UUID,
+        intendedParticipantId: UUID,
         restorationState: FamilyRestorationState
     ) throws -> BoundAthleteIdentity {
         let family: RestoredFamily
@@ -142,19 +159,21 @@ public final class AthleteConnectionIdentityBindingService {
 
         // `family.athleteParticipants` = every .athlete-role participant
         // in this workspace, in ANY lifecycle state (guaranteed by
-        // FamilyRestorationService) — checked BEFORE filtering to .active
-        // so "no athlete participant record exists at all" and "exists
-        // but none currently active" are distinguishable failures.
-        guard !family.athleteParticipants.isEmpty else {
+        // FamilyRestorationService). Athlete Connection Foundation B2.6:
+        // matched by EXACT `intendedParticipantId`, never by "the one
+        // active participant" — a 0-match result here subsumes what used
+        // to be the separate "no athlete participant record exists at
+        // all" check, since an exact-ID lookup against an empty (or
+        // non-matching) set fails identically either way.
+        let matchingParticipants = family.athleteParticipants.filter { $0.id == intendedParticipantId }
+        guard !matchingParticipants.isEmpty else {
             throw AthleteConnectionIdentityBindingError.athleteParticipantNotFound
         }
-
-        let eligibleParticipants = family.athleteParticipants.filter { $0.state == .active }
-        guard !eligibleParticipants.isEmpty else {
-            throw AthleteConnectionIdentityBindingError.participantNotEligible
+        guard matchingParticipants.count == 1, let participant = matchingParticipants.first else {
+            throw AthleteConnectionIdentityBindingError.duplicateWorkspaceParticipantIdentity
         }
-        guard eligibleParticipants.count == 1, let participant = eligibleParticipants.first else {
-            throw AthleteConnectionIdentityBindingError.ambiguousAthleteParticipant
+        guard participant.state == .active else {
+            throw AthleteConnectionIdentityBindingError.participantNotEligible
         }
 
         // `participant` is `role == .athlete` (it was drawn from
@@ -223,14 +242,19 @@ public enum AthleteConnectionIdentityBindingError: Error, Sendable, Equatable {
     /// `FamilyRestorationService`'s canonical consistency rules — `reason`
     /// is that service's own diagnostic string, not re-derived here.
     case localFamilyGraphInconsistent(reason: String)
-    /// The resolved `FamilyWorkspace` has no `.athlete`-role
-    /// `WorkspaceParticipant` at all, in any state.
+    /// No `.athlete`-role `WorkspaceParticipant` in this workspace has the
+    /// EXACT `intendedParticipantId` the invitation-intent record
+    /// specified.
     case athleteParticipantNotFound
-    /// More than one `.athlete`-role participant in this workspace is
-    /// currently `.active` — this `workspaceId` alone cannot disambiguate
-    /// which one this accepted share corresponds to.
-    case ambiguousAthleteParticipant
-    /// `.athlete`-role participant(s) exist, but none is currently
+    /// More than one `WorkspaceParticipant` in this workspace shares the
+    /// same `id` as `intendedParticipantId` — should be structurally
+    /// impossible given SwiftData's own uniqueness enforcement on
+    /// `WorkspaceParticipant.id`, but surfaced explicitly rather than
+    /// silently picking a first match (renamed from the pre-B2.6
+    /// `ambiguousAthleteParticipant`, which described a different,
+    /// now-closed ambiguity — see this type's own AMBIGUITY doc comment).
+    case duplicateWorkspaceParticipantIdentity
+    /// The exact intended participant exists, but is not currently
     /// `.active` (e.g. still `.invited`, or `.declined`/`.revoked`) — see
     /// this type's own ELIGIBILITY doc comment for why this slice does
     /// not auto-transition `.invited → .active` itself.

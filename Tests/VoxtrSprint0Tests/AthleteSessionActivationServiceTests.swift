@@ -229,7 +229,7 @@ struct AthleteSessionActivationServiceTests {
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
         let bindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
-        let boundIdentity = try bindingService.bind(acceptedWorkspaceId: created.workspace.id)
+        let boundIdentity = try bindingService.bind(acceptedWorkspaceId: created.workspace.id, intendedParticipantId: acceptedParticipant.id)
 
         let participantCountBefore = try parentWorkspaceRepository.fetchAllParticipants().count
         let athleteCountBefore = try athleteRepository.fetchAllAthletes().count

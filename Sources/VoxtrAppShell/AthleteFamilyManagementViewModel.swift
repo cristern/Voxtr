@@ -21,21 +21,36 @@ public final class AthleteFamilyManagementViewModel {
     public var birthDate: Date = .now
     public var developmentStage: DevelopmentStage = .parentLed
 
+    /// Athlete Connection Foundation B2.6: the in-flight/completed
+    /// "Connect Athlete App" handoff, if any — `nil` means no handoff is
+    /// currently being presented. Set only by `connectAthleteApp(for:)`
+    /// and cleared by `dismissConnectAthleteApp()` (called when
+    /// `CloudSharingPresenter` finishes or the Parent dismisses it).
+    public private(set) var pendingInvitationHandoff: AthleteConnectionInvitationHandoff?
+    /// Explicit, differentiated failure surfaced to the UI — never a
+    /// generic/silent failure, matching `AthleteConnectionOwnerHandoffError`'s
+    /// own explicit-error-handling requirement. Cleared at the start of
+    /// every `connectAthleteApp(for:)` call.
+    public private(set) var connectAthleteAppErrorMessage: String?
+
     private let workspaceId: WorkspaceId
     private let participantId: UUID
     private let athleteRepository: AthleteRepository
     private let athleteFamilyManagementService: AthleteFamilyManagementService
+    private let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
 
     public init(
         workspaceId: WorkspaceId,
         participantId: UUID,
         athleteRepository: AthleteRepository,
-        athleteFamilyManagementService: AthleteFamilyManagementService
+        athleteFamilyManagementService: AthleteFamilyManagementService,
+        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
     ) {
         self.workspaceId = workspaceId
         self.participantId = participantId
         self.athleteRepository = athleteRepository
         self.athleteFamilyManagementService = athleteFamilyManagementService
+        self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
     }
 
     /// Re-fetches from persistence — `RestoredFamily.athletes` is a
@@ -199,6 +214,67 @@ public final class AthleteFamilyManagementViewModel {
             try athleteRepository.setPreferredColor(athleteId: athlete.athleteId, color: color)
         } catch {
             errorMessage = "Could not update Color."
+        }
+    }
+
+    /// Athlete Connection Foundation B2.6: the "Connect Athlete App"
+    /// action — the smallest ParentApp-side entry point into the
+    /// owner-side CloudKit share handoff. `invitedBy`: this Parent's own
+    /// `ActorId`, from the SAME `participantId` this ViewModel already
+    /// holds (the owner's own `WorkspaceParticipant.id`) — never a
+    /// separately-derived identity.
+    public func connectAthleteApp(for athlete: AthleteProfile) async {
+        connectAthleteAppErrorMessage = nil
+        pendingInvitationHandoff = nil
+        do {
+            pendingInvitationHandoff = try await athleteConnectionOwnerHandoffService.prepareInvitation(
+                forAthlete: athlete.athleteId,
+                workspaceId: workspaceId,
+                invitedBy: ActorId(rawValue: participantId)
+            )
+        } catch {
+            connectAthleteAppErrorMessage = Self.message(forHandoffError: error)
+        }
+    }
+
+    /// Called once `CloudSharingPresenter` finishes (share saved/stopped)
+    /// or the Parent dismisses the sheet without completing it — either
+    /// way, this handoff is done being presented.
+    public func dismissConnectAthleteApp() {
+        pendingInvitationHandoff = nil
+    }
+
+    private static func message(forHandoffError error: Error) -> String {
+        guard let handoffError = error as? AthleteConnectionOwnerHandoffError else {
+            return "Something went wrong. Please try again."
+        }
+        switch handoffError {
+        case .participantLookupFailed:
+            return "Couldn't look up this athlete's connection status. Please try again."
+        case .duplicateAthleteParticipant:
+            return "Something is inconsistent with this athlete's connection record. Please contact support."
+        case .participantCreationFailed:
+            return "Couldn't set up this athlete's connection. Please try again."
+        // PR #68 Codemagic follow-up: these seven cases all mean the same
+        // thing to a Parent — some piece of this device's own local
+        // family/athlete data (needed to build the invitation) could not
+        // be read or was missing entirely. None of these should happen on
+        // a device that ever completed onboarding, so there's no more
+        // useful distinction to surface than "try again"; the specific
+        // underlying case remains available to logging via the real
+        // thrown `AthleteConnectionOwnerHandoffError`, never surfaced here.
+        case .ownerParticipantNotFound,
+             .parentProfileLookupFailed,
+             .parentProfileNotFound,
+             .workspaceLookupFailed,
+             .workspaceNotFound,
+             .athleteProfileLookupFailed,
+             .athleteProfileNotFound:
+            return "Couldn't prepare this invitation. Please try again."
+        case .shareCreationFailed:
+            return "Couldn't reach iCloud to create the invitation. Please check your connection and try again."
+        case .invitationMappingFailed:
+            return "Couldn't finish preparing the invitation. Please try again."
         }
     }
 

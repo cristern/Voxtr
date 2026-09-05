@@ -31,11 +31,13 @@ struct AthleteConnectionIdentityBindingServiceTests {
     }
 
     private static func makeAthleteParticipant(
+        id: UUID = UUID(),
         workspaceId: UUID,
         state: ParticipantState,
         linkedAthleteId: UUID? = UUID()
     ) -> WorkspaceParticipant {
         WorkspaceParticipant(
+            id: id,
             workspaceId: WorkspaceId(rawValue: workspaceId),
             accountId: .pending,
             role: .athlete,
@@ -93,6 +95,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
 
         let bound = try AthleteConnectionIdentityBindingService.resolve(
             acceptedWorkspaceId: workspace.id,
+            intendedParticipantId: participant.id,
             restorationState: .existingFamily(family)
         )
 
@@ -101,7 +104,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         #expect(bound.athleteId == AthleteId(rawValue: athleteId))
     }
 
-    @Test("resolve(acceptedWorkspaceId:restorationState:) is deterministic — repeated calls with identical inputs produce an identical BoundAthleteIdentity")
+    @Test("resolve(acceptedWorkspaceId:intendedParticipantId:restorationState:) is deterministic — repeated calls with identical inputs produce an identical BoundAthleteIdentity")
     func repeatedResolutionIsDeterministic() throws {
         let workspace = Self.makeWorkspace()
         let athleteId = UUID()
@@ -110,8 +113,8 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [athlete])
         let state = FamilyRestorationState.existingFamily(family)
 
-        let first = try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: state)
-        let second = try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: state)
+        let first = try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: state)
+        let second = try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: state)
 
         #expect(first == second)
     }
@@ -119,7 +122,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
     @Test(".noExistingFamily fails explicitly with workspaceNotFound")
     func noExistingFamilyFailsWithWorkspaceNotFound() {
         #expect(throws: AthleteConnectionIdentityBindingError.workspaceNotFound) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: UUID(), restorationState: .noExistingFamily)
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: UUID(), intendedParticipantId: UUID(), restorationState: .noExistingFamily)
         }
     }
 
@@ -128,6 +131,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         #expect(throws: AthleteConnectionIdentityBindingError.localFamilyGraphInconsistent(reason: "some specific rule failed")) {
             try AthleteConnectionIdentityBindingService.resolve(
                 acceptedWorkspaceId: UUID(),
+                intendedParticipantId: UUID(),
                 restorationState: .inconsistentGraph(reason: "some specific rule failed")
             )
         }
@@ -139,7 +143,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [], athletes: [])
 
         #expect(throws: AthleteConnectionIdentityBindingError.workspaceNotFound) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: UUID(), restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: UUID(), intendedParticipantId: UUID(), restorationState: .existingFamily(family))
         }
     }
 
@@ -149,7 +153,18 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [], athletes: [])
 
         #expect(throws: AthleteConnectionIdentityBindingError.athleteParticipantNotFound) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: UUID(), restorationState: .existingFamily(family))
+        }
+    }
+
+    @Test("Athlete Connection Foundation B2.6: an intendedParticipantId that does not match ANY .athlete-role participant in the workspace fails with athleteParticipantNotFound, even when other athlete participants exist — never falls back to picking one of them")
+    func nonMatchingIntendedParticipantIdFailsExplicitly() {
+        let workspace = Self.makeWorkspace()
+        let participant = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active)
+        let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [])
+
+        #expect(throws: AthleteConnectionIdentityBindingError.athleteParticipantNotFound) {
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: UUID(), restorationState: .existingFamily(family))
         }
     }
 
@@ -160,21 +175,59 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [])
 
         #expect(throws: AthleteConnectionIdentityBindingError.participantNotEligible) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: .existingFamily(family))
         }
     }
 
-    @Test("Two currently-.active .athlete-role participants in the same workspace fail with ambiguousAthleteParticipant rather than picking an arbitrary winner")
-    func multipleActiveParticipantsFailAsAmbiguous() {
+    // Athlete Connection Foundation B2.6: this replaces the pre-B2.6
+    // "two currently-.active participants fail as ambiguous" test — that
+    // ambiguity is now CLOSED by the exact-ID discriminator (see the next
+    // test), not merely narrowed. What remains a real, explicit failure
+    // is two participants sharing the SAME `id` (structurally impossible
+    // via a real repository fetch given `@Attribute(.unique)`, but
+    // constructible as a pure in-memory fixture, matching this suite's
+    // own established `duplicateAthleteIdFailsExplicitly` precedent).
+    @Test("Two WorkspaceParticipant fixtures sharing the same id fail with duplicateWorkspaceParticipantIdentity rather than silently binding to the first match")
+    func duplicateWorkspaceParticipantIdentityFailsExplicitly() {
         let workspace = Self.makeWorkspace()
-        let first = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active)
-        let second = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active)
-        let athletes = [first, second].compactMap { $0.linkedAthleteId }.map { Self.makeAthlete(id: $0, workspaceId: workspace.id) }
+        let sharedId = UUID()
+        let athleteIdA = UUID()
+        let athleteIdB = UUID()
+        let first = Self.makeAthleteParticipant(id: sharedId, workspaceId: workspace.id, state: .active, linkedAthleteId: athleteIdA)
+        let second = Self.makeAthleteParticipant(id: sharedId, workspaceId: workspace.id, state: .active, linkedAthleteId: athleteIdB)
+        let athletes = [
+            Self.makeAthlete(id: athleteIdA, workspaceId: workspace.id),
+            Self.makeAthlete(id: athleteIdB, workspaceId: workspace.id),
+        ]
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [first, second], athletes: athletes)
 
-        #expect(throws: AthleteConnectionIdentityBindingError.ambiguousAthleteParticipant) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+        #expect(throws: AthleteConnectionIdentityBindingError.duplicateWorkspaceParticipantIdentity) {
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: sharedId, restorationState: .existingFamily(family))
         }
+    }
+
+    @Test("Athlete Connection Foundation B2.6: two DIFFERENT currently-.active .athlete-role participants in the same workspace no longer cause failure — the exact intendedParticipantId resolves to precisely the one it names, never the other, closing B2.3's original ambiguity gap")
+    func resolvesExactIntendedParticipantAmongMultipleActiveParticipants() throws {
+        let workspace = Self.makeWorkspace()
+        let athleteIdA = UUID()
+        let athleteIdB = UUID()
+        let participantA = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active, linkedAthleteId: athleteIdA)
+        let participantB = Self.makeAthleteParticipant(workspaceId: workspace.id, state: .active, linkedAthleteId: athleteIdB)
+        let athletes = [
+            Self.makeAthlete(id: athleteIdA, workspaceId: workspace.id),
+            Self.makeAthlete(id: athleteIdB, workspaceId: workspace.id),
+        ]
+        let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participantA, participantB], athletes: athletes)
+
+        let bound = try AthleteConnectionIdentityBindingService.resolve(
+            acceptedWorkspaceId: workspace.id,
+            intendedParticipantId: participantB.id,
+            restorationState: .existingFamily(family)
+        )
+
+        #expect(bound.participantId == participantB.id)
+        #expect(bound.participantId != participantA.id)
+        #expect(bound.athleteId == AthleteId(rawValue: athleteIdB))
     }
 
     // NOTE: there is deliberately no test constructing an eligible
@@ -195,7 +248,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [])
 
         #expect(throws: AthleteConnectionIdentityBindingError.athleteNotFound) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: .existingFamily(family))
         }
     }
 
@@ -211,7 +264,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: duplicateAthletes)
 
         #expect(throws: AthleteConnectionIdentityBindingError.duplicateAthleteIdentity) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: .existingFamily(family))
         }
     }
 
@@ -225,7 +278,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         let family = Self.makeFamily(workspace: workspace, athleteParticipants: [participant], athletes: [athlete])
 
         #expect(throws: AthleteConnectionIdentityBindingError.athleteWorkspaceMismatch) {
-            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, restorationState: .existingFamily(family))
+            try AthleteConnectionIdentityBindingService.resolve(acceptedWorkspaceId: workspace.id, intendedParticipantId: participant.id, restorationState: .existingFamily(family))
         }
     }
 
@@ -283,7 +336,7 @@ struct AthleteConnectionIdentityBindingServiceTests {
         )
         let bindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
 
-        let bound = try bindingService.bind(acceptedWorkspaceId: created.workspace.id)
+        let bound = try bindingService.bind(acceptedWorkspaceId: created.workspace.id, intendedParticipantId: acceptedParticipant.id)
 
         #expect(bound.workspaceId == created.workspace.workspaceId)
         #expect(bound.participantId == acceptedParticipant.id)

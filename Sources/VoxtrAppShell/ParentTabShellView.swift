@@ -69,6 +69,13 @@ public struct ParentTabShellView: View {
     /// Calendar Planning Source V1: same threading rationale as
     /// `notificationsPlanningCoordinationService` above.
     public let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
+    /// Athlete Connection Foundation B2.6: same threading rationale as
+    /// every other cross-domain service above — resolved once in
+    /// `CompositionRoot`, passed down through `RootView`, threaded to
+    /// both `AthleteFamilyManagementViewModel` construction sites this
+    /// shell owns (the Home tab's, via `FamilyHomeView`, and the Profile
+    /// tab's own, directly below).
+    public let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
 
     public init(
         family: RestoredFamily,
@@ -87,7 +94,8 @@ public struct ParentTabShellView: View {
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         statisticsService: StatisticsService,
         sportRepository: SportRepository,
-        calendarPlanningCoordinationService: CalendarPlanningCoordinationService
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
+        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
     ) {
         self.family = family
         self.planningService = planningService
@@ -106,6 +114,7 @@ public struct ParentTabShellView: View {
         self.statisticsService = statisticsService
         self.sportRepository = sportRepository
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
+        self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
     }
 
     public var body: some View {
@@ -132,7 +141,8 @@ public struct ParentTabShellView: View {
                 sleepCoordinationService: sleepCoordinationService,
                 sleepChangeBroadcaster: sleepChangeBroadcaster,
                 calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                sportRepository: sportRepository
+                sportRepository: sportRepository,
+                athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -222,7 +232,8 @@ public struct ParentTabShellView: View {
                         workspaceId: WorkspaceId(rawValue: family.workspace.id),
                         participantId: family.participant.id,
                         athleteRepository: athleteRepository,
-                        athleteFamilyManagementService: athleteFamilyManagementService
+                        athleteFamilyManagementService: athleteFamilyManagementService,
+                        athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService
                     ),
                     presentationMode: .navigation,
                     sleepSettingsViewModel: { athlete in

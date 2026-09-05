@@ -532,6 +532,32 @@ struct AthleteSettingsView: View {
             // from one athlete's own configuration hub (see
             // `ExternalPlanningSource`'s own doc comment for why).
 
+            // ATHLETE APP — Athlete Connection Foundation B2.6: the
+            // smallest Internal Alpha ParentApp surface for initiating a
+            // real CloudKit share invite to this specific athlete. This
+            // section only ever creates/reuses a CloudKit share/invite —
+            // it never fabricates a "Connected" state here; real
+            // connection state is Athlete-side runtime evidence
+            // (`AthleteRuntimeSession`), which this configuration hub
+            // deliberately does not read or display (see Athlete Home
+            // scope boundary in this file's own doc comment).
+            Section {
+                if let handoffErrorMessage = viewModel.connectAthleteAppErrorMessage {
+                    Text(handoffErrorMessage)
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("athleteSettings.connectAthleteAppErrorMessage.\(athlete.id.uuidString)")
+                }
+                Button("Connect Athlete App") {
+                    Task { await viewModel.connectAthleteApp(for: athlete) }
+                }
+                .accessibilityIdentifier("athleteSettings.connectAthleteAppButton.\(athlete.id.uuidString)")
+            } header: {
+                VoxtrSectionHeading("Athlete App")
+            } footer: {
+                Text("Send \(athlete.givenName) an invitation to connect their own device to Vǫxtr.")
+            }
+            .voxtrRowSurface()
+
             // ARCHIVE / REACTIVATE — the athlete's one lifecycle action,
             // visually separated in its own trailing Section, at the
             // bottom. `athlete` is the same SwiftData-managed reference
@@ -600,6 +626,26 @@ struct AthleteSettingsView: View {
         }
         .sheet(isPresented: $isPresentingForm) {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
+        }
+        // Athlete Connection Foundation B2.6: presented only once a real
+        // `AthleteConnectionInvitationHandoff` exists — never eagerly, so
+        // there is no CloudKit work behind this sheet until the Parent's
+        // own "Connect Athlete App" tap already completed successfully.
+        .sheet(isPresented: Binding(
+            get: { viewModel.pendingInvitationHandoff != nil },
+            set: { isPresented in
+                if !isPresented {
+                    viewModel.dismissConnectAthleteApp()
+                }
+            }
+        )) {
+            if let handoff = viewModel.pendingInvitationHandoff {
+                CloudSharingPresenter(
+                    handoff: handoff,
+                    athleteDisplayName: athlete.givenName,
+                    onDismiss: { viewModel.dismissConnectAthleteApp() }
+                )
+            }
         }
     }
 
