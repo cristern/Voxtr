@@ -12,29 +12,49 @@ import VoxtrCore
 /// mechanism they choose from this controller (Messages, Mail, AirDrop,
 /// copy link, etc.), exactly as Apple's own API is designed to be used.
 ///
-/// LEADING ROOT-CAUSE HYPOTHESIS for the observed ParentApp TestFlight
-/// build 502 crash (`EXC_BREAKPOINT`/`SIGTRAP` inside CloudKit.framework, on
+/// TWO SEPARATE RUNTIME DEFECTS CONTRIBUTED TO THE OBSERVED PARENTAPP
+/// TESTFLIGHT CRASH (`EXC_BREAKPOINT`/`SIGTRAP` inside CloudKit.framework on
 /// tapping "Connect Athlete App" — the crash stack was not fully symbolized
-/// into Vǫxtr source, so this is runtime evidence strongly indicating, not
-/// a proven-by-symbolication, root cause): Apple's own `UICloudSharingController`
-/// documentation requires this controller to be PRESENTED — via a genuine
-/// `present(_:animated:completion:)` call, with its own
-/// `popoverPresentationController` configured first ("You must set the
-/// popoverPresentationController before presenting"). The version of this
-/// file PR #69 replaced made `UICloudSharingController` itself this type's
-/// `UIViewControllerType`, returned directly from `makeUIViewController`,
-/// relying on the caller wrapping it in SwiftUI's `.sheet(isPresented:)`.
-/// SwiftUI does not call `present(_:)` on a `UIViewControllerRepresentable`'s
-/// own returned controller — it EMBEDS it as a CHILD of SwiftUI's own
-/// internally-managed hosting controller (`addChild`/view embedding), never
-/// a genuine UIKit presentation. This fix targets that observed CloudKit
-/// presentation failure; it is described as verified only once a new
-/// TestFlight build reproduces the same "Connect Athlete App" action
-/// successfully on a real device.
+/// into Vǫxtr source, so root cause is described as leading hypothesis
+/// until a signed TestFlight build confirms it is gone):
 ///
-/// THE FIX, HARDENED (PR #69 lead review): this representable's own
-/// `UIViewControllerType` is `CloudSharingAnchorViewController` (below) — a
-/// plain, invisible ANCHOR, never `UICloudSharingController` itself. The
+/// 1. PRESENTATION MECHANICS (this file, fixed in PR #69): Apple's own
+///    `UICloudSharingController` documentation requires this controller to
+///    be PRESENTED — via a genuine `present(_:animated:completion:)` call,
+///    with its own `popoverPresentationController` configured first ("You
+///    must set the popoverPresentationController before presenting"). The
+///    version of this file PR #69 replaced made `UICloudSharingController`
+///    itself this type's `UIViewControllerType`, returned directly from
+///    `makeUIViewController`, relying on the caller wrapping it in
+///    SwiftUI's `.sheet(isPresented:)`. SwiftUI does not call `present(_:)`
+///    on a `UIViewControllerRepresentable`'s own returned controller — it
+///    EMBEDS it as a CHILD of SwiftUI's own internally-managed hosting
+///    controller, never a genuine UIKit presentation.
+///
+/// 2. CKSharingSupported (ParentApp CloudKit sharing runtime follow-up):
+///    build 507 reproduced the IDENTICAL CloudKit.framework crash signature
+///    (same four frame offsets, same trap PC) after (1) alone was fixed —
+///    proof (1) was necessary but not sufficient. Apple's own `CKShare`
+///    class documentation states, in the same passage describing creating
+///    a share and presenting it via `UICloudSharingController`: "You must
+///    add the `CKSharingSupported` key to your app's Info.plist file with
+///    a value of true." This is a requirement on any app that implements
+///    CloudKit Sharing at all — including the app that only creates/presents
+///    a share and never itself accepts one — not only the accepting app.
+///    A prior investigation of this file read the separate, narrower
+///    `CKSharingSupported` key-only documentation page (which frames the
+///    key around "launch your app when a share URL is tapped") and
+///    concluded ParentApp could correctly omit it; that conclusion is
+///    superseded by the `CKShare` class's own broader contract and by the
+///    build 507 evidence. ParentApp's `Info.plist` now declares
+///    `CKSharingSupported = true` (see
+///    `CloudKitCapabilityConfigurationTests.parentAppDeclaresCKSharingSupported`
+///    in Tests/VoxtrSprint0Tests/CloudKitTransportTests.swift), matching
+///    AthleteApp's own declaration for its accepting-side role.
+///
+/// THE PRESENTATION FIX, HARDENED (PR #69 lead review): this representable's
+/// own `UIViewControllerType` is `CloudSharingAnchorViewController` (below)
+/// — a plain, invisible ANCHOR, never `UICloudSharingController` itself. The
 /// caller embeds this anchor via `.background(...)` on an always-on-screen
 /// view (never `.sheet`). Presentation is triggered from the anchor's own
 /// `viewDidAppear` — NOT from `updateUIViewController` — because
@@ -46,19 +66,8 @@ import VoxtrCore
 /// once this controller's view has actually been added to a window and is
 /// part of the currently-displayed hierarchy, which is precisely what
 /// `present(_:animated:completion:)` requires to succeed. See
-/// `CloudSharingAnchorViewController`'s own doc comment for the rest.
-///
-/// CKSharingSupported: Apple's own documentation ties this Info.plist key
-/// exclusively to "launch your app when the user taps or clicks a share's
-/// URL" — the ACCEPTING side (AthleteApp, which already declares it — see
-/// `CloudKitCapabilityConfigurationTests.athleteAppDeclaresCKSharingSupported`
-/// in Tests/VoxtrSprint0Tests/CloudKitTransportTests.swift). ParentApp only
-/// ever creates/presents a share in this architecture; today's Info.plist
-/// correctly omits this key for that reason. Today's configuration is not
-/// asserted here as a permanent product invariant — if a later Vǫxtr
-/// feature genuinely needs ParentApp to accept share links too, that would
-/// be a deliberate, separate product decision, not something this crash fix
-/// should lock in either direction.
+/// `CloudSharingAnchorViewController`'s own doc comment for the rest. This
+/// presentation mechanism is UNCHANGED by the CKSharingSupported fix above.
 ///
 /// CONSTRUCTION: `UICloudSharingController(share:container:)` — the overload
 /// for a share that ALREADY exists (B2.1's `ensureSharingRoot`/B2.6's
