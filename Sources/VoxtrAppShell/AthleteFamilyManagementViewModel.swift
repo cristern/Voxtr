@@ -255,6 +255,22 @@ public final class AthleteFamilyManagementViewModel {
             return "Something is inconsistent with this athlete's connection record. Please contact support."
         case .participantCreationFailed:
             return "Couldn't set up this athlete's connection. Please try again."
+        // PR #68 Codemagic follow-up: these seven cases all mean the same
+        // thing to a Parent — some piece of this device's own local
+        // family/athlete data (needed to build the invitation) could not
+        // be read or was missing entirely. None of these should happen on
+        // a device that ever completed onboarding, so there's no more
+        // useful distinction to surface than "try again"; the specific
+        // underlying case remains available to logging via the real
+        // thrown `AthleteConnectionOwnerHandoffError`, never surfaced here.
+        case .ownerParticipantNotFound,
+             .parentProfileLookupFailed,
+             .parentProfileNotFound,
+             .workspaceLookupFailed,
+             .workspaceNotFound,
+             .athleteProfileLookupFailed,
+             .athleteProfileNotFound:
+            return "Couldn't prepare this invitation. Please try again."
         case .shareCreationFailed:
             return "Couldn't reach iCloud to create the invitation. Please check your connection and try again."
         case .invitationMappingFailed:
