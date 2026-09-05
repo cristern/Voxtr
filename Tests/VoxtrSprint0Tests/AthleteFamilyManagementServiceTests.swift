@@ -505,6 +505,7 @@ struct AthleteFamilyManagementServiceTests {
             athleteFamilyManagementService: service,
             athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService(
                 parentWorkspaceRepository: parentWorkspaceRepository,
+                athleteRepository: athleteRepository,
                 ownerShareCoordinator: FamilyWorkspaceOwnerShareCoordinator(transport: CloudKitTransport()),
                 transport: CloudKitTransport()
             )
@@ -938,6 +939,7 @@ struct AthleteFamilyManagementServiceTests {
             athleteFamilyManagementService: service,
             athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService(
                 parentWorkspaceRepository: parentWorkspaceRepository,
+                athleteRepository: athleteRepository,
                 ownerShareCoordinator: FamilyWorkspaceOwnerShareCoordinator(transport: CloudKitTransport()),
                 transport: CloudKitTransport()
             )

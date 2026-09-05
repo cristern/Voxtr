@@ -218,8 +218,27 @@ public final class CompositionRoot {
         )
         container.register(AcceptWorkspaceInvitationService.self) { acceptWorkspaceInvitationService }
 
+        // PR #68 architecture follow-up (BLOCKER 1): the ONE thing that
+        // lets a fresh Athlete device pass `FamilyRestorationService`'s
+        // own consistency rules at all — see this type's own doc
+        // comment. Depends on the SAME three repositories
+        // `FamilyRestorationService` itself does, plus direct
+        // `ModelContext` access (same cross-domain composition
+        // privilege `FamilyOnboardingCoordinator` already has).
+        // Registration only; `hydrate(_:)` is only ever called from
+        // `AthleteConnectionLifecycleService.connect(acceptedShare:)`,
+        // itself only ever reached from a real accepted CloudKit share.
+        let athleteIdentityHydrationService = AthleteIdentityHydrationService(
+            modelContext: modelContainer.mainContext,
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
+            athleteAccessGrantRepository: container.resolve(AthleteAccessGrantRepository.self)
+        )
+        container.register(AthleteIdentityHydrationService.self) { athleteIdentityHydrationService }
+
         let athleteConnectionLifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: athleteIdentityHydrationService,
             athleteRepository: container.resolve(AthleteRepository.self),
             acceptanceService: acceptWorkspaceInvitationService,
             identityBindingService: athleteConnectionIdentityBindingService,
@@ -240,6 +259,7 @@ public final class CompositionRoot {
 
         let athleteConnectionOwnerHandoffService = AthleteConnectionOwnerHandoffService(
             parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
             ownerShareCoordinator: ownerShareCoordinator,
             transport: cloudKitTransport
         )

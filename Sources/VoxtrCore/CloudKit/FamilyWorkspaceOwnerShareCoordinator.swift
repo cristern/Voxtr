@@ -302,61 +302,52 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         }
     }
 
-    /// Athlete Connection Foundation B2.6: ensures the invitation-intent
-    /// child record (see `AthleteConnectionInvitationCloudRecordMapping`'s
-    /// own doc comment) exists in the SAME zone as `root`, parented to
-    /// `root`'s own root record so it is included in the share's
-    /// hierarchy, carrying the CURRENT "Connect Athlete App" action's
-    /// intended participant/athlete. Idempotent the same way
-    /// `ensureRootRecord` is: fetch-first, reusing the existing record
-    /// (preserving its change tag) if one already exists rather than
-    /// constructing fresh and risking a `.serverRecordChanged` conflict
-    /// — deliberately WITHOUT `ensureShare`'s own concurrent-writer
-    /// conflict-recovery complexity, since only this Parent's own device
-    /// ever writes this record (no concurrent-writer scenario to
-    /// reconcile for Internal Alpha's single-Parent-device usage).
-    /// Repeated calls for a DIFFERENT athlete converge on UPDATING this
-    /// SAME record — see that type's own doc comment for why this
-    /// bounded slice does not support multiple simultaneously pending
-    /// invitations to different athletes on the same share.
-    public func ensureInvitationIntent(
-        for root: FamilyWorkspaceSharingRoot,
-        intendedParticipantId: UUID,
-        intendedAthleteId: UUID
-    ) async throws {
+    /// Athlete Connection Foundation B2.6 (PR #68 architecture
+    /// follow-up): creates ONE BRAND-NEW, independent invitation record
+    /// AND its own dedicated `CKShare` — see
+    /// `AthleteConnectionInvitationCloudRecordMapping`'s own doc comment
+    /// for why this replaced the earlier workspace-wide mutable
+    /// "current intent" record. Deliberately NOT idempotent, unlike
+    /// every other `ensure*` method in this coordinator: every call is a
+    /// genuinely NEW invitation with a freshly-generated `invitationId`,
+    /// never converging on or overwriting a prior one. `zoneID`: the
+    /// SAME custom zone `ensureSharingRoot(forWorkspace:)` already
+    /// established for this workspace — reused so no second
+    /// zone-creation entitlement surface is introduced, but this
+    /// record/share are otherwise entirely independent of that
+    /// coordinator's own root record/share (no `.parent` relationship —
+    /// see the mapping type's own doc comment).
+    ///
+    /// `publicPermission = .none`: mirrors `ensureShare`'s own choice
+    /// exactly — only the specific person the Parent selects when
+    /// presenting this share can ever join it.
+    public func createInvitationShare(
+        zoneID: CKRecordZone.ID,
+        payload: AthleteConnectionInvitationCloudRecordPayload
+    ) async throws -> CKShare {
         let database = transport.database(for: .private)
-        let payload = AthleteConnectionInvitationCloudRecordPayload(
-            workspaceId: root.workspaceId,
-            intendedParticipantId: intendedParticipantId,
-            intendedAthleteId: intendedAthleteId
-        )
-        let recordID = AthleteConnectionInvitationCloudRecordMapping.recordID(forWorkspace: root.workspaceId, zoneID: root.zoneID)
-
-        let record: CKRecord
-        do {
-            // `database.record(for:)` THROWS (`.unknownItem`) rather
-            // than returning `nil` when not found — matching
-            // `fetchExistingRootRecord`'s own established handling of
-            // exactly this API shape.
-            record = try await database.record(for: recordID)
-        } catch let error as CKError where error.code == .unknownItem {
-            record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(for: payload, zoneID: root.zoneID, parentRecordID: root.rootRecordID)
-        } catch {
-            log.error("AthleteConnectionInvitation record fetch failed: \(error.localizedDescription, privacy: .public)")
-            throw FamilyWorkspaceSharingError.invitationIntentFailed(error)
-        }
-
-        // Re-apply the payload even when reusing a fetched record — an
-        // existing record may carry a PREVIOUS invitation's intent
-        // (a different athlete), which this call is explicitly meant to
-        // replace.
-        AthleteConnectionInvitationCloudRecordMapping.apply(payload, to: record)
+        let invitationId = UUID()
+        let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(invitationId: invitationId, payload: payload, zoneID: zoneID)
+        let share = CKShare(rootRecord: record)
+        share.publicPermission = .none
 
         do {
-            _ = try await database.save(record)
+            let result = try await database.modifyRecords(saving: [record, share], deleting: [])
+            // Mirrors `ensureShare`'s own reasoning exactly: `modifyRecords`
+            // mutates the passed-in objects in place, so the already-held
+            // `share` reference is what is returned; only the per-record
+            // result is inspected to surface a genuine per-record failure
+            // explicitly.
+            guard let shareResult = result.saveResults[share.recordID] else {
+                throw FamilyWorkspaceSharingError.shareSaveResultMissing
+            }
+            _ = try shareResult.get()
+            return share
+        } catch let error as FamilyWorkspaceSharingError {
+            throw error
         } catch {
-            log.error("AthleteConnectionInvitation record save failed: \(error.localizedDescription, privacy: .public)")
-            throw FamilyWorkspaceSharingError.invitationIntentFailed(error)
+            log.error("AthleteConnectionInvitation share creation failed: \(error.localizedDescription, privacy: .public)")
+            throw FamilyWorkspaceSharingError.invitationShareCreationFailed(error)
         }
     }
 }
@@ -399,11 +390,10 @@ public enum FamilyWorkspaceSharingError: Error {
     /// CloudKit's own documented contract, but surfaced explicitly rather
     /// than silently assuming success.
     case shareSaveResultMissing
-    /// Athlete Connection Foundation B2.6: fetching or saving the
-    /// invitation-intent record (`AthleteConnectionInvitationCloudRecordMapping`)
-    /// failed — the share/root record themselves may already exist and
-    /// be unaffected; this specifically means the CURRENT "Connect
-    /// Athlete App" action's intended-participant record could not be
-    /// written.
-    case invitationIntentFailed(Error)
+    /// Athlete Connection Foundation B2.6 (PR #68 architecture
+    /// follow-up): `createInvitationShare` failed — saving the new
+    /// invitation record together with its own dedicated `CKShare`
+    /// failed as a batch. The FamilyWorkspace root record/share
+    /// (`ensureSharingRoot`) are unaffected either way.
+    case invitationShareCreationFailed(Error)
 }

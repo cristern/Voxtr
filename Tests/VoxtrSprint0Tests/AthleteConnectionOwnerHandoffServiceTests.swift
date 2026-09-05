@@ -7,7 +7,7 @@ import VoxtrParentDomain
 // Athlete Connection Foundation B2.6. `AthleteConnectionOwnerHandoffService
 // .prepareInvitation(forAthlete:workspaceId:invitedBy:)` itself performs
 // real CloudKit network I/O (via `FamilyWorkspaceOwnerShareCoordinator
-// .ensureSharingRoot`/`ensureInvitationIntent`) and real SwiftData
+// .ensureSharingRoot`/`.createInvitationShare`) and real SwiftData
 // persistence, so — matching this repository's established B1/B2
 // XCTEST-SAFETY convention — it is not exercised end-to-end here. What IS
 // fully unit-testable is the PURE participant-matching decision it

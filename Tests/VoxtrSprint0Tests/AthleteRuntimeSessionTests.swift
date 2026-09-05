@@ -17,14 +17,15 @@ import VoxtrAthleteDomain
 // exercised here for the same reason `AthleteConnectionLifecycleService
 // .connect(from:)` itself has no test: `CKShare.Metadata` has no public
 // initializer reachable without a real accepted share. What IS fully
-// tested is `handleAcceptedShare(_:)`, the directly-testable B2.3 → B2.4
-// continuation this type exposes — see that method's own doc comment.
+// tested is `handleAcceptedShare(_:)`, the directly-testable hydration →
+// B2.3 → B2.4 continuation this type exposes — see that method's own
+// doc comment.
 //
 // Like the other persistence-backed tests in this suite, the tests that
 // build a real family via `InMemoryPersistenceController` require the
 // Xcode/macOS SwiftData runtime — written but not executed in this
 // sandbox.
-@Suite("AthleteRuntimeSession (Athlete Connection Foundation B2.5)", .serialized)
+@Suite("AthleteRuntimeSession (Athlete Connection Foundation B2.5/B2.6, PR #68 follow-up)", .serialized)
 @MainActor
 struct AthleteRuntimeSessionTests {
 
@@ -43,19 +44,39 @@ struct AthleteRuntimeSessionTests {
         let expectedAthleteId: AthleteId
     }
 
-    private static func makeAcceptedShare(
-        workspaceId: UUID,
-        intendedParticipantId: UUID = UUID(),
-        intendedAthleteId: UUID = UUID()
-    ) -> AcceptedFamilyWorkspaceShare {
+    private static func makeAcceptedShare(hydration: AthleteConnectionInvitationCloudRecordPayload) -> AcceptedFamilyWorkspaceShare {
         let zoneID = CKRecordZone.ID(zoneName: "test-zone", ownerName: "test-owner")
         return AcceptedFamilyWorkspaceShare(
-            workspaceId: workspaceId,
+            workspaceId: hydration.workspaceId,
             zoneID: zoneID,
-            rootRecordID: CKRecord.ID(recordName: "test-root", zoneID: zoneID),
+            rootRecordID: CKRecord.ID(recordName: "test-invitation", zoneID: zoneID),
             shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID),
-            intendedParticipantId: intendedParticipantId,
-            intendedAthleteId: intendedAthleteId
+            intendedParticipantId: hydration.intendedParticipantId,
+            intendedAthleteId: hydration.intendedAthleteId,
+            hydration: hydration
+        )
+    }
+
+    /// A syntactically well-formed but semantically INVALID hydration
+    /// payload — an `athleteBirthDateISO` `AthleteIdentityHydrationService`
+    /// cannot parse into a `LocalDate`. Used to force a genuine, real
+    /// failure (`identityHydrationFailed`) without depending on any
+    /// pre-existing local state, matching this codebase's own
+    /// established preference for real failure modes over fabricated
+    /// ones.
+    private static func makeInvalidHydrationPayload(workspaceId: UUID = UUID()) -> AthleteConnectionInvitationCloudRecordPayload {
+        AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID(),
+            parentId: UUID(),
+            parentGivenName: "Kari",
+            workspaceDisplayName: "Kari's family",
+            ownerParticipantId: UUID(),
+            athleteGivenName: "Jonas",
+            athleteBirthDateISO: "not-a-real-date",
+            athleteTimeZoneId: "Europe/Oslo",
+            athleteDevelopmentStage: DevelopmentStage.parentLed.rawValue
         )
     }
 
@@ -107,10 +128,17 @@ struct AthleteRuntimeSessionTests {
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let identityHydrationService = AthleteIdentityHydrationService(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
         let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
         let lifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: identityHydrationService,
             athleteRepository: athleteRepository,
             acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
@@ -120,14 +148,24 @@ struct AthleteRuntimeSessionTests {
         let session = AthleteRuntimeSession()
         session.configure(lifecycleService: lifecycleService)
 
+        let hydration = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: created.workspace.id,
+            intendedParticipantId: acceptedParticipant.id,
+            intendedAthleteId: created.athlete.id,
+            parentId: created.parent.id,
+            parentGivenName: created.parent.givenName,
+            workspaceDisplayName: created.workspace.displayName,
+            ownerParticipantId: created.participant.id,
+            athleteGivenName: created.athlete.givenName,
+            athleteBirthDateISO: created.athlete.birthDate.isoString,
+            athleteTimeZoneId: created.athlete.timeZoneId.rawValue,
+            athleteDevelopmentStage: created.athlete.developmentStage.rawValue
+        )
+
         return SuccessFixture(
             container: container,
             session: session,
-            acceptedShare: Self.makeAcceptedShare(
-                workspaceId: created.workspace.id,
-                intendedParticipantId: acceptedParticipant.id,
-                intendedAthleteId: created.athlete.athleteId.rawValue
-            ),
+            acceptedShare: Self.makeAcceptedShare(hydration: hydration),
             expectedParticipantId: acceptedParticipant.id,
             expectedWorkspaceId: created.workspace.workspaceId,
             expectedAthleteId: created.athlete.athleteId
@@ -148,7 +186,7 @@ struct AthleteRuntimeSessionTests {
 
     // MARK: - 8: .connecting never carries an actor
 
-    @Test(".connecting carries no associated value — structurally cannot expose a fabricated actor while a connect attempt is pending (not tested as a live race: both handleAcceptedShare's underlying B2.3/B2.4 calls are synchronous, so there is no real suspension point to observe .connecting at without an artificial delay, which this project's own lifecycle rules forbid)")
+    @Test(".connecting carries no associated value — structurally cannot expose a fabricated actor while a connect attempt is pending (not tested as a live race: both handleAcceptedShare's underlying hydration/B2.3/B2.4 calls are synchronous, so there is no real suspension point to observe .connecting at without an artificial delay, which this project's own lifecycle rules forbid)")
     func connectingStateStructurallyCarriesNoActor() {
         let state = AthleteConnectionRuntimeState.connecting
         if case .connected = state {
@@ -189,6 +227,12 @@ struct AthleteRuntimeSessionTests {
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let identityHydrationService = AthleteIdentityHydrationService(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
         let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
         let acceptanceService = AcceptWorkspaceInvitationService(
@@ -197,6 +241,7 @@ struct AthleteRuntimeSessionTests {
         )
         let lifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: identityHydrationService,
             athleteRepository: athleteRepository,
             acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
@@ -204,8 +249,9 @@ struct AthleteRuntimeSessionTests {
         )
         let session = AthleteRuntimeSession()
         session.configure(lifecycleService: lifecycleService)
-        // No family exists on this device at all, so B2.3 fails.
-        let acceptedShare = Self.makeAcceptedShare(workspaceId: UUID())
+        // A malformed hydration payload (unparseable birth date) fails
+        // hydration itself, regardless of what's on this device already.
+        let acceptedShare = Self.makeAcceptedShare(hydration: Self.makeInvalidHydrationPayload())
 
         await session.handleAcceptedShare(acceptedShare)
 
@@ -218,7 +264,7 @@ struct AthleteRuntimeSessionTests {
     @Test("Calling handleAcceptedShare(_:) before configure(lifecycleService:) fails explicitly with .lifecycleServiceNotReady rather than silently dropping the callback")
     func unconfiguredSessionFailsExplicitly() async {
         let session = AthleteRuntimeSession()
-        let acceptedShare = Self.makeAcceptedShare(workspaceId: UUID())
+        let acceptedShare = Self.makeAcceptedShare(hydration: Self.makeInvalidHydrationPayload())
 
         await session.handleAcceptedShare(acceptedShare)
 

@@ -9,22 +9,41 @@ import VoxtrParentDomain
 /// → B2.3 → B2.4 chain — it does not reimplement any of their internal
 /// validation.
 ///
-/// Flow:
+/// Flow (PR #68 architecture follow-up adds step 2 — HYDRATION):
 /// 1. `participantShareCoordinator.resolveAcceptedShare(from:)` (B2.2) —
-///    real CloudKit share acceptance/resolution, now also decoding the
-///    Parent's invitation-intent (`AcceptedFamilyWorkspaceShare
-///    .intendedParticipantId`/`.intendedAthleteId`, B2.6).
-/// 2. `acceptanceService.accept(athleteId:workspaceId:eligibilityFacts:)`
+///    real CloudKit share acceptance/resolution, decoding the Parent's
+///    invitation intent AND the minimum cross-device identity
+///    projection (`AcceptedFamilyWorkspaceShare.hydration`).
+/// 2. `identityHydrationService.hydrate(_:)` — turns that projection
+///    into real local `ParentProfile`/`FamilyWorkspace`/
+///    `WorkspaceParticipant`/`AthleteProfile`/`AthleteAccessGrant` rows,
+///    by stable-ID upsert, so a FRESH Athlete device has a graph that
+///    can actually satisfy `FamilyRestorationService`'s consistency
+///    rules — see HYDRATION STEP below and `AthleteIdentityHydrationService`'s
+///    own doc comment for the full rationale (this closes the "Athlete
+///    device cannot yet hydrate the existing Vǫxtr identity graph"
+///    architecture gap).
+/// 3. `acceptanceService.accept(athleteId:workspaceId:eligibilityFacts:)`
 ///    (`AcceptWorkspaceInvitationService`, unmodified, canonical) — the
 ///    ONE place this codebase performs the `.invited → .active`
 ///    transition. See ACCEPTANCE STEP below for exactly how this slice
 ///    sequences it and why it never invents a parallel mutation path.
-/// 3. `identityBindingService.bind(acceptedWorkspaceId:intendedParticipantId:)`
+/// 4. `identityBindingService.bind(acceptedWorkspaceId:intendedParticipantId:)`
 ///    (B2.3) — binds the accepted transport identity to the EXACT
 ///    existing local Vǫxtr identity the invitation intended, now
 ///    requiring that identity be already `.active`.
-/// 4. `sessionActivationService.activate(boundIdentity:)` (B2.4) —
+/// 5. `sessionActivationService.activate(boundIdentity:)` (B2.4) —
 ///    revalidates and activates the canonical `CurrentSessionActor`.
+///
+/// HYDRATION STEP (PR #68): runs BEFORE the eligibility-facts lookup and
+/// BEFORE `acceptanceService.accept(...)`, because both of those already
+/// assume the intended `AthleteProfile`/`WorkspaceParticipant` exist
+/// locally — on a fresh device they do not, until hydration creates
+/// them. A hydration failure (a genuine persistence problem, a
+/// malformed transported payload, or — Sprint 1's single-family-per-
+/// device assumption — a DIFFERENT family already connected on this
+/// device) stops the chain immediately (`identityHydrationFailed`);
+/// acceptance/B2.3/B2.4 are never invoked.
 ///
 /// ACCEPTANCE STEP (B2.6): `AcceptWorkspaceInvitationService.accept(...)`
 /// is called UNCONDITIONALLY and BEFORE B2.3's `bind` — B2.3 requires the
@@ -36,16 +55,17 @@ import VoxtrParentDomain
 /// (safe to call every time, not just the first), and independently
 /// re-evaluates eligibility (`AthleteEligibilityFacts`, built here from a
 /// FRESH `AthleteRepository.fetchAthlete(byId:)` lookup — never trusted
-/// from whenever the invitation was originally created). Only a genuine
-/// `.repositoryFailed` outcome (or a failure fetching eligibility facts)
-/// stops the chain here (`invitationAcceptanceFailed`); every other
-/// outcome — `.accepted`, `.alreadyAccepted`, `.invitationNotFound`,
-/// `.invitationRevoked`, `.invitationDeclined`, `.notEligible` — falls
-/// through to B2.3's `bind`, which independently and correctly fails
-/// (`athleteParticipantNotFound`/`participantNotEligible`) by
-/// re-inspecting the TRUE persisted participant state rather than this
-/// step's transient result — deliberately not duplicating that judgment
-/// here.
+/// from whenever the invitation was originally created, and now
+/// guaranteed to actually find a row thanks to the hydration step above).
+/// Only a genuine `.repositoryFailed` outcome (or a failure fetching
+/// eligibility facts) stops the chain here (`invitationAcceptanceFailed`);
+/// every other outcome — `.accepted`, `.alreadyAccepted`,
+/// `.invitationNotFound`, `.invitationRevoked`, `.invitationDeclined`,
+/// `.notEligible` — falls through to B2.3's `bind`, which independently
+/// and correctly fails (`athleteParticipantNotFound`/`participantNotEligible`)
+/// by re-inspecting the TRUE persisted participant state rather than
+/// this step's transient result — deliberately not duplicating that
+/// judgment here.
 ///
 /// LAYERING: this file imports `CloudKit` because `connect(from:)`'s own
 /// parameter type (`CKShare.Metadata`) is the real iOS-delivered
@@ -102,6 +122,7 @@ import VoxtrParentDomain
 public final class AthleteConnectionLifecycleService {
 
     private let participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator
+    private let identityHydrationService: AthleteIdentityHydrationService
     private let athleteRepository: AthleteRepository
     private let acceptanceService: AcceptWorkspaceInvitationService
     private let identityBindingService: AthleteConnectionIdentityBindingService
@@ -109,12 +130,14 @@ public final class AthleteConnectionLifecycleService {
 
     public init(
         participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator,
+        identityHydrationService: AthleteIdentityHydrationService,
         athleteRepository: AthleteRepository,
         acceptanceService: AcceptWorkspaceInvitationService,
         identityBindingService: AthleteConnectionIdentityBindingService,
         sessionActivationService: AthleteSessionActivating
     ) {
         self.participantShareCoordinator = participantShareCoordinator
+        self.identityHydrationService = identityHydrationService
         self.athleteRepository = athleteRepository
         self.acceptanceService = acceptanceService
         self.identityBindingService = identityBindingService
@@ -150,6 +173,12 @@ public final class AthleteConnectionLifecycleService {
     func connect(acceptedShare: AcceptedFamilyWorkspaceShare) throws -> CurrentSessionActor {
         let intendedAthleteId = AthleteId(rawValue: acceptedShare.intendedAthleteId)
         let intendedWorkspaceId = WorkspaceId(rawValue: acceptedShare.workspaceId)
+
+        do {
+            try identityHydrationService.hydrate(acceptedShare.hydration)
+        } catch {
+            throw AthleteConnectionLifecycleError.identityHydrationFailed(error)
+        }
 
         let eligibilityFacts: AthleteEligibilityFacts?
         do {
@@ -249,6 +278,13 @@ public enum AthleteConnectionLifecycleError: Error {
     /// record. The chain stops here; acceptance/B2.3/B2.4 are never
     /// invoked.
     case shareAcceptanceOrResolutionFailed(Error)
+    /// PR #68 architecture follow-up: `AthleteIdentityHydrationService
+    /// .hydrate(_:)` failed — either a genuine persistence problem, a
+    /// malformed transported projection, or (Sprint 1's single-family-
+    /// per-device assumption) a DIFFERENT family already connected on
+    /// this device. The chain stops here; acceptance/B2.3/B2.4 are
+    /// never invoked.
+    case identityHydrationFailed(Error)
     /// Athlete Connection Foundation B2.6: either the fresh
     /// `AthleteRepository.fetchAthlete(byId:)` lookup used to build
     /// `AthleteEligibilityFacts` failed, or `AcceptWorkspaceInvitationService
@@ -281,6 +317,8 @@ extension AthleteConnectionLifecycleError {
         switch self {
         case .shareAcceptanceOrResolutionFailed:
             "Couldn't confirm the invitation with iCloud yet."
+        case .identityHydrationFailed:
+            "Couldn't set up this connection on this device."
         case .invitationAcceptanceFailed:
             "Couldn't confirm this invitation right now."
         case .identityBindingFailed:

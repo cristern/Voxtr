@@ -16,43 +16,35 @@ import VoxtrAthleteDomain
 // .Metadata` has no public initializer reachable without a real accepted
 // share, so no fixture — fake-backed or otherwise — could ever supply
 // one to call `connect(from:)` with. What IS fully tested here is
-// `connect(acceptedShare:)`, the B2.3 → B2.4 continuation this service
-// exposes once a B2.2 result already exists — an
-// `AcceptedFamilyWorkspaceShare`'s own fields (`zoneID`/`rootRecordID`/
-// `shareRecordID`) ARE freely constructible local CloudKit value types
-// (see that struct's own doc comment), so this fully covers the
-// service's actual sequencing/error-wrapping logic. That `connect(from:)`
-// stops the chain before ever reaching `connect(acceptedShare:)` on a
-// B2.2 failure is a structural guarantee of its own `do`/`catch` +
-// early-`throw` control flow, not something a runtime test could
-// independently verify without real CloudKit I/O.
+// `connect(acceptedShare:)`, the hydration → acceptance → B2.3 → B2.4
+// continuation this service exposes once a B2.2 result already exists —
+// an `AcceptedFamilyWorkspaceShare`'s own fields ARE freely constructible
+// local CloudKit value types (see that struct's own doc comment), so
+// this fully covers the service's actual sequencing/error-wrapping
+// logic. That `connect(from:)` stops the chain before ever reaching
+// `connect(acceptedShare:)` on a B2.2 failure is a structural guarantee
+// of its own `do`/`catch` + early-`throw` control flow, not something a
+// runtime test could independently verify without real CloudKit I/O.
 //
 // Like the other persistence-backed tests in this suite, the tests that
 // build a real family via `InMemoryPersistenceController` exercise
 // @Model types through actual SwiftData persistence and require the
 // Xcode/macOS SwiftData runtime — written but not executed in this
 // sandbox.
-@Suite("AthleteConnectionLifecycleService (Athlete Connection Foundation B2.5)", .serialized)
+@Suite("AthleteConnectionLifecycleService (Athlete Connection Foundation B2.5/B2.6, PR #68 follow-up)", .serialized)
 @MainActor
 struct AthleteConnectionLifecycleServiceTests {
 
     private struct Fixture {
-        // Retained for the fixture's entire lifetime: an in-memory
-        // ModelContainer that nothing else keeps alive gets deallocated
-        // once the factory function returns, which invalidates every
-        // @Model instance fetched through it (SwiftData resets/destroys
-        // the backing context) — the exact cause of the
-        // "This model instance was destroyed by calling ModelContext
-        // .reset" crash this fixture previously produced. Every other
-        // persistence-backed test in this suite avoids this by
-        // constructing `container` directly inside the test function
-        // itself (so its scope IS the test); this factory function
-        // needed the container to outlive its own return, so it is
-        // carried here instead.
+        // Retained for the fixture's entire lifetime — see this file's
+        // own established precedent (a factory function that hands the
+        // container back out must keep it alive, or SwiftData
+        // invalidates every @Model instance fetched through it).
         let container: ModelContainer
         let service: AthleteConnectionLifecycleService
         let parentWorkspaceRepository: ParentWorkspaceRepository
         let athleteRepository: AthleteRepository
+        let athleteAccessGrantRepository: AthleteAccessGrantRepository
         // Snapshotted stable IDs rather than the managed `@Model`
         // instances themselves — the test only ever needs identity
         // values for comparison, not continued live access to the
@@ -61,26 +53,77 @@ struct AthleteConnectionLifecycleServiceTests {
         let expectedParticipantId: UUID
         let expectedWorkspaceId: WorkspaceId
         let expectedAthleteId: AthleteId
+        let hydrationPayload: AthleteConnectionInvitationCloudRecordPayload
+    }
+
+    private static func makeIdentityHydrationService(
+        container: ModelContainer,
+        parentWorkspaceRepository: ParentWorkspaceRepository,
+        athleteRepository: AthleteRepository,
+        athleteAccessGrantRepository: AthleteAccessGrantRepository
+    ) -> AthleteIdentityHydrationService {
+        AthleteIdentityHydrationService(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+    }
+
+    /// A completely independent, freshly-generated hydration payload —
+    /// no relationship to any locally-persisted state. Used by the
+    /// "fresh device" tests, which prove the FULL chain succeeds purely
+    /// from this transported projection, with NOTHING pre-existing
+    /// locally.
+    private static func makeFreshHydrationPayload(
+        workspaceId: UUID = UUID(),
+        intendedParticipantId: UUID = UUID(),
+        intendedAthleteId: UUID = UUID(),
+        parentId: UUID = UUID(),
+        ownerParticipantId: UUID = UUID(),
+        athleteGivenName: String = "Jonas"
+    ) -> AthleteConnectionInvitationCloudRecordPayload {
+        AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: intendedParticipantId,
+            intendedAthleteId: intendedAthleteId,
+            parentId: parentId,
+            parentGivenName: "Kari",
+            workspaceDisplayName: "Kari's family",
+            ownerParticipantId: ownerParticipantId,
+            athleteGivenName: athleteGivenName,
+            athleteBirthDateISO: LocalDate(year: 2012, month: 4, day: 10).isoString,
+            athleteTimeZoneId: "Europe/Oslo",
+            athleteDevelopmentStage: DevelopmentStage.parentLed.rawValue
+        )
+    }
+
+    private static func makeAcceptedShare(hydration: AthleteConnectionInvitationCloudRecordPayload) -> AcceptedFamilyWorkspaceShare {
+        let zoneID = CKRecordZone.ID(zoneName: "test-zone", ownerName: "test-owner")
+        return AcceptedFamilyWorkspaceShare(
+            workspaceId: hydration.workspaceId,
+            zoneID: zoneID,
+            rootRecordID: CKRecord.ID(recordName: "test-invitation", zoneID: zoneID),
+            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID),
+            intendedParticipantId: hydration.intendedParticipantId,
+            intendedAthleteId: hydration.intendedAthleteId,
+            hydration: hydration
+        )
     }
 
     /// Builds a real, canonically-created family with an invited AND
-    /// accepted `.athlete` participant — the same fixture shape B2.3/B2.4's
-    /// own integration tests use — wired into a real
-    /// `AthleteConnectionLifecycleService`. `sessionActivationService`
-    /// defaults to the real B2.4 implementation; a test proving a GENUINE
-    /// later B2.4 failure (after this real, successful B2.3-eligible
-    /// setup) substitutes a fake conforming to `AthleteSessionActivating`
-    /// instead — see that protocol's own doc comment for why.
-    /// `preAccept`: when `true` (the default, matching every pre-B2.6
-    /// test in this suite), the fixture pre-accepts the invited
-    /// participant itself before ever calling `connect(acceptedShare:)`,
-    /// so `.expectedParticipantId` names an already-`.active` participant
-    /// — exercising `connect(acceptedShare:)`'s own ACCEPTANCE STEP as a
-    /// safe no-op (`.alreadyAccepted`). When `false`, the fixture leaves
-    /// the participant genuinely `.invited` — proving `connect(
-    /// acceptedShare:)` itself performs the real `.invited -> .active`
-    /// transition (Athlete Connection Foundation B2.6) rather than
-    /// requiring the caller to have already done so.
+    /// accepted `.athlete` participant, wired into a real
+    /// `AthleteConnectionLifecycleService` — the "this device already
+    /// has this exact family hydrated" case, so the hydration step
+    /// exercises its own reuse/no-op path, not creation.
+    /// `sessionActivationService` defaults to the real B2.4
+    /// implementation; a test proving a GENUINE later B2.4 failure
+    /// substitutes a fake conforming to `AthleteSessionActivating`
+    /// instead. `preAccept`: when `true` (default), the fixture
+    /// pre-accepts the invited participant itself before ever calling
+    /// `connect(acceptedShare:)`. When `false`, the fixture leaves the
+    /// participant genuinely `.invited` — proving `connect(acceptedShare:)`
+    /// itself performs the real `.invited -> .active` transition.
     private static func makeFixture(
         sessionActivationService: AthleteSessionActivating? = nil,
         preAccept: Bool = true
@@ -135,6 +178,12 @@ struct AthleteConnectionLifecycleServiceTests {
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let identityHydrationService = Self.makeIdentityHydrationService(
+            container: container,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
         let realSessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         // Never actually exercised by connect(acceptedShare:) — only
         // required to satisfy AthleteConnectionLifecycleService's own
@@ -144,10 +193,25 @@ struct AthleteConnectionLifecycleServiceTests {
 
         let service = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: identityHydrationService,
             athleteRepository: athleteRepository,
             acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService ?? realSessionActivationService
+        )
+
+        let hydrationPayload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: created.workspace.id,
+            intendedParticipantId: expectedParticipantId,
+            intendedAthleteId: created.athlete.id,
+            parentId: created.parent.id,
+            parentGivenName: created.parent.givenName,
+            workspaceDisplayName: created.workspace.displayName,
+            ownerParticipantId: created.participant.id,
+            athleteGivenName: created.athlete.givenName,
+            athleteBirthDateISO: created.athlete.birthDate.isoString,
+            athleteTimeZoneId: created.athlete.timeZoneId.rawValue,
+            athleteDevelopmentStage: created.athlete.developmentStage.rawValue
         )
 
         return Fixture(
@@ -155,43 +219,26 @@ struct AthleteConnectionLifecycleServiceTests {
             service: service,
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository,
             workspaceRawId: created.workspace.id,
             expectedParticipantId: expectedParticipantId,
             expectedWorkspaceId: created.workspace.workspaceId,
-            expectedAthleteId: created.athlete.athleteId
+            expectedAthleteId: created.athlete.athleteId,
+            hydrationPayload: hydrationPayload
         )
     }
 
-    private static func makeAcceptedShare(
-        workspaceId: UUID,
-        intendedParticipantId: UUID = UUID(),
-        intendedAthleteId: UUID = UUID()
-    ) -> AcceptedFamilyWorkspaceShare {
-        let zoneID = CKRecordZone.ID(zoneName: "test-zone", ownerName: "test-owner")
-        return AcceptedFamilyWorkspaceShare(
-            workspaceId: workspaceId,
-            zoneID: zoneID,
-            rootRecordID: CKRecord.ID(recordName: "test-root", zoneID: zoneID),
-            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID),
-            intendedParticipantId: intendedParticipantId,
-            intendedAthleteId: intendedAthleteId
-        )
-    }
+    // MARK: - 1/5/6: successful sequence (device already has this family locally)
 
-    // MARK: - 1/5/6: successful sequence
-
-    @Test("connect(acceptedShare:) sequences B2.3 -> B2.4 and returns exactly B2.4's own CurrentSessionActor, creating/mutating nothing")
+    @Test("connect(acceptedShare:) sequences hydration (no-op reuse) -> B2.3 -> B2.4 and returns exactly B2.4's own CurrentSessionActor, creating/mutating nothing beyond what already existed")
     func successfulSequenceProducesCanonicalActor() throws {
         let fixture = try Self.makeFixture()
-        let accepted = Self.makeAcceptedShare(
-            workspaceId: fixture.workspaceRawId,
-            intendedParticipantId: fixture.expectedParticipantId,
-            intendedAthleteId: fixture.expectedAthleteId.rawValue
-        )
+        let accepted = Self.makeAcceptedShare(hydration: fixture.hydrationPayload)
 
         let participantCountBefore = try fixture.parentWorkspaceRepository.fetchAllParticipants().count
         let athleteCountBefore = try fixture.athleteRepository.fetchAllAthletes().count
         let workspaceCountBefore = try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count
+        let grantCountBefore = try fixture.athleteAccessGrantRepository.fetchAllGrants().count
 
         let actor = try fixture.service.connect(acceptedShare: accepted)
 
@@ -203,6 +250,119 @@ struct AthleteConnectionLifecycleServiceTests {
         #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == participantCountBefore)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountBefore)
         #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == workspaceCountBefore)
+        #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().count == grantCountBefore)
+    }
+
+    // MARK: - PR #68: fresh device, no pre-existing local state at all
+
+    @Test("connect(acceptedShare:) succeeds on a COMPLETELY FRESH device — no ParentProfile/FamilyWorkspace/WorkspaceParticipant/AthleteProfile/AthleteAccessGrant exist locally beforehand — driven purely by the accepted share's own hydration payload")
+    func freshDeviceHydratesAndConnectsSuccessfully() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let restorationService = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let identityHydrationService = Self.makeIdentityHydrationService(
+            container: container,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
+        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
+        let service = AthleteConnectionLifecycleService(
+            participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: identityHydrationService,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
+            identityBindingService: identityBindingService,
+            sessionActivationService: sessionActivationService
+        )
+
+        // Confirm the store really is empty before proceeding.
+        #expect(try parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+        #expect(try parentWorkspaceRepository.fetchAllWorkspaces().isEmpty)
+        #expect(try parentWorkspaceRepository.fetchAllParticipants().isEmpty)
+        #expect(try athleteRepository.fetchAllAthletes().isEmpty)
+        #expect(try athleteAccessGrantRepository.fetchAllGrants().isEmpty)
+
+        let hydration = Self.makeFreshHydrationPayload()
+        let accepted = Self.makeAcceptedShare(hydration: hydration)
+
+        let actor = try service.connect(acceptedShare: accepted)
+
+        #expect(actor.participantId == hydration.intendedParticipantId)
+        #expect(actor.workspaceId == WorkspaceId(rawValue: hydration.workspaceId))
+        #expect(actor.role == .athlete)
+        #expect(actor.linkedAthleteId == AthleteId(rawValue: hydration.intendedAthleteId))
+
+        #expect(try parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
+        #expect(try parentWorkspaceRepository.fetchAllParticipants().count == 2)
+        #expect(try athleteRepository.fetchAllAthletes().count == 1)
+        #expect(try athleteAccessGrantRepository.fetchAllGrants().count == 1)
+
+        let restored = try restorationService.restoreState()
+        guard case .existingFamily = restored else {
+            Issue.record("Expected .existingFamily after hydration, got \(restored)")
+            return
+        }
+    }
+
+    @Test("A repeated connect(acceptedShare:) for the SAME accepted share on the same fresh device is idempotent — no duplicate ParentProfile/FamilyWorkspace/WorkspaceParticipant/AthleteProfile/AthleteAccessGrant, and both calls resolve to the identical CurrentSessionActor")
+    func repeatedConnectHydratesIdempotently() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let restorationService = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let identityHydrationService = Self.makeIdentityHydrationService(
+            container: container,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
+        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
+        let service = AthleteConnectionLifecycleService(
+            participantShareCoordinator: participantShareCoordinator,
+            identityHydrationService: identityHydrationService,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
+            identityBindingService: identityBindingService,
+            sessionActivationService: sessionActivationService
+        )
+        let accepted = Self.makeAcceptedShare(hydration: Self.makeFreshHydrationPayload())
+
+        let firstActor = try service.connect(acceptedShare: accepted)
+        let secondActor = try service.connect(acceptedShare: accepted)
+
+        #expect(firstActor == secondActor)
+        #expect(try parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
+        #expect(try parentWorkspaceRepository.fetchAllParticipants().count == 2)
+        #expect(try athleteRepository.fetchAllAthletes().count == 1)
+        #expect(try athleteAccessGrantRepository.fetchAllGrants().count == 1)
     }
 
     // MARK: - Athlete Connection Foundation B2.6: the acceptance step itself
@@ -215,11 +375,7 @@ struct AthleteConnectionLifecycleServiceTests {
             .first { $0.id == fixture.expectedParticipantId }
         #expect(participantBeforeConnect?.state == .invited)
 
-        let accepted = Self.makeAcceptedShare(
-            workspaceId: fixture.workspaceRawId,
-            intendedParticipantId: fixture.expectedParticipantId,
-            intendedAthleteId: fixture.expectedAthleteId.rawValue
-        )
+        let accepted = Self.makeAcceptedShare(hydration: fixture.hydrationPayload)
 
         let actor = try fixture.service.connect(acceptedShare: accepted)
 
@@ -230,47 +386,38 @@ struct AthleteConnectionLifecycleServiceTests {
         #expect(participantAfterConnect?.state == .active)
     }
 
-    // MARK: - 3: B2.3 failure stops before activation
+    // MARK: - PR #68: hydration conflict stops the chain, creating nothing
 
-    @Test("connect(acceptedShare:) wraps a B2.3 (identity binding) failure as identityBindingFailed and never reaches B2.4")
-    func identityBindingFailureStopsChain() throws {
-        // No family exists at all on this device's persistence, so B2.3
-        // fails with workspaceNotFound before B2.4 is ever invoked.
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
-        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
-        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
-        let restorationService = FamilyRestorationService(
-            parentWorkspaceRepository: parentWorkspaceRepository,
-            athleteRepository: athleteRepository,
-            athleteAccessGrantRepository: athleteAccessGrantRepository
-        )
-        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
-        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
-        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
-        let acceptanceService = AcceptWorkspaceInvitationService(
-            repository: parentWorkspaceRepository,
-            eligibilityService: AthleteParticipantEligibilityService()
-        )
-        let service = AthleteConnectionLifecycleService(
-            participantShareCoordinator: participantShareCoordinator,
-            athleteRepository: athleteRepository,
-            acceptanceService: acceptanceService,
-            identityBindingService: identityBindingService,
-            sessionActivationService: sessionActivationService
-        )
-        let accepted = Self.makeAcceptedShare(workspaceId: UUID())
+    @Test("connect(acceptedShare:) wraps a hydration conflict (a DIFFERENT family already exists locally) as identityHydrationFailed, creating/mutating nothing, and never reaches acceptance/B2.3/B2.4")
+    func identityHydrationFailureStopsChain() throws {
+        // This device already has a real, different family — a
+        // completely unrelated parent/workspace/athlete.
+        let fixture = try Self.makeFixture()
+
+        let participantCountBefore = try fixture.parentWorkspaceRepository.fetchAllParticipants().count
+        let athleteCountBefore = try fixture.athleteRepository.fetchAllAthletes().count
+        let workspaceCountBefore = try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count
+        let grantCountBefore = try fixture.athleteAccessGrantRepository.fetchAllGrants().count
+
+        // A genuinely different family's invitation — different
+        // workspaceId/parentId/ownerParticipantId entirely.
+        let unrelatedHydration = Self.makeFreshHydrationPayload(athleteGivenName: "Emma")
+        let accepted = Self.makeAcceptedShare(hydration: unrelatedHydration)
 
         do {
-            _ = try service.connect(acceptedShare: accepted)
+            _ = try fixture.service.connect(acceptedShare: accepted)
             Issue.record("Expected connect(acceptedShare:) to throw")
         } catch let error as AthleteConnectionLifecycleError {
-            guard case .identityBindingFailed = error else {
-                Issue.record("Expected .identityBindingFailed, got \(error)")
+            guard case .identityHydrationFailed = error else {
+                Issue.record("Expected .identityHydrationFailed, got \(error)")
                 return
             }
         }
+
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == participantCountBefore)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountBefore)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == workspaceCountBefore)
+        #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().count == grantCountBefore)
     }
 
     // MARK: - 4: B2.4 failure surfaces correctly
@@ -290,7 +437,7 @@ struct AthleteConnectionLifecycleServiceTests {
         }
     }
 
-    @Test("connect(acceptedShare:) wraps a B2.4 (session activation) failure as sessionActivationFailed after B2.3 already succeeded")
+    @Test("connect(acceptedShare:) wraps a B2.4 (session activation) failure as sessionActivationFailed after hydration/acceptance/B2.3 already succeeded")
     func sessionActivationFailureSurfacesCorrectly() throws {
         // B2.3 runs for real, against the same genuinely-`.active`
         // participant `makeFixture()` always builds — B2.3 succeeds
@@ -300,11 +447,7 @@ struct AthleteConnectionLifecycleServiceTests {
         let fixture = try Self.makeFixture(
             sessionActivationService: FailingSessionActivator(error: .participantNotActive)
         )
-        let accepted = Self.makeAcceptedShare(
-            workspaceId: fixture.workspaceRawId,
-            intendedParticipantId: fixture.expectedParticipantId,
-            intendedAthleteId: fixture.expectedAthleteId.rawValue
-        )
+        let accepted = Self.makeAcceptedShare(hydration: fixture.hydrationPayload)
 
         do {
             _ = try fixture.service.connect(acceptedShare: accepted)
@@ -315,46 +458,5 @@ struct AthleteConnectionLifecycleServiceTests {
                 return
             }
         }
-    }
-
-    // MARK: - 6: no alternative identity created
-
-    @Test("A failed connect(acceptedShare:) attempt creates/mutates nothing")
-    func failedAttemptCreatesNothing() throws {
-        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
-        let container = try controller.makeModelContainer()
-        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
-        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
-        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
-        let restorationService = FamilyRestorationService(
-            parentWorkspaceRepository: parentWorkspaceRepository,
-            athleteRepository: athleteRepository,
-            athleteAccessGrantRepository: athleteAccessGrantRepository
-        )
-        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
-        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
-        let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
-        let acceptanceService = AcceptWorkspaceInvitationService(
-            repository: parentWorkspaceRepository,
-            eligibilityService: AthleteParticipantEligibilityService()
-        )
-        let service = AthleteConnectionLifecycleService(
-            participantShareCoordinator: participantShareCoordinator,
-            athleteRepository: athleteRepository,
-            acceptanceService: acceptanceService,
-            identityBindingService: identityBindingService,
-            sessionActivationService: sessionActivationService
-        )
-        let accepted = Self.makeAcceptedShare(workspaceId: UUID())
-
-        let participantCountBefore = try parentWorkspaceRepository.fetchAllParticipants().count
-        let athleteCountBefore = try athleteRepository.fetchAllAthletes().count
-        let workspaceCountBefore = try parentWorkspaceRepository.fetchAllWorkspaces().count
-
-        _ = try? service.connect(acceptedShare: accepted)
-
-        #expect(try parentWorkspaceRepository.fetchAllParticipants().count == participantCountBefore)
-        #expect(try athleteRepository.fetchAllAthletes().count == athleteCountBefore)
-        #expect(try parentWorkspaceRepository.fetchAllWorkspaces().count == workspaceCountBefore)
     }
 }
