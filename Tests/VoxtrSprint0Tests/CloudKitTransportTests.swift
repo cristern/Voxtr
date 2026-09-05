@@ -2,6 +2,7 @@ import Testing
 import Foundation
 import CloudKit
 @testable import VoxtrCore
+import VoxtrCoreContracts
 import VoxtrAppShell
 
 // NOTE: Configuration tests (1-4) and the regression tests (11, 13) read
