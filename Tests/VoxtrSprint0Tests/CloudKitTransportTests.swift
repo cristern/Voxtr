@@ -57,6 +57,56 @@ struct CloudKitCapabilityConfigurationTests {
         #expect(infoPlist["CKSharingSupported"] as? Bool == true)
     }
 
+    /// PR #69 lead review follow-up: runtime evidence strongly indicates
+    /// `CloudSharingPresenter` returning `UICloudSharingController` itself
+    /// as its own `UIViewControllerRepresentable.UIViewControllerType`,
+    /// relying on SwiftUI's `.sheet` to display it, is what produced the
+    /// observed ParentApp TestFlight build 502 crash — SwiftUI embeds a
+    /// representable's own returned controller as a CHILD view controller
+    /// rather than genuinely `present()`-ing it, and `UICloudSharingController`
+    /// requires genuine presentation per Apple's own documentation ("You
+    /// must set the popoverPresentationController before presenting").
+    /// This fix targets that observed CloudKit presentation failure; it is
+    /// described as verified once a new TestFlight build repeats the same
+    /// "Connect Athlete App" action successfully.
+    ///
+    /// The corrected implementation must also not merely move the bug: the
+    /// lead review flagged that presenting from `updateUIViewController`
+    /// (rather than a genuine on-screen-lifecycle callback) carries no
+    /// guarantee the anchor is actually attached to a window yet, which
+    /// could silently no-op `present(...)` instead of crashing — an
+    /// equally bad outcome. There is no way to reproduce a real,
+    /// signed-device `UICloudSharingController` presentation from XCTest
+    /// (matching every other CloudKit UI-adjacent XCTEST-SAFETY note in
+    /// this file), so — exactly like this file's own entitlements/Info.plist
+    /// checks above — this is a source-of-truth text check on the facts
+    /// that actually matter: the representable's own `UIViewControllerType`
+    /// must NOT be `UICloudSharingController`; a genuine `.present(` call
+    /// must exist; presentation must be driven by a real UIKit lifecycle
+    /// callback (`viewDidAppear`); and `updateUIViewController`'s own body
+    /// must never itself call `.present(`.
+    @Test("CloudSharingPresenter presents UICloudSharingController via a genuine, lifecycle-driven UIKit present(_:animated:) call — never as its own UIViewControllerRepresentable.UIViewControllerType, and never from updateUIViewController's own timing")
+    func cloudSharingPresenterPresentsControllerGenuinelyFromLifecycle() throws {
+        let url = repositoryRoot().appendingPathComponent("Sources/VoxtrAppShell/CloudSharingPresenter.swift")
+        let source = try String(contentsOf: url, encoding: .utf8)
+
+        #expect(!source.contains("-> UICloudSharingController"), "CloudSharingPresenter must not return UICloudSharingController directly from makeUIViewController — SwiftUI would embed it as a child rather than genuinely presenting it")
+        #expect(source.contains("viewDidAppear"), "Presentation must be driven by a genuine UIKit lifecycle callback proving the anchor is actually on-screen — not by updateUIViewController's own timing, which carries no such guarantee")
+        #expect(source.contains(".present(") && source.contains("animated: true"), "CloudSharingPresenter must genuinely present UICloudSharingController via UIKit's present(_:animated:completion:), matching Apple's own documented usage contract")
+
+        guard let updateSignatureRange = source.range(of: "func updateUIViewController") else {
+            Issue.record("Could not locate updateUIViewController in CloudSharingPresenter.swift")
+            return
+        }
+        let afterSignature = source[updateSignatureRange.upperBound...]
+        guard let bodyEnd = afterSignature.range(of: "\n    }") else {
+            Issue.record("Could not locate the end of updateUIViewController's body")
+            return
+        }
+        let updateBody = afterSignature[..<bodyEnd.lowerBound]
+        #expect(!updateBody.contains(".present("), "updateUIViewController must never itself call .present( — SwiftUI does not guarantee the anchor is attached to a window at that point; presentation must be driven exclusively by a genuine lifecycle callback (e.g. viewDidAppear) instead")
+    }
+
     @Test("AthleteApp still does NOT gain Calendar permission/configuration — Calendar import stays a Parent-only capability")
     func athleteAppStillHasNoCalendarPermission() throws {
         let infoPlist = try plist(atRepositoryRelativePath: "App/AthleteApp/Info.plist")
