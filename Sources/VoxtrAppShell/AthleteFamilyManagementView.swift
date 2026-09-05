@@ -627,18 +627,21 @@ struct AthleteSettingsView: View {
         .sheet(isPresented: $isPresentingForm) {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
         }
-        // Athlete Connection Foundation B2.6: presented only once a real
-        // `AthleteConnectionInvitationHandoff` exists — never eagerly, so
-        // there is no CloudKit work behind this sheet until the Parent's
+        // Athlete Connection Foundation B2.6 (TestFlight runtime crash
+        // follow-up): `CloudSharingPresenter` is embedded here, never
+        // wrapped in `.sheet` — its own doc comment explains why:
+        // `UICloudSharingController` must be genuinely `present()`-ed via
+        // UIKit, and SwiftUI's `.sheet` does not do that for a
+        // `UIViewControllerRepresentable`'s own returned controller (it
+        // embeds it as a child instead), which is what caused the
+        // confirmed EXC_BREAKPOINT/SIGTRAP crash inside CloudKit.framework
+        // on tapping "Connect Athlete App" (ParentApp TestFlight build
+        // 502). `CloudSharingPresenter` itself performs the real
+        // `present()`/`dismiss()` calls once embedded here; presented only
+        // once a real `AthleteConnectionInvitationHandoff` exists — never
+        // eagerly, so there is no CloudKit work here until the Parent's
         // own "Connect Athlete App" tap already completed successfully.
-        .sheet(isPresented: Binding(
-            get: { viewModel.pendingInvitationHandoff != nil },
-            set: { isPresented in
-                if !isPresented {
-                    viewModel.dismissConnectAthleteApp()
-                }
-            }
-        )) {
+        .background {
             if let handoff = viewModel.pendingInvitationHandoff {
                 CloudSharingPresenter(
                     handoff: handoff,
