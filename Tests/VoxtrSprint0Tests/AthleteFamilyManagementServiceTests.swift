@@ -502,7 +502,12 @@ struct AthleteFamilyManagementServiceTests {
             workspaceId: staged.workspace.workspaceId,
             participantId: staged.participant.id,
             athleteRepository: athleteRepository,
-            athleteFamilyManagementService: service
+            athleteFamilyManagementService: service,
+            athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService(
+                parentWorkspaceRepository: parentWorkspaceRepository,
+                ownerShareCoordinator: FamilyWorkspaceOwnerShareCoordinator(transport: CloudKitTransport()),
+                transport: CloudKitTransport()
+            )
         )
         viewModel.archiveAthlete(added.athlete)
         #expect(viewModel.errorMessage == nil)
@@ -930,7 +935,12 @@ struct AthleteFamilyManagementServiceTests {
             workspaceId: staged.workspace.workspaceId,
             participantId: staged.participant.id,
             athleteRepository: athleteRepository,
-            athleteFamilyManagementService: service
+            athleteFamilyManagementService: service,
+            athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService(
+                parentWorkspaceRepository: parentWorkspaceRepository,
+                ownerShareCoordinator: FamilyWorkspaceOwnerShareCoordinator(transport: CloudKitTransport()),
+                transport: CloudKitTransport()
+            )
         )
 
         // No explicit preference has ever been set for this athlete —

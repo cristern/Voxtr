@@ -328,7 +328,7 @@ struct FamilyWorkspaceCloudRecordMappingTests {
 // initializer reachable without a real accepted share, so no test double
 // could supply one anyway. What IS fully unit-testable, and covered
 // directly below, is the PURE decode/validation step this method
-// delegates to — `resolveAcceptedShare(share:rootRecord:)` — which takes
+// delegates to — `resolveAcceptedShare(share:rootRecord:invitationIntent:)` — which takes
 // an already-accepted `CKShare` and an already-fetched `CKRecord`, both
 // locally constructible with no entitlement. Shared-database SCOPE
 // SELECTION itself (`.shared` routes to `.sharedDatabase`) is already
@@ -371,23 +371,38 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         return (share, rootRecord)
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) preserves the exact stable workspaceId decoded from the root record")
+    /// Athlete Connection Foundation B2.6: a dummy invitation-intent
+    /// payload matching the given `workspaceId` — these tests exercise
+    /// `resolveAcceptedShare(share:rootRecord:invitationIntent:)`'s
+    /// pre-existing root-record validation paths, which all fail (or, for
+    /// the success-path tests, are unrelated to) the invitation-intent
+    /// cross-check itself, so the exact `intendedParticipantId`/
+    /// `intendedAthleteId` values are otherwise arbitrary.
+    private static func matchingInvitationIntent(workspaceId: UUID) -> AthleteConnectionInvitationCloudRecordPayload {
+        AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID()
+        )
+    }
+
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) preserves the exact stable workspaceId decoded from the root record")
     func preservesWorkspaceIdExactly() throws {
         let workspaceId = UUID()
         let (share, rootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId)
 
-        let result = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord)
+        let result = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
 
         #expect(result.workspaceId == workspaceId)
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) preserves the real accepted zone's ownerName exactly — never CKCurrentUserDefaultName, never derived from workspaceId or any local 'current user' concept")
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) preserves the real accepted zone's ownerName exactly — never CKCurrentUserDefaultName, never derived from workspaceId or any local 'current user' concept")
     func preservesRealZoneOwnerNameWithoutDerivingIt() throws {
         let workspaceId = UUID()
         let realParentOwnerName = "_a_specific_real_parent_icloud_identity_"
         let (share, rootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId, ownerName: realParentOwnerName)
 
-        let result = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord)
+        let result = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
 
         #expect(result.zoneID.ownerName == realParentOwnerName)
         #expect(result.zoneID.ownerName != CKCurrentUserDefaultName)
@@ -398,18 +413,19 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         // preserving it, both calls would wrongly produce the same value.
         let differentOwnerName = "_a_different_real_parent_icloud_identity_"
         let (otherShare, otherRootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId, ownerName: differentOwnerName)
-        let otherResult = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: otherShare, rootRecord: otherRootRecord)
+        let otherResult = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: otherShare, rootRecord: otherRootRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
         #expect(otherResult.zoneID.ownerName == differentOwnerName)
         #expect(otherResult.zoneID.ownerName != result.zoneID.ownerName)
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) is deterministic — repeated resolution of the same accepted share and root record produces the identical result")
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) is deterministic — repeated resolution of the same accepted share and root record produces the identical result")
     func repeatedResolutionIsDeterministic() throws {
         let workspaceId = UUID()
         let (share, rootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId)
+        let invitationIntent = Self.matchingInvitationIntent(workspaceId: workspaceId)
 
-        let first = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord)
-        let second = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord)
+        let first = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: invitationIntent)
+        let second = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: invitationIntent)
 
         #expect(first.workspaceId == second.workspaceId)
         #expect(first.zoneID == second.zoneID)
@@ -417,7 +433,36 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         #expect(first.shareRecordID == second.shareRecordID)
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) rejects a root record from a DIFFERENT zone than the accepted share's own zone, rather than trusting either value alone")
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) preserves the invitation-intent's intended participant/athlete IDs exactly")
+    func preservesInvitationIntentExactly() throws {
+        let workspaceId = UUID()
+        let (share, rootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId)
+        let intendedParticipantId = UUID()
+        let intendedAthleteId = UUID()
+        let invitationIntent = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: intendedParticipantId,
+            intendedAthleteId: intendedAthleteId
+        )
+
+        let result = try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: invitationIntent)
+
+        #expect(result.intendedParticipantId == intendedParticipantId)
+        #expect(result.intendedAthleteId == intendedAthleteId)
+    }
+
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) rejects an invitation-intent whose own workspaceId does not match the root record's decoded workspaceId")
+    func rejectsInvitationIntentWorkspaceMismatch() {
+        let workspaceId = UUID()
+        let (share, rootRecord) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId)
+        let mismatchedInvitationIntent = Self.matchingInvitationIntent(workspaceId: UUID())
+
+        #expect(throws: FamilyWorkspaceShareAcceptanceError.self) {
+            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: rootRecord, invitationIntent: mismatchedInvitationIntent)
+        }
+    }
+
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) rejects a root record from a DIFFERENT zone than the accepted share's own zone, rather than trusting either value alone")
     func rejectsRootRecordFromWrongZone() {
         let workspaceId = UUID()
         let (share, _) = Self.acceptedShareAndRootRecord(workspaceId: workspaceId, ownerName: "_owner_a_")
@@ -431,11 +476,11 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         )
 
         #expect(throws: FamilyWorkspaceShareAcceptanceError.self) {
-            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: mismatchedRootRecord)
+            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: mismatchedRootRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
         }
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) rejects a root record of the wrong record type, surfacing FamilyWorkspaceCloudRecordMapping's own DecodeError rather than silently proceeding")
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) rejects a root record of the wrong record type, surfacing FamilyWorkspaceCloudRecordMapping's own DecodeError rather than silently proceeding")
     func rejectsWrongRecordType() {
         let workspaceId = UUID()
         let zoneID = Self.parentOwnedZoneID(forWorkspace: workspaceId)
@@ -443,11 +488,11 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         let share = CKShare(rootRecord: wrongTypeRecord)
 
         #expect(throws: FamilyWorkspaceShareAcceptanceError.self) {
-            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: wrongTypeRecord)
+            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: wrongTypeRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
         }
     }
 
-    @Test("resolveAcceptedShare(share:rootRecord:) rejects a root record whose own recordID does not match B2.1's deterministic naming rule for its decoded workspaceId, even though the workspaceId field itself parses fine")
+    @Test("resolveAcceptedShare(share:rootRecord:invitationIntent:) rejects a root record whose own recordID does not match B2.1's deterministic naming rule for its decoded workspaceId, even though the workspaceId field itself parses fine")
     func rejectsRootRecordIdentityMismatch() {
         let workspaceId = UUID()
         let zoneID = Self.parentOwnedZoneID(forWorkspace: workspaceId)
@@ -463,7 +508,7 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         let share = CKShare(rootRecord: impostorRecord)
 
         #expect(throws: FamilyWorkspaceShareAcceptanceError.self) {
-            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: impostorRecord)
+            try FamilyWorkspaceParticipantShareCoordinator.resolveAcceptedShare(share: share, rootRecord: impostorRecord, invitationIntent: Self.matchingInvitationIntent(workspaceId: workspaceId))
         }
     }
 
@@ -518,6 +563,107 @@ struct FamilyWorkspaceParticipantShareCoordinatorTests {
         let unrelatedCodes: [CKError.Code] = [.networkUnavailable, .notAuthenticated, .permissionFailure]
         for code in unrelatedCodes {
             #expect(!FamilyWorkspaceParticipantShareCoordinator.isSharedRootNotYetAvailable(code: code))
+        }
+    }
+}
+
+// Athlete Connection Foundation B2.6: pure encode/decode round-trip
+// coverage for the new invitation-intent discriminator record — no
+// CloudKit I/O involved (`CKRecord(recordType:recordID:)` and
+// `CKRecord.Reference` are plain, local value/model object constructors),
+// mirroring `FamilyWorkspaceCloudRecordMappingTests`'s own precedent
+// exactly.
+@Suite("Athlete Connection Foundation B2.6: invitation-intent CloudKit record mapping")
+struct AthleteConnectionInvitationCloudRecordMappingTests {
+
+    @Test("The same workspaceId always produces the same deterministic record NAME, distinct from FamilyWorkspaceCloudRecordSchema's own naming for the same workspaceId")
+    func sameWorkspaceIdProducesSameRecordName() {
+        let workspaceId = UUID()
+        let first = AthleteConnectionInvitationCloudRecordSchema.recordName(forWorkspace: workspaceId)
+        let second = AthleteConnectionInvitationCloudRecordSchema.recordName(forWorkspace: workspaceId)
+        #expect(first == second)
+        #expect(first != FamilyWorkspaceCloudRecordSchema.recordName(forWorkspace: workspaceId))
+    }
+
+    @Test("Different workspaceIds produce different deterministic record NAMEs")
+    func differentWorkspaceIdsProduceDifferentRecordNames() {
+        let first = AthleteConnectionInvitationCloudRecordSchema.recordName(forWorkspace: UUID())
+        let second = AthleteConnectionInvitationCloudRecordSchema.recordName(forWorkspace: UUID())
+        #expect(first != second)
+    }
+
+    @Test("makeRecord(for:zoneID:parentRecordID:) produces a record of the AthleteConnectionInvitation type, in the given zone, parented to the given root record, carrying the intended participant/athlete identity")
+    func makeRecordCarriesExpectedTypeZoneParentAndIdentity() {
+        let workspaceId = UUID()
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        let parentRecordID = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID)
+        let payload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID()
+        )
+
+        let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(for: payload, zoneID: zoneID, parentRecordID: parentRecordID)
+
+        #expect(record.recordType == AthleteConnectionInvitationCloudRecordSchema.recordType)
+        #expect(record.recordID == AthleteConnectionInvitationCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID))
+        #expect(record.parent?.recordID == parentRecordID)
+        #expect(record[AthleteConnectionInvitationCloudRecordSchema.workspaceIdFieldKey] as? String == workspaceId.uuidString)
+        #expect(record[AthleteConnectionInvitationCloudRecordSchema.intendedParticipantIdFieldKey] as? String == payload.intendedParticipantId.uuidString)
+        #expect(record[AthleteConnectionInvitationCloudRecordSchema.intendedAthleteIdFieldKey] as? String == payload.intendedAthleteId.uuidString)
+        #expect(record[AthleteConnectionInvitationCloudRecordSchema.mappingVersionFieldKey] as? Int64 == AthleteConnectionInvitationCloudRecordSchema.mappingVersion)
+    }
+
+    @Test("payload(from:) is the exact inverse of makeRecord(for:zoneID:parentRecordID:) — round-tripping a record recovers the same stable workspace/participant/athlete identity")
+    func payloadRoundTripsThroughMakeRecord() throws {
+        let payload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: UUID(),
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID()
+        )
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: payload.workspaceId)
+        let parentRecordID = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: payload.workspaceId, zoneID: zoneID)
+
+        let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(for: payload, zoneID: zoneID, parentRecordID: parentRecordID)
+        let decoded = try AthleteConnectionInvitationCloudRecordMapping.payload(from: record)
+
+        #expect(decoded == payload)
+    }
+
+    @Test("apply(_:to:) re-applies a NEW payload's field values onto an already-constructed record, preserving its existing recordID/recordType — proves a repeated 'Connect Athlete App' action for the same workspace can retarget an EXISTING fetched record to a different intended participant/athlete rather than only ever supporting a freshly-constructed one")
+    func applyUpdatesFieldsOnExistingRecord() throws {
+        let workspaceId = UUID()
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        let parentRecordID = FamilyWorkspaceCloudRecordMapping.recordID(forWorkspace: workspaceId, zoneID: zoneID)
+        let originalPayload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID()
+        )
+        let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(for: originalPayload, zoneID: zoneID, parentRecordID: parentRecordID)
+        let originalRecordID = record.recordID
+
+        let newPayload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: workspaceId,
+            intendedParticipantId: UUID(),
+            intendedAthleteId: UUID()
+        )
+        AthleteConnectionInvitationCloudRecordMapping.apply(newPayload, to: record)
+
+        #expect(record.recordID == originalRecordID)
+        #expect(record.recordType == AthleteConnectionInvitationCloudRecordSchema.recordType)
+        let decoded = try AthleteConnectionInvitationCloudRecordMapping.payload(from: record)
+        #expect(decoded == newPayload)
+        #expect(decoded != originalPayload)
+    }
+
+    @Test("payload(from:) rejects a record of the wrong record type rather than silently decoding garbage")
+    func payloadRejectsWrongRecordType() {
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: UUID())
+        let wrongTypeRecord = CKRecord(recordType: "NotAnAthleteConnectionInvitation", recordID: CKRecord.ID(recordName: "irrelevant", zoneID: zoneID))
+
+        #expect(throws: AthleteConnectionInvitationCloudRecordMapping.DecodeError.unexpectedRecordType("NotAnAthleteConnectionInvitation")) {
+            try AthleteConnectionInvitationCloudRecordMapping.payload(from: wrongTypeRecord)
         }
     }
 }

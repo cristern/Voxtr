@@ -1,18 +1,51 @@
 import CloudKit
 import VoxtrCore
+import VoxtrCoreContracts
+import VoxtrAthleteDomain
+import VoxtrParentDomain
 
-/// Athlete Connection Foundation B2.5: the one AppShell orchestration
-/// service that SEQUENCES the already-built B2.2 → B2.3 → B2.4 chain —
-/// it does not reimplement any of their internal validation.
+/// Athlete Connection Foundation B2.5/B2.6: the one AppShell orchestration
+/// service that SEQUENCES the already-built B2.2 → (invitation acceptance)
+/// → B2.3 → B2.4 chain — it does not reimplement any of their internal
+/// validation.
 ///
 /// Flow:
 /// 1. `participantShareCoordinator.resolveAcceptedShare(from:)` (B2.2) —
-///    real CloudKit share acceptance/resolution.
-/// 2. `identityBindingService.bind(acceptedWorkspaceId:)` (B2.3) — binds
-///    the accepted transport identity to the existing local Vǫxtr
-///    identity.
-/// 3. `sessionActivationService.activate(boundIdentity:)` (B2.4) —
+///    real CloudKit share acceptance/resolution, now also decoding the
+///    Parent's invitation-intent (`AcceptedFamilyWorkspaceShare
+///    .intendedParticipantId`/`.intendedAthleteId`, B2.6).
+/// 2. `acceptanceService.accept(athleteId:workspaceId:eligibilityFacts:)`
+///    (`AcceptWorkspaceInvitationService`, unmodified, canonical) — the
+///    ONE place this codebase performs the `.invited → .active`
+///    transition. See ACCEPTANCE STEP below for exactly how this slice
+///    sequences it and why it never invents a parallel mutation path.
+/// 3. `identityBindingService.bind(acceptedWorkspaceId:intendedParticipantId:)`
+///    (B2.3) — binds the accepted transport identity to the EXACT
+///    existing local Vǫxtr identity the invitation intended, now
+///    requiring that identity be already `.active`.
+/// 4. `sessionActivationService.activate(boundIdentity:)` (B2.4) —
 ///    revalidates and activates the canonical `CurrentSessionActor`.
+///
+/// ACCEPTANCE STEP (B2.6): `AcceptWorkspaceInvitationService.accept(...)`
+/// is called UNCONDITIONALLY and BEFORE B2.3's `bind` — B2.3 requires the
+/// intended participant to already be `.active`, and this is the only
+/// legitimate place that transition can happen in this chain. This
+/// service does NOT mutate `WorkspaceParticipant.state` directly; it only
+/// sequences the existing canonical service, which already: returns
+/// `.alreadyAccepted` immediately for an already-`.active` participant
+/// (safe to call every time, not just the first), and independently
+/// re-evaluates eligibility (`AthleteEligibilityFacts`, built here from a
+/// FRESH `AthleteRepository.fetchAthlete(byId:)` lookup — never trusted
+/// from whenever the invitation was originally created). Only a genuine
+/// `.repositoryFailed` outcome (or a failure fetching eligibility facts)
+/// stops the chain here (`invitationAcceptanceFailed`); every other
+/// outcome — `.accepted`, `.alreadyAccepted`, `.invitationNotFound`,
+/// `.invitationRevoked`, `.invitationDeclined`, `.notEligible` — falls
+/// through to B2.3's `bind`, which independently and correctly fails
+/// (`athleteParticipantNotFound`/`participantNotEligible`) by
+/// re-inspecting the TRUE persisted participant state rather than this
+/// step's transient result — deliberately not duplicating that judgment
+/// here.
 ///
 /// LAYERING: this file imports `CloudKit` because `connect(from:)`'s own
 /// parameter type (`CKShare.Metadata`) is the real iOS-delivered
@@ -69,15 +102,21 @@ import VoxtrCore
 public final class AthleteConnectionLifecycleService {
 
     private let participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator
+    private let athleteRepository: AthleteRepository
+    private let acceptanceService: AcceptWorkspaceInvitationService
     private let identityBindingService: AthleteConnectionIdentityBindingService
     private let sessionActivationService: AthleteSessionActivating
 
     public init(
         participantShareCoordinator: FamilyWorkspaceParticipantShareCoordinator,
+        athleteRepository: AthleteRepository,
+        acceptanceService: AcceptWorkspaceInvitationService,
         identityBindingService: AthleteConnectionIdentityBindingService,
         sessionActivationService: AthleteSessionActivating
     ) {
         self.participantShareCoordinator = participantShareCoordinator
+        self.athleteRepository = athleteRepository
+        self.acceptanceService = acceptanceService
         self.identityBindingService = identityBindingService
         self.sessionActivationService = sessionActivationService
     }
@@ -109,9 +148,41 @@ public final class AthleteConnectionLifecycleService {
     /// (`@testable import`) can call it directly to test B2.3/B2.4
     /// sequencing and failure propagation without CloudKit.
     func connect(acceptedShare: AcceptedFamilyWorkspaceShare) throws -> CurrentSessionActor {
+        let intendedAthleteId = AthleteId(rawValue: acceptedShare.intendedAthleteId)
+        let intendedWorkspaceId = WorkspaceId(rawValue: acceptedShare.workspaceId)
+
+        let eligibilityFacts: AthleteEligibilityFacts?
+        do {
+            if let athlete = try athleteRepository.fetchAthlete(byId: intendedAthleteId) {
+                eligibilityFacts = AthleteEligibilityFacts(workspaceId: intendedWorkspaceId, isArchived: athlete.isArchived)
+            } else {
+                // No matching AthleteProfile — `AthleteParticipantEligibilityService`
+                // (inside `acceptanceService.accept(...)`) already treats a
+                // `nil` facts value as `.notEligible(.athleteNotFound, ...)`
+                // rather than crashing, so this is passed through rather
+                // than treated as a failure here.
+                eligibilityFacts = nil
+            }
+        } catch {
+            throw AthleteConnectionLifecycleError.invitationAcceptanceFailed(error)
+        }
+
+        switch acceptanceService.accept(athleteId: intendedAthleteId, workspaceId: intendedWorkspaceId, eligibilityFacts: eligibilityFacts) {
+        case .repositoryFailed:
+            throw AthleteConnectionLifecycleError.invitationAcceptanceFailed(AcceptWorkspaceInvitationRepositoryFailure())
+        case .accepted, .alreadyAccepted, .invitationNotFound, .invitationRevoked, .invitationDeclined, .notEligible:
+            // See this file's own ACCEPTANCE STEP doc comment: every
+            // outcome other than a genuine repository failure falls
+            // through to B2.3's `bind`, which independently re-inspects
+            // the TRUE persisted participant state and fails with its
+            // own explicit, correct case if acceptance did not actually
+            // succeed.
+            break
+        }
+
         let bound: BoundAthleteIdentity
         do {
-            bound = try identityBindingService.bind(acceptedWorkspaceId: acceptedShare.workspaceId)
+            bound = try identityBindingService.bind(acceptedWorkspaceId: acceptedShare.workspaceId, intendedParticipantId: acceptedShare.intendedParticipantId)
         } catch {
             throw AthleteConnectionLifecycleError.identityBindingFailed(error)
         }
@@ -123,6 +194,16 @@ public final class AthleteConnectionLifecycleService {
         }
     }
 }
+
+/// `AcceptWorkspaceInvitationResult.repositoryFailed` carries no
+/// underlying `Error` of its own (that service already swallows it
+/// internally — see its own doc comment), but
+/// `AthleteConnectionLifecycleError.invitationAcceptanceFailed` always
+/// wraps a real `Error` like every other case in this enum. This is that
+/// placeholder — its only purpose is to satisfy that shape, never
+/// inspected for anything beyond "an acceptance-time repository
+/// operation failed."
+struct AcceptWorkspaceInvitationRepositoryFailure: Error {}
 
 /// Test seam ONLY: lets `AthleteConnectionLifecycleServiceTests`
 /// substitute a fake B2.4 collaborator so a genuine LATER activation
@@ -164,14 +245,24 @@ extension AthleteSessionActivationService: AthleteSessionActivating {}
 /// `@MainActor` isolation.
 public enum AthleteConnectionLifecycleError: Error {
     /// B2.2 failed — either resolving/accepting the CloudKit share
-    /// itself, or decoding the shared root record. The chain stops here;
-    /// B2.3/B2.4 are never invoked.
+    /// itself, or decoding the shared root record/invitation-intent
+    /// record. The chain stops here; acceptance/B2.3/B2.4 are never
+    /// invoked.
     case shareAcceptanceOrResolutionFailed(Error)
-    /// B2.2 succeeded, but B2.3 could not bind the accepted transport
-    /// identity to an existing local Vǫxtr identity. The chain stops
-    /// here; B2.4 is never invoked.
+    /// Athlete Connection Foundation B2.6: either the fresh
+    /// `AthleteRepository.fetchAthlete(byId:)` lookup used to build
+    /// `AthleteEligibilityFacts` failed, or `AcceptWorkspaceInvitationService
+    /// .accept(...)` itself reported `.repositoryFailed` — a genuine
+    /// persistence failure, distinct from every other acceptance outcome
+    /// (which intentionally falls through to B2.3 — see this file's own
+    /// ACCEPTANCE STEP doc comment). The chain stops here; B2.3/B2.4 are
+    /// never invoked.
+    case invitationAcceptanceFailed(Error)
+    /// B2.2 (and, if applicable, acceptance) succeeded, but B2.3 could
+    /// not bind the accepted transport identity to an existing, eligible
+    /// local Vǫxtr identity. The chain stops here; B2.4 is never invoked.
     case identityBindingFailed(Error)
-    /// B2.2 and B2.3 both succeeded, but B2.4 could not (re)validate and
+    /// Every earlier stage succeeded, but B2.4 could not (re)validate and
     /// activate the bound identity as the current session actor.
     case sessionActivationFailed(Error)
 }
@@ -190,6 +281,8 @@ extension AthleteConnectionLifecycleError {
         switch self {
         case .shareAcceptanceOrResolutionFailed:
             "Couldn't confirm the invitation with iCloud yet."
+        case .invitationAcceptanceFailed:
+            "Couldn't confirm this invitation right now."
         case .identityBindingFailed:
             "Couldn't match this invitation to an existing Vǫxtr athlete."
         case .sessionActivationFailed:

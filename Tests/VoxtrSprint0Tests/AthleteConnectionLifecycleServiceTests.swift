@@ -71,8 +71,19 @@ struct AthleteConnectionLifecycleServiceTests {
     /// later B2.4 failure (after this real, successful B2.3-eligible
     /// setup) substitutes a fake conforming to `AthleteSessionActivating`
     /// instead — see that protocol's own doc comment for why.
+    /// `preAccept`: when `true` (the default, matching every pre-B2.6
+    /// test in this suite), the fixture pre-accepts the invited
+    /// participant itself before ever calling `connect(acceptedShare:)`,
+    /// so `.expectedParticipantId` names an already-`.active` participant
+    /// — exercising `connect(acceptedShare:)`'s own ACCEPTANCE STEP as a
+    /// safe no-op (`.alreadyAccepted`). When `false`, the fixture leaves
+    /// the participant genuinely `.invited` — proving `connect(
+    /// acceptedShare:)` itself performs the real `.invited -> .active`
+    /// transition (Athlete Connection Foundation B2.6) rather than
+    /// requiring the caller to have already done so.
     private static func makeFixture(
-        sessionActivationService: AthleteSessionActivating? = nil
+        sessionActivationService: AthleteSessionActivating? = nil,
+        preAccept: Bool = true
     ) throws -> Fixture {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
@@ -93,7 +104,7 @@ struct AthleteConnectionLifecycleServiceTests {
             athleteDevelopmentStage: .parentLed
         )
         let ownerActorId = ActorId(rawValue: created.participant.id)
-        _ = try parentWorkspaceRepository.createInvitedAthleteParticipant(
+        let invitedParticipant = try parentWorkspaceRepository.createInvitedAthleteParticipant(
             workspaceId: created.workspace.workspaceId,
             linkedAthleteId: created.athlete.athleteId,
             invitedBy: ownerActorId
@@ -102,14 +113,20 @@ struct AthleteConnectionLifecycleServiceTests {
             repository: parentWorkspaceRepository,
             eligibilityService: AthleteParticipantEligibilityService()
         )
-        let acceptanceResult = acceptanceService.accept(
-            athleteId: created.athlete.athleteId,
-            workspaceId: created.workspace.workspaceId,
-            eligibilityFacts: AthleteEligibilityFacts(workspaceId: created.workspace.workspaceId, isArchived: false)
-        )
-        guard case .accepted(let acceptedParticipant) = acceptanceResult else {
-            struct UnexpectedAcceptanceResult: Error {}
-            throw UnexpectedAcceptanceResult()
+        let expectedParticipantId: UUID
+        if preAccept {
+            let acceptanceResult = acceptanceService.accept(
+                athleteId: created.athlete.athleteId,
+                workspaceId: created.workspace.workspaceId,
+                eligibilityFacts: AthleteEligibilityFacts(workspaceId: created.workspace.workspaceId, isArchived: false)
+            )
+            guard case .accepted(let acceptedParticipant) = acceptanceResult else {
+                struct UnexpectedAcceptanceResult: Error {}
+                throw UnexpectedAcceptanceResult()
+            }
+            expectedParticipantId = acceptedParticipant.id
+        } else {
+            expectedParticipantId = invitedParticipant.id
         }
 
         let restorationService = FamilyRestorationService(
@@ -127,6 +144,8 @@ struct AthleteConnectionLifecycleServiceTests {
 
         let service = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService ?? realSessionActivationService
         )
@@ -137,19 +156,25 @@ struct AthleteConnectionLifecycleServiceTests {
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
             workspaceRawId: created.workspace.id,
-            expectedParticipantId: acceptedParticipant.id,
+            expectedParticipantId: expectedParticipantId,
             expectedWorkspaceId: created.workspace.workspaceId,
             expectedAthleteId: created.athlete.athleteId
         )
     }
 
-    private static func makeAcceptedShare(workspaceId: UUID) -> AcceptedFamilyWorkspaceShare {
+    private static func makeAcceptedShare(
+        workspaceId: UUID,
+        intendedParticipantId: UUID = UUID(),
+        intendedAthleteId: UUID = UUID()
+    ) -> AcceptedFamilyWorkspaceShare {
         let zoneID = CKRecordZone.ID(zoneName: "test-zone", ownerName: "test-owner")
         return AcceptedFamilyWorkspaceShare(
             workspaceId: workspaceId,
             zoneID: zoneID,
             rootRecordID: CKRecord.ID(recordName: "test-root", zoneID: zoneID),
-            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID)
+            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID),
+            intendedParticipantId: intendedParticipantId,
+            intendedAthleteId: intendedAthleteId
         )
     }
 
@@ -158,7 +183,11 @@ struct AthleteConnectionLifecycleServiceTests {
     @Test("connect(acceptedShare:) sequences B2.3 -> B2.4 and returns exactly B2.4's own CurrentSessionActor, creating/mutating nothing")
     func successfulSequenceProducesCanonicalActor() throws {
         let fixture = try Self.makeFixture()
-        let accepted = Self.makeAcceptedShare(workspaceId: fixture.workspaceRawId)
+        let accepted = Self.makeAcceptedShare(
+            workspaceId: fixture.workspaceRawId,
+            intendedParticipantId: fixture.expectedParticipantId,
+            intendedAthleteId: fixture.expectedAthleteId.rawValue
+        )
 
         let participantCountBefore = try fixture.parentWorkspaceRepository.fetchAllParticipants().count
         let athleteCountBefore = try fixture.athleteRepository.fetchAllAthletes().count
@@ -174,6 +203,31 @@ struct AthleteConnectionLifecycleServiceTests {
         #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == participantCountBefore)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountBefore)
         #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == workspaceCountBefore)
+    }
+
+    // MARK: - Athlete Connection Foundation B2.6: the acceptance step itself
+    // performs the canonical .invited -> .active transition
+
+    @Test("connect(acceptedShare:) performs the canonical .invited -> .active transition itself, via AcceptWorkspaceInvitationService, before B2.3's bind — a participant that starts genuinely .invited still successfully connects")
+    func connectPerformsInvitedToActiveTransitionItself() throws {
+        let fixture = try Self.makeFixture(preAccept: false)
+        let participantBeforeConnect = try fixture.parentWorkspaceRepository.fetchAllParticipants()
+            .first { $0.id == fixture.expectedParticipantId }
+        #expect(participantBeforeConnect?.state == .invited)
+
+        let accepted = Self.makeAcceptedShare(
+            workspaceId: fixture.workspaceRawId,
+            intendedParticipantId: fixture.expectedParticipantId,
+            intendedAthleteId: fixture.expectedAthleteId.rawValue
+        )
+
+        let actor = try fixture.service.connect(acceptedShare: accepted)
+
+        #expect(actor.participantId == fixture.expectedParticipantId)
+        #expect(actor.role == .athlete)
+        let participantAfterConnect = try fixture.parentWorkspaceRepository.fetchAllParticipants()
+            .first { $0.id == fixture.expectedParticipantId }
+        #expect(participantAfterConnect?.state == .active)
     }
 
     // MARK: - 3: B2.3 failure stops before activation
@@ -195,8 +249,14 @@ struct AthleteConnectionLifecycleServiceTests {
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
         let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
         let service = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService
         )
@@ -240,7 +300,11 @@ struct AthleteConnectionLifecycleServiceTests {
         let fixture = try Self.makeFixture(
             sessionActivationService: FailingSessionActivator(error: .participantNotActive)
         )
-        let accepted = Self.makeAcceptedShare(workspaceId: fixture.workspaceRawId)
+        let accepted = Self.makeAcceptedShare(
+            workspaceId: fixture.workspaceRawId,
+            intendedParticipantId: fixture.expectedParticipantId,
+            intendedAthleteId: fixture.expectedAthleteId.rawValue
+        )
 
         do {
             _ = try fixture.service.connect(acceptedShare: accepted)
@@ -270,8 +334,14 @@ struct AthleteConnectionLifecycleServiceTests {
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
         let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
         let service = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService
         )

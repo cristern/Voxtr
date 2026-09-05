@@ -43,13 +43,19 @@ struct AthleteRuntimeSessionTests {
         let expectedAthleteId: AthleteId
     }
 
-    private static func makeAcceptedShare(workspaceId: UUID) -> AcceptedFamilyWorkspaceShare {
+    private static func makeAcceptedShare(
+        workspaceId: UUID,
+        intendedParticipantId: UUID = UUID(),
+        intendedAthleteId: UUID = UUID()
+    ) -> AcceptedFamilyWorkspaceShare {
         let zoneID = CKRecordZone.ID(zoneName: "test-zone", ownerName: "test-owner")
         return AcceptedFamilyWorkspaceShare(
             workspaceId: workspaceId,
             zoneID: zoneID,
             rootRecordID: CKRecord.ID(recordName: "test-root", zoneID: zoneID),
-            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID)
+            shareRecordID: CKRecord.ID(recordName: "test-share", zoneID: zoneID),
+            intendedParticipantId: intendedParticipantId,
+            intendedAthleteId: intendedAthleteId
         )
     }
 
@@ -105,6 +111,8 @@ struct AthleteRuntimeSessionTests {
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
         let lifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService
         )
@@ -115,7 +123,11 @@ struct AthleteRuntimeSessionTests {
         return SuccessFixture(
             container: container,
             session: session,
-            acceptedShare: Self.makeAcceptedShare(workspaceId: created.workspace.id),
+            acceptedShare: Self.makeAcceptedShare(
+                workspaceId: created.workspace.id,
+                intendedParticipantId: acceptedParticipant.id,
+                intendedAthleteId: created.athlete.athleteId.rawValue
+            ),
             expectedParticipantId: acceptedParticipant.id,
             expectedWorkspaceId: created.workspace.workspaceId,
             expectedAthleteId: created.athlete.athleteId
@@ -179,8 +191,14 @@ struct AthleteRuntimeSessionTests {
         let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
         let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
         let participantShareCoordinator = FamilyWorkspaceParticipantShareCoordinator(transport: CloudKitTransport())
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
         let lifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
             identityBindingService: identityBindingService,
             sessionActivationService: sessionActivationService
         )

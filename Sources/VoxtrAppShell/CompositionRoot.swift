@@ -203,12 +203,47 @@ public final class CompositionRoot {
         )
         container.register(AthleteConnectionIdentityBindingService.self) { athleteConnectionIdentityBindingService }
 
+        // Athlete Connection Foundation B2.6: the canonical, unmodified
+        // `.invited -> .active` transition service this chain now
+        // sequences before B2.3's bind (see AthleteConnectionLifecycleService's
+        // own ACCEPTANCE STEP doc comment). `AthleteParticipantEligibilityService`
+        // is a stateless `Sendable` struct (no dependencies of its own,
+        // matching this codebase's established construct-inline
+        // convention for it) — not separately registered, since nothing
+        // else in this composition currently needs to resolve it on its
+        // own.
+        let acceptWorkspaceInvitationService = AcceptWorkspaceInvitationService(
+            repository: container.resolve(ParentWorkspaceRepository.self),
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
+        container.register(AcceptWorkspaceInvitationService.self) { acceptWorkspaceInvitationService }
+
         let athleteConnectionLifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
+            athleteRepository: container.resolve(AthleteRepository.self),
+            acceptanceService: acceptWorkspaceInvitationService,
             identityBindingService: athleteConnectionIdentityBindingService,
             sessionActivationService: athleteSessionActivationService
         )
         container.register(AthleteConnectionLifecycleService.self) { athleteConnectionLifecycleService }
+
+        // Athlete Connection Foundation B2.6: the ParentApp-side owner
+        // handoff — registration only, exactly like every other B2.x
+        // service above: no CloudKit network call happens here
+        // (`FamilyWorkspaceOwnerShareCoordinator.init` just stores a
+        // transport reference, matching B2.1's own construction-safety
+        // guarantee), and nothing here calls `prepareInvitation(...)` —
+        // that only ever happens from an explicit Parent "Connect Athlete
+        // App" tap (`AthleteFamilyManagementViewModel.connectAthleteApp(for:)`).
+        let ownerShareCoordinator = FamilyWorkspaceOwnerShareCoordinator(transport: cloudKitTransport)
+        container.register(FamilyWorkspaceOwnerShareCoordinator.self) { ownerShareCoordinator }
+
+        let athleteConnectionOwnerHandoffService = AthleteConnectionOwnerHandoffService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            ownerShareCoordinator: ownerShareCoordinator,
+            transport: cloudKitTransport
+        )
+        container.register(AthleteConnectionOwnerHandoffService.self) { athleteConnectionOwnerHandoffService }
 
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's

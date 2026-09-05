@@ -63,6 +63,10 @@ public struct FamilyHomeView: View {
     /// `sleepCoordinationService` above.
     public let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     public let sportRepository: SportRepository
+    /// Athlete Connection Foundation B2.6: same threading rationale as
+    /// every other cross-domain service above — used only by
+    /// `makeAthleteManagementViewModel()` below.
+    public let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
 
     public init(
         family: RestoredFamily,
@@ -80,7 +84,8 @@ public struct FamilyHomeView: View {
         sleepCoordinationService: SleepCoordinationService,
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
-        sportRepository: SportRepository
+        sportRepository: SportRepository,
+        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
     ) {
         self.family = family
         self.planningService = planningService
@@ -98,6 +103,7 @@ public struct FamilyHomeView: View {
         self.sleepChangeBroadcaster = sleepChangeBroadcaster
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
+        self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
     }
 
     public var body: some View {
@@ -149,7 +155,8 @@ public struct FamilyHomeView: View {
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
             participantId: family.participant.id,
             athleteRepository: athleteRepository,
-            athleteFamilyManagementService: athleteFamilyManagementService
+            athleteFamilyManagementService: athleteFamilyManagementService,
+            athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService
         )
     }
 }

@@ -301,6 +301,64 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             throw FamilyWorkspaceSharingError.shareFailed(error)
         }
     }
+
+    /// Athlete Connection Foundation B2.6: ensures the invitation-intent
+    /// child record (see `AthleteConnectionInvitationCloudRecordMapping`'s
+    /// own doc comment) exists in the SAME zone as `root`, parented to
+    /// `root`'s own root record so it is included in the share's
+    /// hierarchy, carrying the CURRENT "Connect Athlete App" action's
+    /// intended participant/athlete. Idempotent the same way
+    /// `ensureRootRecord` is: fetch-first, reusing the existing record
+    /// (preserving its change tag) if one already exists rather than
+    /// constructing fresh and risking a `.serverRecordChanged` conflict
+    /// — deliberately WITHOUT `ensureShare`'s own concurrent-writer
+    /// conflict-recovery complexity, since only this Parent's own device
+    /// ever writes this record (no concurrent-writer scenario to
+    /// reconcile for Internal Alpha's single-Parent-device usage).
+    /// Repeated calls for a DIFFERENT athlete converge on UPDATING this
+    /// SAME record — see that type's own doc comment for why this
+    /// bounded slice does not support multiple simultaneously pending
+    /// invitations to different athletes on the same share.
+    public func ensureInvitationIntent(
+        for root: FamilyWorkspaceSharingRoot,
+        intendedParticipantId: UUID,
+        intendedAthleteId: UUID
+    ) async throws {
+        let database = transport.database(for: .private)
+        let payload = AthleteConnectionInvitationCloudRecordPayload(
+            workspaceId: root.workspaceId,
+            intendedParticipantId: intendedParticipantId,
+            intendedAthleteId: intendedAthleteId
+        )
+        let recordID = AthleteConnectionInvitationCloudRecordMapping.recordID(forWorkspace: root.workspaceId, zoneID: root.zoneID)
+
+        let record: CKRecord
+        do {
+            // `database.record(for:)` THROWS (`.unknownItem`) rather
+            // than returning `nil` when not found — matching
+            // `fetchExistingRootRecord`'s own established handling of
+            // exactly this API shape.
+            record = try await database.record(for: recordID)
+        } catch let error as CKError where error.code == .unknownItem {
+            record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(for: payload, zoneID: root.zoneID, parentRecordID: root.rootRecordID)
+        } catch {
+            log.error("AthleteConnectionInvitation record fetch failed: \(error.localizedDescription, privacy: .public)")
+            throw FamilyWorkspaceSharingError.invitationIntentFailed(error)
+        }
+
+        // Re-apply the payload even when reusing a fetched record — an
+        // existing record may carry a PREVIOUS invitation's intent
+        // (a different athlete), which this call is explicitly meant to
+        // replace.
+        AthleteConnectionInvitationCloudRecordMapping.apply(payload, to: record)
+
+        do {
+            _ = try await database.save(record)
+        } catch {
+            log.error("AthleteConnectionInvitation record save failed: \(error.localizedDescription, privacy: .public)")
+            throw FamilyWorkspaceSharingError.invitationIntentFailed(error)
+        }
+    }
 }
 
 /// The minimum this slice's caller needs to move forward with a later
@@ -341,4 +399,11 @@ public enum FamilyWorkspaceSharingError: Error {
     /// CloudKit's own documented contract, but surfaced explicitly rather
     /// than silently assuming success.
     case shareSaveResultMissing
+    /// Athlete Connection Foundation B2.6: fetching or saving the
+    /// invitation-intent record (`AthleteConnectionInvitationCloudRecordMapping`)
+    /// failed — the share/root record themselves may already exist and
+    /// be unaffected; this specifically means the CURRENT "Connect
+    /// Athlete App" action's intended-participant record could not be
+    /// written.
+    case invitationIntentFailed(Error)
 }

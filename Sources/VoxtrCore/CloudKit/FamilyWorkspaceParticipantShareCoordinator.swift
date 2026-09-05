@@ -140,7 +140,66 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
         let database = transport.database(for: .shared)
         let rootRecord = try await fetchSharedRootRecord(recordID: rootRecordID, database: database)
 
-        return try Self.resolveAcceptedShare(share: acceptedShare, rootRecord: rootRecord)
+        // Athlete Connection Foundation B2.6: the invitation-intent
+        // child record — see `AthleteConnectionInvitationCloudRecordMapping`'s
+        // own doc comment for why this exists and
+        // `AthleteConnectionOwnerHandoffService` for who creates it. Its
+        // deterministic ID is keyed on the root record's own decoded
+        // `workspaceId` (never the root record's own name) combined with
+        // the SAME zone the share/root record already reported
+        // (`rootRecord.recordID.zoneID`), never a participant-side-
+        // constructed guess — mirrors this file's own CRITICAL IDENTITY
+        // RULE for the root record itself. This decode is redundant with
+        // the authoritative one the pure `resolveAcceptedShare(share:
+        // rootRecord:invitationIntent:)` below performs again on the same
+        // record — deliberately so: that function stays the single
+        // source of truth for root-record validation/failure semantics,
+        // this call exists only to learn `workspaceId` early enough to
+        // locate the invitation record. A missing or malformed mapping is
+        // an explicit failure, not a silent fallback to ambiguous
+        // resolution: B2.3 (`AthleteConnectionIdentityBindingService`)
+        // now requires an exact intended participant ID to bind against.
+        let rootPayloadForInvitationLookup: FamilyWorkspaceCloudRecordPayload
+        do {
+            rootPayloadForInvitationLookup = try FamilyWorkspaceCloudRecordMapping.payload(from: rootRecord)
+        } catch {
+            throw FamilyWorkspaceShareAcceptanceError.rootRecordDecodeFailed(error)
+        }
+        let invitationRecordID = AthleteConnectionInvitationCloudRecordMapping.recordID(
+            forWorkspace: rootPayloadForInvitationLookup.workspaceId,
+            zoneID: rootRecord.recordID.zoneID
+        )
+        let invitationRecord = try await fetchInvitationIntentRecord(recordID: invitationRecordID, database: database)
+        let invitationIntent: AthleteConnectionInvitationCloudRecordPayload
+        do {
+            invitationIntent = try AthleteConnectionInvitationCloudRecordMapping.payload(from: invitationRecord)
+        } catch {
+            throw FamilyWorkspaceShareAcceptanceError.invitationIntentDecodeFailed(error)
+        }
+
+        return try Self.resolveAcceptedShare(share: acceptedShare, rootRecord: rootRecord, invitationIntent: invitationIntent)
+    }
+
+    /// Distinguishes "the Parent has not yet performed (or CloudKit has
+    /// not yet propagated) the 'Connect Athlete App' action that creates
+    /// this record" (`missingInvitationIntent` — an explicit, actionable
+    /// failure: the Athlete accepted a share the Parent never actually
+    /// pointed at a specific athlete, or propagation is still catching
+    /// up) from a genuinely unrelated fetch failure
+    /// (`invitationIntentFetchFailed`). Mirrors `fetchSharedRootRecord(
+    /// recordID:database:)`'s own established `.unknownItem`/
+    /// `.zoneNotFound` distinction exactly. Deliberately does not retry,
+    /// sleep, or poll — same reasoning as that method.
+    private func fetchInvitationIntentRecord(recordID: CKRecord.ID, database: CKDatabase) async throws -> CKRecord {
+        do {
+            return try await database.record(for: recordID)
+        } catch let error as CKError where Self.isSharedRootNotYetAvailable(code: error.code) {
+            log.error("AthleteConnectionInvitation record not yet available in the shared database.")
+            throw FamilyWorkspaceShareAcceptanceError.missingInvitationIntent(error)
+        } catch {
+            log.error("AthleteConnectionInvitation record fetch from shared database failed: \(error.localizedDescription, privacy: .public)")
+            throw FamilyWorkspaceShareAcceptanceError.invitationIntentFetchFailed(error)
+        }
     }
 
     /// PURE decision only — no CloudKit I/O, so directly unit testable
@@ -230,7 +289,20 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
     ///    otherwise) — guards against a record that decodes a plausible
     ///    workspaceId but was not actually named the way this codebase's
     ///    own owner-side code names it.
-    nonisolated static func resolveAcceptedShare(share: CKShare, rootRecord: CKRecord) throws -> AcceptedFamilyWorkspaceShare {
+    /// 4. Athlete Connection Foundation B2.6: the supplied
+    ///    `invitationIntent`'s own `workspaceId` matches this SAME
+    ///    decoded root-record `workspaceId` (`invitationIntentWorkspaceMismatch`
+    ///    otherwise) — the invitation record's `CKRecord.ID` is already
+    ///    derived from a workspaceId the caller read off this same root
+    ///    record (see `resolveAcceptedShare(from:)`), so a mismatch here
+    ///    would mean the record's own decoded payload disagrees with the
+    ///    ID it was fetched by, which should never happen but is
+    ///    surfaced explicitly rather than silently trusted.
+    nonisolated static func resolveAcceptedShare(
+        share: CKShare,
+        rootRecord: CKRecord,
+        invitationIntent: AthleteConnectionInvitationCloudRecordPayload
+    ) throws -> AcceptedFamilyWorkspaceShare {
         let zoneID = share.recordID.zoneID
 
         guard rootRecord.recordID.zoneID == zoneID else {
@@ -249,11 +321,17 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
             throw FamilyWorkspaceShareAcceptanceError.rootRecordIdentityMismatch
         }
 
+        guard invitationIntent.workspaceId == payload.workspaceId else {
+            throw FamilyWorkspaceShareAcceptanceError.invitationIntentWorkspaceMismatch
+        }
+
         return AcceptedFamilyWorkspaceShare(
             workspaceId: payload.workspaceId,
             zoneID: zoneID,
             rootRecordID: rootRecord.recordID,
-            shareRecordID: share.recordID
+            shareRecordID: share.recordID,
+            intendedParticipantId: invitationIntent.intendedParticipantId,
+            intendedAthleteId: invitationIntent.intendedAthleteId
         )
     }
 }
@@ -273,6 +351,19 @@ public struct AcceptedFamilyWorkspaceShare {
     public let zoneID: CKRecordZone.ID
     public let rootRecordID: CKRecord.ID
     public let shareRecordID: CKRecord.ID
+    /// Athlete Connection Foundation B2.6: the EXISTING `WorkspaceParticipant
+    /// .id` the Parent's "Connect Athlete App" action intended this
+    /// accepted share to connect — decoded from the separate
+    /// `AthleteConnectionInvitationCloudRecordMapping` child record, never
+    /// inferred from `CKShare.Participant`/CloudKit ownerName/display
+    /// name. The actual discriminator `AthleteConnectionIdentityBindingService`
+    /// (B2.3) now binds against.
+    public let intendedParticipantId: UUID
+    /// The `AthleteProfile.id` (`AthleteId.rawValue`) that participant is
+    /// linked to — see `AthleteConnectionInvitationCloudRecordPayload
+    /// .intendedAthleteId`'s own doc comment for why this is carried
+    /// redundantly alongside `intendedParticipantId`.
+    public let intendedAthleteId: UUID
 }
 
 /// Explicit, differentiated failure semantics — never collapsed to `nil`
@@ -321,4 +412,24 @@ public enum FamilyWorkspaceShareAcceptanceError: Error {
     /// `recordID` does not match what B2.1's deterministic naming rule
     /// would produce for that `workspaceId` in this zone.
     case rootRecordIdentityMismatch
+    /// Athlete Connection Foundation B2.6: the invitation-intent record
+    /// (`AthleteConnectionInvitationCloudRecordMapping`) is not yet
+    /// visible in the shared database — either the Parent has not
+    /// performed "Connect Athlete App" for this share, or (mirroring
+    /// `sharedRootNotYetAvailable`'s own reasoning) CloudKit's residual
+    /// post-acceptance propagation has not yet caught up. Recoverable in
+    /// the same sense as `sharedRootNotYetAvailable`: not solved here by
+    /// retrying/sleeping/polling.
+    case missingInvitationIntent(Error)
+    /// The invitation-intent record fetch failed for a reason other than
+    /// "not yet available."
+    case invitationIntentFetchFailed(Error)
+    /// Wraps `AthleteConnectionInvitationCloudRecordMapping.DecodeError` —
+    /// wrong record type, missing, or malformed field.
+    case invitationIntentDecodeFailed(Error)
+    /// The invitation-intent record's own decoded `workspaceId` did not
+    /// match the root record's — see `resolveAcceptedShare(share:
+    /// rootRecord:invitationIntent:)`'s own doc comment for why this
+    /// should never happen but is still checked explicitly.
+    case invitationIntentWorkspaceMismatch
 }
