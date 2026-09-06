@@ -3,12 +3,13 @@
 # signed-entitlements diagnostic follow-up.
 #
 # Captures what is ACTUALLY present in the FINAL SIGNED, exported ParentApp
-# .ipa — never the source App/ParentApp/ParentApp.entitlements file, and
-# never the .xcarchive — because Xcode/Codemagic export/re-signing can
-# still alter entitlements after archiving. Runs AFTER the "Archive and
-# export ParentApp (Release)" step in each TestFlight workflow, on the IPA
-# that step already produced; this script does not rebuild or re-sign
-# anything.
+# .ipa and compares it against the canonical source
+# App/ParentApp/ParentApp.entitlements (One Truth for what this repository
+# requests) — never against hardcoded expected values, and never against
+# the .xcarchive, because Xcode/Codemagic export/re-signing can still alter
+# entitlements after archiving. Runs AFTER the "Archive and export
+# ParentApp (Release)" step in each TestFlight workflow, on the IPA that
+# step already produced; this script does not rebuild or re-sign anything.
 #
 # `testflight-release` builds AthleteApp and ParentApp into the SAME
 # build/ios/ipa directory, so the correct file is picked by its
@@ -21,7 +22,7 @@ set -euo pipefail
 
 IPA_DIR="build/ios/ipa"
 DIAG_DIR="build/diagnostics"
-EXPECTED_CONTAINER="iCloud.app.voxtr.shared"
+SOURCE_ENTITLEMENTS="App/ParentApp/ParentApp.entitlements"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -102,11 +103,16 @@ else
   rm -f "$PROFILE_ENTITLEMENTS_PLIST"
 fi
 
+if [ ! -f "$SOURCE_ENTITLEMENTS" ]; then
+  echo "FAILING: source entitlements file not found at $SOURCE_ENTITLEMENTS — this is the One Truth for what ParentApp requests; refusing to fabricate a comparison without it."
+  exit 1
+fi
+
 echo "== Writing human-readable CloudKit entitlement comparison =="
 python3 Scripts/summarize_parent_cloudkit_entitlements.py \
+  --source-entitlements "$SOURCE_ENTITLEMENTS" \
   --signed-entitlements "$SIGNED_ENTITLEMENTS_PLIST" \
   --profile-entitlements "$PROFILE_ARG" \
-  --expected-container "$EXPECTED_CONTAINER" \
   --output "$DIAG_DIR/ParentApp-cloudkit-entitlements.txt"
 
 echo "== Diagnostic complete =="
