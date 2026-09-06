@@ -178,18 +178,14 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         share.publicPermission = .none
         do {
             let result = try await database.modifyRecords(saving: [rootRecord, share], deleting: [])
-            // `modifyRecords` mutates the CKRecord/CKShare instances we
-            // passed in in place (system fields like recordChangeTag) —
-            // it does not hand back new objects to adopt — so the
-            // already-held `share` reference is what we return; only the
-            // per-record result is inspected, to surface a genuine
-            // per-record failure explicitly rather than assuming success
-            // because the batch call itself did not throw.
-            guard let shareResult = result.saveResults[share.recordID] else {
-                throw FamilyWorkspaceSharingError.shareSaveResultMissing
-            }
-            _ = try shareResult.get()
-            return share
+            // CORRECTNESS FIX (ParentApp CloudKit sharing runtime follow-up):
+            // see `extractSavedShare(from:recordID:)`'s own doc comment for
+            // the full Apple API evidence — the local `share` instance is
+            // never the authoritative saved object, and using it directly
+            // here is consistent with the observed identical ParentApp
+            // TestFlight crash signature surviving both the
+            // presentation-mechanics fix and the CKSharingSupported fix.
+            return try Self.extractSavedShare(from: result.saveResults, recordID: share.recordID)
         } catch let error as FamilyWorkspaceSharingError {
             throw error
         } catch let error as CKError where Self.isRecoverableShareCreationConflict(code: error.code) {
@@ -241,6 +237,46 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         default:
             false
         }
+    }
+
+    /// PURE extraction only — no CloudKit I/O, so it is directly unit
+    /// testable against a hand-constructed `saveResults` dictionary
+    /// (`CKRecord.ID`, `CKRecord`, `CKShare`, and `Result` are all plain
+    /// local value/model types — no CKDatabase/CKContainer needed). `nonisolated`
+    /// for the same reason `isRecoverableShareCreationConflict(code:)` is:
+    /// this touches no coordinator instance state and performs no I/O.
+    ///
+    /// ParentApp CloudKit sharing runtime follow-up — WHY THIS EXISTS: both
+    /// `ensureShare` and `createInvitationShare` previously returned the
+    /// LOCAL, pre-save `CKShare` object they constructed, on the assumption
+    /// that `CKDatabase.modifyRecords(saving:deleting:...)` mutates its
+    /// input objects in place. That assumption was never verified against
+    /// Apple's actual API contract and is incorrect: Apple's own
+    /// documentation for `modifyRecords` states its `saveResults` dictionary
+    /// holds "the corresponding modified record (as it appears on the
+    /// server)" for each saved `CKRecord.ID` — a value CloudKit RETURNS,
+    /// not one it mutates the caller's original object into. Apple's own
+    /// `UICloudSharingController(share:container:)` documentation requires
+    /// its `share` parameter be "An instance of CKShare that was previously
+    /// saved" — i.e. exactly this server-returned record, not the pre-save
+    /// local object (which lacks the server-assigned `recordChangeTag` and
+    /// any other server-populated fields a genuinely "previously saved"
+    /// share carries). Using the un-returned local object instead is
+    /// consistent with the identical ParentApp TestFlight crash signature
+    /// (builds 502/507/511) that survived both the presentation-mechanics
+    /// fix (PR #69) and the CKSharingSupported fix (PR #70).
+    nonisolated static func extractSavedShare(
+        from saveResults: [CKRecord.ID: Result<CKRecord, Error>],
+        recordID: CKRecord.ID
+    ) throws -> CKShare {
+        guard let shareResult = saveResults[recordID] else {
+            throw FamilyWorkspaceSharingError.shareSaveResultMissing
+        }
+        let savedRecord = try shareResult.get()
+        guard let savedShare = savedRecord as? CKShare else {
+            throw FamilyWorkspaceSharingError.savedShareRecordWasNotAShare
+        }
+        return savedShare
     }
 
     /// Refetches the deterministic root record — the one thing every
@@ -333,16 +369,10 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
 
         do {
             let result = try await database.modifyRecords(saving: [record, share], deleting: [])
-            // Mirrors `ensureShare`'s own reasoning exactly: `modifyRecords`
-            // mutates the passed-in objects in place, so the already-held
-            // `share` reference is what is returned; only the per-record
-            // result is inspected to surface a genuine per-record failure
-            // explicitly.
-            guard let shareResult = result.saveResults[share.recordID] else {
-                throw FamilyWorkspaceSharingError.shareSaveResultMissing
-            }
-            _ = try shareResult.get()
-            return share
+            // CORRECTNESS FIX — same-pattern as `ensureShare`'s own fix;
+            // see `extractSavedShare(from:recordID:)`'s own doc comment for
+            // the full Apple API evidence.
+            return try Self.extractSavedShare(from: result.saveResults, recordID: share.recordID)
         } catch let error as FamilyWorkspaceSharingError {
             throw error
         } catch {
@@ -390,6 +420,12 @@ public enum FamilyWorkspaceSharingError: Error {
     /// CloudKit's own documented contract, but surfaced explicitly rather
     /// than silently assuming success.
     case shareSaveResultMissing
+    /// ParentApp CloudKit sharing runtime follow-up: `modifyRecords`
+    /// reported a successful save for the share's `recordID`, but the
+    /// server-returned record in `saveResults` did not decode as a
+    /// `CKShare` — should not happen given only a `CKShare` was ever saved
+    /// at that `recordID`, but surfaced explicitly rather than force-cast.
+    case savedShareRecordWasNotAShare
     /// Athlete Connection Foundation B2.6 (PR #68 architecture
     /// follow-up): `createInvitationShare` failed — saving the new
     /// invitation record together with its own dedicated `CKShare`

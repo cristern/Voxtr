@@ -394,6 +394,69 @@ struct FamilyWorkspaceCloudRecordMappingTests {
             #expect(!FamilyWorkspaceOwnerShareCoordinator.isRecoverableShareCreationConflict(code: code))
         }
     }
+
+    // ParentApp CloudKit sharing runtime follow-up: `extractSavedShare(from:recordID:)`
+    // is the pure extraction logic both `ensureShare` and `createInvitationShare`
+    // depend on to return the AUTHORITATIVE server-saved `CKShare` from
+    // `modifyRecords`'s own `saveResults`, rather than the pre-save local
+    // object those methods construct — the defect this follow-up fixes.
+    // Needs no CKDatabase/CKContainer: `CKRecord.ID`, `CKRecord`, `CKShare`,
+    // and `Result` are all plain, locally-constructible types.
+
+    private static func makeSavedShareRecord(recordID: CKRecord.ID) -> CKShare {
+        let rootRecord = CKRecord(recordType: "AnyRootType", recordID: CKRecord.ID(recordName: "any-root", zoneID: recordID.zoneID))
+        let share = CKShare(rootRecord: rootRecord, shareID: recordID)
+        return share
+    }
+
+    @Test("extractSavedShare(from:recordID:) returns the SERVER-RETURNED CKShare found in saveResults, never the pre-save local object a caller might have constructed with the same recordID")
+    func extractSavedShareReturnsServerSavedShareNotLocalInstance() throws {
+        let recordID = CKRecord.ID(recordName: "invitation-1", zoneID: CKRecordZone.ID(zoneName: "test-zone", ownerName: CKCurrentUserDefaultName))
+        let serverSavedShare = Self.makeSavedShareRecord(recordID: recordID)
+        // A SEPARATE local instance with the same recordID — standing in for
+        // the pre-save object `ensureShare`/`createInvitationShare` construct
+        // before calling `modifyRecords`. Distinct identity from
+        // `serverSavedShare` (`===`), even though both share a `recordID`.
+        let localPreSaveInstance = Self.makeSavedShareRecord(recordID: recordID)
+        let saveResults: [CKRecord.ID: Result<CKRecord, Error>] = [recordID: .success(serverSavedShare)]
+
+        let extracted = try FamilyWorkspaceOwnerShareCoordinator.extractSavedShare(from: saveResults, recordID: recordID)
+
+        #expect(extracted === serverSavedShare)
+        #expect(extracted !== localPreSaveInstance)
+    }
+
+    @Test("extractSavedShare(from:recordID:) fails explicitly with shareSaveResultMissing when saveResults has no entry for the given recordID, rather than silently returning any share")
+    func extractSavedShareFailsExplicitlyWhenResultMissing() {
+        let recordID = CKRecord.ID(recordName: "invitation-2", zoneID: CKRecordZone.ID(zoneName: "test-zone", ownerName: CKCurrentUserDefaultName))
+        let saveResults: [CKRecord.ID: Result<CKRecord, Error>] = [:]
+
+        #expect(throws: FamilyWorkspaceSharingError.self) {
+            try FamilyWorkspaceOwnerShareCoordinator.extractSavedShare(from: saveResults, recordID: recordID)
+        }
+    }
+
+    @Test("extractSavedShare(from:recordID:) propagates a genuine per-record save failure rather than treating it as success")
+    func extractSavedSharePropagatesPerRecordFailure() {
+        struct FakeSaveError: Error {}
+        let recordID = CKRecord.ID(recordName: "invitation-3", zoneID: CKRecordZone.ID(zoneName: "test-zone", ownerName: CKCurrentUserDefaultName))
+        let saveResults: [CKRecord.ID: Result<CKRecord, Error>] = [recordID: .failure(FakeSaveError())]
+
+        #expect(throws: FakeSaveError.self) {
+            try FamilyWorkspaceOwnerShareCoordinator.extractSavedShare(from: saveResults, recordID: recordID)
+        }
+    }
+
+    @Test("extractSavedShare(from:recordID:) fails explicitly with savedShareRecordWasNotAShare when the saved record at that recordID is not a CKShare, rather than force-casting")
+    func extractSavedShareFailsExplicitlyWhenResultIsNotAShare() {
+        let recordID = CKRecord.ID(recordName: "invitation-4", zoneID: CKRecordZone.ID(zoneName: "test-zone", ownerName: CKCurrentUserDefaultName))
+        let notAShare = CKRecord(recordType: "NotAShare", recordID: recordID)
+        let saveResults: [CKRecord.ID: Result<CKRecord, Error>] = [recordID: .success(notAShare)]
+
+        #expect(throws: FamilyWorkspaceSharingError.self) {
+            try FamilyWorkspaceOwnerShareCoordinator.extractSavedShare(from: saveResults, recordID: recordID)
+        }
+    }
 }
 
 // NOTE (B2.2, PR #68 architecture follow-up): `FamilyWorkspaceParticipantShareCoordinator
