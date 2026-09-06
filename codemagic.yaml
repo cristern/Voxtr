@@ -501,8 +501,21 @@ workflows:
             --scheme "$PARENT_SCHEME" \
             --config Release
 
+    # ParentApp crash symbolication follow-up: `xcode-project build-ipa`
+    # (used for both apps above) archives to `build/ios/xcarchive/*.xcarchive`
+    # by default and never deletes it (no `--remove-xcarchive` flag is
+    # passed anywhere in this file) — that archive's own `dSYMs/` folder is
+    # where each app's `.dSYM` actually lives, since neither app's Release
+    # configuration overrides `DEBUG_INFORMATION_FORMAT`, so both fall back
+    # to Xcode's own `dwarf-with-dsym` default. Previously this archive was
+    # never declared as a Codemagic artifact, so it was silently discarded
+    # when the ephemeral build machine was torn down — leaving no way to
+    # symbolicate a TestFlight crash after the fact. This is the exact
+    # archive actually used to export/upload the IPA above, not a
+    # separately rebuilt one.
     artifacts:
       - build/ios/ipa/*.ipa
+      - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
@@ -631,8 +644,14 @@ workflows:
             --scheme "$PARENT_SCHEME" \
             --config Release
 
+    # ParentApp crash symbolication follow-up: see testflight-release's own
+    # artifacts comment above for the full rationale — same tool
+    # (`xcode-project build-ipa`), same default archive path, same
+    # dwarf-with-dsym fallback, same prior gap (the archive/dSYM this
+    # workflow actually uses to export/upload the IPA was never published).
     artifacts:
       - build/ios/ipa/*.ipa
+      - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
 
     publishing:
