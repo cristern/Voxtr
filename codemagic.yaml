@@ -501,6 +501,23 @@ workflows:
             --scheme "$PARENT_SCHEME" \
             --config Release
 
+      # ParentApp signed-entitlements diagnostic follow-up (build 516):
+      # symbolication proved the TestFlight crash traps at
+      # `CKContainer(identifier:)` realization itself, before any zone/
+      # share/record work — the open question is whether the FINAL SIGNED,
+      # exported ParentApp .ipa actually carries the CloudKit/iCloud
+      # entitlements the source `ParentApp.entitlements` file declares.
+      # Export/re-signing can alter entitlements after archiving, so
+      # neither the source file nor the `.xcarchive` above is authoritative
+      # here — only the exported `.ipa` is. This step never rebuilds or
+      # re-signs anything; it only inspects the IPA `xcode-project build-ipa`
+      # already produced. See Scripts/capture_parent_signed_entitlements.sh
+      # for the full extraction logic (it locates ParentApp's own .ipa by
+      # CFBundleIdentifier, since this workflow builds AthleteApp's .ipa
+      # into the same directory).
+      - name: Capture ParentApp final signed CloudKit entitlements
+        script: bash Scripts/capture_parent_signed_entitlements.sh
+
     # ParentApp crash symbolication follow-up: `xcode-project build-ipa`
     # (used for both apps above) archives to `build/ios/xcarchive/*.xcarchive`
     # by default and never deletes it (no `--remove-xcarchive` flag is
@@ -517,6 +534,9 @@ workflows:
       - build/ios/ipa/*.ipa
       - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
+      - build/diagnostics/ParentApp-signed-entitlements.plist
+      - build/diagnostics/ParentApp-profile-entitlements.plist
+      - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
       # Publishes every IPA produced above to App Store Connect/TestFlight,
@@ -644,6 +664,13 @@ workflows:
             --scheme "$PARENT_SCHEME" \
             --config Release
 
+      # ParentApp signed-entitlements diagnostic follow-up: see
+      # testflight-release's own step comment above for the full
+      # rationale — same script (Scripts/capture_parent_signed_entitlements.sh),
+      # inspecting the exact IPA this workflow just exported/uploads.
+      - name: Capture ParentApp final signed CloudKit entitlements
+        script: bash Scripts/capture_parent_signed_entitlements.sh
+
     # ParentApp crash symbolication follow-up: see testflight-release's own
     # artifacts comment above for the full rationale — same tool
     # (`xcode-project build-ipa`), same default archive path, same
@@ -653,6 +680,9 @@ workflows:
       - build/ios/ipa/*.ipa
       - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
+      - build/diagnostics/ParentApp-signed-entitlements.plist
+      - build/diagnostics/ParentApp-profile-entitlements.plist
+      - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
       app_store_connect:
