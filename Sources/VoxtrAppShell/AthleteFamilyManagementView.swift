@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import VoxtrCoreContracts
 import VoxtrAthleteDomain
 
@@ -546,6 +547,35 @@ struct AthleteSettingsView: View {
                     Text(handoffErrorMessage)
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("athleteSettings.connectAthleteAppErrorMessage.\(athlete.id.uuidString)")
+                    // Internal Alpha diagnostic surface: secondary, calm,
+                    // never a second error — only visible on a TestFlight
+                    // install (see `AthleteInviteDiagnosticVisibility`'s
+                    // own doc comment for why a receipt check rather than
+                    // a manual feature flag) and only shows the already-safe
+                    // stage/CKError-code pair PR #76 introduced — never
+                    // athlete/record/account content.
+                    if AthleteInviteDiagnosticVisibility.isVisibleForCurrentBuild,
+                       let diagnosticSummary = viewModel.connectAthleteAppDiagnosticSummary {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Diagnostic: \(diagnosticSummary)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if let copyText = viewModel.connectAthleteAppDiagnosticCopyText {
+                                Button {
+                                    UIPasteboard.general.string = copyText
+                                } label: {
+                                    Label("Copy diagnostic", systemImage: "doc.on.doc")
+                                        .labelStyle(.iconOnly)
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.secondary)
+                                .accessibilityLabel("Copy diagnostic")
+                            }
+                        }
+                        .accessibilityIdentifier("athleteSettings.connectAthleteAppDiagnostic.\(athlete.id.uuidString)")
+                    }
                 }
                 Button("Connect Athlete App") {
                     Task { await viewModel.connectAthleteApp(for: athlete) }

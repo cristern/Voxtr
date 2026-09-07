@@ -920,4 +920,108 @@ struct CloudKitErrorDiagnosticsTests {
         #expect(!formatted.contains("9F2C"))
         #expect(formatted == "AthleteInviteCloudKit stage=invitation-record-save ckCode=serverRejectedRequest ckCodeRaw=\(CKError.Code.serverRejectedRequest.rawValue)")
     }
+
+    @Test("conciseDisplay(_:) renders the on-device \"<stage> · <ckCode>\" form requested for the Internal Alpha diagnostic surface")
+    func conciseDisplayRendersStageAndCode() {
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: CKError(.permissionFailure))
+        #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "share-save · permissionFailure")
+    }
+
+    @Test("conciseDisplay(_:) falls back to errorTypeName for a non-CKError, never localizedDescription")
+    func conciseDisplayFallsBackToErrorTypeNameForNonCKError() {
+        struct SomeLocalFailure: Error {}
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-fetch", error: SomeLocalFailure())
+        #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "sharing-root-fetch · SomeLocalFailure")
+    }
+}
+
+// Internal Alpha diagnostic surface follow-up: `FamilyWorkspaceSharingError
+// .diagnostic` is the mechanism that preserves the GRANULAR CloudKit stage
+// (e.g. "share-save" vs. "share-fetch") across the `AthleteConnectionOwnerHandoffError`
+// wrapper boundary, since `.rootRecordFailed`/`.shareFailed` each cover more
+// than one call site inside `FamilyWorkspaceOwnerShareCoordinator`. Pure —
+// no CloudKit I/O — directly unit-testable.
+@Suite("Athlete Connection invitation-flow: FamilyWorkspaceSharingError.diagnostic")
+struct FamilyWorkspaceSharingErrorDiagnosticTests {
+
+    @Test("accountUnavailable reports stage account-status with the CloudKitAvailability case name, and no CKError code")
+    func accountUnavailableReportsAccountStatusStage() {
+        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.noAccount).diagnostic
+        #expect(diagnostic.stage == "account-status")
+        #expect(diagnostic.errorTypeName == "noAccount")
+        #expect(diagnostic.ckErrorCode == nil)
+        #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "account-status · noAccount")
+    }
+
+    @Test("zoneCreationFailed always reports stage sharing-zone-create")
+    func zoneCreationFailedReportsZoneCreateStage() {
+        let diagnostic = FamilyWorkspaceSharingError.zoneCreationFailed(CKError(.permissionFailure)).diagnostic
+        #expect(diagnostic.stage == "sharing-zone-create")
+        #expect(diagnostic.ckErrorCode == "permissionFailure")
+    }
+
+    @Test("rootRecordFailed preserves its OWN carried stage (fetch vs. save), not a case-inferred one")
+    func rootRecordFailedPreservesCarriedStage() {
+        let fetchDiagnostic = FamilyWorkspaceSharingError.rootRecordFailed(stage: "sharing-root-fetch", underlying: CKError(.networkUnavailable)).diagnostic
+        #expect(fetchDiagnostic.stage == "sharing-root-fetch")
+        #expect(fetchDiagnostic.ckErrorCode == "networkUnavailable")
+
+        let saveDiagnostic = FamilyWorkspaceSharingError.rootRecordFailed(stage: "sharing-root-save", underlying: CKError(.serverRejectedRequest)).diagnostic
+        #expect(saveDiagnostic.stage == "sharing-root-save")
+        #expect(saveDiagnostic.ckErrorCode == "serverRejectedRequest")
+    }
+
+    @Test("shareFailed preserves its OWN carried stage (fetch vs. save), not a case-inferred one")
+    func shareFailedPreservesCarriedStage() {
+        let fetchDiagnostic = FamilyWorkspaceSharingError.shareFailed(stage: "share-fetch", underlying: CKError(.unknownItem)).diagnostic
+        #expect(fetchDiagnostic.stage == "share-fetch")
+        #expect(fetchDiagnostic.ckErrorCode == "unknownItem")
+
+        let saveDiagnostic = FamilyWorkspaceSharingError.shareFailed(stage: "share-save", underlying: CKError(.permissionFailure)).diagnostic
+        #expect(saveDiagnostic.stage == "share-save")
+        #expect(saveDiagnostic.ckErrorCode == "permissionFailure")
+    }
+
+    @Test("existingShareReferenceWasNotAShare and shareSaveResultMissing report their own fixed, correct stage with no fabricated CKError code")
+    func structuralCasesReportFixedStagesWithoutFabricatingACode() {
+        let notAShare = FamilyWorkspaceSharingError.existingShareReferenceWasNotAShare.diagnostic
+        #expect(notAShare.stage == "share-fetch")
+        #expect(notAShare.ckErrorCode == nil)
+
+        let missingResult = FamilyWorkspaceSharingError.shareSaveResultMissing.diagnostic
+        #expect(missingResult.stage == "share-save")
+        #expect(missingResult.ckErrorCode == nil)
+    }
+
+    @Test("invitationShareCreationFailed always reports stage invitation-record-save")
+    func invitationShareCreationFailedReportsInvitationRecordSaveStage() {
+        let diagnostic = FamilyWorkspaceSharingError.invitationShareCreationFailed(CKError(.quotaExceeded)).diagnostic
+        #expect(diagnostic.stage == "invitation-record-save")
+        #expect(diagnostic.ckErrorCode == "quotaExceeded")
+    }
+}
+
+// Internal Alpha diagnostic surface follow-up: `AthleteInviteDiagnosticVisibility`
+// gates whether the "Connect Athlete App" screen shows its secondary
+// CloudKit diagnostic — pure, injectable receipt URL, no Bundle/Info.plist
+// fixture required.
+@Suite("Internal Alpha diagnostic surface: AthleteInviteDiagnosticVisibility")
+struct AthleteInviteDiagnosticVisibilityTests {
+
+    @Test("A TestFlight-shaped receipt URL (named sandboxReceipt) is visible")
+    func sandboxReceiptIsVisible() {
+        let url = URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/ABC/StoreKit/sandboxReceipt")
+        #expect(AthleteInviteDiagnosticVisibility.isVisible(receiptURL: url) == true)
+    }
+
+    @Test("A real App Store receipt URL (named receipt) is not visible")
+    func appStoreReceiptIsNotVisible() {
+        let url = URL(fileURLWithPath: "/private/var/mobile/Containers/Data/Application/ABC/StoreKit/receipt")
+        #expect(AthleteInviteDiagnosticVisibility.isVisible(receiptURL: url) == false)
+    }
+
+    @Test("No receipt at all (e.g. simulator/local dev without a StoreKit config) is not visible")
+    func noReceiptIsNotVisible() {
+        #expect(AthleteInviteDiagnosticVisibility.isVisible(receiptURL: nil) == false)
+    }
 }
