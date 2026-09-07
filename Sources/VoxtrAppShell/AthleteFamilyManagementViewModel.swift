@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAthleteDomain
 
@@ -271,9 +272,22 @@ public final class AthleteFamilyManagementViewModel {
              .athleteProfileLookupFailed,
              .athleteProfileNotFound:
             return "Couldn't prepare this invitation. Please try again."
-        case .shareCreationFailed:
+        // Athlete Connection invitation-flow diagnostics follow-up: these
+        // two cases are the only ones that wrap a real CloudKit failure —
+        // `FamilyWorkspaceOwnerShareCoordinator`'s own per-operation logs
+        // already captured the granular stage (zone/root/share/etc.) at
+        // the moment it happened; this is the single choke point every
+        // one of those failures passes through on its way to becoming
+        // this unchanged friendly message, so it is where a correlating,
+        // top-level "the invitation flow itself failed here" marker is
+        // logged. Never changes the returned user-facing string.
+        case .shareCreationFailed(let underlying):
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "handoff-prepare", error: underlying)
+            VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             return "Couldn't reach iCloud to create the invitation. Please check your connection and try again."
-        case .invitationMappingFailed:
+        case .invitationMappingFailed(let underlying):
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "handoff-prepare", error: underlying)
+            VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             return "Couldn't finish preparing the invitation. Please try again."
         }
     }

@@ -84,7 +84,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         do {
             _ = try await database.save(CKRecordZone(zoneID: zoneID))
         } catch {
-            log.error("FamilyWorkspace zone save failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-zone-create", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.zoneCreationFailed(error)
         }
         return zoneID
@@ -124,10 +125,12 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             if let serverRecord = (error as NSError).userInfo[CKRecordChangedErrorServerRecordKey] as? CKRecord {
                 return serverRecord
             }
-            log.error("FamilyWorkspace root record save reported serverRecordChanged with no server record attached.")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-save", error: error)
+            log.error("FamilyWorkspace root record save reported serverRecordChanged with no server record attached. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.rootRecordFailed(error)
         } catch {
-            log.error("FamilyWorkspace root record save failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-save", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.rootRecordFailed(error)
         }
     }
@@ -140,7 +143,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             // failure, so it is not wrapped/logged as one.
             return nil
         } catch {
-            log.error("FamilyWorkspace root record fetch failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-fetch", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.rootRecordFailed(error)
         }
     }
@@ -200,7 +204,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
                 underlyingError: error
             )
         } catch {
-            log.error("FamilyWorkspace share save failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.shareFailed(error)
         }
     }
@@ -272,7 +277,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         do {
             refetchedRoot = try await fetchExistingRootRecord(recordID: recordID, database: database)
         } catch {
-            log.error("FamilyWorkspace share creation conflict: refetching the authoritative root record failed; surfacing the original conflict.")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: underlyingError)
+            log.error("FamilyWorkspace share creation conflict: refetching the authoritative root record failed; surfacing the original conflict. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
         }
         guard let refetchedRoot, let shareReference = refetchedRoot.share else {
@@ -282,7 +288,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             // another writer's share creation. Either way, there is
             // nothing to converge on — surface the real failure rather
             // than retrying indefinitely.
-            log.error("FamilyWorkspace share creation conflict did not resolve to an existing share on refetch.")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: underlyingError)
+            log.error("FamilyWorkspace share creation conflict did not resolve to an existing share on refetch. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
         }
         return try await fetchExistingShare(recordID: shareReference.recordID, database: database)
@@ -297,7 +304,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch let error as FamilyWorkspaceSharingError {
             throw error
         } catch {
-            log.error("FamilyWorkspace existing share fetch failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-fetch", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.shareFailed(error)
         }
     }
@@ -346,7 +354,8 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch let error as FamilyWorkspaceSharingError {
             throw error
         } catch {
-            log.error("AthleteConnectionInvitation share creation failed: \(error.localizedDescription, privacy: .public)")
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "invitation-record-save", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             throw FamilyWorkspaceSharingError.invitationShareCreationFailed(error)
         }
     }
