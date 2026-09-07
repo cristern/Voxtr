@@ -16,6 +16,17 @@
 # CFBundleIdentifier (matched against $PARENT_BUNDLE_ID), never by
 # filename — `testflight-parent` only ever produces one .ipa there, so the
 # same lookup is still correct and this one script covers both workflows.
+#
+# Build 119 follow-up: PR #73's entitlement diagnostic proved the embedded
+# profile itself (not just the final codesign output) lacked CloudKit —
+# but a directly-downloaded, freshly regenerated Apple profile for the
+# same bundle id was separately confirmed correct, meaning Codemagic must
+# have embedded a DIFFERENT profile than the one now on record at Apple.
+# This script also writes a small, sanitized profile IDENTITY summary
+# (Name/UUID/CreationDate/ExpirationDate/TeamIdentifier/application-
+# identifier — never certificates or device UDIDs) so a human can compare
+# it against the directly-downloaded Apple profile's own identity to
+# confirm whether the correct profile was actually used.
 set -euo pipefail
 
 : "${PARENT_BUNDLE_ID:?PARENT_BUNDLE_ID is required}"
@@ -81,8 +92,10 @@ echo "Wrote $SIGNED_ENTITLEMENTS_PLIST"
 
 echo "== Extracting provisioning-profile entitlements (if a profile is embedded) =="
 PROFILE_ENTITLEMENTS_PLIST="$DIAG_DIR/ParentApp-profile-entitlements.plist"
+PROFILE_SUMMARY_TXT="$DIAG_DIR/ParentApp-profile-summary.txt"
 EMBEDDED_PROFILE="$PARENT_APP_PATH/embedded.mobileprovision"
 PROFILE_ARG=""
+rm -f "$PROFILE_SUMMARY_TXT"
 if [ -f "$EMBEDDED_PROFILE" ]; then
   PROFILE_PLIST_FULL="$WORK_DIR/profile-full.plist"
   if security cms -D -i "$EMBEDDED_PROFILE" > "$PROFILE_PLIST_FULL" 2>"$WORK_DIR/security.err"; then
@@ -92,6 +105,16 @@ if [ -f "$EMBEDDED_PROFILE" ]; then
     else
       echo "NOTE: embedded.mobileprovision decoded but had no :Entitlements dictionary — not fabricating a file."
       rm -f "$PROFILE_ENTITLEMENTS_PLIST"
+    fi
+
+    echo "== Writing embedded provisioning-profile identity summary (Name/UUID/dates only) =="
+    if python3 Scripts/summarize_parent_profile_identity.py \
+      --profile-plist "$PROFILE_PLIST_FULL" \
+      --output "$PROFILE_SUMMARY_TXT"; then
+      cat "$PROFILE_SUMMARY_TXT"
+    else
+      echo "NOTE: could not summarize profile identity from the decoded plist — not fabricating a file."
+      rm -f "$PROFILE_SUMMARY_TXT"
     fi
   else
     echo "NOTE: embedded.mobileprovision present but could not be decoded with 'security cms' — not fabricating a file."
