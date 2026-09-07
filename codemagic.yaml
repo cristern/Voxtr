@@ -536,6 +536,7 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
       - build/diagnostics/ParentApp-signed-entitlements.plist
       - build/diagnostics/ParentApp-profile-entitlements.plist
+      - build/diagnostics/ParentApp-profile-summary.txt
       - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
@@ -682,6 +683,7 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
       - build/diagnostics/ParentApp-signed-entitlements.plist
       - build/diagnostics/ParentApp-profile-entitlements.plist
+      - build/diagnostics/ParentApp-profile-summary.txt
       - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
