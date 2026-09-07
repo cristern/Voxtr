@@ -33,6 +33,28 @@ public final class AthleteFamilyManagementViewModel {
     /// own explicit-error-handling requirement. Cleared at the start of
     /// every `connectAthleteApp(for:)` call.
     public private(set) var connectAthleteAppErrorMessage: String?
+    /// Internal Alpha diagnostic surface follow-up: the safe, structured
+    /// CloudKit diagnostic behind the most recent `connectAthleteApp(for:)`
+    /// failure, if the failure involved CloudKit at all — `nil` for the
+    /// purely-local failure cases (participant/profile/workspace lookup),
+    /// which have no CloudKit stage to report. Never read directly by the
+    /// View — see `connectAthleteAppDiagnosticSummary`/`...CopyText` below,
+    /// which is all `AthleteFamilyManagementView` needs, so it never has
+    /// to import CloudKit-adjacent types itself.
+    private var connectAthleteAppDiagnostic: CloudKitErrorDiagnostic?
+
+    /// `"<stage> · <ckCode>"` for on-screen display — see
+    /// `CloudKitErrorDiagnostics.conciseDisplay(_:)`.
+    public var connectAthleteAppDiagnosticSummary: String? {
+        connectAthleteAppDiagnostic.map(CloudKitErrorDiagnostics.conciseDisplay)
+    }
+
+    /// The fuller, greppable line for "Copy diagnostic" — the same shape
+    /// PR #76 already logs via `os.Logger`/`VoxtrLog`, never
+    /// `localizedDescription`, never record/athlete/account content.
+    public var connectAthleteAppDiagnosticCopyText: String? {
+        connectAthleteAppDiagnostic.map(CloudKitErrorDiagnostics.format)
+    }
 
     private let workspaceId: WorkspaceId
     private let participantId: UUID
@@ -226,6 +248,7 @@ public final class AthleteFamilyManagementViewModel {
     /// separately-derived identity.
     public func connectAthleteApp(for athlete: AthleteProfile) async {
         connectAthleteAppErrorMessage = nil
+        connectAthleteAppDiagnostic = nil
         pendingInvitationHandoff = nil
         do {
             pendingInvitationHandoff = try await athleteConnectionOwnerHandoffService.prepareInvitation(
@@ -235,6 +258,7 @@ public final class AthleteFamilyManagementViewModel {
             )
         } catch {
             connectAthleteAppErrorMessage = Self.message(forHandoffError: error)
+            connectAthleteAppDiagnostic = Self.diagnostic(forHandoffError: error)
         }
     }
 
@@ -272,24 +296,40 @@ public final class AthleteFamilyManagementViewModel {
              .athleteProfileLookupFailed,
              .athleteProfileNotFound:
             return "Couldn't prepare this invitation. Please try again."
-        // Athlete Connection invitation-flow diagnostics follow-up: these
-        // two cases are the only ones that wrap a real CloudKit failure —
-        // `FamilyWorkspaceOwnerShareCoordinator`'s own per-operation logs
-        // already captured the granular stage (zone/root/share/etc.) at
-        // the moment it happened; this is the single choke point every
-        // one of those failures passes through on its way to becoming
-        // this unchanged friendly message, so it is where a correlating,
-        // top-level "the invitation flow itself failed here" marker is
-        // logged. Never changes the returned user-facing string.
-        case .shareCreationFailed(let underlying):
-            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "handoff-prepare", error: underlying)
-            VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
+        case .shareCreationFailed:
             return "Couldn't reach iCloud to create the invitation. Please check your connection and try again."
-        case .invitationMappingFailed(let underlying):
-            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "handoff-prepare", error: underlying)
-            VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
+        case .invitationMappingFailed:
             return "Couldn't finish preparing the invitation. Please try again."
         }
+    }
+
+    /// Athlete Connection invitation-flow diagnostics follow-up (PR #76),
+    /// extended for the Internal Alpha on-device diagnostic surface: the
+    /// only two `AthleteConnectionOwnerHandoffError` cases that wrap a
+    /// real CloudKit failure. When the wrapped error is a
+    /// `FamilyWorkspaceSharingError` (always true today —
+    /// `FamilyWorkspaceOwnerShareCoordinator` is the only thing
+    /// `prepareInvitation` calls that can produce one), its own
+    /// `.diagnostic` already carries the GRANULAR stage
+    /// (`sharing-zone-create`/`share-save`/etc.) that coordinator's own
+    /// per-operation logs captured at the moment it happened — used here
+    /// instead of the generic `"handoff-prepare"` label so the on-device
+    /// diagnostic is as specific as what unified logging already shows.
+    /// Also logs the same diagnostic (unchanged PR #76 behavior, just
+    /// consolidated into one call site instead of two identical ones).
+    private static func diagnostic(forHandoffError error: Error) -> CloudKitErrorDiagnostic? {
+        guard let handoffError = error as? AthleteConnectionOwnerHandoffError else { return nil }
+        let underlying: Error
+        switch handoffError {
+        case .shareCreationFailed(let wrapped), .invitationMappingFailed(let wrapped):
+            underlying = wrapped
+        default:
+            return nil
+        }
+        let diagnostic = (underlying as? FamilyWorkspaceSharingError)?.diagnostic
+            ?? CloudKitErrorDiagnostics.classify(stage: "handoff-prepare", error: underlying)
+        VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
+        return diagnostic
     }
 
     private static func nilIfBlank(_ value: String) -> String? {

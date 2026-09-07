@@ -157,23 +157,24 @@ public final class CloudKitTransport {
     /// type must stay side-effect-free at app launch; a later slice (B3,
     /// when real Athlete Connection UI needs to show availability) is
     /// where this actually gets called.
-    public func refreshAvailability() async -> CloudKitAvailability {
+    public func refreshAvailability() async -> CloudKitAvailabilityResult {
         do {
             let status = try await containerProvider.accountStatus()
             log.info("CloudKit account status resolved.")
-            return CloudKitAvailability(status)
+            return CloudKitAvailabilityResult(availability: CloudKitAvailability(status), diagnostic: nil)
         } catch {
             // Infrastructure must not crash on account/network failure —
             // surface the honest "could not determine" state rather than
             // propagating the raw error or fabricating `.available`.
-            // Athlete Connection invitation-flow diagnostics follow-up:
-            // `CloudKitAvailability` alone (what `ensureSharingRoot` sees)
-            // no longer carries the underlying CKError.Code once this
-            // returns, so it is captured here, at the only point this
-            // codebase still holds it.
+            // Athlete Connection invitation-flow diagnostics follow-up
+            // (PR #77 review gap): the underlying CKError.Code used to be
+            // discarded here, leaving only `.couldNotDetermine` for
+            // `ensureSharingRoot` to see — now returned alongside the
+            // semantic result so `FamilyWorkspaceSharingError.accountUnavailable`
+            // can carry it through to the on-device diagnostic surface.
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "account-status", error: error)
             log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            return .couldNotDetermine
+            return CloudKitAvailabilityResult(availability: .couldNotDetermine, diagnostic: diagnostic)
         }
     }
 

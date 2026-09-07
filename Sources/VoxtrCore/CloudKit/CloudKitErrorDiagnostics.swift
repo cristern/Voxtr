@@ -221,4 +221,16 @@ public enum CloudKitErrorDiagnostics {
         }
         return parts.joined(separator: " ")
     }
+
+    /// Internal Alpha diagnostic surface follow-up: a short, on-screen
+    /// form — `"<stage> · <code>"` — for a Product Owner to read directly
+    /// off a TestFlight device, distinct from `format(_:)`'s fuller
+    /// greppable line (used for `os.Logger`/Copy diagnostic). Uses
+    /// `errorTypeName` as the code half when there is no `CKError.Code`
+    /// (e.g. `FamilyWorkspaceSharingError.accountUnavailable`'s own
+    /// `CloudKitAvailability` case name) — never `localizedDescription`.
+    public nonisolated static func conciseDisplay(_ diagnostic: CloudKitErrorDiagnostic) -> String {
+        let code = diagnostic.ckErrorCode ?? diagnostic.errorTypeName
+        return "\(diagnostic.stage) · \(code)"
+    }
 }

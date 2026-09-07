@@ -52,9 +52,12 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
     /// exactly how each one converges rather than merely hoping a bare
     /// `save` happens to be idempotent.
     public func ensureSharingRoot(forWorkspace workspaceId: UUID) async throws -> FamilyWorkspaceSharingRoot {
-        let availability = await transport.refreshAvailability()
-        guard availability == .available else {
-            throw FamilyWorkspaceSharingError.accountUnavailable(availability)
+        let availabilityResult = await transport.refreshAvailability()
+        guard availabilityResult.availability == .available else {
+            throw FamilyWorkspaceSharingError.accountUnavailable(
+                availabilityResult.availability,
+                diagnostic: availabilityResult.diagnostic
+            )
         }
 
         let database = transport.database(for: .private)
@@ -127,11 +130,11 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             }
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-save", error: error)
             log.error("FamilyWorkspace root record save reported serverRecordChanged with no server record attached. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.rootRecordFailed(error)
+            throw FamilyWorkspaceSharingError.rootRecordFailed(stage: "sharing-root-save", underlying: error)
         } catch {
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-save", error: error)
             log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.rootRecordFailed(error)
+            throw FamilyWorkspaceSharingError.rootRecordFailed(stage: "sharing-root-save", underlying: error)
         }
     }
 
@@ -145,7 +148,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch {
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-fetch", error: error)
             log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.rootRecordFailed(error)
+            throw FamilyWorkspaceSharingError.rootRecordFailed(stage: "sharing-root-fetch", underlying: error)
         }
     }
 
@@ -206,7 +209,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch {
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: error)
             log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.shareFailed(error)
+            throw FamilyWorkspaceSharingError.shareFailed(stage: "share-save", underlying: error)
         }
     }
 
@@ -279,7 +282,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch {
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: underlyingError)
             log.error("FamilyWorkspace share creation conflict: refetching the authoritative root record failed; surfacing the original conflict. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
+            throw FamilyWorkspaceSharingError.shareFailed(stage: "share-save", underlying: underlyingError)
         }
         guard let refetchedRoot, let shareReference = refetchedRoot.share else {
             // Either the root genuinely vanished (should not happen — we
@@ -290,7 +293,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
             // than retrying indefinitely.
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: underlyingError)
             log.error("FamilyWorkspace share creation conflict did not resolve to an existing share on refetch. \(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.shareFailed(underlyingError)
+            throw FamilyWorkspaceSharingError.shareFailed(stage: "share-save", underlying: underlyingError)
         }
         return try await fetchExistingShare(recordID: shareReference.recordID, database: database)
     }
@@ -306,7 +309,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         } catch {
             let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-fetch", error: error)
             log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-            throw FamilyWorkspaceSharingError.shareFailed(error)
+            throw FamilyWorkspaceSharingError.shareFailed(stage: "share-fetch", underlying: error)
         }
     }
 
@@ -384,11 +387,27 @@ public struct FamilyWorkspaceSharingRoot {
 public enum FamilyWorkspaceSharingError: Error {
     /// CloudKit itself is not usable right now (no/restricted account,
     /// etc.) — surfaced via the existing B1 `CloudKitAvailability` path
-    /// rather than a fresh account-status concept.
-    case accountUnavailable(CloudKitAvailability)
+    /// rather than a fresh account-status concept. `diagnostic`: the
+    /// safe, bounded `CloudKitErrorDiagnostic` from the underlying
+    /// `CKContainer.accountStatus()` lookup, when that lookup itself
+    /// threw (PR #77 review gap) — `nil` for a real, non-throwing
+    /// `.noAccount`/`.restricted`/etc. answer, which is not an error and
+    /// has no `CKError` to carry.
+    case accountUnavailable(CloudKitAvailability, diagnostic: CloudKitErrorDiagnostic?)
     case zoneCreationFailed(Error)
-    case rootRecordFailed(Error)
-    case shareFailed(Error)
+    /// `stage`: "sharing-root-fetch" or "sharing-root-save" — this one
+    /// case covers both `fetchExistingRootRecord` and the save path in
+    /// `ensureRootRecord`, so (Internal Alpha diagnostic surface
+    /// follow-up) the exact stage is carried explicitly rather than
+    /// inferred from the case alone, which would be ambiguous between
+    /// the two.
+    case rootRecordFailed(stage: String, underlying: Error)
+    /// `stage`: "share-fetch" or "share-save" — same reasoning as
+    /// `rootRecordFailed` above; this case covers `fetchExistingShare`,
+    /// `ensureShare`'s own save, and the creation-conflict convergence
+    /// path (which surfaces the original save's stage, not the
+    /// refetch's).
+    case shareFailed(stage: String, underlying: Error)
     /// The root record's own `share` reference pointed at a record that
     /// did not decode as a `CKShare` — should not happen given this
     /// coordinator is the only writer of that reference, but surfaced
@@ -405,4 +424,68 @@ public enum FamilyWorkspaceSharingError: Error {
     /// failed as a batch. The FamilyWorkspace root record/share
     /// (`ensureSharingRoot`) are unaffected either way.
     case invitationShareCreationFailed(Error)
+
+    /// Internal Alpha diagnostic surface follow-up: the same safe,
+    /// structured diagnostic this coordinator's own `log.error(...)`
+    /// calls already compute at each throw site (PR #76), recoverable
+    /// here so a caller several layers up (the "Connect Athlete App" UI)
+    /// can show it without this coordinator threading a parallel
+    /// diagnostics architecture through every throw site. `.accountUnavailable`
+    /// prefers its own carried `diagnostic` (PR #77 review gap — the real
+    /// `CKError` behind the account-status failure, e.g. `notAuthenticated`/
+    /// `networkFailure`) when one exists; only when it is `nil` — a real,
+    /// non-throwing `.noAccount`/`.restricted`/etc. answer with no
+    /// underlying `CKError` to report — does this fall back to the
+    /// `CloudKitAvailability` case name itself (a plain Swift enum, safe
+    /// to describe directly, unlike `CKError.Code`), filling the same
+    /// "what specifically happened" role `errorTypeName` otherwise plays
+    /// for a non-`CKError` value.
+    public var diagnostic: CloudKitErrorDiagnostic {
+        switch self {
+        case .accountUnavailable(let availability, let diagnostic):
+            diagnostic ?? CloudKitErrorDiagnostic(
+                stage: "account-status",
+                errorTypeName: String(describing: availability),
+                ckErrorCode: nil,
+                ckErrorCodeRawValue: nil,
+                retryAfterSeconds: nil,
+                partialFailureCount: nil,
+                partialFailureCodes: nil,
+                underlyingDomain: nil,
+                underlyingCode: nil
+            )
+        case .zoneCreationFailed(let error):
+            CloudKitErrorDiagnostics.classify(stage: "sharing-zone-create", error: error)
+        case .rootRecordFailed(let stage, let error):
+            CloudKitErrorDiagnostics.classify(stage: stage, error: error)
+        case .shareFailed(let stage, let error):
+            CloudKitErrorDiagnostics.classify(stage: stage, error: error)
+        case .existingShareReferenceWasNotAShare:
+            CloudKitErrorDiagnostic(
+                stage: "share-fetch",
+                errorTypeName: "FamilyWorkspaceSharingError",
+                ckErrorCode: nil,
+                ckErrorCodeRawValue: nil,
+                retryAfterSeconds: nil,
+                partialFailureCount: nil,
+                partialFailureCodes: nil,
+                underlyingDomain: nil,
+                underlyingCode: nil
+            )
+        case .shareSaveResultMissing:
+            CloudKitErrorDiagnostic(
+                stage: "share-save",
+                errorTypeName: "FamilyWorkspaceSharingError",
+                ckErrorCode: nil,
+                ckErrorCodeRawValue: nil,
+                retryAfterSeconds: nil,
+                partialFailureCount: nil,
+                partialFailureCodes: nil,
+                underlyingDomain: nil,
+                underlyingCode: nil
+            )
+        case .invitationShareCreationFailed(let error):
+            CloudKitErrorDiagnostics.classify(stage: "invitation-record-save", error: error)
+        }
+    }
 }
