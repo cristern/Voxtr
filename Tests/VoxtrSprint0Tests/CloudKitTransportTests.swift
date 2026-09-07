@@ -944,13 +944,53 @@ struct CloudKitErrorDiagnosticsTests {
 @Suite("Athlete Connection invitation-flow: FamilyWorkspaceSharingError.diagnostic")
 struct FamilyWorkspaceSharingErrorDiagnosticTests {
 
-    @Test("accountUnavailable reports stage account-status with the CloudKitAvailability case name, and no CKError code")
-    func accountUnavailableReportsAccountStatusStage() {
-        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.noAccount).diagnostic
+    @Test("accountUnavailable with no carried diagnostic (a real, non-throwing CloudKitAvailability answer) safely falls back to the availability case name, and no CKError code")
+    func accountUnavailableWithNoDiagnosticFallsBackToAvailabilityCaseName() {
+        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.noAccount, diagnostic: nil).diagnostic
         #expect(diagnostic.stage == "account-status")
         #expect(diagnostic.errorTypeName == "noAccount")
         #expect(diagnostic.ckErrorCode == nil)
         #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "account-status · noAccount")
+    }
+
+    // PR #77 follow-up (proven review gap): before this fix,
+    // `CloudKitTransport.refreshAvailability()` discarded the real
+    // `CKError` behind an `accountStatus()` failure, collapsing every
+    // account-status error down to `.couldNotDetermine` by the time
+    // `FamilyWorkspaceSharingError.accountUnavailable` was thrown — so
+    // the on-device diagnostic could only ever show
+    // `account-status · couldNotDetermine`, never the concrete code.
+    // `accountUnavailable`'s own carried `diagnostic:` (what
+    // `refreshAvailability()` now returns via `CloudKitAvailabilityResult`)
+    // must be preferred over the availability case name whenever one
+    // exists.
+
+    @Test("accountUnavailable with a carried .notAuthenticated diagnostic preserves the concrete CKError code, not just the availability case name")
+    func accountUnavailablePreservesNotAuthenticatedCode() {
+        let carried = CloudKitErrorDiagnostics.classify(stage: "account-status", error: CKError(.notAuthenticated))
+        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.couldNotDetermine, diagnostic: carried).diagnostic
+        #expect(diagnostic.stage == "account-status")
+        #expect(diagnostic.ckErrorCode == "notAuthenticated")
+        #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "account-status · notAuthenticated")
+    }
+
+    @Test("accountUnavailable with a carried .networkFailure diagnostic preserves the concrete CKError code, not just the availability case name")
+    func accountUnavailablePreservesNetworkFailureCode() {
+        let carried = CloudKitErrorDiagnostics.classify(stage: "account-status", error: CKError(.networkFailure))
+        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.couldNotDetermine, diagnostic: carried).diagnostic
+        #expect(diagnostic.stage == "account-status")
+        #expect(diagnostic.ckErrorCode == "networkFailure")
+        #expect(CloudKitErrorDiagnostics.conciseDisplay(diagnostic) == "account-status · networkFailure")
+    }
+
+    @Test("accountUnavailable's carried diagnostic never leaks localizedDescription into display or copy output")
+    func accountUnavailableCarriedDiagnosticNeverLeaksLocalizedDescription() {
+        let secretDescription = "Some very specific, potentially identifying CloudKit failure text"
+        let underlying = CKError(.notAuthenticated, userInfo: [NSLocalizedDescriptionKey: secretDescription])
+        let carried = CloudKitErrorDiagnostics.classify(stage: "account-status", error: underlying)
+        let diagnostic = FamilyWorkspaceSharingError.accountUnavailable(.couldNotDetermine, diagnostic: carried).diagnostic
+        #expect(!CloudKitErrorDiagnostics.conciseDisplay(diagnostic).contains(secretDescription))
+        #expect(!CloudKitErrorDiagnostics.format(diagnostic).contains(secretDescription))
     }
 
     @Test("zoneCreationFailed always reports stage sharing-zone-create")

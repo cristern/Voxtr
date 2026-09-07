@@ -82,9 +82,9 @@ public final class FamilyWorkspaceParticipantShareCoordinator {
             )
         }
 
-        let availability = await transport.refreshAvailability()
-        guard availability == .available else {
-            throw FamilyWorkspaceShareAcceptanceError.accountUnavailable(availability)
+        let availabilityResult = await transport.refreshAvailability()
+        guard availabilityResult.availability == .available else {
+            throw FamilyWorkspaceShareAcceptanceError.accountUnavailable(availabilityResult.availability)
         }
 
         let acceptedShare: CKShare

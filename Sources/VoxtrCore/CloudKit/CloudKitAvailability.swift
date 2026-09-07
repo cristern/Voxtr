@@ -35,3 +35,27 @@ public enum CloudKitAvailability: Sendable, Equatable {
         }
     }
 }
+
+/// PR #77 follow-up: pairs `CloudKitTransport.refreshAvailability()`'s
+/// semantic result with the safe, bounded diagnostic from the underlying
+/// `CKContainer.accountStatus()` lookup, when that lookup itself threw.
+/// `CloudKitAvailability` stays a plain semantic enum — no CKError data
+/// folded into it — since every existing `== .available` comparison
+/// throughout this codebase only ever needs the semantic half; the
+/// diagnostic half exists solely so a caller several layers up (the
+/// Internal Alpha on-device diagnostic surface) can show the concrete
+/// `CKError.Code` behind a `.couldNotDetermine`/etc. result instead of
+/// only the generic case name.
+public struct CloudKitAvailabilityResult: Sendable, Equatable {
+    public let availability: CloudKitAvailability
+    /// `nil` for a normal, non-throwing status resolution — including a
+    /// real `.noAccount`/`.restricted` answer, which is not an error and
+    /// carries no `CKError` to report. Populated only when
+    /// `accountStatus()` itself threw.
+    public let diagnostic: CloudKitErrorDiagnostic?
+
+    public init(availability: CloudKitAvailability, diagnostic: CloudKitErrorDiagnostic?) {
+        self.availability = availability
+        self.diagnostic = diagnostic
+    }
+}

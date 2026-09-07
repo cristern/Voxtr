@@ -52,9 +52,12 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
     /// exactly how each one converges rather than merely hoping a bare
     /// `save` happens to be idempotent.
     public func ensureSharingRoot(forWorkspace workspaceId: UUID) async throws -> FamilyWorkspaceSharingRoot {
-        let availability = await transport.refreshAvailability()
-        guard availability == .available else {
-            throw FamilyWorkspaceSharingError.accountUnavailable(availability)
+        let availabilityResult = await transport.refreshAvailability()
+        guard availabilityResult.availability == .available else {
+            throw FamilyWorkspaceSharingError.accountUnavailable(
+                availabilityResult.availability,
+                diagnostic: availabilityResult.diagnostic
+            )
         }
 
         let database = transport.database(for: .private)
@@ -384,8 +387,13 @@ public struct FamilyWorkspaceSharingRoot {
 public enum FamilyWorkspaceSharingError: Error {
     /// CloudKit itself is not usable right now (no/restricted account,
     /// etc.) — surfaced via the existing B1 `CloudKitAvailability` path
-    /// rather than a fresh account-status concept.
-    case accountUnavailable(CloudKitAvailability)
+    /// rather than a fresh account-status concept. `diagnostic`: the
+    /// safe, bounded `CloudKitErrorDiagnostic` from the underlying
+    /// `CKContainer.accountStatus()` lookup, when that lookup itself
+    /// threw (PR #77 review gap) — `nil` for a real, non-throwing
+    /// `.noAccount`/`.restricted`/etc. answer, which is not an error and
+    /// has no `CKError` to carry.
+    case accountUnavailable(CloudKitAvailability, diagnostic: CloudKitErrorDiagnostic?)
     case zoneCreationFailed(Error)
     /// `stage`: "sharing-root-fetch" or "sharing-root-save" — this one
     /// case covers both `fetchExistingRootRecord` and the save path in
@@ -423,14 +431,19 @@ public enum FamilyWorkspaceSharingError: Error {
     /// here so a caller several layers up (the "Connect Athlete App" UI)
     /// can show it without this coordinator threading a parallel
     /// diagnostics architecture through every throw site. `.accountUnavailable`
-    /// carries no real `Error` — its own `CloudKitAvailability` case name
-    /// (a plain Swift enum, safe to describe directly, unlike
-    /// `CKError.Code`) fills the same "what specifically happened" role
-    /// `errorTypeName` otherwise plays for a non-`CKError` value.
+    /// prefers its own carried `diagnostic` (PR #77 review gap — the real
+    /// `CKError` behind the account-status failure, e.g. `notAuthenticated`/
+    /// `networkFailure`) when one exists; only when it is `nil` — a real,
+    /// non-throwing `.noAccount`/`.restricted`/etc. answer with no
+    /// underlying `CKError` to report — does this fall back to the
+    /// `CloudKitAvailability` case name itself (a plain Swift enum, safe
+    /// to describe directly, unlike `CKError.Code`), filling the same
+    /// "what specifically happened" role `errorTypeName` otherwise plays
+    /// for a non-`CKError` value.
     public var diagnostic: CloudKitErrorDiagnostic {
         switch self {
-        case .accountUnavailable(let availability):
-            CloudKitErrorDiagnostic(
+        case .accountUnavailable(let availability, let diagnostic):
+            diagnostic ?? CloudKitErrorDiagnostic(
                 stage: "account-status",
                 errorTypeName: String(describing: availability),
                 ckErrorCode: nil,
