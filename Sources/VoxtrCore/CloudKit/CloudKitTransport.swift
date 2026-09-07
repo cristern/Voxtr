@@ -166,7 +166,13 @@ public final class CloudKitTransport {
             // Infrastructure must not crash on account/network failure —
             // surface the honest "could not determine" state rather than
             // propagating the raw error or fabricating `.available`.
-            log.error("CloudKit account status check failed: \(error.localizedDescription, privacy: .public)")
+            // Athlete Connection invitation-flow diagnostics follow-up:
+            // `CloudKitAvailability` alone (what `ensureSharingRoot` sees)
+            // no longer carries the underlying CKError.Code once this
+            // returns, so it is captured here, at the only point this
+            // codebase still holds it.
+            let diagnostic = CloudKitErrorDiagnostics.classify(stage: "account-status", error: error)
+            log.error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
             return .couldNotDetermine
         }
     }

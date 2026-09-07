@@ -812,3 +812,112 @@ private final class RecordingCloudKitSyncEngineStateStore: CloudKitSyncEngineSta
 
     func saveState(_ state: CKSyncEngine.State.Serialization, for scope: CloudKitDatabaseScope) {}
 }
+
+// Athlete Connection invitation-flow runtime diagnostics follow-up:
+// `CloudKitErrorDiagnostics.classify(stage:error:)`/`.format(_:)` are pure
+// (no CloudKit I/O), so — like `FamilyWorkspaceOwnerShareCoordinator
+// .isRecoverableShareCreationConflict(code:)` above — they are directly
+// unit-testable via `CKError(_:userInfo:)`, a plain synchronous value
+// initializer requiring no entitlement (documented since iOS 8, long
+// before this XCTest-host CKContainer-realization hazard existed).
+@Suite("Athlete Connection invitation-flow: CloudKitErrorDiagnostics")
+struct CloudKitErrorDiagnosticsTests {
+
+    // PR #76 follow-up: an earlier revision of CloudKitErrorDiagnostics
+    // assumed `String(describing: CKError.Code.someCase)` renders the
+    // symbolic case name — Codemagic's real Xcode toolchain proved that
+    // false (it renders "CKErrorCode(rawValue: 9)" instead). codeName(_:)
+    // is now an explicit switch, so this test locks in the actual
+    // contract directly, independent of classify(stage:error:)'s own
+    // wrapping.
+    @Test("codeName(_:) maps known CKError.Code cases to their exact symbolic names — never the raw CKErrorCode(rawValue:) description")
+    func codeNameMapsKnownCasesToSymbolicNames() {
+        #expect(CloudKitErrorDiagnostics.codeName(.notAuthenticated) == "notAuthenticated")
+        #expect(CloudKitErrorDiagnostics.codeName(.networkUnavailable) == "networkUnavailable")
+        #expect(CloudKitErrorDiagnostics.codeName(.partialFailure) == "partialFailure")
+        #expect(CloudKitErrorDiagnostics.codeName(.zoneNotFound) == "zoneNotFound")
+        #expect(CloudKitErrorDiagnostics.codeName(.serverRejectedRequest) == "serverRejectedRequest")
+        #expect(CloudKitErrorDiagnostics.codeName(.permissionFailure) == "permissionFailure")
+        for name in [
+            CloudKitErrorDiagnostics.codeName(.notAuthenticated),
+            CloudKitErrorDiagnostics.codeName(.networkUnavailable),
+            CloudKitErrorDiagnostics.codeName(.partialFailure),
+            CloudKitErrorDiagnostics.codeName(.zoneNotFound),
+            CloudKitErrorDiagnostics.codeName(.serverRejectedRequest),
+        ] {
+            #expect(!name.contains("CKErrorCode"))
+            #expect(!name.contains("rawValue"))
+        }
+    }
+
+    @Test("classify(stage:error:) captures CKError.Code for .notAuthenticated, with no PII in the formatted output")
+    func classifyCapturesNotAuthenticated() {
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "account-status", error: CKError(.notAuthenticated))
+        #expect(diagnostic.stage == "account-status")
+        #expect(diagnostic.errorTypeName == "CKError")
+        #expect(diagnostic.ckErrorCode == "notAuthenticated")
+        #expect(diagnostic.ckErrorCodeRawValue == CKError.Code.notAuthenticated.rawValue)
+
+        let formatted = CloudKitErrorDiagnostics.format(diagnostic)
+        #expect(formatted == "AthleteInviteCloudKit stage=account-status ckCode=notAuthenticated ckCodeRaw=\(CKError.Code.notAuthenticated.rawValue)")
+    }
+
+    @Test("classify(stage:error:) preserves CKError.Code for .networkUnavailable and its retryAfterSeconds when present")
+    func classifyPreservesNetworkUnavailableAndRetryAfter() {
+        let error = CKError(.networkUnavailable, userInfo: [CKErrorRetryAfterKey: 4.5])
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "share-save", error: error)
+        #expect(diagnostic.ckErrorCode == "networkUnavailable")
+        #expect(diagnostic.retryAfterSeconds == 4.5)
+
+        let formatted = CloudKitErrorDiagnostics.format(diagnostic)
+        #expect(formatted.contains("ckCode=networkUnavailable"))
+        #expect(formatted.contains("retryAfter=4.5"))
+    }
+
+    @Test("classify(stage:error:) on a .partialFailure extracts only a count and deduped child CKError.Code names — never the CKRecord.ID keys")
+    func classifyExtractsPartialFailureCodesWithoutRecordIDs() {
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: UUID())
+        let recordIDOne = CKRecord.ID(recordName: "should-never-appear-in-diagnostic-1", zoneID: zoneID)
+        let recordIDTwo = CKRecord.ID(recordName: "should-never-appear-in-diagnostic-2", zoneID: zoneID)
+        let partial = CKError(.partialFailure, userInfo: [
+            CKPartialErrorsByItemIDKey: [
+                recordIDOne: CKError(.zoneNotFound) as Error,
+                recordIDTwo: CKError(.zoneNotFound) as Error,
+            ],
+        ])
+
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "invitation-record-save", error: partial)
+        #expect(diagnostic.ckErrorCode == "partialFailure")
+        #expect(diagnostic.partialFailureCount == 2)
+        #expect(diagnostic.partialFailureCodes == ["zoneNotFound"])
+
+        let formatted = CloudKitErrorDiagnostics.format(diagnostic)
+        #expect(formatted.contains("partialFailureCount=2"))
+        #expect(formatted.contains("partialFailureCodes=zoneNotFound"))
+        #expect(!formatted.contains("should-never-appear-in-diagnostic"))
+    }
+
+    @Test("classify(stage:error:) never crashes on a non-CKError and reports its Swift type instead of a CKError code")
+    func classifyHandlesNonCKErrorWithoutCrashing() {
+        struct SomeLocalFailure: Error {}
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "sharing-root-fetch", error: SomeLocalFailure())
+        #expect(diagnostic.ckErrorCode == nil)
+        #expect(diagnostic.errorTypeName == "SomeLocalFailure")
+
+        let formatted = CloudKitErrorDiagnostics.format(diagnostic)
+        #expect(formatted.contains("errorType=SomeLocalFailure"))
+        #expect(!formatted.contains("ckCode="))
+    }
+
+    @Test("format(_:) never includes a human-readable description string — only structured fields — so no incidentally-embedded record/athlete content can leak through localizedDescription")
+    func formatNeverIncludesLocalizedDescriptionText() {
+        // A description containing something that would be a PII/content
+        // leak if `format` ever fell back to `.localizedDescription`.
+        let error = CKError(.serverRejectedRequest, userInfo: [NSLocalizedDescriptionKey: "athlete Jamie Smith's invitation for workspace 9F2C failed"])
+        let diagnostic = CloudKitErrorDiagnostics.classify(stage: "invitation-record-save", error: error)
+        let formatted = CloudKitErrorDiagnostics.format(diagnostic)
+        #expect(!formatted.contains("Jamie"))
+        #expect(!formatted.contains("9F2C"))
+        #expect(formatted == "AthleteInviteCloudKit stage=invitation-record-save ckCode=serverRejectedRequest ckCodeRaw=\(CKError.Code.serverRejectedRequest.rawValue)")
+    }
+}
