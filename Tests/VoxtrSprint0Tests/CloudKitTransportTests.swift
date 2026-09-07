@@ -823,6 +823,33 @@ private final class RecordingCloudKitSyncEngineStateStore: CloudKitSyncEngineSta
 @Suite("Athlete Connection invitation-flow: CloudKitErrorDiagnostics")
 struct CloudKitErrorDiagnosticsTests {
 
+    // PR #76 follow-up: an earlier revision of CloudKitErrorDiagnostics
+    // assumed `String(describing: CKError.Code.someCase)` renders the
+    // symbolic case name — Codemagic's real Xcode toolchain proved that
+    // false (it renders "CKErrorCode(rawValue: 9)" instead). codeName(_:)
+    // is now an explicit switch, so this test locks in the actual
+    // contract directly, independent of classify(stage:error:)'s own
+    // wrapping.
+    @Test("codeName(_:) maps known CKError.Code cases to their exact symbolic names — never the raw CKErrorCode(rawValue:) description")
+    func codeNameMapsKnownCasesToSymbolicNames() {
+        #expect(CloudKitErrorDiagnostics.codeName(.notAuthenticated) == "notAuthenticated")
+        #expect(CloudKitErrorDiagnostics.codeName(.networkUnavailable) == "networkUnavailable")
+        #expect(CloudKitErrorDiagnostics.codeName(.partialFailure) == "partialFailure")
+        #expect(CloudKitErrorDiagnostics.codeName(.zoneNotFound) == "zoneNotFound")
+        #expect(CloudKitErrorDiagnostics.codeName(.serverRejectedRequest) == "serverRejectedRequest")
+        #expect(CloudKitErrorDiagnostics.codeName(.permissionFailure) == "permissionFailure")
+        for name in [
+            CloudKitErrorDiagnostics.codeName(.notAuthenticated),
+            CloudKitErrorDiagnostics.codeName(.networkUnavailable),
+            CloudKitErrorDiagnostics.codeName(.partialFailure),
+            CloudKitErrorDiagnostics.codeName(.zoneNotFound),
+            CloudKitErrorDiagnostics.codeName(.serverRejectedRequest),
+        ] {
+            #expect(!name.contains("CKErrorCode"))
+            #expect(!name.contains("rawValue"))
+        }
+    }
+
     @Test("classify(stage:error:) captures CKError.Code for .notAuthenticated, with no PII in the formatted output")
     func classifyCapturesNotAuthenticated() {
         let diagnostic = CloudKitErrorDiagnostics.classify(stage: "account-status", error: CKError(.notAuthenticated))

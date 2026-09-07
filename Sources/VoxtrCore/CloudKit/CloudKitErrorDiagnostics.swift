@@ -43,15 +43,14 @@ public struct CloudKitErrorDiagnostic: Equatable, Sendable {
     /// name of whatever was thrown (e.g. "DecodingError") — never its
     /// message text.
     public let errorTypeName: String
-    /// Deliberately NOT a hand-maintained switch over every
-    /// `CKError.Code` case (this file's own doc comment explains why:
-    /// this repo has no compiler available to verify an exhaustive
-    /// switch against Apple's actual current case set, and a stale/wrong
-    /// case name would silently misreport rather than fail loudly).
-    /// `String(describing:)` on a `CKError.Code` renders its symbolic
-    /// case name (e.g. "networkUnavailable") via Swift's own synthesized
-    /// description for this NS_ERROR_ENUM-imported type — the same
-    /// mechanism Apple's own sample code and documentation rely on.
+    /// Symbolic `CKError.Code` case name (e.g. "networkUnavailable"),
+    /// produced by `CloudKitErrorDiagnostics.codeName(_:)` — see that
+    /// function's own doc comment for why this is an explicit switch
+    /// rather than `String(describing:)` (PR #76 follow-up: on the real
+    /// Codemagic/Xcode toolchain, `String(describing:)` on a `CKError.Code`
+    /// renders `"CKErrorCode(rawValue: N)"`, not the symbolic case name —
+    /// this codebase had no compiler available to catch that assumption
+    /// before Codemagic's own test run proved it wrong).
     public let ckErrorCode: String?
     public let ckErrorCodeRawValue: Int?
     public let retryAfterSeconds: Double?
@@ -119,13 +118,13 @@ public enum CloudKitErrorDiagnostics {
         if let partial = ckError.partialErrorsByItemID, !partial.isEmpty {
             partialCount = partial.count
             let codes = partial.values.compactMap { ($0 as? CKError)?.code }
-            partialCodes = Array(Set(codes.map { String(describing: $0) })).sorted()
+            partialCodes = Array(Set(codes.map(codeName))).sorted()
         }
 
         return CloudKitErrorDiagnostic(
             stage: stage,
             errorTypeName: "CKError",
-            ckErrorCode: String(describing: ckError.code),
+            ckErrorCode: codeName(ckError.code),
             ckErrorCodeRawValue: ckError.code.rawValue,
             retryAfterSeconds: ckError.retryAfterSeconds,
             partialFailureCount: partialCount,
@@ -133,6 +132,62 @@ public enum CloudKitErrorDiagnostics {
             underlyingDomain: nil,
             underlyingCode: nil
         )
+    }
+
+    /// Explicit symbolic name for a `CKError.Code` — PR #76 follow-up:
+    /// `String(describing: someCode)` was assumed to render the case name
+    /// (matching Swift's usual synthesized `Equatable`/`CustomStringConvertible`
+    /// behavior for an NS_ERROR_ENUM-imported type), but Codemagic's real
+    /// Xcode toolchain proved that assumption false — it renders
+    /// `"CKErrorCode(rawValue: 9)"` instead, because `CKError.Code` is
+    /// bridged from an Objective-C `NS_ERROR_ENUM`/`NS_TYPED_ENUM`-style
+    /// integer constant, not a native Swift enum with a synthesized
+    /// description. An explicit switch, verified by Codemagic's own
+    /// compiler (this repository has none locally), is the correct fix.
+    /// `@unknown default`: covers a raw value from a future SDK this
+    /// switch predates, rather than failing to compile against it or
+    /// silently mis-mapping it to an existing case.
+    public nonisolated static func codeName(_ code: CKError.Code) -> String {
+        switch code {
+        case .internalError: "internalError"
+        case .partialFailure: "partialFailure"
+        case .networkUnavailable: "networkUnavailable"
+        case .networkFailure: "networkFailure"
+        case .badContainer: "badContainer"
+        case .serviceUnavailable: "serviceUnavailable"
+        case .requestRateLimited: "requestRateLimited"
+        case .missingEntitlement: "missingEntitlement"
+        case .notAuthenticated: "notAuthenticated"
+        case .permissionFailure: "permissionFailure"
+        case .unknownItem: "unknownItem"
+        case .invalidArguments: "invalidArguments"
+        case .resultsTruncated: "resultsTruncated"
+        case .serverRecordChanged: "serverRecordChanged"
+        case .serverRejectedRequest: "serverRejectedRequest"
+        case .assetFileNotFound: "assetFileNotFound"
+        case .assetFileModified: "assetFileModified"
+        case .incompatibleVersion: "incompatibleVersion"
+        case .constraintViolation: "constraintViolation"
+        case .operationCancelled: "operationCancelled"
+        case .changeTokenExpired: "changeTokenExpired"
+        case .batchRequestFailed: "batchRequestFailed"
+        case .zoneBusy: "zoneBusy"
+        case .badDatabase: "badDatabase"
+        case .quotaExceeded: "quotaExceeded"
+        case .zoneNotFound: "zoneNotFound"
+        case .limitExceeded: "limitExceeded"
+        case .userDeletedZone: "userDeletedZone"
+        case .tooManyParticipants: "tooManyParticipants"
+        case .alreadyShared: "alreadyShared"
+        case .referenceViolation: "referenceViolation"
+        case .managedAccountRestricted: "managedAccountRestricted"
+        case .participantMayNeedVerification: "participantMayNeedVerification"
+        case .serverResponseLost: "serverResponseLost"
+        case .assetNotAvailable: "assetNotAvailable"
+        case .accountTemporarilyUnavailable: "accountTemporarilyUnavailable"
+        case .participantAlreadyInvited: "participantAlreadyInvited"
+        @unknown default: "unknown(rawValue: \(code.rawValue))"
+        }
     }
 
     /// Single-line, greppable format:
