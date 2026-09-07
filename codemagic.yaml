@@ -537,6 +537,7 @@ workflows:
       - build/diagnostics/ParentApp-signed-entitlements.plist
       - build/diagnostics/ParentApp-profile-entitlements.plist
       - build/diagnostics/ParentApp-profile-summary.txt
+      - build/diagnostics/ParentApp-archive-signed-entitlements.plist
       - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
@@ -684,6 +685,7 @@ workflows:
       - build/diagnostics/ParentApp-signed-entitlements.plist
       - build/diagnostics/ParentApp-profile-entitlements.plist
       - build/diagnostics/ParentApp-profile-summary.txt
+      - build/diagnostics/ParentApp-archive-signed-entitlements.plist
       - build/diagnostics/ParentApp-cloudkit-entitlements.txt
 
     publishing:
