@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""ParentApp CloudKit sharing runtime crash (build 502/507/511/516) —
+"""ParentApp CloudKit sharing runtime crash (build 502/507/511/516/119/123) —
 signed-entitlements diagnostic follow-up.
 
 Reads the canonical SOURCE entitlements this repository requests
 (App/ParentApp/ParentApp.entitlements — One Truth for what is requested),
-the FINAL SIGNED ParentApp entitlements (extracted from the exported .ipa
-via `codesign -d --entitlements :-` — authority for what actually shipped),
-and, when available, the embedded provisioning profile's own Entitlements
-dictionary (supporting evidence for what signing allowed), and writes a
-small human-readable comparison of the final signed app against the actual
-source-requested values for the two CloudKit/iCloud entitlements this
-app's runtime CKContainer construction requires.
+the ARCHIVE's own signed entitlements (from build/ios/xcarchive/*.xcarchive
+— what the archive build itself produced, before export/re-sign can alter
+anything), the FINAL SIGNED ParentApp entitlements (extracted from the
+exported .ipa via `codesign -d --entitlements :-` — authority for what
+actually shipped), and, when available, the embedded provisioning
+profile's own Entitlements dictionary (supporting evidence for what
+signing allowed), and writes a small human-readable comparison that
+localizes whether entitlement loss (if any) happens before/during the
+archive build or only during export/re-sign.
 
 Deliberately never hardcodes "CloudKit"/a container identifier as the
 comparison authority — both are read from the source .entitlements file
@@ -18,6 +20,15 @@ each run, so this stays correct if that file ever changes. Deliberately
 does not fail the build or normalize values away — MISMATCH is reported
 plainly so a human decides the next step (see codemagic.yaml's own comment
 for the surrounding context).
+
+Build 123 follow-up: a correctly-selected provisioning profile can
+legitimately authorize a service with the wildcard value "*" (e.g.
+`com.apple.developer.icloud-services = "*"`) meaning "any iCloud service",
+which is not a literal mismatch against a source request of "CloudKit" —
+that wildcard semantic is handled ONLY in the profile-permits comparison
+below (informational), never in the archive/final-signed-app comparisons,
+which must still fail literally if the actual signed entitlements are
+missing the requested value.
 """
 
 import argparse
@@ -28,7 +39,7 @@ from pathlib import Path
 ICLOUD_SERVICES_KEY = "com.apple.developer.icloud-services"
 ICLOUD_CONTAINERS_KEY = "com.apple.developer.icloud-container-identifiers"
 ICLOUD_ENVIRONMENT_KEY = "com.apple.developer.icloud-container-environment"
-CRITICAL_KEYS = (ICLOUD_SERVICES_KEY, ICLOUD_CONTAINERS_KEY)
+WILDCARD = "*"
 
 
 def load_plist(path: str):
@@ -57,7 +68,11 @@ def format_values(values) -> str:
 
 
 def requested_values_present(requested, actual) -> bool:
-    """True iff every value the source requests also appears in `actual`."""
+    """True iff every value the source requests also appears LITERALLY in
+    `actual`. Used for the archive/final-signed-app checks, which must
+    never be satisfied by a wildcard — a signed app's own entitlements
+    plist embeds the specific values it was signed with, not a wildcard
+    authorization; a "*" appearing there would not be a normal outcome."""
     requested = as_list(requested)
     if not requested:
         # Nothing requested for this key is not a meaningful comparison —
@@ -68,9 +83,26 @@ def requested_values_present(requested, actual) -> bool:
     return all(value in actual for value in requested)
 
 
+def profile_permits(requested, profile_actual) -> bool:
+    """True iff the provisioning profile AUTHORIZES every value the source
+    requests. A profile's own `*` entry is Apple's documented wildcard
+    meaning "any value for this key is authorized" (seen in practice on
+    `com.apple.developer.icloud-services`) — satisfies any requested
+    value for that key. This is provisioning-profile-specific semantics;
+    never applied to the archive or final signed app's own entitlements."""
+    requested = as_list(requested)
+    if not requested:
+        return True
+    actual = as_list(profile_actual)
+    if WILDCARD in actual:
+        return True
+    return all(value in actual for value in requested)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-entitlements", required=True)
+    parser.add_argument("--archive-entitlements", default="")
     parser.add_argument("--signed-entitlements", required=True)
     parser.add_argument("--profile-entitlements", default="")
     parser.add_argument("--output", required=True)
@@ -87,6 +119,7 @@ def main() -> int:
         )
         return 1
 
+    archive = load_plist(args.archive_entitlements)
     signed = load_plist(args.signed_entitlements)
     profile = load_plist(args.profile_entitlements)
 
@@ -102,13 +135,34 @@ def main() -> int:
     lines.append(f"  {ICLOUD_CONTAINERS_KEY} = {format_values(source_containers)}")
     lines.append("")
 
+    if args.archive_entitlements and archive is None:
+        lines.append("ARCHIVE SIGNED APP (build/ios/xcarchive/*.xcarchive):")
+        lines.append("  Not available for this build — either no matching archived .app was")
+        lines.append("  found, or codesign could not extract entitlements from it (which is")
+        lines.append("  itself useful evidence: an unsigned archive would fail here). Not fabricated.")
+        archive_services = []
+        archive_containers = []
+    elif archive is not None:
+        archive_services = archive.get(ICLOUD_SERVICES_KEY)
+        archive_containers = archive.get(ICLOUD_CONTAINERS_KEY)
+        archive_environment = archive.get(ICLOUD_ENVIRONMENT_KEY)
+        lines.append("ARCHIVE SIGNED APP (from build/ios/xcarchive/*.xcarchive, via codesign):")
+        lines.append(f"  {ICLOUD_SERVICES_KEY} = {format_values(archive_services)}")
+        lines.append(f"  {ICLOUD_CONTAINERS_KEY} = {format_values(archive_containers)}")
+        lines.append(f"  {ICLOUD_ENVIRONMENT_KEY} = {format_values(archive_environment)}")
+    else:
+        lines.append("ARCHIVE SIGNED APP:")
+        lines.append("  Not inspected (no --archive-entitlements provided for this run).")
+        archive_services = None
+        archive_containers = None
+    lines.append("")
+
     if signed is None:
         lines.append("FINAL SIGNED APP (from the exported .ipa):")
         lines.append("  Could not be read — this file should not be missing if the")
         lines.append("  codesign extraction step itself succeeded; treat as MISMATCH.")
         signed_services = []
         signed_containers = []
-        signed_environment = None
     else:
         signed_services = signed.get(ICLOUD_SERVICES_KEY)
         signed_containers = signed.get(ICLOUD_CONTAINERS_KEY)
@@ -142,6 +196,35 @@ def main() -> int:
     services_match = requested_values_present(source_services, signed_services)
     containers_match = requested_values_present(source_containers, signed_containers)
 
+    lines.append("STAGE LOCALIZATION (where does entitlement loss occur, if anywhere?):")
+    if archive is not None:
+        archive_services_match = requested_values_present(source_services, archive_services)
+        archive_containers_match = requested_values_present(source_containers, archive_containers)
+        lines.append(
+            f"  Archive vs. source — {ICLOUD_SERVICES_KEY}: "
+            f"{'MATCH' if archive_services_match else 'MISMATCH'}, "
+            f"{ICLOUD_CONTAINERS_KEY}: "
+            f"{'MATCH' if archive_containers_match else 'MISMATCH'}"
+        )
+    else:
+        lines.append("  Archive vs. source: not available for this run (see ARCHIVE SIGNED APP above).")
+    lines.append(
+        f"  Final IPA vs. source — {ICLOUD_SERVICES_KEY}: "
+        f"{'MATCH' if services_match else 'MISMATCH'}, "
+        f"{ICLOUD_CONTAINERS_KEY}: "
+        f"{'MATCH' if containers_match else 'MISMATCH'}"
+    )
+    if archive is not None:
+        if (archive_services_match and archive_containers_match) and not (services_match and containers_match):
+            lines.append("  => Entitlements were present in the ARCHIVE but LOST during export/re-sign.")
+        elif not (archive_services_match and archive_containers_match) and (services_match and containers_match):
+            lines.append("  => Entitlements were MISSING in the archive but present in the final IPA (unexpected).")
+        elif not (archive_services_match and archive_containers_match) and not (services_match and containers_match):
+            lines.append("  => Entitlements were already missing at ARCHIVE time — loss occurs before/during archive, not export.")
+        else:
+            lines.append("  => Entitlements present at both archive and final IPA stages.")
+    lines.append("")
+
     lines.append("COMPARISON RESULT (final signed app vs. source-requested values):")
     lines.append(
         f"  {ICLOUD_SERVICES_KEY}: signed app carries every source-requested value: "
@@ -153,10 +236,11 @@ def main() -> int:
     )
 
     if profile is not None:
-        profile_services_match = requested_values_present(source_services, profile_services)
-        profile_containers_match = requested_values_present(source_containers, profile_containers)
+        profile_services_match = profile_permits(source_services, profile_services)
+        profile_containers_match = profile_permits(source_containers, profile_containers)
         lines.append("")
-        lines.append("  Provisioning profile permits the same source-requested values (informational):")
+        lines.append("  Provisioning profile authorizes the same source-requested values (informational;")
+        lines.append(f"  a profile value of \"{WILDCARD}\" authorizes any requested value for that key):")
         lines.append(
             f"    {ICLOUD_SERVICES_KEY}: "
             f"{'MATCH' if profile_services_match else 'MISMATCH'}"
@@ -176,11 +260,8 @@ def main() -> int:
     else:
         lines.append("OVERALL: MISMATCH — the final signed app does not carry every CloudKit")
         lines.append("entitlement value this repository's source .entitlements file requests.")
-        lines.append("The discrepancy is somewhere in the signing/provisioning/export")
-        lines.append("boundary — possible causes include the provisioning profile's own")
-        lines.append("capability/container assignment, profile selection, export/re-signing,")
-        lines.append("or Apple Developer Portal configuration. Further evidence (e.g. the")
-        lines.append("provisioning-profile comparison above, if available) decides which.")
+        lines.append("See STAGE LOCALIZATION above for whether this already happened at")
+        lines.append("archive time or only during export/re-sign.")
 
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)

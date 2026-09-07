@@ -27,11 +27,23 @@
 # identifier — never certificates or device UDIDs) so a human can compare
 # it against the directly-downloaded Apple profile's own identity to
 # confirm whether the correct profile was actually used.
+#
+# Build 123 follow-up: with profile selection now confirmed correct, the
+# final signed IPA STILL lacked CloudKit — so this script also captures
+# the ARCHIVE's own signed entitlements (build/ios/xcarchive/*.xcarchive
+# /Products/Applications/ParentApp.app), which `xcode-project build-ipa`
+# already produces and never deletes, and never modifies again during its
+# own export step (`-exportArchive` reads an archive as input and writes
+# the .ipa as a separate output — it does not rewrite the archive's own
+# Products/Applications/*.app in place). Comparing archive vs. final IPA
+# vs. source localizes whether entitlement loss happens during the
+# archive build itself or only during export/re-sign.
 set -euo pipefail
 
 : "${PARENT_BUNDLE_ID:?PARENT_BUNDLE_ID is required}"
 
 IPA_DIR="build/ios/ipa"
+ARCHIVE_DIR="build/ios/xcarchive"
 DIAG_DIR="build/diagnostics"
 SOURCE_ENTITLEMENTS="App/ParentApp/ParentApp.entitlements"
 WORK_DIR="$(mktemp -d)"
@@ -126,6 +138,40 @@ else
   rm -f "$PROFILE_ENTITLEMENTS_PLIST"
 fi
 
+echo "== Locating the ParentApp archive (bundle id $PARENT_BUNDLE_ID) in $ARCHIVE_DIR =="
+ARCHIVE_ENTITLEMENTS_PLIST="$DIAG_DIR/ParentApp-archive-signed-entitlements.plist"
+ARCHIVE_ARG=""
+rm -f "$ARCHIVE_ENTITLEMENTS_PLIST"
+if compgen -G "$ARCHIVE_DIR"/*.xcarchive > /dev/null; then
+  PARENT_ARCHIVE_APP=""
+  for archive in "$ARCHIVE_DIR"/*.xcarchive; do
+    for app in "$archive"/Products/Applications/*.app; do
+      [ -d "$app" ] || continue
+      archive_bundle_id="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist" 2>/dev/null || true)"
+      if [ "$archive_bundle_id" = "$PARENT_BUNDLE_ID" ]; then
+        PARENT_ARCHIVE_APP="$app"
+        break 2
+      fi
+    done
+  done
+
+  if [ -z "$PARENT_ARCHIVE_APP" ]; then
+    echo "NOTE: no archived .app in $ARCHIVE_DIR matches CFBundleIdentifier '$PARENT_BUNDLE_ID' — not fabricating a file."
+  else
+    echo "Found archived ParentApp bundle: $PARENT_ARCHIVE_APP"
+    if codesign -d --entitlements ":-" "$PARENT_ARCHIVE_APP" > "$ARCHIVE_ENTITLEMENTS_PLIST" 2>"$WORK_DIR/archive-codesign.err"; then
+      echo "Wrote $ARCHIVE_ENTITLEMENTS_PLIST"
+      ARCHIVE_ARG="$ARCHIVE_ENTITLEMENTS_PLIST"
+    else
+      echo "NOTE: codesign could not extract entitlements from the archived app (it may be unsigned at this stage — that is itself useful diagnostic evidence) — not fabricating a file."
+      cat "$WORK_DIR/archive-codesign.err" || true
+      rm -f "$ARCHIVE_ENTITLEMENTS_PLIST"
+    fi
+  fi
+else
+  echo "NOTE: no .xcarchive found in $ARCHIVE_DIR — not fabricating a file."
+fi
+
 if [ ! -f "$SOURCE_ENTITLEMENTS" ]; then
   echo "FAILING: source entitlements file not found at $SOURCE_ENTITLEMENTS — this is the One Truth for what ParentApp requests; refusing to fabricate a comparison without it."
   exit 1
@@ -134,6 +180,7 @@ fi
 echo "== Writing human-readable CloudKit entitlement comparison =="
 python3 Scripts/summarize_parent_cloudkit_entitlements.py \
   --source-entitlements "$SOURCE_ENTITLEMENTS" \
+  --archive-entitlements "$ARCHIVE_ARG" \
   --signed-entitlements "$SIGNED_ENTITLEMENTS_PLIST" \
   --profile-entitlements "$PROFILE_ARG" \
   --output "$DIAG_DIR/ParentApp-cloudkit-entitlements.txt"
