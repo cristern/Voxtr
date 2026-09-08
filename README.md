@@ -50,6 +50,8 @@ These workflows are defined in `codemagic.yaml`. All of them can still be starte
 
 Both use the same App Store Connect integration and signing setup as `testflight-release` (see "Codemagic Setup Requirements" below) — nothing extra to configure if `testflight-release` already works.
 
+- **`cloudkit-development-bootstrap`** — **TEMPORARY**, manual only, no automatic trigger. Builds and signs **only** ParentApp, for CloudKit **Development** (never Production, and never TestFlight/App Store) — the one-time mechanism to bootstrap CloudKit's own sharing schema. See `CloudKit/DevelopmentShareBootstrap.md` for the full runbook and prerequisites. Uses the same App Store Connect integration as the other TestFlight workflows, but signs Ad Hoc rather than App Store — an Ad Hoc-eligible provisioning profile (and the destination iPhone registered as a test device) may need to exist first; the runbook explains what to do if it does not.
+
 ### Starting a workflow manually in Codemagic
 
 1. Open the app in the Codemagic dashboard.

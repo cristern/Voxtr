@@ -700,7 +700,204 @@ workflows:
           failure: true
 
   # =======================================================================
-  # 7. testflight-athlete — manual only. Same structure as
+  # 8. cloudkit-development-bootstrap — TEMPORARY, ONE-TIME infrastructure
+  #    workflow (see CloudKit/DevelopmentShareBootstrap.md). NOT part of
+  #    the normal Vǫxtr release process — do not remove until CloudKit
+  #    Production sharing is proven and the Product Owner approves cleanup
+  #    in a separate follow-up.
+  #
+  #    WHY THIS EXISTS: `testflight-parent`/`testflight-release` always
+  #    sign `distribution_type: app_store`, which Apple always resolves to
+  #    the PRODUCTION CloudKit environment — there is no way to reach
+  #    CloudKit Development through a TestFlight build. CloudKit's
+  #    internal CKShare-support system schema (commonly surfaced as the
+  #    `cloudkit.share` record type) is created automatically the first
+  #    time a real CKShare save succeeds in the DEVELOPMENT environment,
+  #    and must then be promoted to Production via CloudKit Console's
+  #    "Deploy Schema Changes...". Since ParentApp has so far only ever
+  #    run against Production (TestFlight/App Store), that system schema
+  #    was never created — this is believed to be the cause of the
+  #    Production `share-save · invalidArguments` failure
+  #    (`returnedRecordTypes: "_pcs_data"`) that persists even after
+  #    Vǫxtr's own `FamilyWorkspace`/`AthleteConnectionInvitation` schema
+  #    was deployed. This workflow exists only to produce ONE
+  #    Development-CloudKit-signed, physical-device-installable ParentApp
+  #    build so the Product Owner (no Mac available) can trigger a single
+  #    real CKShare save from a browser/Codemagic-built artifact.
+  #
+  #    WHY Ad Hoc, NOT Development-profile signing: a Development-signed
+  #    .ipa can only be installed via Xcode/a cabled device — there is no
+  #    browser-only install path for it. An Ad Hoc-signed .ipa CAN be
+  #    installed via a browser/OTA install link on the device itself, and
+  #    Apple's own `xcodebuild -exportArchive` still lets an Ad Hoc export
+  #    choose EITHER CloudKit environment via the `iCloudContainerEnvironment`
+  #    export option — this is the only combination that is both
+  #    browser-installable AND CloudKit-Development-capable.
+  #
+  #    PREREQUISITE THIS WORKFLOW CANNOT SATISFY ON ITS OWN: like any Ad
+  #    Hoc build, the Product Owner's specific iPhone UDID must already be
+  #    registered as a test device with the Apple Developer account behind
+  #    the `Vøxtr App Store Connect` integration, and an Ad Hoc
+  #    provisioning profile for `app.voxtr.parent` that includes that
+  #    device must exist (or be creatable by Codemagic's automatic signing
+  #    once the device is registered). This repository/session cannot
+  #    verify whether that registration already exists — if it does not,
+  #    this workflow's signing step will fail with a clear Codemagic/Apple
+  #    error rather than silently producing an unusable IPA. See
+  #    CloudKit/DevelopmentShareBootstrap.md for Codemagic's own
+  #    browser-only "Register device" mechanism (a QR code / link that
+  #    installs a small configuration profile capturing the device's UDID
+  #    — no Mac required) if the device is not yet registered.
+  #
+  #    Manual execution only — no `triggering` section, matching
+  #    testflight-parent/testflight-athlete's own established pattern.
+  #    Builds ParentApp only. Never publishes to TestFlight/App Store —
+  #    the .ipa is downloaded directly from this build's own Codemagic
+  #    artifacts page instead (see the runbook).
+  # =======================================================================
+  cloudkit-development-bootstrap:
+    name: "Vǫxtr Parent — TEMPORARY CloudKit Development bootstrap (manual, browser-installable, NOT TestFlight)"
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: "Vøxtr App Store Connect"
+
+    environment:
+      xcode: latest
+      groups:
+        - voxtr_ios_signing
+      vars:
+        XCODE_PROJECT: "App/Voxtr.xcodeproj"
+        PARENT_SCHEME: "ParentApp"
+        PARENT_BUNDLE_ID: "app.voxtr.parent"
+      # Ad Hoc (never app_store/development) — see this workflow's own
+      # header comment above for why. Codemagic resolves this the same
+      # way it already resolves `app_store` for the sibling TestFlight
+      # workflows: via the app_store_connect integration above, provided
+      # the Product Owner's device is already a registered test device.
+      ios_signing:
+        distribution_type: ad_hoc
+        bundle_identifier: $PARENT_BUNDLE_ID
+
+    scripts:
+      - name: Fail clearly if required signing configuration is missing
+        script: |
+          set -e
+          : "${APP_STORE_CONNECT_ISSUER_ID:?Missing APP_STORE_CONNECT_ISSUER_ID — configure the '${CM_INTEGRATION_NAME:-voxtr_app_store_connect}' App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?Missing APP_STORE_CONNECT_KEY_IDENTIFIER — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?Missing APP_STORE_CONNECT_PRIVATE_KEY — configure the App Store Connect integration in Codemagic. See README: Codemagic Setup Requirements.}"
+          echo "App Store Connect signing configuration present — proceeding."
+
+      - name: Validate Xcode version, required scheme, and expected bundle identifier
+        script: |
+          set -e
+          mkdir -p build/reports
+          echo "== Xcode version =="
+          xcodebuild -version
+          echo "== Verifying scheme '$PARENT_SCHEME' exists in $XCODE_PROJECT =="
+          xcodebuild -list -project "$XCODE_PROJECT" -json > build/reports/schemes.json
+          SCHEME_FOUND=$(python3 -c "
+          import json
+          with open('build/reports/schemes.json') as f:
+              data = json.load(f)
+          schemes = data.get('project', {}).get('schemes', [])
+          print('yes' if '$PARENT_SCHEME' in schemes else 'no')
+          ")
+          if [ "$SCHEME_FOUND" != "yes" ]; then
+            echo "FAILING BUILD: scheme '$PARENT_SCHEME' was not found in $XCODE_PROJECT."
+            xcodebuild -list -project "$XCODE_PROJECT"
+            exit 1
+          fi
+          echo "Scheme '$PARENT_SCHEME' found."
+          echo "== Verifying expected bundle identifier is present =="
+          RESOLVED_BUNDLE_ID=$(xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$PARENT_SCHEME" \
+            -destination "generic/platform=iOS" \
+            | awk -F' = ' '$1 ~ /^[[:space:]]*PRODUCT_BUNDLE_IDENTIFIER$/ { print $2; exit }' \
+            | tr -d '[:space:]')
+          echo "Resolved bundle identifier: $RESOLVED_BUNDLE_ID"
+          if [ "$RESOLVED_BUNDLE_ID" != "$PARENT_BUNDLE_ID" ]; then
+            echo "FAILING BUILD: resolved bundle identifier '$RESOLVED_BUNDLE_ID' does not match expected '$PARENT_BUNDLE_ID'."
+            exit 1
+          fi
+          echo "== Resolved Swift packages =="
+          xcodebuild -resolvePackageDependencies -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME"
+
+      - name: Apply Codemagic project build number via Apple Generic Versioning
+        script: |
+          set -e
+          : "${PROJECT_BUILD_NUMBER:?Missing PROJECT_BUILD_NUMBER — this is a Codemagic-provided variable and should always be present in a Codemagic build.}"
+          echo "Applying build number: $PROJECT_BUILD_NUMBER"
+          (cd "$(dirname "$XCODE_PROJECT")" && agvtool new-version -all "$PROJECT_BUILD_NUMBER")
+          echo "== Verifying the build number was actually applied =="
+          APPLIED_VERSION=$(xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$PARENT_SCHEME" \
+            | grep -m1 "CURRENT_PROJECT_VERSION" | awk -F'= ' '{print $2}' | tr -d '[:space:]')
+          echo "CURRENT_PROJECT_VERSION now resolves to: $APPLIED_VERSION"
+          if [ "$APPLIED_VERSION" != "$PROJECT_BUILD_NUMBER" ]; then
+            echo "FAILING BUILD: agvtool did not apply the expected build number. This project may not have Apple Generic Versioning (VERSIONING_SYSTEM = apple-generic) configured — see README: Codemagic Setup Requirements."
+            exit 1
+          fi
+
+      - name: Initialize keychain for code signing
+        script: keychain initialize
+
+      - name: Add certificates, select an Ad Hoc-eligible profile, and request the CloudKit Development environment at export
+        script: |
+          set -e
+          keychain add-certificates
+          # `--custom-export-options` requests Apple's `iCloudContainerEnvironment`
+          # export option, which controls the final signed app's
+          # `com.apple.developer.icloud-container-environment` entitlement —
+          # this is the one thing that actually distinguishes this workflow
+          # from every other Ad Hoc/App Store export in this repository.
+          # `--archive-method=ad-hoc` restricts profile selection to an
+          # Ad Hoc-eligible provisioning profile only, matching
+          # `ios_signing.distribution_type: ad_hoc` above.
+          xcode-project use-profiles \
+            --archive-method=ad-hoc \
+            --custom-export-options='{"iCloudContainerEnvironment": "Development"}'
+          echo "== Generated export options plist =="
+          cat "$HOME/export_options.plist"
+
+      - name: Archive and export ParentApp (Release, Ad Hoc, CloudKit Development)
+        script: |
+          xcode-project build-ipa \
+            --project "$XCODE_PROJECT" \
+            --scheme "$PARENT_SCHEME" \
+            --config Release
+
+      # Hard gate: this script FAILS the build if the final signed app's
+      # com.apple.developer.icloud-container-environment is not
+      # "Development" — see Scripts/capture_bootstrap_cloudkit_diagnostics.sh's
+      # own header for why this is a separate script from
+      # capture_parent_signed_entitlements.sh (used by
+      # testflight-parent/testflight-release), which never touches this
+      # workflow.
+      - name: Capture signing diagnostics and assert CloudKit Development environment
+        script: bash Scripts/capture_bootstrap_cloudkit_diagnostics.sh
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/ios/xcarchive/*.xcarchive
+      - /tmp/xcodebuild_logs/*.log
+      - build/diagnostics/ParentApp-bootstrap-cloudkit-diagnostics.txt
+
+    # Deliberately NO `app_store_connect` publishing block — this build
+    # must never reach TestFlight/App Store. The .ipa is downloaded
+    # directly from this build's own Codemagic artifacts page; see
+    # CloudKit/DevelopmentShareBootstrap.md for the install steps.
+    publishing:
+      email:
+        recipients:
+          - cristern@hotmail.com
+        notify:
+          success: true
+          failure: true
+
+  # =======================================================================
+  # 9. testflight-athlete — manual only. Same structure as
   #    testflight-parent immediately above, scoped to AthleteApp instead.
   #    See that workflow's own header comment for the shared rationale
   #    (no `triggering` section, same signing approach).
