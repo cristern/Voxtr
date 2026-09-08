@@ -1030,6 +1030,24 @@ struct AthleteConnectAppInProgressStateTests {
         )
     }
 
+    /// PR #80 Codemagic SwiftData lifetime follow-up: retained for the
+    /// fixture's entire lifetime — mirrors
+    /// `AthleteConnectionLifecycleServiceTests.Fixture`'s own established
+    /// precedent (this file's sibling suite already solves the exact same
+    /// problem this way): a factory function that hands a managed
+    /// `@Model` instance back out must keep the owning `ModelContainer`
+    /// itself alive, or SwiftData invalidates every `@Model` instance
+    /// fetched through it once the container that owns `mainContext` is
+    /// deallocated ("This model instance was destroyed by calling
+    /// ModelContext.reset"). `athlete` is kept as the live managed model
+    /// (not just its stable ID) because `connectAthleteApp(for:)`'s own
+    /// production signature requires the real `AthleteProfile`.
+    private struct Fixture {
+        let container: ModelContainer
+        let viewModel: AthleteFamilyManagementViewModel
+        let athlete: AthleteProfile
+    }
+
     /// PR #80 Codemagic Swift 6 follow-up: `@MainActor` because every
     /// API this helper touches is MainActor-isolated —
     /// `InMemoryPersistenceController.makeModelContainer()`,
@@ -1041,7 +1059,7 @@ struct AthleteConnectAppInProgressStateTests {
     /// itself MainActor-isolated — Swift requires the callee's own
     /// declaration to carry the isolation, not just the caller's.
     @MainActor
-    private static func makeViewModelAndAthlete() throws -> (viewModel: AthleteFamilyManagementViewModel, athlete: AthleteProfile) {
+    private static func makeFixture() throws -> Fixture {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
@@ -1071,13 +1089,20 @@ struct AthleteConnectAppInProgressStateTests {
                 transport: CloudKitTransport()
             )
         )
-        return (viewModel, added.athlete)
+        return Fixture(container: container, viewModel: viewModel, athlete: added.athlete)
     }
 
     @Test("connectAthleteApp(for:) enters the in-progress state immediately, before the invitation request resolves")
     @MainActor
     func entersInProgressStateImmediately() async throws {
-        let (viewModel, athlete) = try Self.makeViewModelAndAthlete()
+        // `fixture` is kept alive as a local for this entire test — its
+        // retained `container` is what keeps `athlete` (and everything
+        // reachable through `viewModel`'s own repositories) valid for the
+        // whole function, including across the `await`s below. See
+        // `Fixture`'s own doc comment.
+        let fixture = try Self.makeFixture()
+        let viewModel = fixture.viewModel
+        let athlete = fixture.athlete
         let athleteId = athlete.athleteId
         let gate = Gate()
 
@@ -1100,7 +1125,14 @@ struct AthleteConnectAppInProgressStateTests {
     @Test("A second connectAthleteApp(for:) call while the first is still in flight does not start a second underlying invitation request")
     @MainActor
     func reentrantCallDoesNotStartSecondRequest() async throws {
-        let (viewModel, athlete) = try Self.makeViewModelAndAthlete()
+        // `fixture` is kept alive as a local for this entire test — its
+        // retained `container` is what keeps `athlete` (and everything
+        // reachable through `viewModel`'s own repositories) valid for the
+        // whole function, including across the `await`s below. See
+        // `Fixture`'s own doc comment.
+        let fixture = try Self.makeFixture()
+        let viewModel = fixture.viewModel
+        let athlete = fixture.athlete
         let athleteId = athlete.athleteId
         let gate = Gate()
         actor InvocationCounter { var count = 0; func increment() { count += 1 } }
@@ -1131,7 +1163,14 @@ struct AthleteConnectAppInProgressStateTests {
     @Test("A successful invitation request resets the in-progress state and stores the handoff")
     @MainActor
     func successResetsInProgressState() async throws {
-        let (viewModel, athlete) = try Self.makeViewModelAndAthlete()
+        // `fixture` is kept alive as a local for this entire test — its
+        // retained `container` is what keeps `athlete` (and everything
+        // reachable through `viewModel`'s own repositories) valid for the
+        // whole function, including across the `await`s below. See
+        // `Fixture`'s own doc comment.
+        let fixture = try Self.makeFixture()
+        let viewModel = fixture.viewModel
+        let athlete = fixture.athlete
         let handoff = Self.makeHandoff(participantId: UUID(), athleteId: athlete.athleteId)
         viewModel.testPrepareInvitationOverride = { _ in handoff }
 
@@ -1145,7 +1184,14 @@ struct AthleteConnectAppInProgressStateTests {
     @Test("A failed invitation request resets the in-progress state, and preserves the existing friendly error text unchanged")
     @MainActor
     func failureResetsInProgressStateAndPreservesFriendlyError() async throws {
-        let (viewModel, athlete) = try Self.makeViewModelAndAthlete()
+        // `fixture` is kept alive as a local for this entire test — its
+        // retained `container` is what keeps `athlete` (and everything
+        // reachable through `viewModel`'s own repositories) valid for the
+        // whole function, including across the `await`s below. See
+        // `Fixture`'s own doc comment.
+        let fixture = try Self.makeFixture()
+        let viewModel = fixture.viewModel
+        let athlete = fixture.athlete
         viewModel.testPrepareInvitationOverride = { _ in
             throw AthleteConnectionOwnerHandoffError.shareCreationFailed(
                 FamilyWorkspaceSharingError.zoneCreationFailed(CKError(.permissionFailure))
@@ -1162,7 +1208,14 @@ struct AthleteConnectAppInProgressStateTests {
     @Test("A failed invitation request preserves the existing Internal Alpha diagnostic behavior unchanged")
     @MainActor
     func failurePreservesExistingDiagnosticBehavior() async throws {
-        let (viewModel, athlete) = try Self.makeViewModelAndAthlete()
+        // `fixture` is kept alive as a local for this entire test — its
+        // retained `container` is what keeps `athlete` (and everything
+        // reachable through `viewModel`'s own repositories) valid for the
+        // whole function, including across the `await`s below. See
+        // `Fixture`'s own doc comment.
+        let fixture = try Self.makeFixture()
+        let viewModel = fixture.viewModel
+        let athlete = fixture.athlete
         viewModel.testPrepareInvitationOverride = { _ in
             throw AthleteConnectionOwnerHandoffError.shareCreationFailed(
                 FamilyWorkspaceSharingError.zoneCreationFailed(CKError(.permissionFailure))
