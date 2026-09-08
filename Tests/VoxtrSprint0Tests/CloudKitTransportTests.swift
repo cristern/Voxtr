@@ -343,6 +343,26 @@ struct FamilyWorkspaceCloudRecordMappingTests {
         #expect(record[FamilyWorkspaceCloudRecordSchema.mappingVersionFieldKey] as? Int64 == FamilyWorkspaceCloudRecordSchema.mappingVersion)
     }
 
+    // CloudKit schema audit follow-up: schema-drift guard for
+    // `CloudKit/VoxtrCloudKitSchema.ckdb`/`VoxtrCloudKitSchemaManifest.md`.
+    // `CKRecord.allKeys()` is a plain, local, side-effect-free accessor
+    // (no CloudKit I/O — see this file's own XCTEST-SAFETY convention),
+    // so comparing it against the manifest's declared field set directly
+    // catches a field renamed/added/removed in
+    // `FamilyWorkspaceCloudRecordMapping.makeRecord(for:zoneID:)` without
+    // the schema artifact being updated to match, without needing a full
+    // schema-codegen system.
+    @Test("The FamilyWorkspace CKRecord's actual field set exactly matches CloudKit/VoxtrCloudKitSchema.ckdb — a field renamed/added/removed in makeRecord(for:zoneID:) without updating the schema artifact fails this test")
+    func familyWorkspaceRecordFieldsMatchSchemaManifest() {
+        let payload = FamilyWorkspaceCloudRecordPayload(workspaceId: UUID())
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: payload.workspaceId)
+
+        let record = FamilyWorkspaceCloudRecordMapping.makeRecord(for: payload, zoneID: zoneID)
+
+        #expect(record.recordType == "FamilyWorkspace")
+        #expect(Set(record.allKeys()) == ["workspaceId", "mappingVersion"])
+    }
+
     @Test("payload(from:) is the exact inverse of makeRecord(for:zoneID:) — round-tripping a record recovers the same stable workspace identity, proving no identity is lost or randomized in transit")
     func payloadRoundTripsThroughMakeRecord() throws {
         let payload = FamilyWorkspaceCloudRecordPayload(workspaceId: UUID())
@@ -670,6 +690,36 @@ struct AthleteConnectionInvitationCloudRecordMappingTests {
         #expect(record[AthleteConnectionInvitationCloudRecordSchema.athleteTimeZoneIdFieldKey] as? String == payload.athleteTimeZoneId)
         #expect(record[AthleteConnectionInvitationCloudRecordSchema.athleteDevelopmentStageFieldKey] as? String == payload.athleteDevelopmentStage)
         #expect(record[AthleteConnectionInvitationCloudRecordSchema.mappingVersionFieldKey] as? Int64 == AthleteConnectionInvitationCloudRecordSchema.mappingVersion)
+    }
+
+    // CloudKit schema audit follow-up: schema-drift guard for
+    // `CloudKit/VoxtrCloudKitSchema.ckdb`/`VoxtrCloudKitSchemaManifest.md`
+    // — see `FamilyWorkspaceCloudRecordMappingTests`'s own equivalent
+    // test for why comparing `CKRecord.allKeys()` directly is the
+    // smallest useful guard against silent Swift/schema drift.
+    @Test("The AthleteConnectionInvitation CKRecord's actual field set exactly matches CloudKit/VoxtrCloudKitSchema.ckdb — a field renamed/added/removed in makeRecord/apply without updating the schema artifact fails this test")
+    func invitationRecordFieldsMatchSchemaManifest() {
+        let workspaceId = UUID()
+        let zoneID = FamilyWorkspaceCloudZoneIdentifier.ownerZoneID(forWorkspace: workspaceId)
+        let payload = makePayload(workspaceId: workspaceId)
+
+        let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(invitationId: UUID(), payload: payload, zoneID: zoneID)
+
+        #expect(record.recordType == "AthleteConnectionInvitation")
+        #expect(Set(record.allKeys()) == [
+            "workspaceId",
+            "intendedParticipantId",
+            "intendedAthleteId",
+            "parentId",
+            "parentGivenName",
+            "workspaceDisplayName",
+            "ownerParticipantId",
+            "athleteGivenName",
+            "athleteBirthDateISO",
+            "athleteTimeZoneId",
+            "athleteDevelopmentStage",
+            "mappingVersion",
+        ])
     }
 
     @Test("payload(from:) is the exact inverse of makeRecord(invitationId:payload:zoneID:) — round-tripping a record recovers the same stable identity and hydration fields")
