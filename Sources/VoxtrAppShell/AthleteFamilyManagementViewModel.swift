@@ -86,7 +86,17 @@ public final class AthleteFamilyManagementViewModel {
     /// established testability boundary. Mirrors
     /// `CreateFamilyViewModel.testSaveOverride`'s own precedent for the
     /// same reason.
-    var testPrepareInvitationOverride: ((AthleteProfile) async throws -> AthleteConnectionInvitationHandoff)?
+    ///
+    /// PR #80 Codemagic Swift 6 follow-up: the closure type itself is
+    /// explicitly `@MainActor`-isolated — a plain, unannotated function
+    /// type is NOT implicitly MainActor-isolated merely by being stored
+    /// on a `@MainActor` class, so passing the already-MainActor-isolated
+    /// `athlete` argument into it was flagged as a potential actor-crossing
+    /// send. There is no product/architectural reason for this seam to
+    /// leave MainActor at all — `connectAthleteApp(for:)` itself never
+    /// does — so pinning the closure's isolation to match, rather than
+    /// weakening `AthleteProfile`'s own Sendability, is the correct fix.
+    var testPrepareInvitationOverride: (@MainActor (AthleteProfile) async throws -> AthleteConnectionInvitationHandoff)?
 
     public init(
         workspaceId: WorkspaceId,
