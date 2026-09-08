@@ -1,9 +1,12 @@
 // Vǫxtr CloudKit Schema — Athlete Connection
 //
 // CloudKit Schema Language, importable via CloudKit Console's
-// "Deploy Schema Changes... > Import Schema" in the Development
-// environment of container `iCloud.app.voxtr.shared`, or via
-// `cktool import-schema` / `cktool apply-schema`.
+// "Import Schema..." action in the Development environment of
+// container `iCloud.app.voxtr.shared` (a separate top-level action from
+// "Deploy Schema Changes...", which is used afterward to promote the
+// reviewed Development schema to Production — see
+// VoxtrCloudKitSchemaManifest.md's "Deployment sequence" for the exact
+// steps), or via `cktool import-schema` / `cktool apply-schema`.
 //
 // This file is GENERATED-BY-HAND from the actual repository CKRecord
 // mappings — it is not a design document. It must be kept in sync with:

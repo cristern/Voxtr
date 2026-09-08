@@ -95,18 +95,25 @@ until a real query requires it.
 
 ## Deployment sequence
 
-1. **Development**: CloudKit Console → container `iCloud.app.voxtr.shared`
-   → Development environment → Schema → "Deploy Schema Changes..." →
-   Import Schema → select `VoxtrCloudKitSchema.ckdb`.
-2. **Review**: confirm the two record types and their fields above
-   appear exactly as listed, with no unexpected additional fields,
-   grants, or indexes.
-3. **Production**: CloudKit Console → "Deploy Schema Changes..." →
-   deploy the reviewed Development schema to Production. Production
-   is otherwise locked, per normal CloudKit environment lifecycle.
-4. **Retry**: the existing TestFlight Parent build can retry "Connect
-   Athlete App" against Production immediately after step 3 — no new
-   app build is required, since nothing about the CKRecord shape
+`Import Schema...` and `Deploy Schema Changes...` are two separate,
+top-level CloudKit Console actions — `Import Schema...` is not reached
+through `Deploy Schema Changes...`.
+
+1. Open CloudKit Console.
+2. Select container `iCloud.app.voxtr.shared`.
+3. Select **Development**.
+4. Choose **Import Schema...**.
+5. Import `VoxtrCloudKitSchema.ckdb`.
+6. Review **Schema → Record Types** and confirm:
+   - `FamilyWorkspace`
+   - `AthleteConnectionInvitation`
+   - the exact fields/types listed above, with no unexpected additional
+     fields, grants, or indexes.
+7. Choose **Deploy Schema Changes...**.
+8. Deploy the reviewed Development schema to Production. Production is
+   otherwise locked, per normal CloudKit environment lifecycle.
+9. Retry the existing TestFlight Parent build's "Connect Athlete App" —
+   no new app build is required, since nothing about the CKRecord shape
    changes, only the schema CloudKit was missing.
 
 ## Keeping this file in sync
