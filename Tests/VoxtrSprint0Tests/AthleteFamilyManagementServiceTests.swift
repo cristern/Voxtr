@@ -1030,6 +1030,17 @@ struct AthleteConnectAppInProgressStateTests {
         )
     }
 
+    /// PR #80 Codemagic Swift 6 follow-up: `@MainActor` because every
+    /// API this helper touches is MainActor-isolated —
+    /// `InMemoryPersistenceController.makeModelContainer()`,
+    /// `ModelContainer.mainContext`, `AthleteFamilyManagementService`,
+    /// `AthleteConnectionOwnerHandoffService`,
+    /// `FamilyWorkspaceOwnerShareCoordinator`, `CloudKitTransport`, and
+    /// `AthleteFamilyManagementViewModel` itself. Being called only from
+    /// `@MainActor`-annotated test functions does not make this helper
+    /// itself MainActor-isolated — Swift requires the callee's own
+    /// declaration to carry the isolation, not just the caller's.
+    @MainActor
     private static func makeViewModelAndAthlete() throws -> (viewModel: AthleteFamilyManagementViewModel, athlete: AthleteProfile) {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
