@@ -28,6 +28,16 @@ public final class AthleteFamilyManagementViewModel {
     /// and cleared by `dismissConnectAthleteApp()` (called when
     /// `CloudSharingPresenter` finishes or the Parent dismisses it).
     public private(set) var pendingInvitationHandoff: AthleteConnectionInvitationHandoff?
+    /// In-progress state follow-up: true from the moment
+    /// `connectAthleteApp(for:)` starts a real request until it finishes
+    /// (success or failure) — set synchronously before the first `await`,
+    /// so the View can show immediate feedback, and doubles as the
+    /// re-entry guard at the ViewModel/service boundary (see that
+    /// method's own doc comment for why the guard belongs here, not only
+    /// on the button). Mirrors the existing `isSubmitting` convention
+    /// already used by `CreateFamilyViewModel`/`DailyTrainingViewModel`/
+    /// `WeeklyReflectionFormViewModel`.
+    public private(set) var isConnectingAthleteApp = false
     /// Explicit, differentiated failure surfaced to the UI — never a
     /// generic/silent failure, matching `AthleteConnectionOwnerHandoffError`'s
     /// own explicit-error-handling requirement. Cleared at the start of
@@ -61,6 +71,22 @@ public final class AthleteFamilyManagementViewModel {
     private let athleteRepository: AthleteRepository
     private let athleteFamilyManagementService: AthleteFamilyManagementService
     private let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
+
+    /// In-progress state follow-up: test-only seam, default `nil` — every
+    /// real call goes through `athleteConnectionOwnerHandoffService
+    /// .prepareInvitation` exactly as before. `AthleteConnectionOwnerHandoffService
+    /// .prepareInvitation` itself performs real CloudKit/SwiftData I/O and
+    /// is deliberately never exercised end-to-end in tests (see
+    /// `AthleteConnectionOwnerHandoffServiceTests.swift`'s own suite-level
+    /// comment) — and a call that never suspends can never overlap with a
+    /// second one on the MainActor, so no fixture built from that service
+    /// alone could ever prove the re-entry guard rejects a concurrent
+    /// second call. This lets a test control the timing of "creating the
+    /// invitation" instead, without touching that service's own
+    /// established testability boundary. Mirrors
+    /// `CreateFamilyViewModel.testSaveOverride`'s own precedent for the
+    /// same reason.
+    var testPrepareInvitationOverride: ((AthleteProfile) async throws -> AthleteConnectionInvitationHandoff)?
 
     public init(
         workspaceId: WorkspaceId,
@@ -246,16 +272,37 @@ public final class AthleteFamilyManagementViewModel {
     /// `ActorId`, from the SAME `participantId` this ViewModel already
     /// holds (the owner's own `WorkspaceParticipant.id`) — never a
     /// separately-derived identity.
+    ///
+    /// In-progress state follow-up: the `isConnectingAthleteApp` guard
+    /// below is the re-entry boundary — deliberately not left to the
+    /// View's own `.disabled(...)` alone, so a second caller reaching
+    /// this method directly (e.g. if the button/screen structure changes
+    /// later) still cannot start a second, parallel invitation request
+    /// while one is already in flight. `isConnectingAthleteApp` is set
+    /// synchronously, before the first `await`, so it is already `true`
+    /// by the time this method's first suspension point is reached —
+    /// there is no window where a second call could slip in before the
+    /// flag takes effect. `defer` resets it on every exit path (success
+    /// or the `catch` below), matching this file's own existing
+    /// `isSubmitting`-style convention elsewhere in this module.
     public func connectAthleteApp(for athlete: AthleteProfile) async {
+        guard !isConnectingAthleteApp else { return }
+        isConnectingAthleteApp = true
+        defer { isConnectingAthleteApp = false }
+
         connectAthleteAppErrorMessage = nil
         connectAthleteAppDiagnostic = nil
         pendingInvitationHandoff = nil
         do {
-            pendingInvitationHandoff = try await athleteConnectionOwnerHandoffService.prepareInvitation(
-                forAthlete: athlete.athleteId,
-                workspaceId: workspaceId,
-                invitedBy: ActorId(rawValue: participantId)
-            )
+            if let testPrepareInvitationOverride {
+                pendingInvitationHandoff = try await testPrepareInvitationOverride(athlete)
+            } else {
+                pendingInvitationHandoff = try await athleteConnectionOwnerHandoffService.prepareInvitation(
+                    forAthlete: athlete.athleteId,
+                    workspaceId: workspaceId,
+                    invitedBy: ActorId(rawValue: participantId)
+                )
+            }
         } catch {
             connectAthleteAppErrorMessage = Self.message(forHandoffError: error)
             connectAthleteAppDiagnostic = Self.diagnostic(forHandoffError: error)

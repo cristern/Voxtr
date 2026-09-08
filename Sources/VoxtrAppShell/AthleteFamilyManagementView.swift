@@ -577,9 +577,19 @@ struct AthleteSettingsView: View {
                         .accessibilityIdentifier("athleteSettings.connectAthleteAppDiagnostic.\(athlete.id.uuidString)")
                     }
                 }
-                Button("Connect Athlete App") {
+                Button {
                     Task { await viewModel.connectAthleteApp(for: athlete) }
+                } label: {
+                    if viewModel.isConnectingAthleteApp {
+                        HStack {
+                            ProgressView()
+                            Text("Creating invitation…")
+                        }
+                    } else {
+                        Text("Connect Athlete App")
+                    }
                 }
+                .disabled(viewModel.isConnectingAthleteApp)
                 .accessibilityIdentifier("athleteSettings.connectAthleteAppButton.\(athlete.id.uuidString)")
             } header: {
                 VoxtrSectionHeading("Athlete App")
