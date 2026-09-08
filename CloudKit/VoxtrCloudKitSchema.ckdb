@@ -1,0 +1,76 @@
+// Vǫxtr CloudKit Schema — Athlete Connection
+//
+// CloudKit Schema Language, importable via CloudKit Console's
+// "Import Schema..." action in the Development environment of
+// container `iCloud.app.voxtr.shared` (a separate top-level action from
+// "Deploy Schema Changes...", which is used afterward to promote the
+// reviewed Development schema to Production — see
+// VoxtrCloudKitSchemaManifest.md's "Deployment sequence" for the exact
+// steps), or via `cktool import-schema` / `cktool apply-schema`.
+//
+// This file is GENERATED-BY-HAND from the actual repository CKRecord
+// mappings — it is not a design document. It must be kept in sync with:
+//   - Sources/VoxtrCore/CloudKit/FamilyWorkspaceCloudRecordMapping.swift
+//   - Sources/VoxtrCore/CloudKit/AthleteConnectionInvitationCloudRecordMapping.swift
+// See CloudKit/VoxtrCloudKitSchemaManifest.md for the human-readable
+// inventory this file is derived from, and
+// Tests/VoxtrSprint0Tests/CloudKitTransportTests.swift's
+// "...RecordFieldsMatchSchemaManifest" tests for the automated guard
+// against the two silently drifting apart.
+//
+// Only the two custom record types Vǫxtr code actually writes are
+// declared below. The container's built-in "Users" record type is
+// CloudKit's own system type and is not managed here.
+//
+// No QUERYABLE/SORTABLE/SEARCHABLE field options are declared: every
+// current Athlete Connection CloudKit access is either a direct fetch by
+// CKRecord.ID (CKDatabase.record(for:)) or CKShare root/reference
+// traversal — no CKQuery/NSPredicate-based lookup exists anywhere in the
+// repository today, so no field requires an index. Do not add one
+// speculatively; add it only when a real query needs it.
+//
+// GRANT statements deliberately omit `GRANT READ TO "_world"`: both
+// record types live exclusively in a Parent-owned private custom zone
+// (never the public database), and access is governed by CKShare
+// participant permissions (both shares are created with
+// `publicPermission = .none`), not by public-database schema grants.
+// `_creator`/`_icloud` are CloudKit's own standard default grants for a
+// non-public record type.
+
+DEFINE SCHEMA
+
+    RECORD TYPE FamilyWorkspace (
+        "___createTime" TIMESTAMP,
+        "___createdBy"  REFERENCE,
+        "___etag"       STRING,
+        "___modTime"    TIMESTAMP,
+        "___modifiedBy" REFERENCE,
+        "___recordID"   REFERENCE,
+        workspaceId     STRING,
+        mappingVersion  INT64,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud"
+    );
+
+    RECORD TYPE AthleteConnectionInvitation (
+        "___createTime"          TIMESTAMP,
+        "___createdBy"           REFERENCE,
+        "___etag"                STRING,
+        "___modTime"             TIMESTAMP,
+        "___modifiedBy"          REFERENCE,
+        "___recordID"            REFERENCE,
+        workspaceId              STRING,
+        intendedParticipantId    STRING,
+        intendedAthleteId        STRING,
+        parentId                 STRING,
+        parentGivenName          STRING,
+        workspaceDisplayName     STRING,
+        ownerParticipantId       STRING,
+        athleteGivenName         STRING,
+        athleteBirthDateISO      STRING,
+        athleteTimeZoneId        STRING,
+        athleteDevelopmentStage  STRING,
+        mappingVersion           INT64,
+        GRANT WRITE TO "_creator",
+        GRANT CREATE TO "_icloud"
+    );
