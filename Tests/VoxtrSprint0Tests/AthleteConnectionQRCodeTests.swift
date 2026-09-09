@@ -4,9 +4,12 @@ import Foundation
 
 // Athlete Connection QR-first V1: `AthleteConnectionQRCode.validate(_:)` is
 // pure — no CloudKit I/O, no persistence — so it is fully unit-testable
-// here, unlike `AthleteConnectionScanCoordinator.handleScannedText(...)`
-// (real CloudKit I/O, matching this repository's established B1/B2
-// XCTEST-SAFETY convention: never exercised in a unit test).
+// here. `AthleteConnectionScanCoordinator`'s own production adapter,
+// `handleScannedText(_:transport:session:)` (real CloudKit I/O), remains
+// untested here, matching this repository's established B1/B2
+// XCTEST-SAFETY convention — but PR #84's follow-up added a generic,
+// injectable-closure overload of the same name that IS fully unit-tested,
+// in `AthleteConnectionScanCoordinatorTests.swift`.
 @Suite("AthleteConnectionQRCode (Athlete Connection QR-first V1)")
 struct AthleteConnectionQRCodeTests {
 

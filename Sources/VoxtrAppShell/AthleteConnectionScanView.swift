@@ -19,6 +19,14 @@ public struct AthleteConnectionScanView: View {
     let transport: CloudKitTransport
     let session: AthleteRuntimeSession
     @Environment(\.dismiss) private var dismiss
+    /// PR #84 follow-up: one coordinator instance for this screen's own
+    /// lifetime — see `AthleteConnectionScanCoordinator`'s own
+    /// RE-ENTRANCE GUARD doc comment for why its `isHandlingScan` guard
+    /// is deliberately separate, per-screen-session state, not shared or
+    /// global. `@State` (not a plain `let`) so the SAME instance, and
+    /// its internal guard, survives this view's own re-renders rather
+    /// than being reconstructed on every body evaluation.
+    @State private var scanCoordinator = AthleteConnectionScanCoordinator()
     @State private var scanAttempt = 0
     @State private var isProcessingScan = false
     @State private var scanErrorMessage: String?
@@ -148,7 +156,7 @@ public struct AthleteConnectionScanView: View {
         guard !isProcessingScan else { return }
         isProcessingScan = true
         scanErrorMessage = nil
-        let outcome = await AthleteConnectionScanCoordinator.handleScannedText(text, transport: transport, session: session)
+        let outcome = await scanCoordinator.handleScannedText(text, transport: transport, session: session)
         isProcessingScan = false
         switch outcome {
         case nil:
@@ -160,6 +168,14 @@ public struct AthleteConnectionScanView: View {
             scanErrorMessage = "That code isn't a Vǫxtr connection code. Try scanning again."
         case .shareMetadataFetchFailed:
             scanErrorMessage = "Couldn't confirm this code with iCloud. Check your connection and try again."
+        case .alreadyInFlight:
+            // This screen's own isProcessingScan guard above already
+            // prevents overlapping calls in the ordinary case — this
+            // case is the coordinator's own defense-in-depth guard
+            // catching an unexpected second call; the first, genuine
+            // attempt is still in flight and will settle session.state
+            // on its own, so nothing further is shown here.
+            break
         }
     }
 }
