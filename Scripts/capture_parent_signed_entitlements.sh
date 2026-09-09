@@ -17,6 +17,23 @@
 # never fail the build" semantics are preserved exactly by leaving it
 # unset there.
 #
+# PR #83 follow-up (Blocker 1 — iCloud environment): optional
+# `EXPECTED_ICLOUD_ENVIRONMENT` (e.g. "Production") is forwarded to the
+# Python summarizer's own `--expected-icloud-environment`, which then
+# requires the FINAL SIGNED app's `com.apple.developer.icloud-container-
+# environment` to equal it exactly for `OVERALL: MATCH` — left unset
+# (the default) for Parent's existing calls, preserving their prior
+# services/containers-only determination unchanged.
+#
+# PR #83 follow-up (Blocker 2 — archive evidence must not silently
+# disappear): optional `REQUIRE_ARCHIVE=true` (unset/false by default,
+# preserving Parent's existing behavior) fails this script outright if no
+# matching $APP_NAME archive is found, or if codesign cannot extract its
+# entitlements — rather than letting the run continue on final-IPA
+# evidence alone. The embedded provisioning profile is deliberately NOT
+# subject to this requirement — it remains optional supporting evidence,
+# since it legitimately varies by signing/export flow.
+#
 # Captures what is ACTUALLY present in the FINAL SIGNED, exported .ipa and
 # compares it against the canonical source App/$APP_NAME/$APP_NAME.entitlements
 # (One Truth for what this repository requests) — never against hardcoded
@@ -58,6 +75,8 @@ set -euo pipefail
 : "${APP_NAME:?APP_NAME is required (e.g. ParentApp or AthleteApp)}"
 : "${BUNDLE_ID:?BUNDLE_ID is required}"
 FAIL_ON_MISMATCH="${FAIL_ON_MISMATCH:-false}"
+EXPECTED_ICLOUD_ENVIRONMENT="${EXPECTED_ICLOUD_ENVIRONMENT:-}"
+REQUIRE_ARCHIVE="${REQUIRE_ARCHIVE:-false}"
 
 IPA_DIR="build/ios/ipa"
 ARCHIVE_DIR="build/ios/xcarchive"
@@ -190,6 +209,11 @@ else
   echo "NOTE: no .xcarchive found in $ARCHIVE_DIR — not fabricating a file."
 fi
 
+if [ "$REQUIRE_ARCHIVE" = "true" ] && [ -z "$ARCHIVE_ARG" ]; then
+  echo "FAILING: REQUIRE_ARCHIVE=true but no readable $APP_NAME archive signed entitlements were found — Source -> Archive -> Final IPA localization cannot be guaranteed without them. (The embedded provisioning profile above is NOT subject to this requirement — it remains optional supporting evidence.)"
+  exit 1
+fi
+
 if [ ! -f "$SOURCE_ENTITLEMENTS" ]; then
   echo "FAILING: source entitlements file not found at $SOURCE_ENTITLEMENTS — this is the One Truth for what $APP_NAME requests; refusing to fabricate a comparison without it."
   exit 1
@@ -203,6 +227,7 @@ python3 Scripts/summarize_parent_cloudkit_entitlements.py \
   --archive-entitlements "$ARCHIVE_ARG" \
   --signed-entitlements "$SIGNED_ENTITLEMENTS_PLIST" \
   --profile-entitlements "$PROFILE_ARG" \
+  --expected-icloud-environment "$EXPECTED_ICLOUD_ENVIRONMENT" \
   --output "$CLOUDKIT_REPORT"
 
 echo "== Diagnostic complete =="

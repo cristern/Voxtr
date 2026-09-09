@@ -514,9 +514,16 @@ workflows:
       # `CKContainer(identifier:)` the same way ParentApp once did — see
       # Scripts/capture_parent_signed_entitlements.sh's own doc comment for
       # why this differs from ParentApp's own (unset, report-only) call
-      # below.
+      # below. PR #83 follow-up: EXPECTED_ICLOUD_ENVIRONMENT=Production
+      # additionally requires the final signed app be provisioned for the
+      # real distribution CloudKit environment, never Development — a
+      # services/containers-only MATCH is not sufficient for a TestFlight
+      # release. REQUIRE_ARCHIVE=true additionally fails this step if no
+      # readable AthleteApp archive entitlements were found, so
+      # Source -> Archive -> Final IPA localization is guaranteed, not
+      # merely attempted.
       - name: Capture AthleteApp final signed CloudKit entitlements
-        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true bash Scripts/capture_parent_signed_entitlements.sh
+        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true EXPECTED_ICLOUD_ENVIRONMENT=Production REQUIRE_ARCHIVE=true bash Scripts/capture_parent_signed_entitlements.sh
 
       - name: Archive and export ParentApp (Release)
         script: |
@@ -844,8 +851,16 @@ workflows:
       # exact IPA this workflow just exported/uploads. FAIL_ON_MISMATCH=true:
       # this manual release path must refuse to publish an AthleteApp
       # that would crash on `CKContainer(identifier:)` at runtime.
+      # PR #83 follow-up: EXPECTED_ICLOUD_ENVIRONMENT=Production additionally
+      # requires the final signed app be provisioned for the real
+      # distribution CloudKit environment, never Development — a
+      # services/containers-only MATCH is not sufficient for a TestFlight
+      # release. REQUIRE_ARCHIVE=true additionally fails this step if no
+      # readable AthleteApp archive entitlements were found, so
+      # Source -> Archive -> Final IPA localization is guaranteed, not
+      # merely attempted.
       - name: Capture AthleteApp final signed CloudKit entitlements
-        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true bash Scripts/capture_parent_signed_entitlements.sh
+        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true EXPECTED_ICLOUD_ENVIRONMENT=Production REQUIRE_ARCHIVE=true bash Scripts/capture_parent_signed_entitlements.sh
 
     # AthleteApp Release signing closeout: see testflight-release's own
     # artifacts comment for the full symbolication rationale — same tool
