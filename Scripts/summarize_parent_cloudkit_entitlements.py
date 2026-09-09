@@ -19,7 +19,29 @@ comparison authority — both are read from the source .entitlements file
 each run, so this stays correct if that file ever changes. Deliberately
 does not fail the build or normalize values away — MISMATCH is reported
 plainly so a human decides the next step (see codemagic.yaml's own comment
-for the surrounding context).
+for the surrounding context). This script's own exit code is always 0;
+Scripts/capture_parent_signed_entitlements.sh (the caller) is what
+decides, via its own optional FAIL_ON_MISMATCH flag, whether an "OVERALL:
+MISMATCH" line in this report should fail the build.
+
+AthleteApp Release signing closeout: generalized via --app-name (defaults
+to "ParentApp" so an omitted flag reproduces this script's original
+output text unchanged) — every other argument was already a plain path,
+not Parent-specific.
+
+PR #83 follow-up (Blocker 1 — iCloud environment): --expected-icloud-environment
+is optional and defaults to "" (unchecked), so an omitted flag reproduces
+this script's prior OVERALL determination unchanged (services/containers
+only) — Parent's own historical report-only call never passes it. When
+given (Athlete's TestFlight calls pass "Production"), the FINAL SIGNED
+app's own com.apple.developer.icloud-container-environment must equal it
+EXACTLY for OVERALL to read MATCH — this is a single-value distribution-
+environment check, never a services/containers-style subset/wildcard
+check, and never inferred from the source .entitlements file (which
+intentionally never declares an environment — signing/export adds it).
+The archive's own environment is still only reported for stage
+localization, exactly like archive services/containers already are —
+OVERALL remains authoritative over the FINAL SIGNED app only.
 
 Build 123 follow-up: a correctly-selected provisioning profile can
 legitimately authorize a service with the wildcard value "*" (e.g.
@@ -83,6 +105,20 @@ def requested_values_present(requested, actual) -> bool:
     return all(value in actual for value in requested)
 
 
+def environment_matches(expected: str, actual) -> bool:
+    """True iff `actual` (a signed app's own
+    com.apple.developer.icloud-container-environment value) is EXACTLY
+    `expected` — a single distribution-environment string, never a
+    services/containers-style "every requested value present" subset
+    check and never satisfied by a wildcard. `actual` is normally a
+    plain string; a length-1 list is also accepted defensively (plist
+    tooling can round-trip a scalar as a single-element array), but
+    anything else (missing, multi-valued) is a MISMATCH."""
+    if isinstance(actual, (list, tuple)):
+        actual = actual[0] if len(actual) == 1 else None
+    return actual == expected
+
+
 def profile_permits(requested, profile_actual) -> bool:
     """True iff the provisioning profile AUTHORIZES every value the source
     requests. A profile's own `*` entry is Apple's documented wildcard
@@ -101,10 +137,22 @@ def profile_permits(requested, profile_actual) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app-name", default="ParentApp")
     parser.add_argument("--source-entitlements", required=True)
     parser.add_argument("--archive-entitlements", default="")
     parser.add_argument("--signed-entitlements", required=True)
     parser.add_argument("--profile-entitlements", default="")
+    parser.add_argument(
+        "--expected-icloud-environment",
+        default="",
+        help=(
+            "e.g. 'Production' for a TestFlight/App Store release. Empty "
+            "(default) means the environment is not checked at all, "
+            "reproducing this script's original OVERALL determination — "
+            "never inferred from --source-entitlements, which does not "
+            "declare a distribution environment."
+        ),
+    )
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -113,7 +161,7 @@ def main() -> int:
         print(
             f"FAILING: could not read source entitlements at "
             f"{args.source_entitlements} — this is the One Truth for what "
-            f"ParentApp requests; refusing to fabricate a comparison "
+            f"{args.app_name} requests; refusing to fabricate a comparison "
             f"without it.",
             file=sys.stderr,
         )
@@ -127,7 +175,7 @@ def main() -> int:
     source_containers = source.get(ICLOUD_CONTAINERS_KEY)
 
     lines = []
-    lines.append("ParentApp CloudKit/iCloud signed-entitlements comparison")
+    lines.append(f"{args.app_name} CloudKit/iCloud signed-entitlements comparison")
     lines.append("=" * 58)
     lines.append("")
     lines.append(f"Source requested (from {args.source_entitlements}):")
@@ -142,6 +190,7 @@ def main() -> int:
         lines.append("  itself useful evidence: an unsigned archive would fail here). Not fabricated.")
         archive_services = []
         archive_containers = []
+        archive_environment = None
     elif archive is not None:
         archive_services = archive.get(ICLOUD_SERVICES_KEY)
         archive_containers = archive.get(ICLOUD_CONTAINERS_KEY)
@@ -155,6 +204,7 @@ def main() -> int:
         lines.append("  Not inspected (no --archive-entitlements provided for this run).")
         archive_services = None
         archive_containers = None
+        archive_environment = None
     lines.append("")
 
     if signed is None:
@@ -163,6 +213,7 @@ def main() -> int:
         lines.append("  codesign extraction step itself succeeded; treat as MISMATCH.")
         signed_services = []
         signed_containers = []
+        signed_environment = None
     else:
         signed_services = signed.get(ICLOUD_SERVICES_KEY)
         signed_containers = signed.get(ICLOUD_CONTAINERS_KEY)
@@ -196,24 +247,50 @@ def main() -> int:
     services_match = requested_values_present(source_services, signed_services)
     containers_match = requested_values_present(source_containers, signed_containers)
 
+    # PR #83 follow-up (Blocker 1): only checked when the caller supplied
+    # an expected environment at all — empty means "unchecked", exactly
+    # this script's original behavior (Parent's own historical call).
+    environment_required = bool(args.expected_icloud_environment)
+    environment_match = (
+        environment_matches(args.expected_icloud_environment, signed_environment)
+        if environment_required
+        else True
+    )
+    archive_environment_match = (
+        environment_matches(args.expected_icloud_environment, archive_environment)
+        if environment_required
+        else True
+    )
+
     lines.append("STAGE LOCALIZATION (where does entitlement loss occur, if anywhere?):")
     if archive is not None:
         archive_services_match = requested_values_present(source_services, archive_services)
         archive_containers_match = requested_values_present(source_containers, archive_containers)
-        lines.append(
+        archive_line = (
             f"  Archive vs. source — {ICLOUD_SERVICES_KEY}: "
             f"{'MATCH' if archive_services_match else 'MISMATCH'}, "
             f"{ICLOUD_CONTAINERS_KEY}: "
             f"{'MATCH' if archive_containers_match else 'MISMATCH'}"
         )
+        if environment_required:
+            archive_line += f", {ICLOUD_ENVIRONMENT_KEY}: {'MATCH' if archive_environment_match else 'MISMATCH'}"
+        lines.append(archive_line)
     else:
+        archive_services_match = True
+        archive_containers_match = True
         lines.append("  Archive vs. source: not available for this run (see ARCHIVE SIGNED APP above).")
-    lines.append(
+    final_line = (
         f"  Final IPA vs. source — {ICLOUD_SERVICES_KEY}: "
         f"{'MATCH' if services_match else 'MISMATCH'}, "
         f"{ICLOUD_CONTAINERS_KEY}: "
         f"{'MATCH' if containers_match else 'MISMATCH'}"
     )
+    if environment_required:
+        final_line += (
+            f", {ICLOUD_ENVIRONMENT_KEY}: {'MATCH' if environment_match else 'MISMATCH'} "
+            f"(expected {args.expected_icloud_environment})"
+        )
+    lines.append(final_line)
     if archive is not None:
         if (archive_services_match and archive_containers_match) and not (services_match and containers_match):
             lines.append("  => Entitlements were present in the ARCHIVE but LOST during export/re-sign.")
@@ -234,6 +311,12 @@ def main() -> int:
         f"  {ICLOUD_CONTAINERS_KEY}: signed app carries every source-requested value: "
         f"{'MATCH' if containers_match else 'MISMATCH'}"
     )
+    if environment_required:
+        lines.append(
+            f"  {ICLOUD_ENVIRONMENT_KEY}: signed app matches the expected release "
+            f"environment ({args.expected_icloud_environment}): "
+            f"{'MATCH' if environment_match else 'MISMATCH'}"
+        )
 
     if profile is not None:
         profile_services_match = profile_permits(source_services, profile_services)
@@ -251,15 +334,21 @@ def main() -> int:
         )
 
     lines.append("")
-    if services_match and containers_match:
+    overall_match = services_match and containers_match and environment_match
+    if overall_match:
         lines.append("OVERALL: MATCH — the required source-requested CloudKit entitlements")
-        lines.append("survived into the final signed app. This does not by itself prove the")
+        lines.append("survived into the final signed app" + (
+            f", and it is signed for the expected {args.expected_icloud_environment} "
+            f"iCloud environment" if environment_required else ""
+        ) + ". This does not by itself prove the")
         lines.append("Apple Developer Portal container assignment is correct, nor that")
         lines.append("CloudKit will succeed at runtime — it only confirms the signing/export")
         lines.append("boundary did not drop or alter what this repository requested.")
     else:
         lines.append("OVERALL: MISMATCH — the final signed app does not carry every CloudKit")
-        lines.append("entitlement value this repository's source .entitlements file requests.")
+        lines.append("entitlement value this repository's source .entitlements file requests" + (
+            ", or is not signed for the expected iCloud environment" if environment_required else ""
+        ) + ".")
         lines.append("See STAGE LOCALIZATION above for whether this already happened at")
         lines.append("archive time or only during export/re-sign.")
 

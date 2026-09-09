@@ -18,6 +18,10 @@ run.
 Deliberately never reads or emits `DeveloperCertificates` (certificate
 blobs), `ProvisionedDevices` (device UDIDs), or any other profile field
 beyond the identity fields listed above.
+
+AthleteApp Release signing closeout: generalized via --app-name (defaults
+to "ParentApp" so an omitted flag reproduces this script's original
+output text unchanged) — every other argument was already app-agnostic.
 """
 
 import argparse
@@ -40,6 +44,7 @@ def format_value(value) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app-name", default="ParentApp")
     parser.add_argument("--profile-plist", required=True, help="Full decoded embedded.mobileprovision plist")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -55,7 +60,7 @@ def main() -> int:
     entitlements = profile.get("Entitlements", {})
 
     lines = []
-    lines.append("ParentApp embedded provisioning-profile identity")
+    lines.append(f"{args.app_name} embedded provisioning-profile identity")
     lines.append("=" * 50)
     lines.append("")
     lines.append("Compare these fields against the Name/UUID/CreationDate shown when")

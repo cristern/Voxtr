@@ -283,6 +283,15 @@ workflows:
           xcodebuild -showBuildSettings -project "$XCODE_PROJECT" -scheme "$XCODE_SCHEME" \
             | grep -i PRODUCT_BUNDLE_IDENTIFIER || true
 
+      # AthleteApp Release signing closeout: the smallest regression
+      # assertion that Release for either app can never again silently
+      # disable code signing (see the script's own doc comment for the
+      # full rationale) — a plain, dependency-free script matching this
+      # repo's own established Scripts/*.py CI-check pattern, not a new
+      # test framework.
+      - name: Verify neither app's Release build disables code signing
+        script: python3 Scripts/check_release_signing_enabled.py
+
       - name: Auto-detect an available iOS Simulator via simctl
         script: |
           set -e
@@ -494,6 +503,28 @@ workflows:
             --scheme "$ATHLETE_SCHEME" \
             --config Release
 
+      # AthleteApp Release signing closeout: the exact same class of risk
+      # the ParentApp diagnostic below was built for — Release signing was
+      # previously disabled at the project level for AthleteApp too (fixed
+      # in App/Voxtr.xcodeproj/project.pbxproj), so this is the first real
+      # signed AthleteApp build. This step never rebuilds or re-signs
+      # anything; it only inspects the IPA/archive `xcode-project build-ipa`
+      # above already produced. FAIL_ON_MISMATCH=true: this workflow must
+      # refuse to publish an AthleteApp that would crash on
+      # `CKContainer(identifier:)` the same way ParentApp once did — see
+      # Scripts/capture_parent_signed_entitlements.sh's own doc comment for
+      # why this differs from ParentApp's own (unset, report-only) call
+      # below. PR #83 follow-up: EXPECTED_ICLOUD_ENVIRONMENT=Production
+      # additionally requires the final signed app be provisioned for the
+      # real distribution CloudKit environment, never Development — a
+      # services/containers-only MATCH is not sufficient for a TestFlight
+      # release. REQUIRE_ARCHIVE=true additionally fails this step if no
+      # readable AthleteApp archive entitlements were found, so
+      # Source -> Archive -> Final IPA localization is guaranteed, not
+      # merely attempted.
+      - name: Capture AthleteApp final signed CloudKit entitlements
+        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true EXPECTED_ICLOUD_ENVIRONMENT=Production REQUIRE_ARCHIVE=true bash Scripts/capture_parent_signed_entitlements.sh
+
       - name: Archive and export ParentApp (Release)
         script: |
           xcode-project build-ipa \
@@ -514,9 +545,11 @@ workflows:
       # already produced. See Scripts/capture_parent_signed_entitlements.sh
       # for the full extraction logic (it locates ParentApp's own .ipa by
       # CFBundleIdentifier, since this workflow builds AthleteApp's .ipa
-      # into the same directory).
+      # into the same directory). FAIL_ON_MISMATCH is deliberately left
+      # unset here — Parent's own historical report-only semantics are
+      # unchanged by the AthleteApp Release signing closeout.
       - name: Capture ParentApp final signed CloudKit entitlements
-        script: bash Scripts/capture_parent_signed_entitlements.sh
+        script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/capture_parent_signed_entitlements.sh
 
     # ParentApp crash symbolication follow-up: `xcode-project build-ipa`
     # (used for both apps above) archives to `build/ios/xcarchive/*.xcarchive`
@@ -534,6 +567,11 @@ workflows:
       - build/ios/ipa/*.ipa
       - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
+      - build/diagnostics/AthleteApp-signed-entitlements.plist
+      - build/diagnostics/AthleteApp-profile-entitlements.plist
+      - build/diagnostics/AthleteApp-profile-summary.txt
+      - build/diagnostics/AthleteApp-archive-signed-entitlements.plist
+      - build/diagnostics/AthleteApp-cloudkit-entitlements.txt
       - build/diagnostics/ParentApp-signed-entitlements.plist
       - build/diagnostics/ParentApp-profile-entitlements.plist
       - build/diagnostics/ParentApp-profile-summary.txt
@@ -670,8 +708,11 @@ workflows:
       # testflight-release's own step comment above for the full
       # rationale — same script (Scripts/capture_parent_signed_entitlements.sh),
       # inspecting the exact IPA this workflow just exported/uploads.
+      # FAIL_ON_MISMATCH is deliberately left unset — Parent's own
+      # historical report-only semantics, unchanged by the AthleteApp
+      # Release signing closeout.
       - name: Capture ParentApp final signed CloudKit entitlements
-        script: bash Scripts/capture_parent_signed_entitlements.sh
+        script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/capture_parent_signed_entitlements.sh
 
     # ParentApp crash symbolication follow-up: see testflight-release's own
     # artifacts comment above for the full rationale — same tool
@@ -803,9 +844,39 @@ workflows:
             --scheme "$ATHLETE_SCHEME" \
             --config Release
 
+      # AthleteApp signed-entitlements diagnostic follow-up (AthleteApp
+      # Release signing closeout): see testflight-release's own step
+      # comment for the full rationale — same generalized script
+      # (Scripts/capture_parent_signed_entitlements.sh), inspecting the
+      # exact IPA this workflow just exported/uploads. FAIL_ON_MISMATCH=true:
+      # this manual release path must refuse to publish an AthleteApp
+      # that would crash on `CKContainer(identifier:)` at runtime.
+      # PR #83 follow-up: EXPECTED_ICLOUD_ENVIRONMENT=Production additionally
+      # requires the final signed app be provisioned for the real
+      # distribution CloudKit environment, never Development — a
+      # services/containers-only MATCH is not sufficient for a TestFlight
+      # release. REQUIRE_ARCHIVE=true additionally fails this step if no
+      # readable AthleteApp archive entitlements were found, so
+      # Source -> Archive -> Final IPA localization is guaranteed, not
+      # merely attempted.
+      - name: Capture AthleteApp final signed CloudKit entitlements
+        script: APP_NAME=AthleteApp BUNDLE_ID="$ATHLETE_BUNDLE_ID" FAIL_ON_MISMATCH=true EXPECTED_ICLOUD_ENVIRONMENT=Production REQUIRE_ARCHIVE=true bash Scripts/capture_parent_signed_entitlements.sh
+
+    # AthleteApp Release signing closeout: see testflight-release's own
+    # artifacts comment for the full symbolication rationale — same tool
+    # (`xcode-project build-ipa`), same default archive path. Previously
+    # this workflow declared neither the archive nor any diagnostic
+    # output, since AthleteApp Release was never genuinely signed before
+    # this fix.
     artifacts:
       - build/ios/ipa/*.ipa
+      - build/ios/xcarchive/*.xcarchive
       - /tmp/xcodebuild_logs/*.log
+      - build/diagnostics/AthleteApp-signed-entitlements.plist
+      - build/diagnostics/AthleteApp-profile-entitlements.plist
+      - build/diagnostics/AthleteApp-profile-summary.txt
+      - build/diagnostics/AthleteApp-archive-signed-entitlements.plist
+      - build/diagnostics/AthleteApp-cloudkit-entitlements.txt
 
     publishing:
       app_store_connect:
