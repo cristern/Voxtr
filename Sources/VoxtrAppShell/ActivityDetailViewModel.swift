@@ -18,6 +18,21 @@ public final class ActivityDetailViewModel {
     public private(set) var isCompleted: Bool
     public private(set) var errorMessage: String?
     public private(set) var isDeleted: Bool = false
+    /// Activity Edit -> Split Activity: the current split draft — empty
+    /// until `beginSplit()` populates it. Purely local UI state, the
+    /// same "draft until an explicit commit action" shape
+    /// `reminders`/`ActivityReminderDraft` already establishes on this
+    /// same screen — nothing here is persisted until `splitActivity()`
+    /// is called and succeeds.
+    public var splitChildren: [SplitChildDraft] = []
+    /// Set only inside `splitActivity()` on success, and reset by
+    /// `beginSplit()` — the explicit success signal `SplitActivityFormView`'s
+    /// presenting `.sheet(onDismiss:)` reads to decide whether to also
+    /// pop this whole screen back to the list the split's new siblings
+    /// are now visible in, the same "explicit success signal, not
+    /// implicit SwiftUI lifecycle" principle `onActivityLogged` already
+    /// establishes elsewhere on this screen.
+    public private(set) var didSplitSuccessfully: Bool = false
     /// VX-022 closeout: the exact `LoggedActivity` this `PlannedActivity`
     /// resolved to, if any — resolved by `ActivityDetailViewLoader` via
     /// `TrainingReflectionCoordinationService.loggedActivityDetail(forPlannedActivity:)`
@@ -281,6 +296,33 @@ public final class ActivityDetailViewModel {
         return TrainingValidator.requiresActualDuration(for: outcomeStatus)
     }
 
+    /// Activity Edit -> Split Activity: mirrors `canEditOrDelete`'s own
+    /// `isWeekPlanDraft` requirement exactly — `PlanningService
+    /// .splitPlannedActivity` enforces the identical `.draft` guard
+    /// `editPlannedActivity`/`deletePlannedActivity` already do, so a
+    /// committed week's activities are no more splittable than they are
+    /// editable/deletable, not a new lifecycle rule invented here.
+    ///
+    /// Also requires `!isCompleted` — the same canonical "has a
+    /// LoggedActivity already been resolved for this activity" signal
+    /// `canCancel` already reads, reused rather than re-derived: Planning
+    /// proposes, Training proves, and a split rewrites the PLAN, which
+    /// must not happen once Training has proven something about the
+    /// activity as it was originally shaped. `PlanningService` itself has
+    /// no visibility into `LoggedActivity` (a different domain — see
+    /// `splitPlannedActivity`'s own doc comment), so this check belongs
+    /// here, at the ViewModel/application boundary, not only behind the
+    /// "Split Activity" button's visibility — `splitActivity()` below
+    /// re-checks this same condition before ever calling the service.
+    public var canSplit: Bool { isWeekPlanDraft && !isCompleted }
+
+    /// Whether the current split draft has enough valid rows to attempt
+    /// a split — `PlanningService.splitPlannedActivity`'s own
+    /// `children.count >= 2` requirement, checked here too so the
+    /// "Split" action can be disabled before the user taps it, not only
+    /// after a doomed attempt.
+    public var canConfirmSplit: Bool { splitChildren.count >= 2 }
+
     public func prefillEditForm() {
         editTitle = activity.title ?? ""
         editSportId = activity.sportId.map { SportId(rawValue: $0) }
@@ -447,6 +489,112 @@ public final class ActivityDetailViewModel {
         } catch {
             errorMessage = "Could not save changes. Please try again."
             return false
+        }
+    }
+
+    /// Activity Edit -> Split Activity: (re)initializes the split draft
+    /// from the CURRENTLY PERSISTED `activity` — never from `editXxx`
+    /// (the separate, independent "Edit Planned Activity" form's own
+    /// in-progress, possibly-unsaved draft state). Split is a distinct
+    /// structural action, not a continuation of an in-progress plan
+    /// edit: an unsaved title/date/duration change sitting in the Edit
+    /// sheet must never be silently folded into a split.
+    ///
+    /// Two default children: the first exactly mirrors the original's
+    /// own current shape (offset 0, same Activity Type/duration); the
+    /// second starts immediately after the first ends, defaulting to 30
+    /// minutes and the same Activity Type — deliberately not blank/zeroed,
+    /// so the split form opens on a plausible, immediately editable
+    /// starting point rather than empty pickers.
+    public func beginSplit() {
+        errorMessage = nil
+        didSplitSuccessfully = false
+        let firstDuration = activity.plannedDurationMinutes ?? 60
+        splitChildren = [
+            SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: 0, durationMinutes: firstDuration),
+            SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: firstDuration, durationMinutes: 30)
+        ]
+    }
+
+    /// Appends one more draft row, starting immediately after the
+    /// current last child ends — matching `beginSplit()`'s own "plausible
+    /// starting point, never blank" convention.
+    public func addSplitChild() {
+        let lastEnd = splitChildren.last.map { $0.startOffsetMinutes + $0.durationMinutes } ?? 0
+        splitChildren.append(SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: lastEnd, durationMinutes: 30))
+    }
+
+    /// Removes one draft row. Never affects any sibling row's own
+    /// offset/duration — a Parent who removes a child is expected to
+    /// adjust the remaining ones themselves, the same "no heuristic
+    /// re-derivation of what the user typed" boundary
+    /// `CalendarImportReviewViewModel.removeSplitChild` already
+    /// establishes for the same UI shape.
+    public func removeSplitChild(_ id: SplitChildDraft.ID) {
+        splitChildren.removeAll { $0.id == id }
+    }
+
+    /// Commits the current split draft through `PlanningService
+    /// .splitPlannedActivity` — the ONLY place this screen mutates
+    /// `PlannedActivity` structurally into more than one row. Re-checks
+    /// `canSplit` here, not only at the "Split Activity" button's own
+    /// visibility, so a stale/reused draft can never bypass the
+    /// LoggedActivity/draft-week eligibility rule merely by having
+    /// reached this method some other way.
+    @discardableResult
+    public func splitActivity() -> Bool {
+        errorMessage = nil
+        guard canSplit else {
+            errorMessage = PlanningStrings.splitNotEligible
+            return false
+        }
+        guard canConfirmSplit else {
+            errorMessage = PlanningStrings.splitRequiresTwoChildren
+            return false
+        }
+        do {
+            let children = splitChildren.map {
+                PlannedActivitySplitChild(
+                    activityType: $0.activityType,
+                    startOffsetMinutes: $0.startOffsetMinutes,
+                    durationMinutes: $0.durationMinutes
+                )
+            }
+            let result = try planningService.splitPlannedActivity(
+                activity.plannedActivityId,
+                expectedWeekPlanId: weekPlanId,
+                children: children,
+                splitBy: deletedByActorId
+            )
+            guard let updatedOriginal = result.first else { return false }
+            activity = updatedOriginal
+            // The first child is a reshaped version of the SAME
+            // PlannedActivity this screen already shows — refresh the
+            // edit/reminder drafts from it exactly as `saveEdit()`
+            // already does after its own successful mutation, so
+            // nothing on this screen shows a stale pre-split shape.
+            prefillEditForm()
+            prefillReminderForm()
+            didSplitSuccessfully = true
+            onActivityLogged()
+            return true
+        } catch let error as PlanningServiceError {
+            errorMessage = Self.message(forSplitError: error)
+            return false
+        } catch {
+            errorMessage = PlanningStrings.splitGenericError
+            return false
+        }
+    }
+
+    private static func message(forSplitError error: PlanningServiceError) -> String {
+        switch error {
+        case .weekPlanNotDraft:
+            return PlanningStrings.weekPlanNotDraftError
+        case .invalidField:
+            return PlanningStrings.splitRequiresTwoChildren
+        default:
+            return PlanningStrings.splitGenericError
         }
     }
 

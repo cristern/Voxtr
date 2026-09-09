@@ -83,4 +83,33 @@ public enum PlanningStrings {
             defaultValue: "The activity was saved, but this reminder could not be set."
         )
     }
+
+    /// Activity Edit -> Split Activity.
+    public static var splitNotEligible: String {
+        String(
+            localized: "planning.split.notEligible",
+            defaultValue: "This activity can no longer be split."
+        )
+    }
+
+    public static var splitRequiresTwoChildren: String {
+        String(
+            localized: "planning.split.requiresTwoChildren",
+            defaultValue: "Add at least two activities to split into."
+        )
+    }
+
+    public static var splitGenericError: String {
+        String(
+            localized: "planning.split.genericError",
+            defaultValue: "Could not split this activity. Please try again."
+        )
+    }
+
+    public static var splitBlockedByLoggedActivity: String {
+        String(
+            localized: "planning.split.blockedByLoggedActivity",
+            defaultValue: "This activity has already been logged and can no longer be split."
+        )
+    }
 }
