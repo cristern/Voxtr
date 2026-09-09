@@ -114,16 +114,61 @@ final class CloudKitContainerProvider: CloudKitContainerProviding {
         try await container.accept(metadata)
     }
 
-    /// `CKContainer.fetchShareMetadata(with:completionHandler:)` is
-    /// Apple's own Objective-C completion-handler API
-    /// (`(CKShare.Metadata?, Error?) -> Void`); Swift's automatic
-    /// completion-handler-to-async bridging (SE-0297) is what exposes it
-    /// here as `async throws`, not a hand-written Apple overlay — the
-    /// same mechanism this codebase already relies on nowhere else, so
-    /// this is the first place it is depended on explicitly.
+    /// PR #84 follow-up (Codemagic Xcode 26.6 compile fix): the
+    /// previous implementation assumed Swift's automatic completion-
+    /// handler-to-async bridging exposed `CKContainer.fetchShareMetadata
+    /// (with:completionHandler:)` here as `async throws` — Codemagic's
+    /// own authoritative compiler errors ("Cannot convert return
+    /// expression of type 'Void' to return type 'CKShare.Metadata'",
+    /// "Missing argument for parameter 'completionHandler' in call")
+    /// prove that bridging does not exist in this project's actual SDK/
+    /// compiler shape. The completion-handler form must be called
+    /// explicitly instead.
+    ///
+    /// `withCheckedThrowingContinuation` is the smallest Swift-
+    /// concurrency-safe adapter for a callback API with no async
+    /// overlay — no blocking wait/semaphore. `continuation.resume` is
+    /// called EXACTLY ONCE on every path:
+    /// - a real Apple `Error` → rethrown as-is;
+    /// - a real `CKShare.Metadata` (no error) → returned;
+    /// - neither (the completion handler's own `(CKShare.Metadata?,
+    ///   Error?)` signature technically allows this, even though it
+    ///   should not happen in practice) → a bounded, explicit
+    ///   `CloudKitContainerProviderError.shareMetadataUnavailable`,
+    ///   never a force-unwrap.
+    ///
+    /// SENDABILITY: the closure passed to `withCheckedThrowingContinuation`
+    /// runs synchronously within this call (not on a different thread),
+    /// so it needs no `@Sendable` annotation itself; the INNER completion
+    /// handler — the closure CloudKit actually invokes later, from its
+    /// own background queue — captures only `continuation`
+    /// (`CheckedContinuation` is `Sendable` by Apple's own declaration)
+    /// and `url` (a `Sendable` value type), so no non-Sendable state
+    /// crosses that boundary.
     func fetchShareMetadata(with url: URL) async throws -> CKShare.Metadata {
-        try await container.fetchShareMetadata(with: url)
+        try await withCheckedThrowingContinuation { continuation in
+            container.fetchShareMetadata(with: url) { metadata, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let metadata else {
+                    continuation.resume(throwing: CloudKitContainerProviderError.shareMetadataUnavailable)
+                    return
+                }
+                continuation.resume(returning: metadata)
+            }
+        }
     }
+}
+
+/// Bounded internal transport error — never force-unwrapped. Only ever
+/// thrown when Apple's own `fetchShareMetadata(with:completionHandler:)`
+/// reports neither a real `CKShare.Metadata` nor an `Error`, a case its
+/// own optional-optional signature technically allows even though it
+/// should not happen in practice.
+enum CloudKitContainerProviderError: Error, Equatable {
+    case shareMetadataUnavailable
 }
 
 /// Which of Apple's two database properties a `CloudKitDatabaseScope`
