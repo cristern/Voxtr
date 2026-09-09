@@ -193,6 +193,7 @@ public struct ParentTabShellView: View {
                 weeklyReflectionService: weeklyReflectionService,
                 coachingApplicationService: coachingApplicationService,
                 athleteRepository: athleteRepository,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 actorId: family.currentActor.actorId
             )
             .tabItem { Label("Training", systemImage: "figure.run") }
@@ -511,6 +512,14 @@ private struct ParentTrainingTabView: View {
     let weeklyReflectionService: WeeklyReflectionService
     let coachingApplicationService: CoachingApplicationService
     let athleteRepository: AthleteRepository
+    /// Activity Edit -> Split Activity (PR #82 follow-up 3, Codemagic
+    /// build 143 compile fix): threaded through so this tab root's own
+    /// `DailyTrainingView` construction below can reach the Split
+    /// Activity action, matching every other `DailyTrainingView`/
+    /// `ActivityDetailViewLoader` entry point in the app — the SAME
+    /// shared instance `ParentTabShellView` already owns, never a
+    /// second, locally-constructed coordinator.
+    let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     let actorId: ActorId
 
     @State private var activeAthletes: [AthleteProfile]
@@ -539,6 +548,7 @@ private struct ParentTrainingTabView: View {
         weeklyReflectionService: WeeklyReflectionService,
         coachingApplicationService: CoachingApplicationService,
         athleteRepository: AthleteRepository,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         actorId: ActorId
     ) {
         self.family = family
@@ -551,6 +561,7 @@ private struct ParentTrainingTabView: View {
         self.weeklyReflectionService = weeklyReflectionService
         self.coachingApplicationService = coachingApplicationService
         self.athleteRepository = athleteRepository
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.actorId = actorId
         _activeAthletes = State(initialValue: family.activeAthletes)
     }
