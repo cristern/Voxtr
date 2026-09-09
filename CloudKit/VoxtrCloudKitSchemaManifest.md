@@ -41,7 +41,7 @@ as permission to model CloudKit system schema in the repository.
 ## CloudKit-managed sharing schema
 
 `cloudkit.share` and `_pcs_data` are CloudKit-managed sharing/system
-concepts. They are **not** part of Vǫtr's application schema and must not
+concepts. They are **not** part of Vǫxtr's application schema and must not
 be added manually to `VoxtrCloudKitSchema.ckdb` or to the Swift mapping
 field manifests below.
 
