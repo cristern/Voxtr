@@ -1,27 +1,67 @@
 # Vǫxtr CloudKit Schema Manifest
 
 Operational reference for `VoxtrCloudKitSchema.ckdb`. Not a design
-document — see `Docs/AthleteConnectionFoundationB-Discovery.md` for
-architecture rationale. This file states what exists and how to deploy
-it.
+document — see `Docs/AthleteConnectionFoundationB-Discovery.md` and
+`Docs/AthleteConnectionFoundationB-Closeout.md` for architecture rationale
+and runtime closeout. This file states what exists and how to deploy it.
 
 ## Container
 
 `iCloud.app.voxtr.shared`
 
-## Current diagnostic this schema fixes
+## Current deployment/runtime status
 
-TestFlight Parent builds fail Athlete Connection with:
+The Vǫxtr custom schema below has been imported into CloudKit Development
+and deployed to Production.
 
-```
-AthleteInviteCloudKit stage=sharing-root-save ckCode=invalidArguments ckCodeRaw=12
-```
+Runtime validation established two separate prerequisites for Parent-side
+Athlete Connection share creation:
 
-CloudKit Console confirms Production is locked (expected) and
-Development contains only the built-in `Users` record type — Vǫxtr's own
-custom record types have never been deployed to either environment.
-Importing `VoxtrCloudKitSchema.ckdb` into Development, then deploying to
-Production, is expected to resolve this without a new app build.
+1. the final signed ParentApp must actually carry the CloudKit/container
+   entitlements authorised by its provisioning profile; and
+2. CloudKit's own sharing support schema must exist in the target
+   environment in addition to Vǫxtr's custom record types.
+
+The first issue was fixed in Parent Release signing before this schema
+closeout. After the custom Vǫxtr schema was deployed, Parent TestFlight
+progressed from `sharing-root-save · invalidArguments` to
+`share-save · invalidArguments`. CloudKit Production logs for that second
+failure showed `BAD_REQUEST`, `USER_ERROR`, `returnedRecordTypes:
+"_pcs_data"` while saving the share.
+
+A one-time ParentApp build targeting CloudKit Development then performed a
+real `CKShare` save. CloudKit generated its own `cloudkit.share` system
+record type in Development. After **Deploy Schema Changes...** promoted
+that generated sharing schema to Production, the normal TestFlight
+ParentApp successfully progressed through the share-creation path.
+
+This is a Vǫxtr runtime-verified operational fact. It should not be treated
+as permission to model CloudKit system schema in the repository.
+
+## CloudKit-managed sharing schema
+
+`cloudkit.share` and `_pcs_data` are CloudKit-managed sharing/system
+concepts. They are **not** part of Vǫtr's application schema and must not
+be added manually to `VoxtrCloudKitSchema.ckdb` or to the Swift mapping
+field manifests below.
+
+If a fresh CloudKit container/environment later exhibits the same
+`share-save · invalidArguments` / `BAD_REQUEST` / `_pcs_data` signature and
+`cloudkit.share` is absent from Development, the verified recovery path is:
+
+1. run a correctly signed physical-device build against CloudKit
+   **Development**;
+2. perform one real `CKShare` save;
+3. confirm CloudKit generated `cloudkit.share` under Development → Schema →
+   Record Types;
+4. use **Deploy Schema Changes...** to promote the resulting Development
+   schema to Production; and
+5. retry the normal Production/TestFlight build.
+
+The temporary Codemagic workflow used for the one-time Vǫxtr bootstrap was
+kept out of `develop`; PR #79 was closed unmerged after successful runtime
+validation. Recreate such tooling only if this bootstrap is genuinely
+needed again.
 
 ## Custom zone naming (not part of the imported schema — created by app code)
 
@@ -99,6 +139,8 @@ until a real query requires it.
 top-level CloudKit Console actions — `Import Schema...` is not reached
 through `Deploy Schema Changes...`.
 
+### Vǫxtr custom schema
+
 1. Open CloudKit Console.
 2. Select container `iCloud.app.voxtr.shared`.
 3. Select **Development**.
@@ -107,14 +149,24 @@ through `Deploy Schema Changes...`.
 6. Review **Schema → Record Types** and confirm:
    - `FamilyWorkspace`
    - `AthleteConnectionInvitation`
-   - the exact fields/types listed above, with no unexpected additional
+   - the exact fields/types listed above, with no unexpected application
      fields, grants, or indexes.
 7. Choose **Deploy Schema Changes...**.
 8. Deploy the reviewed Development schema to Production. Production is
    otherwise locked, per normal CloudKit environment lifecycle.
-9. Retry the existing TestFlight Parent build's "Connect Athlete App" —
-   no new app build is required, since nothing about the CKRecord shape
-   changes, only the schema CloudKit was missing.
+
+### CloudKit sharing system schema, only when missing
+
+9. If a real share save still fails with the verified
+   `share-save · invalidArguments` / `BAD_REQUEST` / `_pcs_data` signature,
+   inspect Development → Schema → Record Types for `cloudkit.share`.
+10. If `cloudkit.share` is absent, use a correctly signed physical-device
+    Development build and perform one real `CKShare` save.
+11. Confirm CloudKit generated `cloudkit.share` in Development.
+12. Choose **Deploy Schema Changes...** again and promote the resulting
+    Development schema to Production.
+13. Return to the normal TestFlight ParentApp and retry **Connect Athlete
+    App**. No application code change is required merely to promote schema.
 
 ## Keeping this file in sync
 
@@ -127,3 +179,6 @@ tests in `CloudKitTransportTests.swift`
 `AthleteConnectionInvitationCloudRecordMappingTests` — the tests named
 `...RecordFieldsMatchSchemaManifest`) — they fail if the Swift mapping's
 actual `CKRecord` field set no longer matches the field lists above.
+
+Do not add CloudKit-managed system fields/types such as `cloudkit.share`
+or `_pcs_data` to those drift tests or to the repository schema artifact.
