@@ -38,6 +38,7 @@ public struct ActivityDetailView: View {
     @State private var isPresentingDeleteConfirmation: Bool = false
     @State private var isPresentingCancelConfirmation: Bool = false
     @State private var isEditingLoggedActivity: Bool = false
+    @State private var isPresentingSplit: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     public init(viewModel: ActivityDetailViewModel) {
@@ -218,10 +219,28 @@ public struct ActivityDetailView: View {
         .tint(VoxtrColor.accent)
         .navigationTitle(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
         .sheet(isPresented: $isEditing) {
-            ActivityEditFormView(viewModel: viewModel)
+            ActivityEditFormView(viewModel: viewModel, isPresentingSplit: $isPresentingSplit)
         }
         .sheet(isPresented: $isEditingLoggedActivity) {
             LoggedActivityEditFormView(viewModel: viewModel)
+        }
+        // Activity Edit -> Split Activity: a SIBLING sheet to `isEditing`
+        // above, not nested inside it — `ActivityEditFormView`'s own
+        // "Split Activity" button dismisses that sheet and flips this
+        // flag in the same action (see its own doc comment). `onDismiss`
+        // reads `viewModel.didSplitSuccessfully` — the explicit success
+        // signal set only inside `splitActivity()` — to decide whether
+        // to ALSO pop this whole screen back to the list the split's new
+        // sibling activities are now visible in; tapping "Cancel" inside
+        // the split form (never setting that flag) just closes this
+        // sheet and leaves `ActivityDetailView` showing the unchanged
+        // activity, the same as any other cancelled edit.
+        .sheet(isPresented: $isPresentingSplit, onDismiss: {
+            if viewModel.didSplitSuccessfully {
+                dismiss()
+            }
+        }) {
+            SplitActivityFormView(viewModel: viewModel)
         }
         .sheet(isPresented: $isLogging) {
             // TestFlight closeout: logging is an in-context correction/
@@ -312,6 +331,7 @@ public struct ActivityDetailView: View {
 /// editing logic, matching this work's own constraint).
 struct ActivityEditFormView: View {
     @Bindable var viewModel: ActivityDetailViewModel
+    @Binding var isPresentingSplit: Bool
     @Environment(\.dismiss) private var dismiss
 
     private var availableActivityTypes: [ActivityType] {
@@ -358,6 +378,8 @@ struct ActivityEditFormView: View {
                     .accessibilityIdentifier("activityDetail.editLocationField")
 
                 reminderSection
+
+                structuralActionsSection
             }
             .voxtrScreenBackground()
             .tint(VoxtrColor.accent)
@@ -404,6 +426,163 @@ struct ActivityEditFormView: View {
             )
         } header: {
             VoxtrSectionHeading("Reminders")
+        }
+    }
+
+    /// Activity Edit -> Split Activity: a clearly SEPARATE, structural
+    /// section, deliberately placed last — never alongside title/date/
+    /// duration/notes/location/reminders above, so Split does not read
+    /// as just another field on this form. Calm wording ("Split
+    /// Activity", not destructive-red) since this is a restructuring,
+    /// approved correction of Planning truth, not a destructive action
+    /// in the sense Delete/Cancel are.
+    ///
+    /// Tapping it dismisses THIS sheet and asks the presenting
+    /// `ActivityDetailView` to open the Split editor next (via
+    /// `isPresentingSplit`, a `@Binding` it owns) — a flat sibling-sheet
+    /// hand-off, matching how `isEditing`/`isLogging`/
+    /// `isEditingLoggedActivity` already sit side by side on that same
+    /// screen, rather than nesting a second sheet inside this one.
+    @ViewBuilder
+    private var structuralActionsSection: some View {
+        Section {
+            if viewModel.canSplit {
+                Button("Split Activity") {
+                    viewModel.beginSplit()
+                    isPresentingSplit = true
+                    dismiss()
+                }
+                .accessibilityIdentifier("activityDetail.edit.splitActivityButton")
+            } else {
+                Text(PlanningStrings.splitBlockedByLoggedActivity)
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+        } header: {
+            VoxtrSectionHeading("Structural Actions")
+        }
+    }
+}
+
+/// Activity Edit -> Split Activity: lets a Parent carve one
+/// already-persisted `PlannedActivity` into `splitChildren.count`
+/// activities. A separate sheet, presented as a SIBLING of
+/// `ActivityEditFormView` (never nested inside it) from
+/// `ActivityDetailView` — see that view's own `isPresentingSplit`
+/// wiring. Reuses `ActivityDetailViewModel`'s own split draft/commit
+/// methods directly (`splitChildren`/`addSplitChild`/`removeSplitChild`/
+/// `splitActivity()`) — no duplicated validation, no direct repository
+/// access from this view.
+struct SplitActivityFormView: View {
+    @Bindable var viewModel: ActivityDetailViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    /// Lead Review follow-up (legacy `.physicalTraining`): mirrors
+    /// `ActivityEditFormView.availableActivityTypes`'s own established
+    /// per-row inclusion rule exactly, applied PER CHILD here rather
+    /// than once for the whole form — only the first child (which stays
+    /// an in-place edit of the original) can ever actually carry
+    /// `.physicalTraining`; every later child is created fresh via
+    /// `addPlannedActivity`, which unconditionally rejects that legacy
+    /// value, so its own Picker never needs to offer it.
+    private static func availableActivityTypes(for currentValue: ActivityType) -> [ActivityType] {
+        if currentValue == .physicalTraining {
+            return [.physicalTraining] + ActivityType.selectableCases
+        } else {
+            return ActivityType.selectableCases
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let errorMessage = viewModel.errorMessage {
+                    Section {
+                        Text(errorMessage)
+                            .foregroundStyle(.red)
+                            .accessibilityIdentifier("activityDetail.split.errorMessage")
+                    }
+                    .voxtrRowSurface()
+                }
+
+                ForEach($viewModel.splitChildren) { $child in
+                    Section {
+                        Picker("Activity Type", selection: $child.activityType) {
+                            ForEach(Self.availableActivityTypes(for: child.activityType), id: \.self) { activityType in
+                                Text(activityType.displayName).tag(activityType)
+                            }
+                        }
+                        // PR #82 Lead Review follow-up 2 (first-child
+                        // offset UX): `PlanningService.splitPlannedActivity`
+                        // requires whichever child is first to start at
+                        // the original activity's own start (offset 0) —
+                        // it reuses the original's own non-editable
+                        // WeekPlanId. Never presented as an editable
+                        // control the Parent could set to something the
+                        // service would reject; `removeSplitChild(_:)`
+                        // keeps this invariant true for whichever row is
+                        // first after a removal (see its own doc
+                        // comment), so this check is always accurate.
+                        if child.id == viewModel.splitChildren.first?.id {
+                            LabeledContent("Starts", value: "Original start (not editable)")
+                        } else {
+                            Stepper(
+                                "Starts \(child.startOffsetMinutes) min after original start",
+                                value: $child.startOffsetMinutes,
+                                in: 0...1439,
+                                step: 5
+                            )
+                        }
+                        DurationPickerView(durationMinutes: $child.durationMinutes)
+
+                        if viewModel.splitChildren.count > 2 {
+                            Button("Remove", role: .destructive) {
+                                viewModel.removeSplitChild(child.id)
+                            }
+                            .accessibilityIdentifier("activityDetail.split.removeChildButton")
+                        }
+                    }
+                    .voxtrRowSurface()
+                }
+
+                Section {
+                    // PR #82 Lead Review follow-up 2 (short original
+                    // durations): explicit, calm explanation instead of a
+                    // mysteriously inert button once the original's own
+                    // envelope is fully consumed — see `canAddSplitChild`'s
+                    // own doc comment.
+                    if viewModel.canAddSplitChild {
+                        Button("Add Another") {
+                            viewModel.addSplitChild()
+                        }
+                        .accessibilityIdentifier("activityDetail.split.addChildButton")
+                    } else {
+                        Text(PlanningStrings.splitNoRoomForAnotherChild)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
+                            .accessibilityIdentifier("activityDetail.split.addChildUnavailableMessage")
+                    }
+                }
+                .voxtrRowSurface()
+            }
+            .voxtrScreenBackground()
+            .tint(VoxtrColor.accent)
+            .navigationTitle("Split Activity")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Split") {
+                        if viewModel.splitActivity() {
+                            dismiss()
+                        }
+                    }
+                    .disabled(!viewModel.canConfirmSplit)
+                    .accessibilityIdentifier("activityDetail.split.confirmButton")
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .accessibilityIdentifier("activityDetail.split.cancelButton")
+                }
+            }
         }
     }
 }

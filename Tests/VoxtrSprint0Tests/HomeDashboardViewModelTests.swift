@@ -10,6 +10,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -23,6 +24,20 @@ import VoxtrNotificationsDomain
 /// tests in this file (which do not exercise reminder behavior) can
 /// construct the now-required `NotificationsPlanningCoordinationService`
 /// dependency without touching `UNUserNotificationCenter`.
+/// Lead Review follow-up (PR #82): a bare no-op `CalendarEventProviding`
+/// — see `HomeDashboardViewModelTests.makeNoopCalendarPlanningCoordinationService`'s
+/// own doc comment.
+private struct NoOpCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
+
 private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
     func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
     func cancelReminder(id: ActivityReminderId) {}
@@ -40,6 +55,29 @@ struct HomeDashboardViewModelTests {
     private static let athleteId = AthleteId()
     private static let weekStart = LocalDate(year: 2026, month: 1, day: 5)
     private static let oslo = TimeZoneId(rawValue: "Europe/Oslo")
+
+    /// Lead Review follow-up (PR #82): `ActivityDetailViewModel` now
+    /// requires a `CalendarPlanningCoordinationService` dependency (Split
+    /// Activity routes through it) — none of this file's tests exercise
+    /// Calendar Import, so a bare no-op fixture is built once here rather
+    /// than duplicated at every one of this file's several
+    /// `ActivityDetailViewModel(...)` construction sites.
+    @MainActor
+    private static func makeNoopCalendarPlanningCoordinationService(
+        container: ModelContainer, planningService: PlanningService
+    ) -> CalendarPlanningCoordinationService {
+        CalendarPlanningCoordinationService(
+            sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+            importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+            legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+            decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+            decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+            calendarEventProvider: NoOpCalendarEventProvider(),
+            planningService: planningService,
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext)
+        )
+    }
 
     /// Records exactly what it was called with and returns a
     /// pre-built `CoachingPresentation` unchanged — same pattern
@@ -635,6 +673,7 @@ struct HomeDashboardViewModelTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: {
                 homeDashboardViewModel.loadTodaysTraining()
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -797,6 +836,7 @@ struct HomeDashboardViewModelTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { homeDashboardViewModelA.loadTodayActivityRows() }
         )
         let logA = detailViewModelA.makeLogActivityViewModel()
@@ -881,6 +921,7 @@ struct HomeDashboardViewModelTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: {
                 reloadCallCount += 1
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -1321,6 +1362,7 @@ struct HomeDashboardViewModelTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: {
                 homeDashboardViewModel.loadTodaysTraining()
                 homeDashboardViewModel.loadTodayActivityRows()
@@ -1412,7 +1454,8 @@ struct HomeDashboardViewModelTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         #expect(detailViewModelA.deleteActivity() == true)
 
@@ -1477,7 +1520,8 @@ struct HomeDashboardViewModelTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         #expect(detailViewModel.deleteActivity() == true)
 

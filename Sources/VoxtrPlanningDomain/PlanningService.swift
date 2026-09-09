@@ -20,6 +20,46 @@ public enum PlanningServiceError: Error, Equatable {
     case recurringPlannedActivityDisabled
 }
 
+/// Activity Edit -> Split Activity: one training unit a Parent wants to
+/// carve out of an already-persisted `PlannedActivity`. Deliberately has
+/// no `athleteId`/`sportId` of its own — a `PlannedActivity` already
+/// names exactly one athlete and one (optional) sport, so every child a
+/// split produces inherits both from the activity being split; only
+/// what actually distinguishes one child from another (its Activity
+/// Type, and its own timing/duration within the original) is per-child
+/// here. Mirrors `CalendarPlanningCoordinationService.DecomposedChildInput`'s
+/// shape minus those two shared fields — not the same type, since that
+/// one lives in `VoxtrAppShell` and is calendar-import-specific (see
+/// `PlanningService.splitPlannedActivity`'s own doc comment for why this
+/// is a separate, general Planning-domain operation).
+public struct PlannedActivitySplitChild: Sendable, Equatable {
+    public let activityType: ActivityType
+    /// Minutes after the ORIGINAL activity's own `startLocalTime` this
+    /// child begins. Must be `>= 0`. Meaningless (ignored) when the
+    /// original has no `startLocalTime` — the resulting child then also
+    /// has no `startLocalTime`, the same "nothing to offset from" rule
+    /// `LocalTime.adding(minutes:)`'s own caller-side optional-chaining
+    /// already expresses.
+    ///
+    /// Lead Review follow-up (Blocker 2): the FIRST element of
+    /// `splitPlannedActivity`'s own `children` array must carry
+    /// `startOffsetMinutes == 0` — it reuses the original's own
+    /// `PlannedActivityId`/`WeekPlanId` (via `editPlannedActivity`,
+    /// which never changes `weekPlanId`), so it can never be asked to
+    /// cross into a different calendar day. Every LATER child may carry
+    /// any `startOffsetMinutes >= 0`, including one that crosses
+    /// midnight/a week boundary — `splitPlannedActivity` correctly
+    /// resolves that child's own `localDate` and `WeekPlan` in that case.
+    public let startOffsetMinutes: Int
+    public let durationMinutes: Int
+
+    public init(activityType: ActivityType, startOffsetMinutes: Int, durationMinutes: Int) {
+        self.activityType = activityType
+        self.startOffsetMinutes = startOffsetMinutes
+        self.durationMinutes = durationMinutes
+    }
+}
+
 /// S2.1 scope only: one use case — get-or-create a draft `WeekPlan` for
 /// a given athlete and calendar week. No commit-week behavior, no
 /// `PlannedActivity` editing, no UI. Lives in `VoxtrPlanningDomain`
@@ -497,6 +537,224 @@ public final class PlanningService {
     /// `PlanningRepository` directly.
     public func fetchPlannedActivity(byId plannedActivityId: PlannedActivityId) throws -> PlannedActivity? {
         try repository.fetchPlannedActivity(byId: plannedActivityId)
+    }
+
+    /// Activity Edit -> Split Activity: splits ONE already-persisted
+    /// `PlannedActivity` into `children.count` activities representing
+    /// the separate training units it actually was. Requires
+    /// `children.count >= 2` — a "split" into one child is not a split.
+    ///
+    /// Deliberately does NOT delete the original and insert
+    /// `children.count` brand-new rows: the FIRST child reuses the
+    /// original `plannedActivityId` via `editPlannedActivity` (only its
+    /// `activityType`/`startLocalTime`/`plannedDurationMinutes` change);
+    /// every later child is a genuinely new row via `addPlannedActivity`,
+    /// inheriting the original's `athleteId`/`sportId`/`categoryIds`/
+    /// `title`/`localDate`/`timeZoneId`/`notes`/`location`/
+    /// `externalSourceId`/`externalSourceType` unchanged. This is what
+    /// keeps a source-backed activity's provenance intact with NO change
+    /// to `CalendarImportDecision`/`DecomposedActivityLink` at all:
+    /// `CalendarImportDecision.plannedActivityId` (immutable, no
+    /// `update` method) keeps pointing at a real, still-existing row —
+    /// never a dangling reference to something this method deleted — and
+    /// every sibling shares the original's `externalSourceId`, which is
+    /// already exactly what `CalendarPlanningCoordinationService`
+    /// reconciliation keys its own "more than one match for this
+    /// external event -> already decomposed, skip" safety on (see that
+    /// service's own `applyReconciledEvent` doc comment) — reused
+    /// as-is, not re-implemented here.
+    ///
+    /// Requires the owning `WeekPlan` to still be `.draft` — the exact
+    /// same requirement `editPlannedActivity`/`deletePlannedActivity`
+    /// already enforce, not a new lifecycle rule. Whether a
+    /// `LoggedActivity` already exists for this activity is a
+    /// Training-domain concern this service has no visibility into by
+    /// design (see `VoxtrPlanningDomain`'s own module boundary); callers
+    /// (`ActivityDetailViewModel.canSplit`) must check that themselves
+    /// before calling this, the same way `ActivityDetailViewModel.canCancel`
+    /// already gates Cancel on the canonical `isCompleted` signal it
+    /// already holds, not a new dependency added here.
+    ///
+    /// On any failure partway through creating the later children, every
+    /// already-created sibling is deleted and the original is restored to
+    /// its pre-split shape — the same explicit, ordered rollback
+    /// `CalendarPlanningCoordinationService.classifyAndImportSplit`
+    /// already establishes for the same reason (no cross-write SwiftData
+    /// transaction spans multiple `repository.save()` calls).
+    ///
+    /// Returns every resulting `PlannedActivity`, first element always
+    /// the original (now reshaped into the first child).
+    public func splitPlannedActivity(
+        _ plannedActivityId: PlannedActivityId,
+        expectedWeekPlanId weekPlanId: WeekPlanId,
+        children: [PlannedActivitySplitChild],
+        splitBy actorId: ActorId
+    ) throws -> [PlannedActivity] {
+        guard children.count >= 2 else {
+            throw PlanningServiceError.invalidField("A split requires at least two activities")
+        }
+        guard children.allSatisfy({ $0.startOffsetMinutes >= 0 }) else {
+            throw PlanningServiceError.invalidField("startOffsetMinutes must be 0 or greater")
+        }
+        // Lead Review follow-up (Blocker 2): child 1 reuses the
+        // original's own `PlannedActivityId` via `editPlannedActivity`,
+        // which never changes `weekPlanId` — an identity/ownership field,
+        // not editable through that method (see its own doc comment).
+        // Child 1 must therefore never be asked to cross into a
+        // different calendar day (and possibly a different WeekPlan)
+        // than the original already occupies.
+        guard children[0].startOffsetMinutes == 0 else {
+            throw PlanningServiceError.invalidField("the first child must start at the original activity's own start (startOffsetMinutes 0)")
+        }
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
+            throw PlanningServiceError.weekPlanNotFound
+        }
+        guard weekPlan.status == .draft else {
+            throw PlanningServiceError.weekPlanNotDraft
+        }
+        guard let original = try repository.fetchPlannedActivity(byId: plannedActivityId) else {
+            throw PlanningServiceError.plannedActivityNotFound
+        }
+        guard original.weekPlanId == weekPlanId.rawValue else {
+            throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
+        }
+
+        // Snapshot BEFORE the first child's `editPlannedActivity` call
+        // mutates `original` in place — `original`/`updatedFirstChild`
+        // below are the SAME SwiftData instance, so these three fields
+        // must be captured now to be restorable on rollback.
+        let preSplitActivityType = original.activityType
+        let preSplitStartLocalTime = original.startLocalTime
+        let preSplitPlannedDurationMinutes = original.plannedDurationMinutes
+        // Lead Review follow-up 2 (Blocker 4): split is a purely
+        // structural operation — `plannedIntensity` is shared, unrelated
+        // Planning truth (like `title`/`notes`/`location`/`sportId`
+        // below), never one of the intentionally per-child values
+        // (`activityType`/timing/duration). Captured here so every
+        // child, and rollback, carries it forward instead of silently
+        // dropping it to `editPlannedActivity`/`addPlannedActivity`'s own
+        // `nil` default.
+        let preSplitPlannedIntensity = original.plannedIntensity
+        let athleteId = AthleteId(rawValue: original.athleteId)
+        let sportId = original.sportId.map(SportId.init(rawValue:))
+        let categoryIds = original.categoryIds.map(ActivityCategoryId.init(rawValue:))
+        let originalLocalDate = original.localDate
+        let originalStartLocalTime = original.startLocalTime
+
+        // Lead Review follow-up (Blocker 2): pure `LocalDate`/`LocalTime`
+        // arithmetic — deliberately never `Date`/`TimeZone` — that
+        // correctly carries a day (and therefore possibly a WeekPlan)
+        // rollover when a later child's offset crosses midnight relative
+        // to the original's own start. `LocalTime.adding(minutes:)`
+        // itself wraps modulo 24h and does NOT track the day; `daysToAdd`
+        // recovers exactly that using the same total-minutes value,
+        // always `>= 0` here since every `startOffsetMinutes` is already
+        // validated `>= 0`. `LocalDate.adding(days:)` is this codebase's
+        // own canonical calendar-arithmetic primitive (see that type's
+        // own doc comment) — reused here, not reimplemented. Returns
+        // `nil` only when the original has no `startLocalTime` at all —
+        // there is then no clock time to offset from, matching
+        // `PlannedActivitySplitChild.startOffsetMinutes`'s own doc
+        // comment ("meaningless when the original has no startLocalTime").
+        func localDateAndTime(offsetMinutes: Int) -> (LocalDate, LocalTime)? {
+            guard let originalStartLocalTime else { return nil }
+            let totalMinutes = originalStartLocalTime.hour * 60 + originalStartLocalTime.minute + offsetMinutes
+            let daysToAdd = totalMinutes / 1440
+            return (originalLocalDate.adding(days: daysToAdd), originalStartLocalTime.adding(minutes: offsetMinutes))
+        }
+
+        var createdSiblings: [PlannedActivity] = []
+        do {
+            let firstChild = children[0]
+            let updatedFirstChild = try editPlannedActivity(
+                plannedActivityId,
+                expectedWeekPlanId: weekPlanId,
+                activityType: firstChild.activityType,
+                title: original.title,
+                localDate: originalLocalDate,
+                timeZoneId: original.timeZoneId,
+                sportId: sportId,
+                categoryIds: categoryIds,
+                startLocalTime: originalStartLocalTime,
+                plannedDurationMinutes: firstChild.durationMinutes,
+                plannedIntensity: preSplitPlannedIntensity,
+                notes: original.notes,
+                location: original.location
+            )
+
+            for child in children.dropFirst() {
+                let (childLocalDate, childStartLocalTime): (LocalDate, LocalTime?)
+                if let resolved = localDateAndTime(offsetMinutes: child.startOffsetMinutes) {
+                    childLocalDate = resolved.0
+                    childStartLocalTime = resolved.1
+                } else {
+                    childLocalDate = originalLocalDate
+                    childStartLocalTime = nil
+                }
+                // Lead Review follow-up (Blocker 2): each later child
+                // resolves its OWN WeekPlan from its OWN (possibly
+                // different) local date — mirrors
+                // `CalendarPlanningCoordinationService.classifyAndImportSplit`'s
+                // own existing per-child WeekPlan resolution exactly, not
+                // a new pattern invented here.
+                let childWeekPlan = try getOrCreateWeekPlan(athleteId: athleteId, weekStart: childLocalDate.startOfWeek)
+                // Lead Review follow-up 2 (target WeekPlan lifecycle):
+                // `addPlannedActivity` itself has no draft-status guard
+                // (it is used broadly, including by callers that legally
+                // insert regardless of commit state) — that global
+                // behavior is deliberately NOT changed here. A split
+                // crossing into another week's WeekPlan must still honor
+                // the same "only a draft WeekPlan may gain a new
+                // activity" invariant `editPlannedActivity`/
+                // `deletePlannedActivity`/this method's OWN original-week
+                // guard above already enforce, so this check is added
+                // HERE, specific to this split operation, before creating
+                // that child — never as a change to `addPlannedActivity`.
+                guard childWeekPlan.status == .draft else {
+                    throw PlanningServiceError.weekPlanNotDraft
+                }
+                let sibling = try addPlannedActivity(
+                    toWeekPlan: childWeekPlan.weekPlanId,
+                    athleteId: athleteId,
+                    activityType: child.activityType,
+                    title: original.title,
+                    localDate: childLocalDate,
+                    timeZoneId: original.timeZoneId,
+                    sportId: sportId,
+                    categoryIds: categoryIds,
+                    startLocalTime: childStartLocalTime,
+                    plannedDurationMinutes: child.durationMinutes,
+                    plannedIntensity: preSplitPlannedIntensity,
+                    externalSourceId: original.externalSourceId,
+                    externalSourceType: original.externalSourceType,
+                    notes: original.notes,
+                    location: original.location
+                )
+                createdSiblings.append(sibling)
+            }
+
+            return [updatedFirstChild] + createdSiblings
+        } catch {
+            for sibling in createdSiblings {
+                try? repository.deletePlannedActivity(sibling, deletedBy: actorId)
+            }
+            _ = try? editPlannedActivity(
+                plannedActivityId,
+                expectedWeekPlanId: weekPlanId,
+                activityType: preSplitActivityType,
+                title: original.title,
+                localDate: originalLocalDate,
+                timeZoneId: original.timeZoneId,
+                sportId: sportId,
+                categoryIds: categoryIds,
+                startLocalTime: preSplitStartLocalTime,
+                plannedDurationMinutes: preSplitPlannedDurationMinutes,
+                plannedIntensity: preSplitPlannedIntensity,
+                notes: original.notes,
+                location: original.location
+            )
+            throw error
+        }
     }
 
     // MARK: - Recurring Planned Activities

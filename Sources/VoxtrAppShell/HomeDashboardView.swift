@@ -339,6 +339,7 @@ public struct HomeDashboardView: View {
                     planningService: planningService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                    calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                     onActivityLogged: {
                         homeDashboardDebugLog("onActivityLogged fired for rowId=\(familyHomeRow.id)")
                         viewModel.loadTodaysTraining()

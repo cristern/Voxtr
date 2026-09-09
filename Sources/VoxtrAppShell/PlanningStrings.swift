@@ -83,4 +83,55 @@ public enum PlanningStrings {
             defaultValue: "The activity was saved, but this reminder could not be set."
         )
     }
+
+    /// Activity Edit -> Split Activity.
+    public static var splitNotEligible: String {
+        String(
+            localized: "planning.split.notEligible",
+            defaultValue: "This activity can no longer be split."
+        )
+    }
+
+    public static var splitRequiresTwoChildren: String {
+        String(
+            localized: "planning.split.requiresTwoChildren",
+            defaultValue: "Add at least two activities to split into."
+        )
+    }
+
+    public static var splitGenericError: String {
+        String(
+            localized: "planning.split.genericError",
+            defaultValue: "Could not split this activity. Please try again."
+        )
+    }
+
+    public static var splitBlockedByLoggedActivity: String {
+        String(
+            localized: "planning.split.blockedByLoggedActivity",
+            defaultValue: "This activity has already been logged and can no longer be split."
+        )
+    }
+
+    /// PR #82 Lead Review follow-up 2 (Blocker 3B): shown when a
+    /// source-backed activity is already itself one child of a completed
+    /// split — restructuring an existing decomposition is not supported
+    /// in V1.
+    public static var splitBlockedByExistingDecomposition: String {
+        String(
+            localized: "planning.split.blockedByExistingDecomposition",
+            defaultValue: "This activity is already part of a split and can't be split again."
+        )
+    }
+
+    /// PR #82 Lead Review follow-up 2 (short original durations): shown
+    /// in place of "Add Another" once the original activity's own
+    /// planned duration leaves no room for another positive-duration
+    /// child.
+    public static var splitNoRoomForAnotherChild: String {
+        String(
+            localized: "planning.split.noRoomForAnotherChild",
+            defaultValue: "The original activity's planned duration doesn't leave room for another activity."
+        )
+    }
 }

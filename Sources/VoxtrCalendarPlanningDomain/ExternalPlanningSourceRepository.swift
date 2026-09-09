@@ -75,6 +75,25 @@ public final class ExternalPlanningSourceRepository {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// PR #82 Lead Review follow-up 2 (Blocker 1): every source for one
+    /// workspace REGARDLESS of `lifecycleStatus` — unlike
+    /// `fetchAllConnected(forWorkspace:)`/`fetchAllEnabled(forWorkspace:)`
+    /// above, a `.disconnected` source is deliberately INCLUDED here.
+    /// Needed so a post-hoc Activity Edit -> Split can still resolve the
+    /// exact `ExternalPlanningSource` a source-backed `PlannedActivity`
+    /// came from for historical provenance purposes, even if the Parent
+    /// has since disconnected that calendar — the same "never lose a
+    /// stable identity just because a source was disconnected" contract
+    /// `ExternalPlanningSource`'s own doc comment already establishes.
+    /// Scoped by `workspaceId` alone, matching every other method here —
+    /// a source belonging to a DIFFERENT workspace never appears.
+    public func fetchAll(forWorkspace workspaceId: WorkspaceId) throws -> [ExternalPlanningSource] {
+        let rawWorkspaceId = workspaceId.rawValue
+        return try modelContext.fetch(FetchDescriptor<ExternalPlanningSource>())
+            .filter { $0.workspaceId == rawWorkspaceId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
     /// Looks up a source by its full identity tuple — (workspace,
     /// provider, container) — regardless of `lifecycleStatus`
     /// (deliberately includes `.disconnected` rows, so both the

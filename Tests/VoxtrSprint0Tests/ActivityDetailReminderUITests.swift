@@ -8,6 +8,8 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
+import VoxtrAthleteDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -86,6 +88,22 @@ private struct FixedDateProvider: DateProvider {
     let now: Date
 }
 
+/// Lead Review follow-up (PR #82): a bare no-op `CalendarEventProviding`
+/// — these reminder tests never exercise Calendar Import, so
+/// `CalendarPlanningCoordinationService` (a required `ActivityDetailViewModel`
+/// dependency since PR #82's Blocker 1 fix) never actually needs to
+/// reach real calendar data.
+private struct NoOpCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
+
 private func activityDetailReminderTestsFixedNow() -> Date {
     var components = DateComponents()
     components.year = 2025
@@ -105,12 +123,14 @@ struct ActivityDetailReminderUITests {
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         scheduler: FakeActivityReminderScheduler
     ) {
         let eventBus = EventBus()
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext), eventBus: eventBus)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext), eventBus: eventBus)
         let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
-            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext), eventBus: eventBus),
+            trainingService: trainingService,
             reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         )
         let scheduler = FakeActivityReminderScheduler()
@@ -124,7 +144,22 @@ struct ActivityDetailReminderUITests {
             dateProvider: FixedDateProvider(now: activityDetailReminderTestsFixedNow())
         )
         notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
-        return (planningService, trainingReflectionCoordinationService, notificationsPlanningCoordinationService, scheduler)
+        // Lead Review follow-up (PR #82): required since
+        // ActivityDetailViewModel now routes Split Activity through this
+        // coordinator — these reminder tests never exercise Calendar
+        // Import, so a bare no-op event provider is enough.
+        let calendarPlanningCoordinationService = CalendarPlanningCoordinationService(
+            sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+            importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+            legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+            decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+            decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+            calendarEventProvider: NoOpCalendarEventProvider(),
+            planningService: planningService,
+            trainingService: trainingService,
+            athleteRepository: AthleteRepository(modelContext: container.mainContext)
+        )
+        return (planningService, trainingReflectionCoordinationService, notificationsPlanningCoordinationService, calendarPlanningCoordinationService, scheduler)
     }
 
     @MainActor
@@ -148,6 +183,7 @@ struct ActivityDetailReminderUITests {
             planningService: PlanningService,
             trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
             notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
             scheduler: FakeActivityReminderScheduler
         ),
         athleteId: AthleteId,
@@ -159,7 +195,8 @@ struct ActivityDetailReminderUITests {
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: fixture.planningService,
             trainingReflectionCoordinationService: fixture.trainingReflectionCoordinationService,
-            notificationsPlanningCoordinationService: fixture.notificationsPlanningCoordinationService
+            notificationsPlanningCoordinationService: fixture.notificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: fixture.calendarPlanningCoordinationService
         )
     }
 

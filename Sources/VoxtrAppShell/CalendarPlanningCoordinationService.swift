@@ -93,6 +93,34 @@ public enum CalendarPlanningCoordinationError: Error, Sendable, Equatable {
     /// family-isolation boundary `classifyAndImport` already enforces,
     /// checked per child since children may name different athletes.
     case splitChildAthleteOutsideSourceWorkspace(index: Int)
+    /// Activity Edit -> Split Activity (Lead Review follow-up): `splitExistingPlannedActivity`
+    /// guard — a `LoggedActivity` already exists for this `PlannedActivity`.
+    /// Planning proposes; Training proves — a split rewrites the PLAN,
+    /// which must never happen once Training has proven something about
+    /// the activity as it was originally shaped. Enforced HERE, using
+    /// real Training truth (`TrainingService.fetchLoggedActivities`), not
+    /// only at the ViewModel layer — see that method's own doc comment.
+    case plannedActivityAlreadyLogged
+    /// PR #82 Lead Review follow-up 2 (Blocker 3B): `splitExistingPlannedActivity`
+    /// guard — this source-backed `PlannedActivity`'s own decision
+    /// already has `DecomposedActivityLink` rows (it is ITSELF already
+    /// one child of a completed split, or this exact decision was
+    /// already split before). V1 does not support restructuring/
+    /// re-splitting an already-decomposed decision — see that method's
+    /// own doc comment. Checked and thrown BEFORE any Planning mutation,
+    /// so a rejected attempt leaves the activity completely untouched.
+    case plannedActivityAlreadyDecomposed
+    /// PR #82 Lead Review follow-up 2 (Blocker 1): `splitExistingPlannedActivity`
+    /// guard — resolving the ONE `ExternalPlanningSource` this
+    /// source-backed activity's `externalEventKey` belongs to (scoped to
+    /// the athlete's own workspace, never a global lookup) found MORE
+    /// THAN ONE candidate. This should be unreachable given this
+    /// domain's own "one row per (workspace, provider, external
+    /// container)" product contract (see `ExternalPlanningSource`'s own
+    /// doc comment) — thrown as a defensive backstop rather than
+    /// silently choosing `.first` and possibly attaching decomposition
+    /// provenance to the wrong source.
+    case splitSourceAmbiguous
 }
 
 /// Family-Owned Calendar Sources V1: the one place
@@ -1171,6 +1199,281 @@ public final class CalendarPlanningCoordinationService {
         }
 
         return created
+    }
+
+    // MARK: - Activity Edit -> Split Activity (post-persistence split)
+
+    /// Lead Review follow-up (Blocker 1): splits ONE already-persisted
+    /// `PlannedActivity` — reached from Activity Edit, never from
+    /// Calendar Import Review — into `children.count` activities. The
+    /// actual Planning mutation is `PlanningService.splitPlannedActivity`,
+    /// reused unchanged (the ONE general, calendar-agnostic split
+    /// operation, serving manual and source-backed activities alike —
+    /// see that method's own doc comment). This coordinator adds exactly
+    /// two things a plain `PlanningService` call cannot, by design:
+    ///
+    /// 1. TRAINING ELIGIBILITY, enforced with real Training truth
+    ///    (`trainingService.fetchLoggedActivities`), not only trusted
+    ///    from a caller's own possibly-stale `isCompleted` snapshot —
+    ///    `PlanningService` has no visibility into `LoggedActivity` by
+    ///    design (a different domain), so this is the one place that
+    ///    check can be a genuine service-level backstop rather than a
+    ///    rule every future caller must remember to re-check.
+    ///
+    /// 2. CALENDAR PROVENANCE CONVERSION: if the activity being split is
+    ///    source-backed (`externalSourceType == Self.externalSourceType`
+    ///    and a resolvable `CalendarImportDecision` exists for its
+    ///    `externalSourceId`), inserts one `DecomposedActivityLink` per
+    ///    resulting child under that EXISTING, still-immutable decision —
+    ///    the SAME canonical shape `classifyAndImportSplit` already
+    ///    writes at import time. This is what makes `plannedActivityIds(for:)`,
+    ///    `historicalTitleClassifications(for:)`, and `classifyAndImport`'s
+    ///    own idempotency check all correctly see this decision as
+    ///    decomposed afterward — the ONE canonical decomposition
+    ///    representation, never a second, count-based heuristic. A
+    ///    manually-created (non-source-backed) activity has nothing to
+    ///    convert and skips this step entirely — same method, no branch
+    ///    in `PlanningService`.
+    ///
+    /// ALL-OR-NOTHING: if provenance conversion fails after the Planning
+    /// split already durably succeeded, this method rolls EVERYTHING
+    /// back — every `DecomposedActivityLink` THIS call itself inserted
+    /// (reverse order), the `CalendarImportDecision` THIS call itself
+    /// adopted (Blocker 3A below), every newly-created sibling
+    /// `PlannedActivity`, and finally the original activity's own
+    /// pre-split shape — using ONLY `PlanningService`'s/this domain's own
+    /// already-public methods, the same "outer coordinator rolls back
+    /// via public methods" shape `classifyAndImportSplit` already
+    /// establishes, not a new hook added to `PlanningService`. Rollback
+    /// itself is best-effort (`try?`), matching that same established
+    /// convention — but the ORIGINAL failure is always rethrown, never
+    /// masked.
+    ///
+    /// PR #82 Lead Review follow-up 2 (Blocker 1): resolving WHICH
+    /// `CalendarImportDecision` a source-backed activity belongs to is
+    /// scoped to the athlete's own workspace FIRST
+    /// (`resolveSourceBackedSplitContext`, below) — `externalEventKey` is
+    /// never treated as a globally unique lookup key, since a DIFFERENT
+    /// workspace's source may legitimately share the same
+    /// `externalContainerIdentifier` (see `ExternalPlanningSource`'s own
+    /// doc comment).
+    ///
+    /// PR #82 Lead Review follow-up 2 (Blocker 3): two source-backed
+    /// states this method must never silently mishandle:
+    ///   A. No `CalendarImportDecision` resolves at all, but the exact
+    ///      source is known (a legacy Calendar Planning Source V1
+    ///      import, or a prior `classifyAndImport` whose decision write
+    ///      failed) — adopts the missing ORDINARY decision first, using
+    ///      the persisted activity's own pre-split athlete/sport/
+    ///      activityType, the exact same adoption shape
+    ///      `classifyAndImport`'s own "Step 2" already establishes for
+    ///      this identical situation — then converts it to decomposed in
+    ///      this same call.
+    ///   B. The resolved decision already has `DecomposedActivityLink`
+    ///      rows (this activity is itself already one child of a
+    ///      completed split) — rejected with `.plannedActivityAlreadyDecomposed`
+    ///      BEFORE any Planning mutation. V1 does not support
+    ///      restructuring/re-splitting an existing decomposition.
+    ///
+    /// Does NOT record `DecompositionEvidence` — a post-hoc split has no
+    /// `ExternalCalendarEvent`/`CalendarReviewItem` to recover
+    /// `isRecurring`/`eventIdentifier` from (both are transient, never
+    /// persisted), so there is no reliable key to record evidence under.
+    /// A future occurrence of the same external event therefore will NOT
+    /// receive Suggested Split assistance from a post-hoc split — a
+    /// known V1 limitation, not silently invented around.
+    public func splitExistingPlannedActivity(
+        _ plannedActivityId: PlannedActivityId,
+        children: [PlannedActivitySplitChild],
+        splitBy actorId: ActorId
+    ) throws -> [PlannedActivity] {
+        guard let original = try planningService.fetchPlannedActivity(byId: plannedActivityId) else {
+            throw PlanningServiceError.plannedActivityNotFound
+        }
+        guard try trainingService.fetchLoggedActivities(forPlannedActivity: plannedActivityId).isEmpty else {
+            throw CalendarPlanningCoordinationError.plannedActivityAlreadyLogged
+        }
+
+        let weekPlanId = WeekPlanId(rawValue: original.weekPlanId)
+        let isSourceBacked = original.externalSourceType == Self.externalSourceType && original.externalSourceId != nil
+
+        // Snapshot for THIS method's own rollback — captured before
+        // `planningService.splitPlannedActivity` mutates `original` in
+        // place (child 1 IS `original`, reshaped). Also the exact
+        // athlete/sport/activityType/plannedActivityId Blocker 3A's
+        // decision-adoption path (below) uses — the persisted activity's
+        // OWN pre-split shape, never a value derived from the split's own
+        // children.
+        let preSplitActivityType = original.activityType
+        let preSplitStartLocalTime = original.startLocalTime
+        let preSplitPlannedDurationMinutes = original.plannedDurationMinutes
+        let preSplitPlannedIntensity = original.plannedIntensity
+        let preSplitTitle = original.title
+        let preSplitLocalDate = original.localDate
+        let preSplitTimeZoneId = original.timeZoneId
+        let preSplitAthleteId = AthleteId(rawValue: original.athleteId)
+        let preSplitSportId = original.sportId.map(SportId.init(rawValue:))
+        let preSplitCategoryIds = original.categoryIds.map(ActivityCategoryId.init(rawValue:))
+        let preSplitNotes = original.notes
+        let preSplitLocation = original.location
+
+        // Blocker 1 & 3B: resolve source-backed provenance BEFORE any
+        // Planning mutation, so an already-decomposed source-backed
+        // activity (Blocker 3B) is rejected with ZERO side effects rather
+        // than after a Planning split this method would then need to
+        // unwind.
+        var splitContext: SourceBackedSplitContext?
+        if isSourceBacked, let externalEventKey = original.externalSourceId {
+            splitContext = try resolveSourceBackedSplitContext(forActivity: original, externalEventKey: externalEventKey)
+            if let decision = splitContext?.decision {
+                let existingLinks = try decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
+                guard existingLinks.isEmpty else {
+                    throw CalendarPlanningCoordinationError.plannedActivityAlreadyDecomposed
+                }
+            }
+        }
+
+        let result = try planningService.splitPlannedActivity(
+            plannedActivityId, expectedWeekPlanId: weekPlanId, children: children, splitBy: actorId
+        )
+
+        guard let splitContext else {
+            return result
+        }
+
+        var didAdoptDecision = false
+        var adoptedDecision: CalendarImportDecision?
+        var insertedLinks: [DecomposedActivityLink] = []
+        do {
+            let decision: CalendarImportDecision
+            if let existing = splitContext.decision {
+                decision = existing
+            } else {
+                // Blocker 3A: adopt the missing ORDINARY decision, using
+                // the persisted activity's OWN pre-split identity — the
+                // exact same adoption shape `classifyAndImport`'s own
+                // "Step 2" already establishes for "a PlannedActivity
+                // with this exact externalSourceId exists but has no
+                // decision yet."
+                let adopted = try importDecisionRepository.insert(
+                    sourceId: splitContext.source.externalPlanningSourceId,
+                    externalEventKey: splitContext.externalEventKey,
+                    status: .imported,
+                    athleteId: preSplitAthleteId,
+                    sportId: preSplitSportId,
+                    activityType: preSplitActivityType,
+                    plannedActivityId: plannedActivityId,
+                    decidedBy: actorId
+                )
+                decision = adopted
+                adoptedDecision = adopted
+                didAdoptDecision = true
+            }
+
+            for (index, activity) in result.enumerated() {
+                let link = try decomposedActivityLinkRepository.insert(
+                    calendarImportDecisionId: decision.calendarImportDecisionId,
+                    plannedActivityId: activity.plannedActivityId,
+                    orderIndex: index
+                )
+                insertedLinks.append(link)
+            }
+            return result
+        } catch {
+            // Blocker 2: undo THIS call's own writes, in reverse
+            // dependency order — links first (they reference the
+            // decision), then the decision THIS call itself adopted (if
+            // any — an already-existing decision is never deleted), then
+            // the Planning-level split. Best-effort (`try?`), matching
+            // `classifyAndImportSplit`'s own established rollback
+            // convention; the ORIGINAL error is always rethrown below,
+            // never masked by a rollback failure.
+            for link in insertedLinks.reversed() {
+                try? decomposedActivityLinkRepository.delete(link)
+            }
+            if didAdoptDecision, let adoptedDecision {
+                try? importDecisionRepository.delete(adoptedDecision)
+            }
+            for sibling in result.dropFirst() {
+                try? planningService.deletePlannedActivity(
+                    sibling.plannedActivityId, expectedWeekPlanId: WeekPlanId(rawValue: sibling.weekPlanId), deletedBy: actorId
+                )
+            }
+            _ = try? planningService.editPlannedActivity(
+                plannedActivityId,
+                expectedWeekPlanId: weekPlanId,
+                activityType: preSplitActivityType,
+                title: preSplitTitle,
+                localDate: preSplitLocalDate,
+                timeZoneId: preSplitTimeZoneId,
+                sportId: preSplitSportId,
+                categoryIds: preSplitCategoryIds,
+                startLocalTime: preSplitStartLocalTime,
+                plannedDurationMinutes: preSplitPlannedDurationMinutes,
+                plannedIntensity: preSplitPlannedIntensity,
+                notes: preSplitNotes,
+                location: preSplitLocation
+            )
+            throw error
+        }
+    }
+
+    /// PR #82 Lead Review follow-up 2 (Blocker 1): the resolved
+    /// provenance context for a source-backed split — `decision` is `nil`
+    /// exactly for Blocker 3A's "missing decision" state.
+    private struct SourceBackedSplitContext {
+        let source: ExternalPlanningSource
+        let externalEventKey: String
+        let decision: CalendarImportDecision?
+    }
+
+    /// PR #82 Lead Review follow-up 2 (Blocker 1): resolves the ONE
+    /// `ExternalPlanningSource` a source-backed `PlannedActivity` belongs
+    /// to, scoped to the ATHLETE'S OWN WORKSPACE first — never a bare,
+    /// unscoped `externalEventKey` lookup, since a different workspace's
+    /// source may legitimately share the same `externalContainerIdentifier`
+    /// (see `ExternalPlanningSource`'s own doc comment on why two
+    /// workspaces must never collapse into one row). Every source for
+    /// the workspace is fetched (`fetchAll(forWorkspace:)`, including a
+    /// `.disconnected` one — historical provenance must still resolve
+    /// after a disconnect), then narrowed to the source whose own
+    /// `externalContainerIdentifier` is the exact container segment
+    /// `externalEventKey` was built from
+    /// (`ExternalCalendarEventIdentity.externalSourceId`'s own documented
+    /// `"\(calendarIdentifier)|\(eventIdentifier)[...]"` shape — the ONE
+    /// canonical construction this domain already shares, never a second,
+    /// divergent parsing rule). More than one candidate is a defensive
+    /// backstop (`.splitSourceAmbiguous`) — this domain's own "one row
+    /// per (workspace, provider, container)" contract means it should be
+    /// unreachable in practice. Once the exact source is resolved, the
+    /// existing canonical `fetch(sourceId:externalEventKey:)` lookup
+    /// finds its decision, if any — `nil` is a legitimate result (Blocker
+    /// 3A), not an error. Returns `nil` only if the athlete itself no
+    /// longer resolves, or genuinely no source in the workspace matches
+    /// (should not normally happen, since sources are never hard-deleted)
+    /// — the caller then leaves the Planning split standing with no
+    /// calendar-provenance conversion, same as before this fix for that
+    /// narrow residual case.
+    private func resolveSourceBackedSplitContext(
+        forActivity original: PlannedActivity,
+        externalEventKey: String
+    ) throws -> SourceBackedSplitContext? {
+        guard let athlete = try athleteRepository.fetchAthlete(byId: AthleteId(rawValue: original.athleteId)) else {
+            return nil
+        }
+        let workspaceId = WorkspaceId(rawValue: athlete.workspaceId)
+        let workspaceSources = try sourceRepository.fetchAll(forWorkspace: workspaceId)
+        let candidateSources = workspaceSources.filter { source in
+            externalEventKey.hasPrefix(source.externalContainerIdentifier + "|")
+        }
+        guard candidateSources.count <= 1 else {
+            throw CalendarPlanningCoordinationError.splitSourceAmbiguous
+        }
+        guard let resolvedSource = candidateSources.first else {
+            return nil
+        }
+        let decision = try importDecisionRepository.fetch(sourceId: resolvedSource.externalPlanningSourceId, externalEventKey: externalEventKey)
+        return SourceBackedSplitContext(source: resolvedSource, externalEventKey: externalEventKey, decision: decision)
     }
 
     /// VX-038: the reusable, historical shape of a Suggested Split — a

@@ -73,6 +73,12 @@ public struct FamilyScheduleView: View {
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    /// Activity Edit -> Split Activity (Lead Review follow-up): threaded
+    /// unconditionally, matching `notificationsPlanningCoordinationService`'s
+    /// own "no domain-service dependency is optional" convention here —
+    /// deliberately NOT reused from `calendarSourcesViewModel` below,
+    /// which is `nil` at one of this view's two entry points.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let calendarSourcesViewModel: FamilyCalendarSourcesViewModel?
     /// VX-037: when supplied, drives the toolbar's Weekly Plan action —
     /// called with the athlete to navigate to. The CALLER owns the real
@@ -94,6 +100,7 @@ public struct FamilyScheduleView: View {
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         calendarSourcesViewModel: FamilyCalendarSourcesViewModel? = nil,
         onNavigateToWeeklyPlan: ((AthleteId) -> Void)? = nil
     ) {
@@ -103,6 +110,7 @@ public struct FamilyScheduleView: View {
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.calendarSourcesViewModel = calendarSourcesViewModel
         self.onNavigateToWeeklyPlan = onNavigateToWeeklyPlan
     }
@@ -354,6 +362,7 @@ public struct FamilyScheduleView: View {
                     planningService: planningService,
                     trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                     notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                    calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                     onActivityLogged: { viewModel.loadSchedule() }
                 )
             } label: {
