@@ -667,28 +667,28 @@ struct AthleteSettingsView: View {
         .sheet(isPresented: $isPresentingForm) {
             AthleteFormView(viewModel: viewModel, editingAthlete: athlete)
         }
-        // Athlete Connection Foundation B2.6 (TestFlight runtime crash
-        // follow-up): `CloudSharingPresenter` is embedded here, never
-        // wrapped in `.sheet` — its own doc comment explains why:
-        // `UICloudSharingController` must be genuinely `present()`-ed via
-        // UIKit, and SwiftUI's `.sheet` does not do that for a
-        // `UIViewControllerRepresentable`'s own returned controller (it
-        // embeds it as a child instead). Runtime evidence strongly
-        // indicates this is what caused the EXC_BREAKPOINT/SIGTRAP crash
-        // observed inside CloudKit.framework on tapping "Connect Athlete
-        // App" (ParentApp TestFlight build 502); this fix targets that
-        // observed CloudKit presentation failure and is confirmed once a
-        // new TestFlight build repeats the same action successfully.
-        // `CloudSharingPresenter` itself performs the real
-        // `present()`/`dismiss()` calls (from its own anchor's
-        // `viewDidAppear`, never from arbitrary SwiftUI update timing) once
-        // embedded here; presented only once a real
-        // `AthleteConnectionInvitationHandoff` exists — never eagerly, so
-        // there is no CloudKit work here until the Parent's own "Connect
-        // Athlete App" tap already completed successfully.
-        .background {
+        // Athlete Connection QR-first V1: the approved nearby-pairing
+        // happy path (see `Docs/AthleteConnectionFoundationB-Closeout.md`'s
+        // own "Approved product direction — QR-first nearby pairing"
+        // section) — presents `AthleteConnectionQRPairingView` as a plain
+        // SwiftUI `.sheet`, never the Apple recipient/share UI
+        // (`CloudSharingPresenter`, left in place unused for later
+        // remote/flexible sharing scope). A plain SwiftUI view has none
+        // of that presenter's own `UICloudSharingController` presentation
+        // constraints, so `.sheet` is the correct, ordinary mechanism
+        // here. Presented only once a real `AthleteConnectionInvitationHandoff`
+        // exists — never eagerly — and dismissing it (Done, or swipe)
+        // only clears `pendingInvitationHandoff`; the already-durably-saved
+        // CloudKit invitation/share itself is untouched either way, so
+        // dismissal never corrupts canonical connection state.
+        .sheet(isPresented: Binding(
+            get: { viewModel.pendingInvitationHandoff != nil },
+            set: { isPresented in
+                if !isPresented { viewModel.dismissConnectAthleteApp() }
+            }
+        )) {
             if let handoff = viewModel.pendingInvitationHandoff {
-                CloudSharingPresenter(
+                AthleteConnectionQRPairingView(
                     handoff: handoff,
                     athleteDisplayName: athlete.givenName,
                     onDismiss: { viewModel.dismissConnectAthleteApp() }

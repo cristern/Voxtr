@@ -37,6 +37,13 @@
 	     accepting-app-only requirement. -->
 	<key>CKSharingSupported</key>
 	<true/>
+	<!-- Athlete Connection QR-first V1: AthleteApp's own "Scan connection
+	     code" screen requests camera access only when that screen
+	     actually appears (never eagerly at launch) — this description is
+	     required by iOS the first time that request happens, or the
+	     process is terminated instead of prompting. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Vǫxtr Athlete needs the camera to scan a connection code from a parent's device.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

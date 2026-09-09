@@ -44,6 +44,21 @@ protocol CloudKitContainerProviding {
     /// `accountStatus()` already do, so it inherits the same lazy-
     /// realization/XCTest-safety contract as every other method here.
     func accept(_ metadata: CKShare.Metadata) async throws -> CKShare
+
+    /// Athlete Connection QR-first V1: resolves an out-of-band share URL
+    /// (scanned from a QR code, never delivered via iOS's own system
+    /// share-acceptance callback) into real `CKShare.Metadata` — the same
+    /// shape `AthleteCloudKitShareAppDelegate.application(_:
+    /// userDidAcceptCloudKitShareWith:)` already hands to
+    /// `AthleteRuntimeSession.handleAcceptedCloudKitShare(_:)`, so a
+    /// QR-scanned invitation and a system-delivered one converge on the
+    /// exact same downstream acceptance pipeline. `CKContainer
+    /// .fetchShareMetadata(with:)` is Apple's own documented, public API
+    /// for exactly this out-of-band case — it does not require associated
+    /// domains or any system URL-routing to already recognize the link.
+    /// Realizes the real `CKContainer`, inheriting the same lazy-
+    /// realization/XCTest-safety contract as every other method here.
+    func fetchShareMetadata(with url: URL) async throws -> CKShare.Metadata
 }
 
 /// The one production implementation. `CKContainer` itself is realized
@@ -97,6 +112,17 @@ final class CloudKitContainerProvider: CloudKitContainerProviding {
 
     func accept(_ metadata: CKShare.Metadata) async throws -> CKShare {
         try await container.accept(metadata)
+    }
+
+    /// `CKContainer.fetchShareMetadata(with:completionHandler:)` is
+    /// Apple's own Objective-C completion-handler API
+    /// (`(CKShare.Metadata?, Error?) -> Void`); Swift's automatic
+    /// completion-handler-to-async bridging (SE-0297) is what exposes it
+    /// here as `async throws`, not a hand-written Apple overlay — the
+    /// same mechanism this codebase already relies on nowhere else, so
+    /// this is the first place it is depended on explicitly.
+    func fetchShareMetadata(with url: URL) async throws -> CKShare.Metadata {
+        try await container.fetchShareMetadata(with: url)
     }
 }
 

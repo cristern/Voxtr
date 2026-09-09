@@ -1,4 +1,5 @@
 import SwiftUI
+import VoxtrCore
 import VoxtrCoreContracts
 import VoxtrAthleteDomain
 
@@ -16,9 +17,17 @@ import VoxtrAthleteDomain
 /// once `root` is available — never at `CompositionRoot.build()` itself,
 /// and never triggers a connection attempt on its own; it only makes the
 /// session READY to handle a callback if/when one arrives.
+///
+/// Athlete Connection QR-first V1: adds the "Scan connection code" entry
+/// point (`AthleteConnectionStatusView`'s own button, surfaced whenever
+/// there is no active connection) and presents `AthleteConnectionScanView`
+/// as a sheet on tap. Resolves `CloudKitTransport` straight off `root`
+/// (already a public property, exactly like `AthleteConnectionLifecycleService`
+/// above) — this view invents no separate DI registration for it.
 @MainActor
 public struct AthleteRootView: View {
     let root: CompositionRoot
+    @State private var isPresentingScanner = false
 
     public init(root: CompositionRoot) {
         self.root = root
@@ -28,7 +37,8 @@ public struct AthleteRootView: View {
         VStack(spacing: 0) {
             AthleteConnectionStatusView(
                 session: AthleteRuntimeSession.shared,
-                athleteRepository: root.container.resolve(AthleteRepository.self)
+                athleteRepository: root.container.resolve(AthleteRepository.self),
+                onScanConnectionCode: { isPresentingScanner = true }
             )
             Divider()
             NavigationShellView()
@@ -37,6 +47,9 @@ public struct AthleteRootView: View {
             AthleteRuntimeSession.shared.configure(
                 lifecycleService: root.container.resolve(AthleteConnectionLifecycleService.self)
             )
+        }
+        .sheet(isPresented: $isPresentingScanner) {
+            AthleteConnectionScanView(transport: root.cloudKitTransport)
         }
     }
 }
@@ -54,6 +67,12 @@ public struct AthleteRootView: View {
 struct AthleteConnectionStatusView: View {
     let session: AthleteRuntimeSession
     let athleteRepository: AthleteRepository
+    /// Athlete Connection QR-first V1: the ONE initial action an
+    /// unconnected AthleteApp exposes — surfaced here (never a countdown/
+    /// forced-refresh) whenever there is no active connection to show
+    /// instead, including after a recoverable failure (retry, not a dead
+    /// end).
+    let onScanConnectionCode: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -61,6 +80,7 @@ struct AthleteConnectionStatusView: View {
             case .notConnected:
                 Label("Not connected", systemImage: "personalhotspot.slash")
                     .foregroundStyle(.secondary)
+                scanButton
             case .connecting:
                 Label("Connecting…", systemImage: "ellipsis.circle")
                     .foregroundStyle(.secondary)
@@ -73,6 +93,7 @@ struct AthleteConnectionStatusView: View {
             case .failed(let error):
                 Label(error.presentationSafeDescription, systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
+                scanButton
             case .lifecycleServiceNotReady:
                 Label("Not ready yet", systemImage: "hourglass")
                     .foregroundStyle(.secondary)
@@ -81,6 +102,11 @@ struct AthleteConnectionStatusView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .accessibilityIdentifier("athleteConnection.status")
+    }
+
+    private var scanButton: some View {
+        Button("Scan connection code", action: onScanConnectionCode)
+            .accessibilityIdentifier("athleteConnection.scanButton")
     }
 
     /// Display-only lookup: `actor.linkedAthleteId` → `AthleteProfile`
