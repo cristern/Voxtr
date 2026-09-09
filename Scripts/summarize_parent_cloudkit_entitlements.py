@@ -19,7 +19,15 @@ comparison authority — both are read from the source .entitlements file
 each run, so this stays correct if that file ever changes. Deliberately
 does not fail the build or normalize values away — MISMATCH is reported
 plainly so a human decides the next step (see codemagic.yaml's own comment
-for the surrounding context).
+for the surrounding context). This script's own exit code is always 0;
+Scripts/capture_parent_signed_entitlements.sh (the caller) is what
+decides, via its own optional FAIL_ON_MISMATCH flag, whether an "OVERALL:
+MISMATCH" line in this report should fail the build.
+
+AthleteApp Release signing closeout: generalized via --app-name (defaults
+to "ParentApp" so an omitted flag reproduces this script's original
+output text unchanged) — every other argument was already a plain path,
+not Parent-specific.
 
 Build 123 follow-up: a correctly-selected provisioning profile can
 legitimately authorize a service with the wildcard value "*" (e.g.
@@ -101,6 +109,7 @@ def profile_permits(requested, profile_actual) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--app-name", default="ParentApp")
     parser.add_argument("--source-entitlements", required=True)
     parser.add_argument("--archive-entitlements", default="")
     parser.add_argument("--signed-entitlements", required=True)
@@ -113,7 +122,7 @@ def main() -> int:
         print(
             f"FAILING: could not read source entitlements at "
             f"{args.source_entitlements} — this is the One Truth for what "
-            f"ParentApp requests; refusing to fabricate a comparison "
+            f"{args.app_name} requests; refusing to fabricate a comparison "
             f"without it.",
             file=sys.stderr,
         )
@@ -127,7 +136,7 @@ def main() -> int:
     source_containers = source.get(ICLOUD_CONTAINERS_KEY)
 
     lines = []
-    lines.append("ParentApp CloudKit/iCloud signed-entitlements comparison")
+    lines.append(f"{args.app_name} CloudKit/iCloud signed-entitlements comparison")
     lines.append("=" * 58)
     lines.append("")
     lines.append(f"Source requested (from {args.source_entitlements}):")
