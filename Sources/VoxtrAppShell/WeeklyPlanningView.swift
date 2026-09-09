@@ -26,6 +26,10 @@ public struct WeeklyPlanningView: View {
     private let planningService: PlanningService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    /// Activity Edit -> Split Activity (Lead Review follow-up): threaded
+    /// unconditionally, matching this view's own "no domain-service
+    /// dependency is optional" convention above.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let actorId: ActorId
 
     public init(
@@ -34,6 +38,7 @@ public struct WeeklyPlanningView: View {
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         actorId: ActorId
     ) {
         _viewModel = State(initialValue: viewModel)
@@ -41,6 +46,7 @@ public struct WeeklyPlanningView: View {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.actorId = actorId
     }
 
@@ -140,6 +146,7 @@ public struct WeeklyPlanningView: View {
                             planningService: planningService,
                             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                             notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                             onActivityLogged: { viewModel.refreshAfterActivityDetailMutation() }
                         )
                     } label: {

@@ -155,6 +155,16 @@ public final class ActivityDetailViewModel {
     /// matching this service's own "Notifications owns reminder intent
     /// and delivery infrastructure" boundary.
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    /// Activity Edit -> Split Activity (Lead Review follow-up, Blocker
+    /// 1): the ONLY place this screen reaches `splitPlannedActivity` —
+    /// via `CalendarPlanningCoordinationService.splitExistingPlannedActivity`,
+    /// never `planningService.splitPlannedActivity` directly. That
+    /// coordinator (not this ViewModel, not `PlanningService`) is the one
+    /// place Training eligibility is enforced with real Training truth,
+    /// and the one place a source-backed activity's decomposition
+    /// provenance (`DecomposedActivityLink`) is correctly converted — see
+    /// that method's own doc comment for the full reasoning.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     /// Post-mutation navigation and stale-state consistency audit: the
     /// explicit signal back to whichever screen pushed this one (Family
     /// Home, Athlete Home, Daily Training, Family Schedule, Weekly
@@ -195,6 +205,7 @@ public final class ActivityDetailViewModel {
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         onActivityLogged: @escaping () -> Void = {}
     ) {
         self.activity = activity
@@ -209,6 +220,7 @@ public final class ActivityDetailViewModel {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.onActivityLogged = onActivityLogged
         prefillEditForm()
         prefillReminderForm()
@@ -500,28 +512,47 @@ public final class ActivityDetailViewModel {
     /// edit: an unsaved title/date/duration change sitting in the Edit
     /// sheet must never be silently folded into a split.
     ///
-    /// Two default children: the first exactly mirrors the original's
-    /// own current shape (offset 0, same Activity Type/duration); the
-    /// second starts immediately after the first ends, defaulting to 30
-    /// minutes and the same Activity Type — deliberately not blank/zeroed,
-    /// so the split form opens on a plausible, immediately editable
-    /// starting point rather than empty pickers.
+    /// Lead Review follow-up: reuses `CalendarImportReviewViewModel
+    /// .setSplitEnabled`'s own established Calm-by-Default starting
+    /// state exactly — ONE child, `(offset: 0, duration: 30)` — never
+    /// "the entire original duration." A single, small starting child
+    /// never silently proposes MORE total planned time than the original
+    /// activity already had; the Parent explicitly grows the split via
+    /// `addSplitChild()` (or `canConfirmSplit` blocks Split until a
+    /// second child exists).
     public func beginSplit() {
         errorMessage = nil
         didSplitSuccessfully = false
-        let firstDuration = activity.plannedDurationMinutes ?? 60
-        splitChildren = [
-            SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: 0, durationMinutes: firstDuration),
-            SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: firstDuration, durationMinutes: 30)
-        ]
+        splitChildren = [SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: 0, durationMinutes: 30)]
     }
 
-    /// Appends one more draft row, starting immediately after the
-    /// current last child ends — matching `beginSplit()`'s own "plausible
-    /// starting point, never blank" convention.
+    /// Lead Review follow-up: reuses `CalendarImportReviewViewModel
+    /// .nextSequentialSplitChild`'s own established algorithm, with
+    /// `activity.plannedDurationMinutes` standing in for that pattern's
+    /// `eventEnd` (the original activity's OWN total is the "envelope" a
+    /// post-hoc split derives against — there is no external calendar
+    /// event here). The new child starts immediately after the last one
+    /// ends; when the original's own total duration is known and already
+    /// reached/exceeded by the running total, this is a NO-OP — the
+    /// established "never auto-propose a child outside the original's
+    /// own envelope" guard, so the total planned time is never silently
+    /// expanded merely by tapping "Add Another." New (non-first)
+    /// children default to `.individualTraining`, matching
+    /// `CalendarImportReviewViewModel.SplitChild.init`'s own default —
+    /// deliberately NOT `activity.activityType`, which could be the
+    /// legacy `.physicalTraining` value `addPlannedActivity` rejects for
+    /// any new row (only the FIRST child, which stays an in-place edit
+    /// of the original, may legally carry that value).
     public func addSplitChild() {
-        let lastEnd = splitChildren.last.map { $0.startOffsetMinutes + $0.durationMinutes } ?? 0
-        splitChildren.append(SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: lastEnd, durationMinutes: 30))
+        guard let previous = splitChildren.last else { return }
+        let startOffsetMinutes = previous.startOffsetMinutes + previous.durationMinutes
+        guard let envelopeDurationMinutes = activity.plannedDurationMinutes else {
+            splitChildren.append(SplitChildDraft(activityType: .individualTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: 30))
+            return
+        }
+        guard startOffsetMinutes < envelopeDurationMinutes else { return }
+        let remainingMinutes = envelopeDurationMinutes - startOffsetMinutes
+        splitChildren.append(SplitChildDraft(activityType: .individualTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: remainingMinutes))
     }
 
     /// Removes one draft row. Never affects any sibling row's own
@@ -534,13 +565,15 @@ public final class ActivityDetailViewModel {
         splitChildren.removeAll { $0.id == id }
     }
 
-    /// Commits the current split draft through `PlanningService
-    /// .splitPlannedActivity` — the ONLY place this screen mutates
-    /// `PlannedActivity` structurally into more than one row. Re-checks
-    /// `canSplit` here, not only at the "Split Activity" button's own
-    /// visibility, so a stale/reused draft can never bypass the
-    /// LoggedActivity/draft-week eligibility rule merely by having
-    /// reached this method some other way.
+    /// Commits the current split draft through `CalendarPlanningCoordinationService
+    /// .splitExistingPlannedActivity` — the ONLY place this screen
+    /// mutates `PlannedActivity` structurally into more than one row.
+    /// Re-checks `canSplit` here, not only at the "Split Activity"
+    /// button's own visibility, so a stale/reused draft can never bypass
+    /// the LoggedActivity/draft-week eligibility rule merely by having
+    /// reached this method some other way — that coordinator ALSO
+    /// re-checks Training eligibility itself, using real Training truth,
+    /// as the authoritative backstop (see its own doc comment).
     @discardableResult
     public func splitActivity() -> Bool {
         errorMessage = nil
@@ -560,9 +593,8 @@ public final class ActivityDetailViewModel {
                     durationMinutes: $0.durationMinutes
                 )
             }
-            let result = try planningService.splitPlannedActivity(
+            let result = try calendarPlanningCoordinationService.splitExistingPlannedActivity(
                 activity.plannedActivityId,
-                expectedWeekPlanId: weekPlanId,
                 children: children,
                 splitBy: deletedByActorId
             )
@@ -580,6 +612,9 @@ public final class ActivityDetailViewModel {
             return true
         } catch let error as PlanningServiceError {
             errorMessage = Self.message(forSplitError: error)
+            return false
+        } catch CalendarPlanningCoordinationError.plannedActivityAlreadyLogged {
+            errorMessage = PlanningStrings.splitBlockedByLoggedActivity
             return false
         } catch {
             errorMessage = PlanningStrings.splitGenericError

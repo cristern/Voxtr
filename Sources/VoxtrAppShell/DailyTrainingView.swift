@@ -16,6 +16,10 @@ public struct DailyTrainingView: View {
     private let trainingService: TrainingService
     private let trainingReflectionCoordinationService: TrainingReflectionCoordinationService
     private let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    /// Activity Edit -> Split Activity (Lead Review follow-up): threaded
+    /// unconditionally, matching this view's own "no domain-service
+    /// dependency is optional" convention above.
+    private let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     private let actorId: ActorId
     private let athleteDisplayName: String
 
@@ -25,6 +29,7 @@ public struct DailyTrainingView: View {
         trainingService: TrainingService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         actorId: ActorId,
         athleteDisplayName: String
     ) {
@@ -33,6 +38,7 @@ public struct DailyTrainingView: View {
         self.trainingService = trainingService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.actorId = actorId
         self.athleteDisplayName = athleteDisplayName
     }
@@ -70,6 +76,7 @@ public struct DailyTrainingView: View {
                                 planningService: planningService,
                                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                 notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                                 onActivityLogged: { viewModel.load() }
                             )
                         } label: {

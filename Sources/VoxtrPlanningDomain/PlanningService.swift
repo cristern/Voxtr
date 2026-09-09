@@ -40,6 +40,16 @@ public struct PlannedActivitySplitChild: Sendable, Equatable {
     /// has no `startLocalTime`, the same "nothing to offset from" rule
     /// `LocalTime.adding(minutes:)`'s own caller-side optional-chaining
     /// already expresses.
+    ///
+    /// Lead Review follow-up (Blocker 2): the FIRST element of
+    /// `splitPlannedActivity`'s own `children` array must carry
+    /// `startOffsetMinutes == 0` — it reuses the original's own
+    /// `PlannedActivityId`/`WeekPlanId` (via `editPlannedActivity`,
+    /// which never changes `weekPlanId`), so it can never be asked to
+    /// cross into a different calendar day. Every LATER child may carry
+    /// any `startOffsetMinutes >= 0`, including one that crosses
+    /// midnight/a week boundary — `splitPlannedActivity` correctly
+    /// resolves that child's own `localDate` and `WeekPlan` in that case.
     public let startOffsetMinutes: Int
     public let durationMinutes: Int
 
@@ -586,6 +596,16 @@ public final class PlanningService {
         guard children.allSatisfy({ $0.startOffsetMinutes >= 0 }) else {
             throw PlanningServiceError.invalidField("startOffsetMinutes must be 0 or greater")
         }
+        // Lead Review follow-up (Blocker 2): child 1 reuses the
+        // original's own `PlannedActivityId` via `editPlannedActivity`,
+        // which never changes `weekPlanId` — an identity/ownership field,
+        // not editable through that method (see its own doc comment).
+        // Child 1 must therefore never be asked to cross into a
+        // different calendar day (and possibly a different WeekPlan)
+        // than the original already occupies.
+        guard children[0].startOffsetMinutes == 0 else {
+            throw PlanningServiceError.invalidField("the first child must start at the original activity's own start (startOffsetMinutes 0)")
+        }
         guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
         }
@@ -609,6 +629,30 @@ public final class PlanningService {
         let athleteId = AthleteId(rawValue: original.athleteId)
         let sportId = original.sportId.map(SportId.init(rawValue:))
         let categoryIds = original.categoryIds.map(ActivityCategoryId.init(rawValue:))
+        let originalLocalDate = original.localDate
+        let originalStartLocalTime = original.startLocalTime
+
+        // Lead Review follow-up (Blocker 2): pure `LocalDate`/`LocalTime`
+        // arithmetic — deliberately never `Date`/`TimeZone` — that
+        // correctly carries a day (and therefore possibly a WeekPlan)
+        // rollover when a later child's offset crosses midnight relative
+        // to the original's own start. `LocalTime.adding(minutes:)`
+        // itself wraps modulo 24h and does NOT track the day; `daysToAdd`
+        // recovers exactly that using the same total-minutes value,
+        // always `>= 0` here since every `startOffsetMinutes` is already
+        // validated `>= 0`. `LocalDate.adding(days:)` is this codebase's
+        // own canonical calendar-arithmetic primitive (see that type's
+        // own doc comment) — reused here, not reimplemented. Returns
+        // `nil` only when the original has no `startLocalTime` at all —
+        // there is then no clock time to offset from, matching
+        // `PlannedActivitySplitChild.startOffsetMinutes`'s own doc
+        // comment ("meaningless when the original has no startLocalTime").
+        func localDateAndTime(offsetMinutes: Int) -> (LocalDate, LocalTime)? {
+            guard let originalStartLocalTime else { return nil }
+            let totalMinutes = originalStartLocalTime.hour * 60 + originalStartLocalTime.minute + offsetMinutes
+            let daysToAdd = totalMinutes / 1440
+            return (originalLocalDate.adding(days: daysToAdd), originalStartLocalTime.adding(minutes: offsetMinutes))
+        }
 
         var createdSiblings: [PlannedActivity] = []
         do {
@@ -618,27 +662,42 @@ public final class PlanningService {
                 expectedWeekPlanId: weekPlanId,
                 activityType: firstChild.activityType,
                 title: original.title,
-                localDate: original.localDate,
+                localDate: originalLocalDate,
                 timeZoneId: original.timeZoneId,
                 sportId: sportId,
                 categoryIds: categoryIds,
-                startLocalTime: preSplitStartLocalTime.map { $0.adding(minutes: firstChild.startOffsetMinutes) },
+                startLocalTime: originalStartLocalTime,
                 plannedDurationMinutes: firstChild.durationMinutes,
                 notes: original.notes,
                 location: original.location
             )
 
             for child in children.dropFirst() {
+                let (childLocalDate, childStartLocalTime): (LocalDate, LocalTime?)
+                if let resolved = localDateAndTime(offsetMinutes: child.startOffsetMinutes) {
+                    childLocalDate = resolved.0
+                    childStartLocalTime = resolved.1
+                } else {
+                    childLocalDate = originalLocalDate
+                    childStartLocalTime = nil
+                }
+                // Lead Review follow-up (Blocker 2): each later child
+                // resolves its OWN WeekPlan from its OWN (possibly
+                // different) local date — mirrors
+                // `CalendarPlanningCoordinationService.classifyAndImportSplit`'s
+                // own existing per-child WeekPlan resolution exactly, not
+                // a new pattern invented here.
+                let childWeekPlan = try getOrCreateWeekPlan(athleteId: athleteId, weekStart: childLocalDate.startOfWeek)
                 let sibling = try addPlannedActivity(
-                    toWeekPlan: weekPlanId,
+                    toWeekPlan: childWeekPlan.weekPlanId,
                     athleteId: athleteId,
                     activityType: child.activityType,
                     title: original.title,
-                    localDate: original.localDate,
+                    localDate: childLocalDate,
                     timeZoneId: original.timeZoneId,
                     sportId: sportId,
                     categoryIds: categoryIds,
-                    startLocalTime: preSplitStartLocalTime.map { $0.adding(minutes: child.startOffsetMinutes) },
+                    startLocalTime: childStartLocalTime,
                     plannedDurationMinutes: child.durationMinutes,
                     externalSourceId: original.externalSourceId,
                     externalSourceType: original.externalSourceType,
@@ -658,7 +717,7 @@ public final class PlanningService {
                 expectedWeekPlanId: weekPlanId,
                 activityType: preSplitActivityType,
                 title: original.title,
-                localDate: original.localDate,
+                localDate: originalLocalDate,
                 timeZoneId: original.timeZoneId,
                 sportId: sportId,
                 categoryIds: categoryIds,

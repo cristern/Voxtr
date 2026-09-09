@@ -557,6 +557,138 @@ struct PlanningServiceTests {
         #expect(try repository.fetchPlannedActivity(byId: original.plannedActivityId) != nil)
     }
 
+    @Test("Splitting requires the FIRST child to start at offset 0 — it reuses the original's own WeekPlanId, which is never editable")
+    @MainActor
+    func splitPlannedActivityRejectsNonzeroFirstChildOffset() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Hockey block",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 17, minute: 0),
+            plannedDurationMinutes: 90
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.splitPlannedActivity(
+                original.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                children: [
+                    // Nonzero first-child offset — rejected, since child 1
+                    // reuses the original's own (non-editable) WeekPlanId.
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 15, durationMinutes: 60),
+                    PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 75, durationMinutes: 15)
+                ],
+                splitBy: ActorId()
+            )
+        }
+        let unchanged = try repository.fetchPlannedActivity(byId: original.plannedActivityId)
+        #expect(unchanged?.startLocalTime == LocalTime(hour: 17, minute: 0))
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    @Test("Lead Review follow-up (Blocker 2): a later child whose offset crosses midnight lands on the CORRECT next calendar day and WeekPlan, never silently wrapped onto the original's own day")
+    @MainActor
+    func splitPlannedActivityCarriesDateAcrossMidnight() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        // Tuesday 2026-01-06 (same week as the original) — original
+        // starts late enough (23:30) that a 90-minute offset crosses
+        // midnight into Wednesday 2026-01-07, still the SAME Vǫxtr week
+        // (Monday 2026-01-05 -> Sunday 2026-01-11).
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Late block",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 23, minute: 30),
+            plannedDurationMinutes: 120
+        )
+
+        let result = try service.splitPlannedActivity(
+            original.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 60),
+                // 90 minutes after 23:30 -> 01:00 the NEXT calendar day.
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 90, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+
+        #expect(result.count == 2)
+        #expect(result[0].localDate == LocalDate(year: 2026, month: 1, day: 6))
+        #expect(result[0].startLocalTime == LocalTime(hour: 23, minute: 30))
+        // The correct next-day date — never 2026-01-06 with a silently
+        // wrapped 01:00 time.
+        #expect(result[1].localDate == LocalDate(year: 2026, month: 1, day: 7))
+        #expect(result[1].startLocalTime == LocalTime(hour: 1, minute: 0))
+        // Same WeekPlan either way here, since Jan 7 is still within the
+        // Jan 5-11 Vǫxtr week — confirmed explicitly, not assumed.
+        #expect(result[1].weekPlanId == weekPlan.id)
+    }
+
+    @Test("Lead Review follow-up (Blocker 2): a later child that crosses into the NEXT Vǫxtr week resolves its own correct WeekPlan, distinct from the original's")
+    @MainActor
+    func splitPlannedActivityResolvesDistinctWeekPlanAcrossWeekBoundary() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        // Sunday 2026-01-11 — the LAST day of the Jan 5-11 week. A late
+        // start plus a long enough offset pushes the second child into
+        // Monday 2026-01-12, the FIRST day of the NEXT Vǫxtr week.
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Sunday night block",
+            localDate: LocalDate(year: 2026, month: 1, day: 11),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 23, minute: 0),
+            plannedDurationMinutes: 90
+        )
+
+        let result = try service.splitPlannedActivity(
+            original.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 45),
+                // 90 minutes after 23:00 Sunday -> 00:30 MONDAY, the next
+                // Vǫxtr week entirely.
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 90, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+
+        #expect(result.count == 2)
+        #expect(result[0].weekPlanId == weekPlan.id)
+        #expect(result[1].localDate == LocalDate(year: 2026, month: 1, day: 12))
+        #expect(result[1].startLocalTime == LocalTime(hour: 0, minute: 30))
+        // A DIFFERENT WeekPlan than the original's — the next Vǫxtr week
+        // (Monday 2026-01-12 -> Sunday 2026-01-18), never silently forced
+        // into the original's own WeekPlan.
+        #expect(result[1].weekPlanId != weekPlan.id)
+        let nextWeekPlan = try repository.fetchWeekPlan(forAthlete: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 12))
+        #expect(nextWeekPlan?.id == result[1].weekPlanId)
+    }
+
     // MARK: - Sport / Activity Identity domain foundation (Parts 3/4)
 
     @Test("A PlannedActivity may be created Sport-only, with no title at all")

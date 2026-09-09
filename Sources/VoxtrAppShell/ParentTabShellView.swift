@@ -425,6 +425,7 @@ private struct ParentPlanTabView: View {
                 trainingService: trainingService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 calendarSourcesViewModel: familyCalendarSourcesViewModel,
                 onNavigateToWeeklyPlan: { athleteId in weeklyPlanPath.append(athleteId) }
             )
@@ -442,6 +443,7 @@ private struct ParentPlanTabView: View {
                         planningService: planningService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                         notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                        calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                         actorId: actorId
                     )
                     .accessibilityIdentifier("parentPlan.weeklyPlanDestination.\(athleteId.rawValue.uuidString)")
@@ -585,6 +587,7 @@ private struct ParentTrainingTabView: View {
                                         trainingService: trainingService,
                                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                                         notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                                        calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                                         actorId: actorId,
                                         athleteDisplayName: athlete.givenName
                                     )

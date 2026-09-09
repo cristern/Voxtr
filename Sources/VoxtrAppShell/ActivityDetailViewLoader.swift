@@ -44,6 +44,12 @@ public struct ActivityDetailViewLoader: View {
     /// Activity Reminder control is available on this screen regardless
     /// of entry point.
     let notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+    /// Activity Edit -> Split Activity (Lead Review follow-up): threaded
+    /// through unconditionally, matching this loader's own established
+    /// "no domain-service dependency is optional" convention above — the
+    /// Split Activity action is available on this screen regardless of
+    /// entry point, the same way Reminders already are.
+    let calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     /// Post-mutation navigation and stale-state consistency audit: the
     /// caller's own reload/refresh entry point — called the moment a
     /// log genuinely succeeds inside `ActivityDetailView`, so the
@@ -64,6 +70,7 @@ public struct ActivityDetailViewLoader: View {
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
         notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         onActivityLogged: @escaping () -> Void = {}
     ) {
         self.plannedActivity = plannedActivity
@@ -73,6 +80,7 @@ public struct ActivityDetailViewLoader: View {
         self.planningService = planningService
         self.trainingReflectionCoordinationService = trainingReflectionCoordinationService
         self.notificationsPlanningCoordinationService = notificationsPlanningCoordinationService
+        self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.onActivityLogged = onActivityLogged
     }
 
@@ -124,6 +132,7 @@ public struct ActivityDetailViewLoader: View {
                 planningService: planningService,
                 trainingReflectionCoordinationService: trainingReflectionCoordinationService,
                 notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 onActivityLogged: onActivityLogged
             )
         }

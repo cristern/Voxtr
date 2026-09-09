@@ -8,6 +8,8 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
+import VoxtrAthleteDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -16,11 +18,14 @@ import VoxtrNotificationsDomain
 // Activity Edit -> Split Activity: covers the ViewModel/UI-facing layer
 // specifically — eligibility (`canSplit`), the local split draft
 // (`beginSplit`/`addSplitChild`/`removeSplitChild`), and
-// `splitActivity()`'s wiring into `PlanningService.splitPlannedActivity`.
-// Domain-level split behavior (field inheritance, validation reuse,
-// rollback, provenance) is covered directly in
-// `PlanningServiceTests.swift`'s own "Activity Edit -> Split Activity"
-// section — not duplicated here.
+// `splitActivity()`'s wiring into `CalendarPlanningCoordinationService
+// .splitExistingPlannedActivity`. Domain-level split behavior (field
+// inheritance, validation reuse, rollback, midnight/week-boundary
+// carry) is covered directly in `PlanningServiceTests.swift`'s own
+// "Activity Edit -> Split Activity" section; source-backed decomposition
+// provenance conversion (Lead Review Blocker 1) is covered in
+// `CalendarPlanningCoordinationServiceTests.swift`'s own
+// "Activity Edit -> Split Activity" section — neither duplicated here.
 //
 // Following `ActivityDetailReminderUITests`'s own already-accepted
 // deviation from the S1.1 "no shared helpers" lesson: small inline
@@ -41,6 +46,20 @@ private final class NoOpActivityReminderScheduler: ActivityReminderScheduling, @
     }
 }
 
+/// A bare no-op `CalendarEventProviding` — these ViewModel-layer tests
+/// never exercise Calendar Import itself, only whether `splitActivity()`
+/// correctly routes through the coordinator that owns it.
+private struct NoOpCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
+
 private struct FixedDateProvider: DateProvider {
     let now: Date
 }
@@ -54,12 +73,14 @@ struct ActivityDetailSplitActivityTests {
     private func makeFixture(container: ModelContainer) -> (
         planningService: PlanningService,
         trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+        notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+        calendarPlanningCoordinationService: CalendarPlanningCoordinationService
     ) {
         let eventBus = EventBus()
         let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext), eventBus: eventBus)
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext), eventBus: eventBus)
         let trainingReflectionCoordinationService = TrainingReflectionCoordinationService(
-            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext), eventBus: eventBus),
+            trainingService: trainingService,
             reflectionService: ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
         )
         let activityReminderService = ActivityReminderService(
@@ -72,7 +93,20 @@ struct ActivityDetailSplitActivityTests {
             dateProvider: FixedDateProvider(now: Date(timeIntervalSince1970: 1_767_225_600))
         )
         notificationsPlanningCoordinationService.subscribeToEvents(eventBus)
-        return (planningService, trainingReflectionCoordinationService, notificationsPlanningCoordinationService)
+        // Lead Review follow-up (PR #82): splitActivity() now routes
+        // through this coordinator, not PlanningService directly.
+        let calendarPlanningCoordinationService = CalendarPlanningCoordinationService(
+            sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+            importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+            legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+            decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+            decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+            calendarEventProvider: NoOpCalendarEventProvider(),
+            planningService: planningService,
+            trainingService: trainingService,
+            athleteRepository: AthleteRepository(modelContext: container.mainContext)
+        )
+        return (planningService, trainingReflectionCoordinationService, notificationsPlanningCoordinationService, calendarPlanningCoordinationService)
     }
 
     @MainActor
@@ -91,7 +125,8 @@ struct ActivityDetailSplitActivityTests {
         fixture: (
             planningService: PlanningService,
             trainingReflectionCoordinationService: TrainingReflectionCoordinationService,
-            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: CalendarPlanningCoordinationService
         ),
         athleteId: AthleteId,
         weekPlan: WeekPlan,
@@ -107,6 +142,7 @@ struct ActivityDetailSplitActivityTests {
             planningService: fixture.planningService,
             trainingReflectionCoordinationService: fixture.trainingReflectionCoordinationService,
             notificationsPlanningCoordinationService: fixture.notificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: fixture.calendarPlanningCoordinationService,
             onActivityLogged: onActivityLogged
         )
     }
@@ -147,7 +183,10 @@ struct ActivityDetailSplitActivityTests {
         // Simulates a stale/reused draft reaching splitActivity() some
         // other way than through the (hidden) "Split Activity" button —
         // the application-boundary guard this task requires, not only
-        // the button's own conditional visibility.
+        // the button's own conditional visibility. This is the
+        // ViewModel-level guard; the coordinator ALSO re-checks Training
+        // eligibility itself (see CalendarPlanningCoordinationServiceTests
+        // for that backstop covered directly).
         viewModel.splitChildren = [
             SplitChildDraft(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 60),
             SplitChildDraft(activityType: .strength, startOffsetMinutes: 60, durationMinutes: 30)
@@ -159,7 +198,7 @@ struct ActivityDetailSplitActivityTests {
         #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
     }
 
-    @Test("beginSplit() initializes two default children from the CURRENTLY PERSISTED activity, never from an unsaved Edit draft")
+    @Test("beginSplit() seeds exactly one Calm-by-Default child (offset 0, duration 30) from the CURRENTLY PERSISTED activity, never from an unsaved Edit draft, and never the entire original duration")
     @MainActor
     func beginSplitReadsPersistedActivityNotUnsavedEditDraft() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
@@ -176,17 +215,47 @@ struct ActivityDetailSplitActivityTests {
 
         viewModel.beginSplit()
 
-        #expect(viewModel.splitChildren.count == 2)
+        #expect(viewModel.splitChildren.count == 1)
         #expect(viewModel.splitChildren[0].activityType == .individualTraining)
         #expect(viewModel.splitChildren[0].startOffsetMinutes == 0)
-        // 90 (the PERSISTED duration), never 15 (the unsaved edit draft).
-        #expect(viewModel.splitChildren[0].durationMinutes == 90)
-        #expect(viewModel.splitChildren[1].startOffsetMinutes == 90)
+        // The Calm-by-Default flat 30, never 15 (the unsaved edit draft)
+        // and never 90 (the original's full duration).
+        #expect(viewModel.splitChildren[0].durationMinutes == 30)
     }
 
-    @Test("addSplitChild() and removeSplitChild() mutate only the local split draft")
+    @Test("addSplitChild() derives each new child from the original's own remaining envelope, and never proposes past it")
     @MainActor
-    func addAndRemoveSplitChildMutateDraft() throws {
+    func addSplitChildDerivesFromOriginalEnvelope() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        // plannedDurationMinutes: 90 — the "envelope" addSplitChild()
+        // derives against.
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId)
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        viewModel.beginSplit()
+        #expect(viewModel.splitChildren.count == 1)
+
+        viewModel.addSplitChild()
+        #expect(viewModel.splitChildren.count == 2)
+        #expect(viewModel.splitChildren[1].activityType == .individualTraining)
+        #expect(viewModel.splitChildren[1].startOffsetMinutes == 30)
+        // Remainder up to the original's own 90-minute total — never
+        // more, matching "never silently expand the total planned time."
+        #expect(viewModel.splitChildren[1].durationMinutes == 60)
+
+        // The running total (0-90) already reaches the original's own
+        // envelope — a further tap is a NO-OP, exactly mirroring
+        // CalendarImportReviewViewModel.nextSequentialSplitChild's own
+        // "never auto-propose outside the envelope" guard.
+        viewModel.addSplitChild()
+        #expect(viewModel.splitChildren.count == 2)
+    }
+
+    @Test("removeSplitChild() mutates only the local split draft")
+    @MainActor
+    func removeSplitChildMutatesOnlyDraft() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
         let fixture = makeFixture(container: container)
@@ -194,15 +263,15 @@ struct ActivityDetailSplitActivityTests {
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId)
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
         viewModel.beginSplit()
-        #expect(viewModel.splitChildren.count == 2)
-
         viewModel.addSplitChild()
-        #expect(viewModel.splitChildren.count == 3)
-
-        let middleId = viewModel.splitChildren[1].id
-        viewModel.removeSplitChild(middleId)
         #expect(viewModel.splitChildren.count == 2)
-        #expect(!viewModel.splitChildren.contains { $0.id == middleId })
+
+        let secondId = viewModel.splitChildren[1].id
+        viewModel.removeSplitChild(secondId)
+
+        #expect(viewModel.splitChildren.count == 1)
+        #expect(!viewModel.splitChildren.contains { $0.id == secondId })
+        #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
     }
 
     @Test("splitActivity() with fewer than two children is rejected and canConfirmSplit reflects that")
@@ -215,7 +284,6 @@ struct ActivityDetailSplitActivityTests {
         let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId)
         let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
         viewModel.beginSplit()
-        viewModel.removeSplitChild(viewModel.splitChildren[1].id)
         #expect(viewModel.splitChildren.count == 1)
         #expect(viewModel.canConfirmSplit == false)
 
@@ -239,6 +307,8 @@ struct ActivityDetailSplitActivityTests {
             onActivityLogged: { loggedCount += 1 }
         )
         viewModel.beginSplit()
+        viewModel.addSplitChild()
+        #expect(viewModel.splitChildren.count == 2)
         #expect(viewModel.didSplitSuccessfully == false)
 
         let succeeded = viewModel.splitActivity()
@@ -247,7 +317,9 @@ struct ActivityDetailSplitActivityTests {
         #expect(viewModel.didSplitSuccessfully == true)
         #expect(viewModel.errorMessage == nil)
         #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
-        #expect(viewModel.activity.plannedDurationMinutes == 90)
+        // The first child's own (Calm-by-Default) duration — 30, not the
+        // original's full 90.
+        #expect(viewModel.activity.plannedDurationMinutes == 30)
         #expect(loggedCount == 1)
         #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 2)
     }

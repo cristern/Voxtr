@@ -330,7 +330,8 @@ public struct FamilyHomeContentView: View {
                         planningService: planningService,
                         trainingService: trainingService,
                         trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService
+                        notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                        calendarPlanningCoordinationService: calendarPlanningCoordinationService
                     )
                 case .sleepCapture(let athleteId):
                     if let athlete = viewModel.activeAthletes.first(where: { $0.athleteId == athleteId }) {
@@ -940,6 +941,7 @@ public struct FamilyHomeContentView: View {
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
             notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
             onActivityLogged: { viewModel.refresh() }
         )
     }

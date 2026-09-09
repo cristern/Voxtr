@@ -477,6 +477,22 @@ struct SplitActivityFormView: View {
     @Bindable var viewModel: ActivityDetailViewModel
     @Environment(\.dismiss) private var dismiss
 
+    /// Lead Review follow-up (legacy `.physicalTraining`): mirrors
+    /// `ActivityEditFormView.availableActivityTypes`'s own established
+    /// per-row inclusion rule exactly, applied PER CHILD here rather
+    /// than once for the whole form — only the first child (which stays
+    /// an in-place edit of the original) can ever actually carry
+    /// `.physicalTraining`; every later child is created fresh via
+    /// `addPlannedActivity`, which unconditionally rejects that legacy
+    /// value, so its own Picker never needs to offer it.
+    private static func availableActivityTypes(for currentValue: ActivityType) -> [ActivityType] {
+        if currentValue == .physicalTraining {
+            return [.physicalTraining] + ActivityType.selectableCases
+        } else {
+            return ActivityType.selectableCases
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -492,7 +508,7 @@ struct SplitActivityFormView: View {
                 ForEach($viewModel.splitChildren) { $child in
                     Section {
                         Picker("Activity Type", selection: $child.activityType) {
-                            ForEach(ActivityType.selectableCases, id: \.self) { activityType in
+                            ForEach(Self.availableActivityTypes(for: child.activityType), id: \.self) { activityType in
                                 Text(activityType.displayName).tag(activityType)
                             }
                         }

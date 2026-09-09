@@ -8,6 +8,8 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
+import VoxtrAthleteDomain
 
 // NOTE: like the other persistence-backed tests in this suite, the
 // `ActivityDetailViewModel` cases here require the Xcode/macOS SwiftData
@@ -20,6 +22,22 @@ import VoxtrNotificationsDomain
 // the contract independently. `PlannedTimeRangeFormatterTests` already
 // covers the formatter's own arithmetic exhaustively — these tests only
 // prove each surface wires it in correctly.
+
+/// Lead Review follow-up (PR #82): a bare no-op `CalendarEventProviding`
+/// — these tests exercise `PlannedTimeRangeFormatter` consumers only,
+/// never Calendar Import, so `CalendarPlanningCoordinationService`
+/// (a required `ActivityDetailViewModel` dependency since PR #82's
+/// Blocker 1 fix) never actually needs to reach real calendar data.
+private struct NoopCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
 
 private struct NoopActivityReminderScheduler: ActivityReminderScheduling {
     func scheduleReminder(id: ActivityReminderId, fireDate: Date, content: ActivityReminderContent) {}
@@ -214,6 +232,20 @@ struct PlannedTimeRangeFormatterConsumerTests {
             planningService: planningService,
             dateProvider: FixedDateProvider(now: Date(timeIntervalSince1970: 1_764_547_200))
         )
+        // Lead Review follow-up (PR #82): required since
+        // ActivityDetailViewModel now routes Split Activity through this
+        // coordinator — see NoopCalendarEventProvider's own doc comment.
+        let calendarPlanningCoordinationService = CalendarPlanningCoordinationService(
+            sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+            importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+            legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+            decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+            decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+            calendarEventProvider: NoopCalendarEventProvider(),
+            planningService: planningService,
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext), eventBus: eventBus),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext)
+        )
 
         let athleteId = AthleteId()
         let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
@@ -228,7 +260,8 @@ struct PlannedTimeRangeFormatterConsumerTests {
             athleteId: athleteId, athleteDisplayName: "Oliver", isWeekPlanDraft: true, deletedByActorId: ActorId(),
             planningService: planningService,
             trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService
+            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+            calendarPlanningCoordinationService: calendarPlanningCoordinationService
         )
     }
 

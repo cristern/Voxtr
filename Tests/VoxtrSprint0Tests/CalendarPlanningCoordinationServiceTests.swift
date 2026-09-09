@@ -3311,6 +3311,141 @@ extension CalendarPlanningCoordinationServiceTests {
         #expect(staged.splitAthleteId == athleteId)
         #expect(staged.splitChildren.map(\.durationMinutes) == [30, 60])
     }
+
+    // MARK: - Activity Edit -> Split Activity (Lead Review follow-up, Blocker 1)
+
+    /// Blocker 1: a source-backed activity, already imported as an
+    /// ORDINARY (non-decomposed) decision, is split post-persistence via
+    /// `splitExistingPlannedActivity`. This must convert the existing
+    /// decision into the SAME canonical decomposed shape
+    /// `classifyAndImportSplit` itself produces — `DecomposedActivityLink`
+    /// rows for every child, under the EXISTING (never mutated)
+    /// `CalendarImportDecision` — so `plannedActivityIds(for:)` and
+    /// `historicalTitleClassifications(for:)` both correctly treat it as
+    /// decomposed afterward, never a count-based heuristic.
+    @Test("Lead Review follow-up: splitting an already-imported source-backed activity converts its decision to the canonical decomposed shape")
+    @MainActor
+    func splitExistingPlannedActivityConvertsOrdinaryDecisionToDecomposed() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let original = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+        // Ordinary, not decomposed, before the split.
+        #expect(try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).isEmpty)
+
+        let result = try fixture.coordinationService.splitExistingPlannedActivity(
+            original.plannedActivityId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+
+        #expect(result.count == 2)
+        #expect(result[0].plannedActivityId == original.plannedActivityId)
+
+        // Canonical decomposed shape now exists — same decision, still
+        // immutable/unmutated, now with N links.
+        let links = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
+        #expect(links.count == 2)
+        #expect(Set(links.map(\.plannedActivityId)) == Set(result.map(\.plannedActivityId)))
+
+        // The ONE canonical read helper now resolves both children, not
+        // just the mirrored first child.
+        let resolvedIds = try fixture.coordinationService.plannedActivityIds(for: decision)
+        #expect(Set(resolvedIds) == Set(result.map(\.plannedActivityId)))
+
+        // No longer admitted into the single-activity remembered-choice
+        // pool — the same exclusion `classifyAndImportSplit`'s own
+        // decomposed decisions already get.
+        let history = try fixture.coordinationService.historicalTitleClassifications(for: source)
+        #expect(history.isEmpty)
+    }
+
+    /// Blocker 1 / Training invariant: the coordinator itself — not only
+    /// `ActivityDetailViewModel`'s own re-checked `canSplit` — refuses to
+    /// split a `PlannedActivity` that already has a `LoggedActivity`,
+    /// using real Training truth. Nothing is mutated.
+    @Test("Lead Review follow-up: splitExistingPlannedActivity refuses a PlannedActivity that already has a LoggedActivity, using real Training truth")
+    @MainActor
+    func splitExistingPlannedActivityRefusesAlreadyLoggedActivity() throws {
+        let fixture = try makeFixture()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Morning run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 60
+        )
+        _ = try fixture.trainingService.logActivity(
+            athleteId: fixture.athleteId, plannedActivityId: activity.plannedActivityId, activityType: .individualTraining,
+            title: "Morning run", startedAt: Self.referenceDate, durationMinutes: 60, status: .completed, loggedByActorId: ActorId()
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.plannedActivityAlreadyLogged) {
+            try fixture.coordinationService.splitExistingPlannedActivity(
+                activity.plannedActivityId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                    PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+                ],
+                splitBy: ActorId()
+            )
+        }
+        #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    /// A manually-created (never calendar-imported) activity splits
+    /// through the SAME general operation, with zero calendar side
+    /// effects — no `CalendarImportDecision`, no `DecomposedActivityLink`
+    /// — confirming manual and source-backed activities share one
+    /// canonical split path, never two competing ones.
+    @Test("Lead Review follow-up: splitExistingPlannedActivity on a manually-created activity produces no CalendarImportDecision/DecomposedActivityLink")
+    @MainActor
+    func splitExistingPlannedActivityOnManualActivityHasNoCalendarSideEffects() throws {
+        let fixture = try makeFixture()
+        // A connected source exists in the workspace (mirroring a real
+        // family that also has calendars connected), so this test proves
+        // the manual activity's split genuinely produces zero decisions
+        // under that source — not merely that no source exists to check.
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Manual block", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 60
+        )
+
+        let result = try fixture.coordinationService.splitExistingPlannedActivity(
+            activity.plannedActivityId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+
+        #expect(result.count == 2)
+        #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 2)
+        // Nothing calendar-shaped was ever created for a manual activity.
+        let allDecisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
+        #expect(allDecisions.isEmpty)
+    }
 }
 
 private extension Date {

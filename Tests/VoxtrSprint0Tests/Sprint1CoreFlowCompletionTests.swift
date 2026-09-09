@@ -10,6 +10,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrNotificationsDomain
+import VoxtrCalendarPlanningDomain
 
 // NOTE: like the other persistence-backed tests, these exercise @Model
 // types and require the Xcode/macOS SwiftData runtime — written but not
@@ -34,8 +35,45 @@ private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
     }
 }
 
+/// Lead Review follow-up (PR #82): a bare no-op `CalendarEventProviding`
+/// — see `Sprint1CoreFlowCompletionTests.makeNoopCalendarPlanningCoordinationService`'s
+/// own doc comment.
+private struct NoOpCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
+
 @Suite("Sprint 1 Core Flow Completion", .serialized)
 struct Sprint1CoreFlowCompletionTests {
+
+    /// Lead Review follow-up (PR #82): `ActivityDetailViewModel` now
+    /// requires a `CalendarPlanningCoordinationService` dependency (Split
+    /// Activity routes through it) — none of this file's tests exercise
+    /// Calendar Import, so a bare no-op fixture is built once here rather
+    /// than duplicated at every one of this file's many
+    /// `ActivityDetailViewModel(...)` construction sites.
+    @MainActor
+    private static func makeNoopCalendarPlanningCoordinationService(
+        container: ModelContainer, planningService: PlanningService
+    ) -> CalendarPlanningCoordinationService {
+        CalendarPlanningCoordinationService(
+            sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+            importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+            legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+            decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+            decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+            calendarEventProvider: NoOpCalendarEventProvider(),
+            planningService: planningService,
+            trainingService: TrainingService(repository: TrainingRepository(modelContext: container.mainContext)),
+            athleteRepository: AthleteRepository(modelContext: container.mainContext)
+        )
+    }
 
     /// Item 7: with three athletes, resolving by explicit AthleteId
     /// never silently returns athlete #1 — the actual regression this
@@ -113,7 +151,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.activity.plannedActivityId == activity.plannedActivityId)
@@ -175,6 +214,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { reloadCallCount += 1 }
         )
         #expect(viewModel.loggedActivity == nil)
@@ -246,6 +286,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -321,6 +362,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -599,7 +641,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.isCompleted == true)
@@ -655,7 +698,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.isCompleted == false)
@@ -702,7 +746,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
     }
 
@@ -894,7 +939,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(detail?.reflection != nil) // the reflection genuinely exists...
@@ -1079,7 +1125,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         otherAthleteViewModel.prefillLoggedActivityEditForm()
         otherAthleteViewModel.editLoggedPerceivedExertion = 1
@@ -1170,7 +1217,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         // Opens safely with no historical value — never fabricated.
@@ -1228,7 +1276,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         viewModel.prefillLoggedActivityEditForm()
         viewModel.editLoggedPerceivedExertion = 5
@@ -1289,7 +1338,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         let missedViewModel = ActivityDetailViewModel(
             activity: missedActivity, isCompleted: true, loggedActivity: missedLogged,
@@ -1302,7 +1352,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(completedViewModel.canEditLoggedDuration == true)
@@ -1347,7 +1398,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         viewModel.prefillLoggedActivityEditForm()
         #expect(viewModel.editLoggedDurationMinutes == 35)
@@ -1401,7 +1453,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         viewModel.prefillLoggedActivityEditForm()
         viewModel.editLoggedDurationMinutes = 0
@@ -1443,7 +1496,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.canCancel == true)
@@ -1481,6 +1535,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { reloadCallCount += 1 }
         )
 
@@ -1525,7 +1580,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.cancelActivity())
@@ -1564,7 +1620,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
 
         #expect(viewModel.canReopen == false)
@@ -1625,7 +1682,8 @@ struct Sprint1CoreFlowCompletionTests {
                         scheduler: NoOpActivityReminderScheduler()
                     ),
                     planningService: planningService
-                )
+                ),
+                calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
             )
 
             #expect(viewModel.canReopen == (status == .missed))
@@ -1689,6 +1747,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { hostReloads += 1 }
         )
 
@@ -1734,6 +1793,7 @@ struct Sprint1CoreFlowCompletionTests {
                 ),
                 planningService: planningService
             ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService),
             onActivityLogged: { reloadCallCount += 1 }
         )
         #expect(viewModel.cancelActivity())
@@ -1788,7 +1848,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         #expect(viewModel.cancelActivity())
         #expect(viewModel.reopenActivity())
@@ -1832,7 +1893,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         #expect(unresolvedViewModel.reopenActivity() == false)
 
@@ -1858,7 +1920,8 @@ struct Sprint1CoreFlowCompletionTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
-            )
+            ),
+            calendarPlanningCoordinationService: Self.makeNoopCalendarPlanningCoordinationService(container: container, planningService: planningService)
         )
         #expect(completedViewModel.canReopen == false)
         #expect(completedViewModel.reopenActivity() == false)

@@ -64,6 +64,24 @@ public final class CalendarImportDecisionRepository {
             .first { $0.sourceId == rawSourceId && $0.externalEventKey == externalEventKey }
     }
 
+    /// Activity Edit -> Split Activity (Lead Review follow-up, Blocker
+    /// 1): looks up a decision by `externalEventKey` ALONE, without
+    /// already knowing which `ExternalPlanningSourceId` it belongs to.
+    /// Safe because `externalEventKey` (== `PlannedActivity.externalSourceId`
+    /// for every calendar-imported activity) is already constructed as
+    /// globally unique — prefixed by the source's own
+    /// `externalContainerIdentifier` (see `ExternalCalendarEventIdentity
+    /// .externalSourceId`) — the `sourceId` parameter every OTHER method
+    /// here takes is a scoping convenience, never load-bearing for
+    /// uniqueness. Needed because a post-hoc split starts from an
+    /// already-persisted `PlannedActivity`, which only carries
+    /// `externalSourceId` — never a reference to the
+    /// `ExternalPlanningSource` it came from.
+    public func fetch(externalEventKey: String) throws -> CalendarImportDecision? {
+        try modelContext.fetch(FetchDescriptor<CalendarImportDecision>())
+            .first { $0.externalEventKey == externalEventKey }
+    }
+
     public func delete(_ decision: CalendarImportDecision) throws {
         modelContext.delete(decision)
         try modelContext.save()

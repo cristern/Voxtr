@@ -34,6 +34,23 @@ private struct NoOpActivityReminderScheduler: ActivityReminderScheduling {
     }
 }
 
+/// Lead Review follow-up (PR #82): a bare no-op `CalendarEventProviding`
+/// so `ActivityDetailViewModel` tests in this file (which do not
+/// exercise Calendar Import) can construct the now-required
+/// `CalendarPlanningCoordinationService` dependency without touching
+/// real calendar data — same rationale as `NoOpActivityReminderScheduler`
+/// above.
+private struct NoOpCalendarEventProvider: CalendarEventProviding {
+    func authorizationStatus(completion: @escaping @MainActor @Sendable (CalendarAuthorizationStatus) -> Void) {
+        MainActor.assumeIsolated { completion(.authorized) }
+    }
+    func requestAuthorization(completion: @escaping @MainActor @Sendable (Bool) -> Void) {
+        MainActor.assumeIsolated { completion(true) }
+    }
+    func availableCalendars() throws -> [AvailableCalendar] { [] }
+    func events(inCalendar calendarIdentifier: String, from: Date, to: Date) throws -> [ExternalCalendarEvent] { [] }
+}
+
 @Suite("Sprint 1 completion: Tomorrow and Family Schedule", .serialized)
 struct FamilyScheduleAndTomorrowTests {
 
@@ -496,6 +513,17 @@ struct FamilyScheduleAndTomorrowTests {
                     scheduler: NoOpActivityReminderScheduler()
                 ),
                 planningService: planningService
+            ),
+            calendarPlanningCoordinationService: CalendarPlanningCoordinationService(
+                sourceRepository: ExternalPlanningSourceRepository(modelContext: container.mainContext),
+                importDecisionRepository: CalendarImportDecisionRepository(modelContext: container.mainContext),
+                legacyMappingRepository: CalendarPlanningMappingRepository(modelContext: container.mainContext),
+                decomposedActivityLinkRepository: DecomposedActivityLinkRepository(modelContext: container.mainContext),
+                decompositionEvidenceRepository: DecompositionEvidenceRepository(modelContext: container.mainContext),
+                calendarEventProvider: NoOpCalendarEventProvider(),
+                planningService: planningService,
+                trainingService: trainingService,
+                athleteRepository: AthleteRepository(modelContext: container.mainContext)
             )
         )
         #expect(detailViewModel.activity.plannedActivityId == created.plannedActivityId)
