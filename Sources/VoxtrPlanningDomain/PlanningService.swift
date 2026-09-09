@@ -626,6 +626,15 @@ public final class PlanningService {
         let preSplitActivityType = original.activityType
         let preSplitStartLocalTime = original.startLocalTime
         let preSplitPlannedDurationMinutes = original.plannedDurationMinutes
+        // Lead Review follow-up 2 (Blocker 4): split is a purely
+        // structural operation — `plannedIntensity` is shared, unrelated
+        // Planning truth (like `title`/`notes`/`location`/`sportId`
+        // below), never one of the intentionally per-child values
+        // (`activityType`/timing/duration). Captured here so every
+        // child, and rollback, carries it forward instead of silently
+        // dropping it to `editPlannedActivity`/`addPlannedActivity`'s own
+        // `nil` default.
+        let preSplitPlannedIntensity = original.plannedIntensity
         let athleteId = AthleteId(rawValue: original.athleteId)
         let sportId = original.sportId.map(SportId.init(rawValue:))
         let categoryIds = original.categoryIds.map(ActivityCategoryId.init(rawValue:))
@@ -668,6 +677,7 @@ public final class PlanningService {
                 categoryIds: categoryIds,
                 startLocalTime: originalStartLocalTime,
                 plannedDurationMinutes: firstChild.durationMinutes,
+                plannedIntensity: preSplitPlannedIntensity,
                 notes: original.notes,
                 location: original.location
             )
@@ -688,6 +698,21 @@ public final class PlanningService {
                 // own existing per-child WeekPlan resolution exactly, not
                 // a new pattern invented here.
                 let childWeekPlan = try getOrCreateWeekPlan(athleteId: athleteId, weekStart: childLocalDate.startOfWeek)
+                // Lead Review follow-up 2 (target WeekPlan lifecycle):
+                // `addPlannedActivity` itself has no draft-status guard
+                // (it is used broadly, including by callers that legally
+                // insert regardless of commit state) — that global
+                // behavior is deliberately NOT changed here. A split
+                // crossing into another week's WeekPlan must still honor
+                // the same "only a draft WeekPlan may gain a new
+                // activity" invariant `editPlannedActivity`/
+                // `deletePlannedActivity`/this method's OWN original-week
+                // guard above already enforce, so this check is added
+                // HERE, specific to this split operation, before creating
+                // that child — never as a change to `addPlannedActivity`.
+                guard childWeekPlan.status == .draft else {
+                    throw PlanningServiceError.weekPlanNotDraft
+                }
                 let sibling = try addPlannedActivity(
                     toWeekPlan: childWeekPlan.weekPlanId,
                     athleteId: athleteId,
@@ -699,6 +724,7 @@ public final class PlanningService {
                     categoryIds: categoryIds,
                     startLocalTime: childStartLocalTime,
                     plannedDurationMinutes: child.durationMinutes,
+                    plannedIntensity: preSplitPlannedIntensity,
                     externalSourceId: original.externalSourceId,
                     externalSourceType: original.externalSourceType,
                     notes: original.notes,
@@ -723,6 +749,7 @@ public final class PlanningService {
                 categoryIds: categoryIds,
                 startLocalTime: preSplitStartLocalTime,
                 plannedDurationMinutes: preSplitPlannedDurationMinutes,
+                plannedIntensity: preSplitPlannedIntensity,
                 notes: original.notes,
                 location: original.location
             )

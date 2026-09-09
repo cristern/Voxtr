@@ -3362,7 +3362,7 @@ extension CalendarPlanningCoordinationServiceTests {
         // immutable/unmutated, now with N links.
         let links = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
         #expect(links.count == 2)
-        #expect(Set(links.map(\.plannedActivityId)) == Set(result.map(\.plannedActivityId)))
+        #expect(Set(links.map { PlannedActivityId(rawValue: $0.plannedActivityId) }) == Set(result.map(\.plannedActivityId)))
 
         // The ONE canonical read helper now resolves both children, not
         // just the mirrored first child.
@@ -3445,6 +3445,261 @@ extension CalendarPlanningCoordinationServiceTests {
         // Nothing calendar-shaped was ever created for a manual activity.
         let allDecisions = try fixture.importDecisionRepository.fetchAll(forSource: source.externalPlanningSourceId)
         #expect(allDecisions.isEmpty)
+    }
+
+    // MARK: - PR #82 Lead Review follow-up 2 (Blockers 1, 2, 3)
+
+    /// Blocker 1: two DIFFERENT workspaces each connect a source sharing
+    /// the exact same `externalContainerIdentifier` (a real, legitimate
+    /// collision this domain's own doc comment already documents — see
+    /// `ExternalPlanningSource`'s own) and import the SAME external
+    /// event, producing colliding `externalEventKey` strings. Splitting
+    /// workspace A's resulting activity must resolve and convert ONLY
+    /// workspace A's own decision — workspace B's decision (same key,
+    /// different source/workspace) must remain completely untouched,
+    /// proving `externalEventKey` is never treated as a globally unique
+    /// lookup key.
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 1): colliding external container/event identities across two workspaces never cross-link")
+    @MainActor
+    func splitExistingPlannedActivityNeverCrossesWorkspaceBoundaryOnCollidingIdentity() throws {
+        let fixture = try makeFixture()
+        let workspaceB = WorkspaceId()
+        let athleteB = try fixture.athleteRepository.createAthlete(
+            workspaceId: workspaceB, givenName: "Other Family Runner", birthDate: LocalDate(year: 2011, month: 5, day: 1),
+            timeZoneId: Self.timeZoneId, developmentStage: .parentLed
+        )
+
+        let sourceA = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-shared", displayName: "Familie A"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceA.externalPlanningSourceId, isEnabled: true)
+        let sourceB = try fixture.coordinationService.createSource(
+            forWorkspace: workspaceB, providerKind: .eventKit, externalContainerIdentifier: "cal-shared", displayName: "Familie B"
+        )
+        try fixture.coordinationService.setSourceEnabled(sourceB.externalPlanningSourceId, isEnabled: true)
+
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-shared"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-shared", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+
+        let itemA = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceA).first)
+        let importedA = try fixture.coordinationService.classifyAndImport(
+            itemA, for: sourceA, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        let itemB = try #require(try fixture.coordinationService.fetchReviewQueue(for: sourceB).first)
+        let importedB = try fixture.coordinationService.classifyAndImport(
+            itemB, for: sourceB, athleteId: athleteB.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        // The exact collision this fix must never mishandle: two
+        // DIFFERENT decisions (different sourceId), same externalEventKey.
+        #expect(itemA.externalEventKey == itemB.externalEventKey)
+
+        let decisionA = try #require(try fixture.importDecisionRepository.fetch(sourceId: sourceA.externalPlanningSourceId, externalEventKey: itemA.externalEventKey))
+        let decisionB = try #require(try fixture.importDecisionRepository.fetch(sourceId: sourceB.externalPlanningSourceId, externalEventKey: itemB.externalEventKey))
+
+        let result = try fixture.coordinationService.splitExistingPlannedActivity(
+            importedA.plannedActivityId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+        #expect(result.count == 2)
+
+        let linksA = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decisionA.calendarImportDecisionId)
+        #expect(linksA.count == 2)
+        // Workspace B's own decision — same externalEventKey, different
+        // source/workspace — is completely untouched.
+        let linksB = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decisionB.calendarImportDecisionId)
+        #expect(linksB.isEmpty)
+        #expect(try fixture.planningService.fetchPlannedActivity(byId: importedB.plannedActivityId)?.activityType == .individualTraining)
+    }
+
+    /// Blocker 2: this codebase's repositories are concrete SwiftData
+    /// types with no fault-injection seam (see `classifyAndImportSplit`'s
+    /// own "CORE CONSISTENCY" doc note — the same reasoning applies
+    /// here), so a genuine mid-loop persistence failure inside
+    /// `splitExistingPlannedActivity`'s own link-insertion loop cannot be
+    /// triggered from a black-box test without inventing a new protocol/
+    /// mock abstraction — out of this fix's bounded scope (see this
+    /// task's own explicit "do not add production-only failure injection
+    /// unless an established seam already exists"). This test instead
+    /// reproduces the EXACT partial state a real interruption between the
+    /// first and second link insert would leave (1 of 2 links written)
+    /// and proves the READ-TIME safety net (Blocker 3B) rejects any
+    /// further split attempt against it, before any further mutation —
+    /// the same "retry against a partial write fails safely rather than
+    /// silently extending it" guarantee `classifyAndImportSplit`'s own
+    /// `.splitProvenanceIncomplete` guard already establishes for the
+    /// import-time path. `splitExistingPlannedActivity`'s own rollback
+    /// code (verified directly by code review — see its own doc comment)
+    /// is what prevents this partial state from ever being left behind
+    /// by a genuine failure in the first place.
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 2): a source-backed activity left with a partial link set is safely rejected, never silently extended")
+    @MainActor
+    func splitExistingPlannedActivityRejectsActivityWithPartialLinkSet() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+
+        // Reproduce the exact partial state a genuine mid-loop failure
+        // (link 1 written, link 2's write interrupted) would leave —
+        // bypassing `splitExistingPlannedActivity` entirely, which,
+        // after this fix, would delete link 1 again before rethrowing
+        // rather than leave this state behind on its own.
+        let secondSibling = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: WeekPlanId(rawValue: imported.weekPlanId), athleteId: fixture.athleteId, activityType: .strength,
+            title: "Hockey training", localDate: imported.localDate, timeZoneId: imported.timeZoneId,
+            plannedDurationMinutes: 30, externalSourceId: imported.externalSourceId, externalSourceType: imported.externalSourceType
+        )
+        try fixture.decomposedActivityLinkRepository.insert(
+            calendarImportDecisionId: decision.calendarImportDecisionId, plannedActivityId: imported.plannedActivityId, orderIndex: 0
+        )
+
+        #expect(throws: CalendarPlanningCoordinationError.plannedActivityAlreadyDecomposed) {
+            try fixture.coordinationService.splitExistingPlannedActivity(
+                imported.plannedActivityId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                    PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+                ],
+                splitBy: ActorId()
+            )
+        }
+
+        // Never silently extended — still exactly 1 link, and the
+        // second, orphaned sibling from the simulated interruption is
+        // untouched (never duplicated, never silently linked after the
+        // fact).
+        #expect(try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).count == 1)
+        #expect(try fixture.planningService.fetchPlannedActivity(byId: secondSibling.plannedActivityId) != nil)
+    }
+
+    /// Blocker 3A: a source-backed `PlannedActivity` exists (its own
+    /// `externalSourceId`/`externalSourceType` set, exactly as a legacy
+    /// Calendar Planning Source V1 import — or a `classifyAndImport`
+    /// whose own decision write failed — would leave it), but NO
+    /// `CalendarImportDecision` resolves for it at all. Splitting it must
+    /// ADOPT the missing ORDINARY decision first (using the activity's
+    /// own pre-split athlete/sport/activityType), then convert it to the
+    /// canonical decomposed shape in the SAME call — never silently
+    /// succeed with no decision at all (the pre-fix behavior this
+    /// blocker named as invalid).
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 3A): a source-backed activity with no resolvable decision adopts the missing decision, then decomposes it")
+    @MainActor
+    func splitExistingPlannedActivityAdoptsMissingDecisionThenDecomposes() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: fixture.athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let externalEventKey = "cal-familie|evt-legacy"
+        // A legacy-shaped import: externalSourceId/Type set, but NO
+        // CalendarImportDecision was ever written for it (mirrors what
+        // Calendar Planning Source V1's own auto-import left behind, or a
+        // classifyAndImport whose decision write itself failed).
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: fixture.athleteId, activityType: .individualTraining,
+            title: "Legacy hockey block", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: Self.timeZoneId, plannedDurationMinutes: 60,
+            externalSourceId: externalEventKey, externalSourceType: CalendarPlanningCoordinationService.externalSourceType
+        )
+        #expect(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: externalEventKey) == nil)
+
+        let result = try fixture.coordinationService.splitExistingPlannedActivity(
+            activity.plannedActivityId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+        #expect(result.count == 2)
+
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: externalEventKey))
+        #expect(decision.status == .imported)
+        #expect(decision.athleteId == fixture.athleteId.rawValue)
+        #expect(decision.activityType == .individualTraining)
+        let links = try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId)
+        #expect(links.count == 2)
+        #expect(Set(links.map(\.plannedActivityId)) == Set(result.map { $0.plannedActivityId.rawValue }))
+    }
+
+    /// Blocker 3B: a source-backed activity whose decision ALREADY has
+    /// `DecomposedActivityLink` rows (it is itself already one child of a
+    /// completed split — here, splitting the SAME activity a second
+    /// time, since child 1 always reuses the original's own
+    /// `PlannedActivityId`) is rejected BEFORE any Planning mutation. V1
+    /// does not support restructuring/re-splitting an existing
+    /// decomposition.
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 3B): an already-decomposed source-backed activity is rejected before any mutation")
+    @MainActor
+    func splitExistingPlannedActivityRejectsAlreadyDecomposedActivity() throws {
+        let fixture = try makeFixture()
+        let source = try fixture.coordinationService.createSource(
+            forWorkspace: fixture.workspaceId, providerKind: .eventKit, externalContainerIdentifier: "cal-familie", displayName: "Familie"
+        )
+        try fixture.coordinationService.setSourceEnabled(source.externalPlanningSourceId, isEnabled: true)
+        let start = Self.referenceDate.addingTimeInterval(3600)
+        fixture.calendarProvider.eventsByCalendar["cal-familie"] = [
+            ExternalCalendarEvent(
+                eventIdentifier: "evt-hockey", calendarIdentifier: "cal-familie", title: "Hockey training",
+                startDate: start, endDate: start.addingTimeInterval(3600), isAllDay: false, isRecurring: false
+            )
+        ]
+        let item = try #require(try fixture.coordinationService.fetchReviewQueue(for: source).first)
+        let imported = try fixture.coordinationService.classifyAndImport(
+            item, for: source, athleteId: fixture.athleteId, sportId: nil, activityType: .individualTraining, decidedBy: ActorId()
+        )
+        let firstSplit = try fixture.coordinationService.splitExistingPlannedActivity(
+            imported.plannedActivityId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 30, durationMinutes: 30)
+            ],
+            splitBy: ActorId()
+        )
+        #expect(firstSplit.count == 2)
+        // Child 1 reuses the original's own PlannedActivityId — so
+        // `imported.plannedActivityId` now IDENTIFIES an already-
+        // decomposed child.
+        let activityCountBeforeRetry = try fixture.planningService.fetchPlannedActivities(forWeekPlan: WeekPlanId(rawValue: imported.weekPlanId)).count
+
+        #expect(throws: CalendarPlanningCoordinationError.plannedActivityAlreadyDecomposed) {
+            try fixture.coordinationService.splitExistingPlannedActivity(
+                imported.plannedActivityId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 15),
+                    PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 15, durationMinutes: 15)
+                ],
+                splitBy: ActorId()
+            )
+        }
+
+        // Zero further mutation — the same 2 activities, the same 2
+        // links, nothing restructured.
+        #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: WeekPlanId(rawValue: imported.weekPlanId)).count == activityCountBeforeRetry)
+        let decision = try #require(try fixture.importDecisionRepository.fetch(sourceId: source.externalPlanningSourceId, externalEventKey: item.externalEventKey))
+        #expect(try fixture.decomposedActivityLinkRepository.fetchAll(forDecision: decision.calendarImportDecisionId).count == 2)
     }
 }
 

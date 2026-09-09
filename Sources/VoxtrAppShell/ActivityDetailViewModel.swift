@@ -335,6 +335,19 @@ public final class ActivityDetailViewModel {
     /// after a doomed attempt.
     public var canConfirmSplit: Bool { splitChildren.count >= 2 }
 
+    /// PR #82 Lead Review follow-up 2 (short original durations): whether
+    /// `addSplitChild()` would actually add a row right now — lets
+    /// `SplitActivityFormView` show an explicit, calm explanation instead
+    /// of a mysteriously inert "Add Another" button once the original
+    /// activity's own envelope is fully consumed (always `true` when the
+    /// original has no known `plannedDurationMinutes`, matching
+    /// `addSplitChild()`'s own unbounded-envelope behavior in that case).
+    public var canAddSplitChild: Bool {
+        guard let previous = splitChildren.last else { return false }
+        guard let envelopeDurationMinutes = activity.plannedDurationMinutes else { return true }
+        return previous.startOffsetMinutes + previous.durationMinutes < envelopeDurationMinutes
+    }
+
     public func prefillEditForm() {
         editTitle = activity.title ?? ""
         editSportId = activity.sportId.map { SportId(rawValue: $0) }
@@ -514,16 +527,37 @@ public final class ActivityDetailViewModel {
     ///
     /// Lead Review follow-up: reuses `CalendarImportReviewViewModel
     /// .setSplitEnabled`'s own established Calm-by-Default starting
-    /// state exactly — ONE child, `(offset: 0, duration: 30)` — never
-    /// "the entire original duration." A single, small starting child
-    /// never silently proposes MORE total planned time than the original
-    /// activity already had; the Parent explicitly grows the split via
-    /// `addSplitChild()` (or `canConfirmSplit` blocks Split until a
-    /// second child exists).
+    /// state — ONE child, offset 0 — never "the entire original
+    /// duration." A single, small starting child never silently proposes
+    /// MORE total planned time than the original activity already had;
+    /// the Parent explicitly grows the split via `addSplitChild()` (or
+    /// `canConfirmSplit` blocks Split until a second child exists).
+    ///
+    /// PR #82 Lead Review follow-up 2 (short original durations): the
+    /// starting duration is `min(30, max(1, originalDuration / 2))` when
+    /// the original's own `plannedDurationMinutes` is known — leaving
+    /// room, whenever the original is at least 2 minutes long, for
+    /// `addSplitChild()` to still add at least one more POSITIVE-duration
+    /// child within the same envelope (a flat 30-minute default would
+    /// otherwise consume the ENTIRE envelope of any original 30 minutes
+    /// or shorter, silently making a second child impossible). When the
+    /// original is exactly 1 minute, this formula naturally settles on a
+    /// 1-minute first child with zero room left — `addSplitChild()`
+    /// already no-ops in that case (its own envelope-exhausted guard,
+    /// unchanged), and `canAddSplitChild` below lets the UI say so
+    /// explicitly rather than leaving "Add Another" silently inert. When
+    /// `plannedDurationMinutes` is `nil` (no known envelope to divide),
+    /// the previous flat 30-minute provisional default is unchanged.
     public func beginSplit() {
         errorMessage = nil
         didSplitSuccessfully = false
-        splitChildren = [SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: 0, durationMinutes: 30)]
+        let firstChildDurationMinutes: Int
+        if let envelopeDurationMinutes = activity.plannedDurationMinutes {
+            firstChildDurationMinutes = min(30, max(1, envelopeDurationMinutes / 2))
+        } else {
+            firstChildDurationMinutes = 30
+        }
+        splitChildren = [SplitChildDraft(activityType: activity.activityType, startOffsetMinutes: 0, durationMinutes: firstChildDurationMinutes)]
     }
 
     /// Lead Review follow-up: reuses `CalendarImportReviewViewModel
@@ -561,8 +595,21 @@ public final class ActivityDetailViewModel {
     /// re-derivation of what the user typed" boundary
     /// `CalendarImportReviewViewModel.removeSplitChild` already
     /// establishes for the same UI shape.
+    ///
+    /// PR #82 Lead Review follow-up 2 (first-child offset UX): whichever
+    /// row is first ALWAYS carries offset 0 — `SplitActivityFormView`
+    /// hides that row's own offset control entirely (see its own doc
+    /// comment), so if removing a row promotes a DIFFERENT row to first,
+    /// that row's offset is reset to 0 here rather than left at whatever
+    /// nonzero value it held as a later child. Never relies on the
+    /// service's own `startOffsetMinutes == 0` validation as normal UX —
+    /// this keeps that invariant true before `splitActivity()` ever
+    /// submits.
     public func removeSplitChild(_ id: SplitChildDraft.ID) {
         splitChildren.removeAll { $0.id == id }
+        if !splitChildren.isEmpty {
+            splitChildren[0].startOffsetMinutes = 0
+        }
     }
 
     /// Commits the current split draft through `CalendarPlanningCoordinationService
@@ -615,6 +662,9 @@ public final class ActivityDetailViewModel {
             return false
         } catch CalendarPlanningCoordinationError.plannedActivityAlreadyLogged {
             errorMessage = PlanningStrings.splitBlockedByLoggedActivity
+            return false
+        } catch CalendarPlanningCoordinationError.plannedActivityAlreadyDecomposed {
+            errorMessage = PlanningStrings.splitBlockedByExistingDecomposition
             return false
         } catch {
             errorMessage = PlanningStrings.splitGenericError

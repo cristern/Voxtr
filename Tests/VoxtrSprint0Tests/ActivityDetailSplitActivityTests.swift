@@ -344,4 +344,83 @@ struct ActivityDetailSplitActivityTests {
         // The untouched split draft never leaked into the ordinary edit.
         #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
     }
+
+    @Test("PR #82 Lead Review follow-up 2 (short original durations): beginSplit() derives a bounded starting duration from a SHORT original, leaving room for a valid two-child draft without expanding the envelope")
+    @MainActor
+    func beginSplitBoundedDurationForShortOriginal() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Short block", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 17, minute: 0), plannedDurationMinutes: 30
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        viewModel.beginSplit()
+        // min(30, max(1, 30 / 2)) == 15 — never the flat 30 that would
+        // have consumed the ENTIRE 30-minute envelope, making a second
+        // child impossible.
+        #expect(viewModel.splitChildren.count == 1)
+        #expect(viewModel.splitChildren[0].durationMinutes == 15)
+
+        viewModel.addSplitChild()
+        #expect(viewModel.splitChildren.count == 2)
+        #expect(viewModel.splitChildren[1].startOffsetMinutes == 15)
+        #expect(viewModel.splitChildren[1].durationMinutes == 15)
+        #expect(viewModel.canConfirmSplit == true)
+    }
+
+    @Test("PR #82 Lead Review follow-up 2 (short original durations): a 1-minute original settles calmly with no room for a second child, and canAddSplitChild says so explicitly")
+    @MainActor
+    func beginSplitOnOneMinuteOriginalLeavesNoRoomForSecondChild() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Tiny block", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 17, minute: 0), plannedDurationMinutes: 1
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        viewModel.beginSplit()
+        #expect(viewModel.splitChildren.count == 1)
+        #expect(viewModel.splitChildren[0].durationMinutes == 1)
+        #expect(viewModel.canAddSplitChild == false)
+
+        viewModel.addSplitChild()
+        // Calm no-op — never silently expands past the original's own
+        // 1-minute envelope.
+        #expect(viewModel.splitChildren.count == 1)
+    }
+
+    @Test("PR #82 Lead Review follow-up 2 (first-child offset UX): removeSplitChild() resets whichever row becomes first back to offset 0, so children[0].startOffsetMinutes == 0 always holds")
+    @MainActor
+    func removeSplitChildResetsNewFirstChildOffset() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId)
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        viewModel.beginSplit()
+        viewModel.addSplitChild()
+        #expect(viewModel.splitChildren.map(\.startOffsetMinutes) == [0, 30])
+
+        let firstId = viewModel.splitChildren[0].id
+        viewModel.removeSplitChild(firstId)
+
+        #expect(viewModel.splitChildren.count == 1)
+        // The row that was previously SECOND (offset 30) is now first,
+        // and its offset has been normalized to 0 — never left at a
+        // stale nonzero value the service would reject, and never relied
+        // on the service's own validation as normal UX.
+        #expect(viewModel.splitChildren[0].startOffsetMinutes == 0)
+    }
 }

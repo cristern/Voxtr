@@ -512,12 +512,27 @@ struct SplitActivityFormView: View {
                                 Text(activityType.displayName).tag(activityType)
                             }
                         }
-                        Stepper(
-                            "Starts \(child.startOffsetMinutes) min after original start",
-                            value: $child.startOffsetMinutes,
-                            in: 0...1439,
-                            step: 5
-                        )
+                        // PR #82 Lead Review follow-up 2 (first-child
+                        // offset UX): `PlanningService.splitPlannedActivity`
+                        // requires whichever child is first to start at
+                        // the original activity's own start (offset 0) —
+                        // it reuses the original's own non-editable
+                        // WeekPlanId. Never presented as an editable
+                        // control the Parent could set to something the
+                        // service would reject; `removeSplitChild(_:)`
+                        // keeps this invariant true for whichever row is
+                        // first after a removal (see its own doc
+                        // comment), so this check is always accurate.
+                        if child.id == viewModel.splitChildren.first?.id {
+                            LabeledContent("Starts", value: "Original start (not editable)")
+                        } else {
+                            Stepper(
+                                "Starts \(child.startOffsetMinutes) min after original start",
+                                value: $child.startOffsetMinutes,
+                                in: 0...1439,
+                                step: 5
+                            )
+                        }
                         DurationPickerView(durationMinutes: $child.durationMinutes)
 
                         if viewModel.splitChildren.count > 2 {
@@ -531,10 +546,22 @@ struct SplitActivityFormView: View {
                 }
 
                 Section {
-                    Button("Add Another") {
-                        viewModel.addSplitChild()
+                    // PR #82 Lead Review follow-up 2 (short original
+                    // durations): explicit, calm explanation instead of a
+                    // mysteriously inert button once the original's own
+                    // envelope is fully consumed — see `canAddSplitChild`'s
+                    // own doc comment.
+                    if viewModel.canAddSplitChild {
+                        Button("Add Another") {
+                            viewModel.addSplitChild()
+                        }
+                        .accessibilityIdentifier("activityDetail.split.addChildButton")
+                    } else {
+                        Text(PlanningStrings.splitNoRoomForAnotherChild)
+                            .font(VoxtrTypography.metadata)
+                            .foregroundStyle(VoxtrColor.textSecondary)
+                            .accessibilityIdentifier("activityDetail.split.addChildUnavailableMessage")
                     }
-                    .accessibilityIdentifier("activityDetail.split.addChildButton")
                 }
                 .voxtrRowSurface()
             }

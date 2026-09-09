@@ -689,6 +689,141 @@ struct PlanningServiceTests {
         #expect(nextWeekPlan?.id == result[1].weekPlanId)
     }
 
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 4): split preserves plannedIntensity on every resulting child")
+    @MainActor
+    func splitPlannedActivityPreservesPlannedIntensity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Hockey block",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 17, minute: 0),
+            plannedDurationMinutes: 90,
+            plannedIntensity: 7
+        )
+
+        let result = try service.splitPlannedActivity(
+            original.plannedActivityId,
+            expectedWeekPlanId: weekPlan.weekPlanId,
+            children: [
+                PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 45),
+                PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 45, durationMinutes: 45)
+            ],
+            splitBy: ActorId()
+        )
+
+        #expect(result.count == 2)
+        #expect(result[0].plannedIntensity == 7)
+        #expect(result[1].plannedIntensity == 7)
+    }
+
+    @Test("PR #82 Lead Review follow-up 2 (Blocker 4): a failed split restores the original's plannedIntensity, not just activityType/duration/timing")
+    @MainActor
+    func splitPlannedActivityRollbackRestoresPlannedIntensity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Hockey block",
+            localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 17, minute: 0),
+            plannedDurationMinutes: 90,
+            plannedIntensity: 4
+        )
+
+        // `.physicalTraining` is unconditionally rejected by
+        // `addPlannedActivity` for any NEW row (only an in-place edit of
+        // an activity that was ALREADY `.physicalTraining` may keep it —
+        // see that method's own guard) — a genuine, deterministic
+        // failure trigger for the SECOND child, reached only after the
+        // first child's own `editPlannedActivity` has already succeeded,
+        // exercising this method's real rollback path rather than a
+        // simulated one.
+        #expect(throws: PlanningServiceError.self) {
+            try service.splitPlannedActivity(
+                original.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 45),
+                    PlannedActivitySplitChild(activityType: .physicalTraining, startOffsetMinutes: 45, durationMinutes: 45)
+                ],
+                splitBy: ActorId()
+            )
+        }
+
+        let restored = try repository.fetchPlannedActivity(byId: original.plannedActivityId)
+        #expect(restored?.activityType == .individualTraining)
+        #expect(restored?.plannedDurationMinutes == 90)
+        #expect(restored?.plannedIntensity == 4)
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
+    @Test("PR #82 Lead Review follow-up 2 (target WeekPlan lifecycle): a later child crossing into an ALREADY-COMMITTED WeekPlan is rejected, never silently inserted into a committed week")
+    @MainActor
+    func splitPlannedActivityRejectsCommittedTargetWeekPlan() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let original = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Sunday night block",
+            localDate: LocalDate(year: 2026, month: 1, day: 11),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            startLocalTime: LocalTime(hour: 23, minute: 0),
+            plannedDurationMinutes: 90,
+            plannedIntensity: 6
+        )
+        // The NEXT Vǫxtr week's own WeekPlan already exists and is
+        // COMMITTED before the split is even attempted — `addPlannedActivity`
+        // itself has no draft-status guard (used broadly by callers that
+        // legally insert regardless of commit state), so this specific
+        // "later split child" caller must enforce it itself, never by
+        // changing that global behavior.
+        let nextWeekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 12))
+        try service.commitWeekPlan(nextWeekPlan.weekPlanId, expectedRevision: nextWeekPlan.revision, committedBy: ActorId())
+
+        #expect(throws: PlanningServiceError.weekPlanNotDraft) {
+            try service.splitPlannedActivity(
+                original.plannedActivityId,
+                expectedWeekPlanId: weekPlan.weekPlanId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 0, durationMinutes: 45),
+                    // 90 minutes after 23:00 Sunday -> Monday, the
+                    // COMMITTED next week.
+                    PlannedActivitySplitChild(activityType: .strength, startOffsetMinutes: 90, durationMinutes: 30)
+                ],
+                splitBy: ActorId()
+            )
+        }
+
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: nextWeekPlan.weekPlanId).isEmpty)
+        let restored = try repository.fetchPlannedActivity(byId: original.plannedActivityId)
+        #expect(restored?.activityType == .individualTraining)
+        #expect(restored?.plannedDurationMinutes == 90)
+        #expect(restored?.plannedIntensity == 6)
+        #expect(try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
+    }
+
     // MARK: - Sport / Activity Identity domain foundation (Parts 3/4)
 
     @Test("A PlannedActivity may be created Sport-only, with no title at all")
