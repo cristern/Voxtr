@@ -13,7 +13,9 @@ to AthleteApp without creating a second athlete identity. CloudKit is transport;
 Vǫxtr stable workspace / participant / athlete IDs remain canonical.
 
 The current foundation is intended to make a real cross-device connection safe
-before broader Athlete experience work begins.
+before Athlete business capabilities depend on that connection. AthleteApp shell
+and UX work may proceed independently when it does not assume pairing runtime
+success or introduce new business truth.
 
 ## Verified implementation state
 
@@ -30,20 +32,28 @@ The implementation now has the following foundations merged to `develop`:
 - Internal Alpha, PII-safe CloudKit diagnostics;
 - Parent Release signing corrected so the final signed TestFlight app actually
   carries its CloudKit/container entitlements;
+- Athlete Release signing corrected and verified through signed TestFlight
+  artifact/runtime launch (PR #83);
 - Vǫxtr custom CloudKit schema captured in
   `CloudKit/VoxtrCloudKitSchema.ckdb` and deployed to Production;
 - CloudKit's own generated sharing schema bootstrapped in Development and
   deployed to Production;
-- Parent-side `Connect Athlete App` now gives immediate calm in-progress
-  feedback and rejects parallel re-entry while an invitation is being created.
+- Parent-side `Connect Athlete App` gives immediate calm in-progress feedback
+  and rejects parallel re-entry while an invitation is being created;
+- Activity Edit exposes the canonical Split Activity operation (PR #82);
+- QR-first nearby pairing is implemented and merged (PR #84): Parent renders the
+  canonical existing `CKShare.url` as QR, AthleteApp scans it, resolves
+  `CKShare.Metadata`, and enters the existing canonical acceptance/exact-identity
+  binding pipeline;
+- PR #84 passed Codemagic compile/test validation before merge.
 
 As of `develop` commit
-`1eec3b7835c4aeb9acdf0fcc704b783a64047dc6` (PR #80 merged), Parent TestFlight
-successfully progresses through the share-creation path that previously failed.
+`c4b6fbd1c4cc42394a653a1dc4a14a3d3b545077` (PR #84 merged), the QR-first
+implementation is integrated on `develop` and compile/test validated.
 
-This does **not** by itself prove the full B2 exit contract. Full two-device
-acceptance, exact-athlete binding and persistent AthleteApp lifecycle still
-require runtime validation / follow-up work.
+This does **not** prove the full B2 exit contract. Full two-device QR acceptance,
+exact-athlete runtime binding and persistent AthleteApp lifecycle still require
+physical-device runtime validation / follow-up work.
 
 ## CloudKit root-cause chain
 
@@ -88,13 +98,13 @@ than reopening #79 as if it were permanent product infrastructure.
 
 ## PR #71 disposition
 
-PR #71 remains **open and unmerged** and is not part of the accepted solution.
-Its hypothesis that using the authoritative server-returned saved `CKShare`
-would fix the original crash was superseded by symbolication and later runtime
-evidence: the original crash occurred at `CKContainer(identifier:)`, before
-zone/root/share work, and subsequent blockers were signing/schema related.
+PR #71 is **closed unmerged and superseded** and is not part of the accepted
+solution. Its hypothesis that using the authoritative server-returned saved
+`CKShare` would fix the original crash was superseded by symbolication and later
+runtime evidence: the original crash occurred at `CKContainer(identifier:)`,
+before zone/root/share work, and subsequent blockers were signing/schema related.
 
-Do not merge or reuse #71 without a separate evidence-based review.
+Do not reopen, merge or reuse #71 without a separate evidence-based review.
 
 ## Approved product direction — QR-first nearby pairing
 
@@ -117,27 +127,56 @@ Required invariants:
 - Remote/flexible sharing remains later scope (for example Share Sheet,
   Messages/Mail, AirDrop-style handoff or copy/share link).
 
-QR implementation should build on the now-working canonical invitation creation
-rather than replace it.
+PR #84 implements this transport direction by building on the canonical
+invitation/share flow rather than replacing it. Runtime proof remains pending
+until the Product Owner can perform the required two-device TestFlight test.
 
-## Open follow-ups before main Athlete experience work
+## Current AthleteApp sequencing decision
 
-1. **Athlete Release signing** — Athlete Release still carries the historical
-   signing-disable flags and must be corrected before serious physical-device
-   AthleteApp runtime validation.
-2. **Activity Edit — Split Activity** — approved usability/closeout item:
-   existing activities must expose the canonical Split Activity operation from
-   Edit without duplicating split domain logic. This is a must-fix before the
-   main serious Athlete App work.
-3. **QR-first Athlete Connection** — implement the approved nearby pairing happy
-   path using the existing invitation identity and CloudKit acceptance/binding
-   pipeline.
-4. **Persistent Athlete connection/session lifecycle** — already-connected
+Physical two-device pairing validation is temporarily unavailable. Product work
+may therefore continue in parallel without falsely treating pairing as proven.
+
+Approved sequencing:
+
+1. **Athlete App Shell / UX Foundation may proceed now.** Purpose: make
+   AthleteApp look and feel like a coherent, usable product rather than a
+   technical connection shell. Scope may include app structure, navigation,
+   empty states, connected/not-connected presentation, Profile/Settings and
+   visual consistency with the existing design system.
+2. This shell/UX work must **not** introduce a new business capability whose
+   correctness depends on unproven pairing/runtime data. It must not add fake
+   local actor state, UserDefaults identity truth, timing hacks or duplicate
+   domain ownership.
+3. QR pairing remains **implemented and compile/test validated, but not
+   two-device runtime-proven** until TestFlight validation is performed.
+4. **Persistent Athlete connection/session restoration remains a separate
+   connection lifecycle task.** It must restore canonical actor/session state on
+   relaunch and must not be hidden inside UX polish.
+5. After the shell/UX foundation, make an explicit product decision on the
+   **first meaningful Athlete business capability** before implementing it.
+   “Athlete Now” or showing planned activities are possible proposals, not yet
+   canonical decisions.
+6. The first Parent Planning → Athlete Training cross-device business proof is
+   deferred until AthleteApp has a meaningful Athlete capability to exercise.
+
+This sequencing preserves the distinction between making AthleteApp usable as a
+product surface and proving business behavior across devices.
+
+## Open follow-ups
+
+1. **Two-device QR runtime validation** — Parent selects Athlete A, AthleteApp
+   scans the QR, exact Athlete A identity is resolved, no sibling/duplicate
+   identity appears, and the observed relaunch behavior is recorded.
+2. **Athlete App Shell / UX Foundation** — proceed independently of the pending
+   two-device test, bounded by the sequencing decision above.
+3. **Persistent Athlete connection/session lifecycle** — already-connected
    AthleteApp relaunch should restore canonical actor/session state without a
    fresh share callback or UserDefaults identity truth.
-5. **First cross-device business proof** — Parent Planning → Athlete executes /
-   logs in Training → Parent sees the same canonical performed result. Prove
-   `Planning proposes → Training proves` before broad Athlete Home expansion.
+4. **First meaningful Athlete capability — product decision required** — define
+   what AthleteApp should first help the athlete understand/do/achieve before
+   implementation begins.
+5. **First cross-device business proof** — once that capability exists, prove a
+   canonical Parent/Athlete workflow such as Planning proposes → Training proves.
 
 ## Product/architecture guardrails preserved
 
@@ -156,12 +195,19 @@ Durable consequences that should also be reflected in the next canonical
 Architecture / Project Context / Product Backlog revisions:
 
 - Parent CloudKit signing is corrected and runtime-proven.
+- Athlete Release signing is corrected and signed TestFlight launch verified.
 - Vǫxtr custom schema plus CloudKit-generated sharing schema are established in
   Production.
 - PR #79 is closed unmerged after successful one-time bootstrap.
-- PR #80 is merged and Codemagic-green.
-- QR-first nearby pairing is the approved V1 Athlete Connection happy path.
-- full two-device B2 completion is still an explicit runtime gate, not assumed
-  from Parent share creation alone.
-- Athlete Release signing and Activity Edit → Split Activity remain required
-  follow-ups before main Athlete experience work.
+- PR #71 is closed unmerged and superseded.
+- Activity Edit → Split Activity is complete (PR #82).
+- QR-first nearby pairing is implemented and merged (PR #84), with two-device
+  runtime proof still explicitly pending.
+- Athlete App Shell / UX Foundation is approved to proceed while pairing runtime
+  validation is unavailable, provided it does not depend on pairing success or
+  add new business truth.
+- persistent session restoration remains separate work.
+- the first meaningful Athlete business capability requires a separate product
+  decision.
+- cross-device Planning → Training proof is deferred until AthleteApp has that
+  meaningful capability.
