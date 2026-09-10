@@ -373,10 +373,16 @@ public struct RecurringOccurrencePreviewView: View {
     /// exact same purpose, reused here rather than duplicated with
     /// different logic.
     private static func startedAt(for activity: PlannedActivity) -> Date {
+        // Flexible Weekly Planning V1: recurring activities remain
+        // dated-only in this round (out of scope for undated), so
+        // `activity.localDate` is real here in practice — the `.now`
+        // fallback below is defensive only, matching
+        // `LogActivityViewModel.startedAt(for:)`'s own equivalent guard.
+        guard let localDate = activity.localDate else { return .now }
         var components = DateComponents(
-            year: activity.localDate.year,
-            month: activity.localDate.month,
-            day: activity.localDate.day
+            year: localDate.year,
+            month: localDate.month,
+            day: localDate.day
         )
         if let startTime = activity.startLocalTime {
             components.hour = startTime.hour

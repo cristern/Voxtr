@@ -53,7 +53,7 @@ public final class PlanningRepository {
         athleteId: AthleteId,
         activityType: ActivityType,
         title: String?,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -98,7 +98,7 @@ public final class PlanningRepository {
         athleteId: AthleteId,
         activityType: ActivityType,
         title: String?,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -159,17 +159,44 @@ public final class PlanningRepository {
     /// S2.2: ordered deterministically by `localDate`, then `id` as a
     /// stable tiebreaker for same-day activities — not a business rule,
     /// just making repeated fetches return the same order every time.
+    ///
+    /// Flexible Weekly Planning V1: see `isPlannedActivityOrderedBefore`'s
+    /// own doc comment for the undated-first ordering this now applies.
     public func fetchPlannedActivities(forWeekPlan weekPlanId: WeekPlanId) throws -> [PlannedActivity] {
         let rawWeekPlanId = weekPlanId.rawValue
         let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
         return all
             .filter { $0.weekPlanId == rawWeekPlanId }
-            .sorted { lhs, rhs in
-                if lhs.localDate != rhs.localDate {
-                    return lhs.localDate < rhs.localDate
-                }
-                return lhs.id.uuidString < rhs.id.uuidString
+            .sorted(by: Self.isPlannedActivityOrderedBefore)
+    }
+
+    /// Flexible Weekly Planning V1: shared ordering for every
+    /// `PlannedActivity` listing in this repository — undated activities
+    /// (`localDate == nil`, "intended this week, no day chosen yet")
+    /// sort FIRST, ahead of every dated activity, which then sort
+    /// chronologically by `localDate`; `id` remains the final, stable
+    /// tiebreaker for two activities that land on the same day (or two
+    /// undated activities), matching every existing tiebreaker in this
+    /// file. Calm, neutral ordering only — never a priority/urgency
+    /// signal: an undated activity sorts first so an unresolved weekly
+    /// intention is visible before the day-specific plan, not because it
+    /// is more important, overdue, or requires attention (see this
+    /// feature's own product contract — no warning framing anywhere in
+    /// this ordering).
+    private static func isPlannedActivityOrderedBefore(_ lhs: PlannedActivity, _ rhs: PlannedActivity) -> Bool {
+        switch (lhs.localDate, rhs.localDate) {
+        case (nil, nil):
+            return lhs.id.uuidString < rhs.id.uuidString
+        case (nil, _):
+            return true
+        case (_, nil):
+            return false
+        case (let l?, let r?):
+            if l != r {
+                return l < r
             }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }
     }
 
     /// S2.2: fetch a single `PlannedActivity` by ID, used by
@@ -234,12 +261,7 @@ public final class PlanningRepository {
         let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
         return all
             .filter { $0.athleteId == rawAthleteId && $0.externalSourceType == externalSourceType }
-            .sorted { lhs, rhs in
-                if lhs.localDate != rhs.localDate {
-                    return lhs.localDate < rhs.localDate
-                }
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
+            .sorted(by: Self.isPlannedActivityOrderedBefore)
     }
 
     /// Family-Owned Calendar Sources V1: every `PlannedActivity` stamped
@@ -252,12 +274,7 @@ public final class PlanningRepository {
         let all = try modelContext.fetch(FetchDescriptor<PlannedActivity>())
         return all
             .filter { $0.externalSourceType == externalSourceType }
-            .sorted { lhs, rhs in
-                if lhs.localDate != rhs.localDate {
-                    return lhs.localDate < rhs.localDate
-                }
-                return lhs.id.uuidString < rhs.id.uuidString
-            }
+            .sorted(by: Self.isPlannedActivityOrderedBefore)
     }
 
     // MARK: - RecurringPlannedActivity

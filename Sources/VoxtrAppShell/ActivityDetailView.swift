@@ -85,7 +85,8 @@ public struct ActivityDetailView: View {
                 LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                 LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.activity))
                 LabeledContent("Identity", value: ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: viewModel.activity))
-                LabeledContent("Date", value: viewModel.activity.localDate.isoString)
+                LabeledContent("Date", value: viewModel.activity.localDate?.isoString ?? "Planned this week")
+                    .accessibilityIdentifier("activityDetail.dateRow")
                 if let timeLabel = viewModel.plannedTimeRangeLabel {
                     LabeledContent("Time", value: timeLabel)
                 }
@@ -357,11 +358,22 @@ struct ActivityEditFormView: View {
                     availableActivityTypes: availableActivityTypes,
                     accessibilityPrefix: "activityDetail.edit"
                 )
-                DatePicker("Date", selection: $viewModel.editDate, displayedComponents: .date)
-                    .accessibilityIdentifier("activityDetail.editDatePicker")
+                // Flexible Weekly Planning V1: calm, neutral wording —
+                // never "overdue"/"incomplete"/warning framing. Toggling
+                // this off returns the activity to the undated weekly
+                // state (`localDate == nil`), preserving the same
+                // `PlannedActivityId` — see `saveEdit()`'s own doc
+                // comment.
+                Toggle("Has a specific day", isOn: $viewModel.editHasDate)
+                    .accessibilityIdentifier("activityDetail.editHasDateToggle")
+                if viewModel.editHasDate {
+                    DatePicker("Date", selection: $viewModel.editDate, displayedComponents: .date)
+                        .accessibilityIdentifier("activityDetail.editDatePicker")
+                }
 
                 Toggle("Has start time", isOn: $viewModel.editHasStartTime)
-                if viewModel.editHasStartTime {
+                    .disabled(!viewModel.editHasDate)
+                if viewModel.editHasDate && viewModel.editHasStartTime {
                     DatePicker("Start time", selection: $viewModel.editStartTime, displayedComponents: .hourAndMinute)
                         .accessibilityIdentifier("activityDetail.editStartTimePicker")
                 }

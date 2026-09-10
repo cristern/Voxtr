@@ -128,4 +128,67 @@ struct TrainingPlanningCoordinationServiceTests {
         #expect(results.first?.plannedActivity.title == "Zebra session")
         #expect(noPlanResults.isEmpty)
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("An undated planned activity (localDate == nil) never appears in today's planned activities — it does not belong to any specific day")
+    @MainActor
+    func undatedPlannedActivityExcludedFromToday() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let referenceDate = Date(timeIntervalSince1970: 1_767_312_000)
+        let weekStart = TrainingPlanningCoordinationService.weekStart(referenceDate: referenceDate)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let results = try coordinationService.todaysPlannedActivitiesWithCompletion(
+            forAthlete: athleteId, referenceDate: referenceDate
+        )
+
+        #expect(results.isEmpty)
+    }
+
+    @Test("An undated planned activity (localDate == nil) never appears in a date-range query — Family Schedule and other day-grouped surfaces built on this method must never show it as belonging to a specific day")
+    @MainActor
+    func undatedPlannedActivityExcludedFromDateRange() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let coordinationService = TrainingPlanningCoordinationService(
+            planningRepository: planningRepository,
+            trainingRepository: trainingRepository
+        )
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2026, month: 1, day: 5)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let dated = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let results = try coordinationService.plannedActivitiesWithCompletion(
+            forAthlete: athleteId, from: weekStart, through: weekStart.adding(days: 6)
+        )
+
+        #expect(results.count == 1)
+        #expect(results.first?.plannedActivity.plannedActivityId == dated.plannedActivityId)
+    }
 }

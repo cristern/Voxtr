@@ -1968,10 +1968,15 @@ struct StatisticsServiceTests {
         let today = LocalDate(year: 2026, month: 3, day: 15)
         let week1 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
         let week4 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 30))
-        // Past/today-relative plan: must count.
+        // Past/today-relative plan: must count. `day: 3` falls inside
+        // week1's own Mar 2-8 range (PR #88 follow-up: PlanningService
+        // now rejects a localDate outside its owning WeekPlan's week —
+        // `day: 10` here was a pre-existing typo that happened to land
+        // in the FOLLOWING week and was never caught before that guard
+        // existed).
         _ = try planningService.addPlannedActivity(
             toWeekPlan: week1.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Already happened window", localDate: LocalDate(year: 2026, month: 3, day: 10),
+            title: "Already happened window", localDate: LocalDate(year: 2026, month: 3, day: 3),
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
         )
         // Future plan (after `today`, later in the same selected month):
@@ -2077,6 +2082,134 @@ struct StatisticsServiceTests {
         #expect(weeklyPlannedMinutes == summary.plannedMinutes)
         #expect(summary.plannedActivityCount == 3)
         #expect(summary.plannedMinutes == 135)
+    }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("An undated PlannedActivity (localDate == nil) contributes to plannedActivityCount/plannedMinutes for its owning week, both at the interval level and within the correct weekly bucket")
+    @MainActor
+    func undatedPlannedActivityCountsTowardOwningWeek() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        // 2026-03-02 is a Monday; the interval spans exactly this one week.
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 8)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: intervalStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 45
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 45)
+        let bucket = try #require(summary.weeklyBuckets.first { $0.weekStart == intervalStart })
+        #expect(bucket.plannedActivityCount == 1)
+        #expect(bucket.plannedMinutes == 45)
+        // Conservation invariant: the interval-level totals still equal
+        // the sum across weekly buckets, exactly as the existing
+        // dated-only test above already establishes.
+        #expect(summary.weeklyBuckets.reduce(0) { $0 + $1.plannedActivityCount } == summary.plannedActivityCount)
+        #expect(summary.weeklyBuckets.reduce(0) { $0 + $1.plannedMinutes } == summary.plannedMinutes)
+    }
+
+    @Test("Actual (performed) minutes remain wholly separate from an undated activity's planned duration — Plan vs Actual never conflates the two")
+    @MainActor
+    func undatedPlannedActivityDoesNotAffectActualMinutes() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 2)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 8)
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: intervalStart)
+        let planned = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 45
+        )
+        // Performed on Wednesday, well after the plan was made — the
+        // PlannedActivity itself is never touched by this.
+        _ = try trainingService.logActivity(
+            athleteId: athleteId, plannedActivityId: planned.plannedActivityId,
+            activityType: .teamTraining, title: "Strength this week",
+            startedAt: Self.date(2026, 3, 4), durationMinutes: 40, status: .completed,
+            loggedByActorId: ActorId()
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.totalActualMinutes == 40)
+        #expect(summary.performedActivityCount == 1)
+        #expect(summary.plannedActivityCount == 1)
+        #expect(summary.plannedMinutes == 45)
+        let refetchedPlanned = try planningService.fetchPlannedActivity(byId: planned.plannedActivityId)
+        #expect(refetchedPlanned?.localDate == nil)
+    }
+
+    @Test("An undated PlannedActivity belonging to a week outside the requested interval is excluded — undated membership never leaks across the interval/future-date clamp boundary")
+    @MainActor
+    func undatedPlannedActivityOutsideIntervalExcluded() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let trainingService = TrainingService(repository: TrainingRepository(modelContext: container.mainContext))
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let planningService = PlanningService(repository: PlanningRepository(modelContext: container.mainContext))
+        let weeklyReflectionService = WeeklyReflectionService(repository: WeeklyReflectionRepository(modelContext: container.mainContext))
+        let statisticsService = StatisticsService(
+            trainingService: trainingService,
+            reflectionService: reflectionService,
+            planningService: planningService,
+            weeklyReflectionService: weeklyReflectionService
+        )
+        let athleteId = AthleteId()
+        // The undated activity's week (2026-03-02) is entirely outside
+        // the requested interval (2026-03-09...2026-03-15).
+        let outsideWeekStart = LocalDate(year: 2026, month: 3, day: 2)
+        let intervalStart = LocalDate(year: 2026, month: 3, day: 9)
+        let intervalEnd = LocalDate(year: 2026, month: 3, day: 15)
+        let outsideWeekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: outsideWeekStart)
+        _ = try planningService.addPlannedActivity(
+            toWeekPlan: outsideWeekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 45
+        )
+
+        let summary = try statisticsService.athleteSummary(
+            forAthlete: athleteId, from: intervalStart, through: intervalEnd,
+            today: LocalDate(year: 2026, month: 4, day: 1), calendar: Self.utcCalendar
+        )
+
+        #expect(summary.plannedActivityCount == 0)
+        #expect(summary.plannedMinutes == 0)
     }
 }
 

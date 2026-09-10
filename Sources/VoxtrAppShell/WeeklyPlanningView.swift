@@ -135,42 +135,31 @@ public struct WeeklyPlanningView: View {
                 .accessibilityIdentifier("planning.suggestionList")
             }
 
+            // Flexible Weekly Planning V1: a week may legitimately
+            // contain both undated ("planned for the week, no day
+            // chosen yet") and dated activities — `viewModel.activities`
+            // is already sorted undated-first via
+            // `PlanningRepository.isPlannedActivityOrderedBefore`, so
+            // this simply partitions that same order into two sections
+            // rather than re-sorting. Calm, neutral heading — never
+            // "overdue"/"incomplete"/"attention required," and never
+            // shown at all when there is nothing unscheduled, so an
+            // empty week never leads with an empty section.
+            if !undatedActivities.isEmpty {
+                Section {
+                    ForEach(undatedActivities, id: \.id) { activity in
+                        activityRow(for: activity)
+                    }
+                } header: {
+                    VoxtrSectionHeading("Unscheduled this week")
+                }
+                .voxtrRowSurface()
+                .accessibilityIdentifier("planning.unscheduledActivityList")
+            }
+
             Section {
-                ForEach(viewModel.activities, id: \.id) { activity in
-                    NavigationLink {
-                        ActivityDetailViewLoader(
-                            plannedActivity: activity,
-                            athleteId: viewModel.athleteId,
-                            athleteDisplayName: athleteDisplayName,
-                            actorId: actorId,
-                            planningService: planningService,
-                            trainingReflectionCoordinationService: trainingReflectionCoordinationService,
-                            notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
-                            calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                            onActivityLogged: { viewModel.refreshAfterActivityDetailMutation() }
-                        )
-                    } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
-                                .font(VoxtrTypography.cardTitle)
-                                .foregroundStyle(VoxtrColor.textPrimary)
-                            Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
-                                .font(VoxtrTypography.metadata)
-                                .foregroundStyle(VoxtrColor.textSecondary)
-                            Text(Self.rowSubtitle(for: activity))
-                                .font(VoxtrTypography.metadata)
-                                .foregroundStyle(VoxtrColor.textSecondary)
-                        }
-                    }
-                    .accessibilityIdentifier("planning.activityRow.\(activity.id.uuidString)")
-                    .swipeActions {
-                        if !viewModel.isCommitted {
-                            Button("Delete", role: .destructive) {
-                                viewModel.deleteActivity(activity)
-                            }
-                            .accessibilityIdentifier("planning.deleteActivityButton.\(activity.id.uuidString)")
-                        }
-                    }
+                ForEach(datedActivities, id: \.id) { activity in
+                    activityRow(for: activity)
                 }
             } header: {
                 VoxtrSectionHeading("Planned activities")
@@ -186,11 +175,25 @@ public struct WeeklyPlanningView: View {
                         activityName: $viewModel.newActivityTitle,
                         accessibilityPrefix: "planning.newActivity"
                     )
-                    DatePicker("Date", selection: $viewModel.newActivityDate, displayedComponents: .date)
-                        .accessibilityIdentifier("planning.newActivityDatePicker")
+                    // Flexible Weekly Planning V1: "Choose day later"
+                    // lets a genuinely new activity be created for the
+                    // week without picking a specific day — the same
+                    // "Has X" toggle pattern already established below
+                    // for start time/duration, reused here rather than a
+                    // new mechanism. A start time without a day is
+                    // incoherent, so the start-time toggle/picker is
+                    // disabled (and hidden) whenever this is off,
+                    // matching `ActivityEditFormView`'s identical gate.
+                    Toggle("Has a specific day", isOn: $viewModel.newActivityHasDate)
+                        .accessibilityIdentifier("planning.newActivityHasDateToggle")
+                    if viewModel.newActivityHasDate {
+                        DatePicker("Date", selection: $viewModel.newActivityDate, displayedComponents: .date)
+                            .accessibilityIdentifier("planning.newActivityDatePicker")
+                    }
                     Toggle("Has start time", isOn: $viewModel.newActivityHasStartTime)
+                        .disabled(!viewModel.newActivityHasDate)
                         .accessibilityIdentifier("planning.newActivityHasStartTimeToggle")
-                    if viewModel.newActivityHasStartTime {
+                    if viewModel.newActivityHasDate && viewModel.newActivityHasStartTime {
                         DatePicker("Start time", selection: $viewModel.newActivityStartTime, displayedComponents: .hourAndMinute)
                             .accessibilityIdentifier("planning.newActivityStartTimePicker")
                     }
@@ -353,6 +356,62 @@ public struct WeeklyPlanningView: View {
         }
     }
 
+    /// Flexible Weekly Planning V1: the same partition used by both the
+    /// "Unscheduled this week" and "Planned activities" sections above —
+    /// `viewModel.activities` is already sorted undated-first via
+    /// `PlanningRepository.isPlannedActivityOrderedBefore`, so these
+    /// simply preserve that existing order rather than re-sorting.
+    private var undatedActivities: [PlannedActivity] {
+        viewModel.activities.filter { $0.localDate == nil }
+    }
+
+    private var datedActivities: [PlannedActivity] {
+        viewModel.activities.filter { $0.localDate != nil }
+    }
+
+    /// One activity row, shared by both the "Unscheduled this week" and
+    /// "Planned activities" sections — the row's own content
+    /// (`rowSubtitle(for:)`) already renders correctly for either an
+    /// undated or dated activity, so there is only ever one row
+    /// presentation, never a second one duplicated per section.
+    @ViewBuilder
+    private func activityRow(for activity: PlannedActivity) -> some View {
+        NavigationLink {
+            ActivityDetailViewLoader(
+                plannedActivity: activity,
+                athleteId: viewModel.athleteId,
+                athleteDisplayName: athleteDisplayName,
+                actorId: actorId,
+                planningService: planningService,
+                trainingReflectionCoordinationService: trainingReflectionCoordinationService,
+                notificationsPlanningCoordinationService: notificationsPlanningCoordinationService,
+                calendarPlanningCoordinationService: calendarPlanningCoordinationService,
+                onActivityLogged: { viewModel.refreshAfterActivityDetailMutation() }
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: activity))
+                    .font(VoxtrTypography.cardTitle)
+                    .foregroundStyle(VoxtrColor.textPrimary)
+                Text(ActivityLabelResolver(modelContext: modelContext).metadataLabel(for: activity))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                Text(Self.rowSubtitle(for: activity))
+                    .font(VoxtrTypography.metadata)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+            }
+        }
+        .accessibilityIdentifier("planning.activityRow.\(activity.id.uuidString)")
+        .swipeActions {
+            if !viewModel.isCommitted {
+                Button("Delete", role: .destructive) {
+                    viewModel.deleteActivity(activity)
+                }
+                .accessibilityIdentifier("planning.deleteActivityButton.\(activity.id.uuidString)")
+            }
+        }
+    }
+
     /// Sprint 1 completion package, Part 6: date, start time (when
     /// planned), and location (when set) — everywhere the domain model
     /// already represents these, they're shown, not replaced with a
@@ -364,8 +423,16 @@ public struct WeeklyPlanningView: View {
     /// date string, so a row's day is legible at a glance rather than
     /// requiring the reader to parse "2026-08-19". This replaces the
     /// date text rather than adding to it, so nothing is duplicated.
+    ///
+    /// Flexible Weekly Planning V1: an undated activity
+    /// (`localDate == nil`) has no weekday to show — the "Unscheduled
+    /// this week" section it appears under already communicates that,
+    /// so this simply omits the weekday part rather than inventing one.
     private static func rowSubtitle(for activity: PlannedActivity) -> String {
-        var parts: [String] = [weekdayLabel(for: activity.localDate.weekday)]
+        var parts: [String] = []
+        if let localDate = activity.localDate {
+            parts.append(weekdayLabel(for: localDate.weekday))
+        }
         if let timeLabel = PlannedTimeRangeFormatter.label(start: activity.startLocalTime, durationMinutes: activity.plannedDurationMinutes) {
             parts.append(timeLabel)
         }

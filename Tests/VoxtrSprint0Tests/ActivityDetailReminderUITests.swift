@@ -533,4 +533,100 @@ struct ActivityDetailReminderUITests {
         #expect(viewModel.reminders.isEmpty)
         #expect(Set(fixture.scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("Removing the date from a dated activity via editHasDate persists localDate == nil, preserves the same PlannedActivityId, and cancels reminders (a start time with no day is incoherent)")
+    @MainActor
+    func removingDateViaEditHasDatePersistsUndatedAndPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        let originalId = activity.plannedActivityId
+        let reminder = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.editHasDate == true)
+
+        viewModel.editHasDate = false
+        #expect(viewModel.saveEdit() == true)
+
+        #expect(viewModel.activity.plannedActivityId == originalId)
+        #expect(viewModel.activity.localDate == nil)
+        #expect(viewModel.activity.startLocalTime == nil)
+        #expect(fixture.scheduler.cancelledIds.contains(reminder.activityReminderId))
+        let refetched = try fixture.planningService.fetchPlannedActivity(byId: originalId)
+        #expect(refetched?.localDate == nil)
+    }
+
+    @Test("Assigning a day to a previously undated activity via editHasDate persists a real localDate and preserves the same PlannedActivityId")
+    @MainActor
+    func assigningDateViaEditHasDatePersistsDatedAndPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: Self.oslo
+        )
+        let originalId = activity.plannedActivityId
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.editHasDate == false)
+
+        viewModel.editHasDate = true
+        viewModel.editDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now
+        #expect(viewModel.saveEdit() == true)
+
+        #expect(viewModel.activity.plannedActivityId == originalId)
+        #expect(viewModel.activity.localDate == LocalDate(year: 2026, month: 1, day: 7))
+        let refetched = try fixture.planningService.fetchPlannedActivity(byId: originalId)
+        #expect(refetched?.localDate == LocalDate(year: 2026, month: 1, day: 7))
+    }
+
+    /// PR #88 follow-up (correctness pass): `prefillEditForm()` used to
+    /// seed `editDate` with a raw `.now` for an undated activity,
+    /// regardless of which week that activity actually belongs to — so
+    /// toggling "Has a specific day" on for an undated activity in a
+    /// non-current week and saving without touching the date picker
+    /// would be silently rejected by `PlanningService.validateLocalDate`'s
+    /// new WeekPlan-range guard. `weekStart` here (2020-01-06) is firmly
+    /// in the past relative to any real "today" this test could run on,
+    /// so a passing assertion genuinely proves the fallback is NOT `.now`.
+    @Test("Activity Detail's 'assign a day' fallback for an undated activity in a non-current week seeds editDate inside that week's own range, and saving with that seeded default succeeds")
+    @MainActor
+    func assignDayFallbackForUndatedActivitySeedsWithinOwningWeek() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekStart = LocalDate(year: 2020, month: 1, day: 6)
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: Self.oslo
+        )
+
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.editHasDate == false)
+
+        let seededComponents = Calendar.current.dateComponents([.year, .month, .day], from: viewModel.editDate)
+        let seededLocalDate = LocalDate(
+            year: seededComponents.year ?? 0, month: seededComponents.month ?? 0, day: seededComponents.day ?? 0
+        )
+        let weekEnd = weekStart.adding(days: 6)
+        #expect(seededLocalDate >= weekStart && seededLocalDate <= weekEnd)
+
+        // Genuinely usable, not merely "inside range on paper": toggling
+        // on and saving with the seeded default (untouched by this test)
+        // succeeds — it would have been rejected had the fallback stayed
+        // a raw `.now` outside this week.
+        viewModel.editHasDate = true
+        #expect(viewModel.saveEdit() == true)
+        #expect(viewModel.activity.localDate == seededLocalDate)
+    }
 }

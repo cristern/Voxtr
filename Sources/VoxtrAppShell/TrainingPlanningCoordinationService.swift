@@ -192,9 +192,17 @@ public final class TrainingPlanningCoordinationService {
             guard let weekPlan = try planningRepository.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else {
                 continue
             }
+            // Flexible Weekly Planning V1: an undated activity
+            // (`localDate == nil`) never belongs to a specific date
+            // range — Family Schedule and every other day-grouped
+            // surface built on this method must never show it as if it
+            // belonged to a particular day.
             let activities = try planningRepository
                 .fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
-                .filter { $0.localDate >= startDate && $0.localDate <= endDate }
+                .filter { activity in
+                    guard let localDate = activity.localDate else { return false }
+                    return localDate >= startDate && localDate <= endDate
+                }
             allActivities.append(contentsOf: activities)
         }
 

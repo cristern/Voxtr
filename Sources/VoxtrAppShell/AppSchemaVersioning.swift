@@ -1379,23 +1379,147 @@ public enum AppSchemaV10: VersionedSchema {
     }
 }
 
-/// Athlete Connection Foundation A: the current, live version. Adds ONE
-/// field to an already-listed live type — `LoggedActivity
-/// .loggedByActorId: UUID?` — no model *type* addition/removal, so
-/// `AppSchema.modelTypes` itself is unchanged by this round (see that
-/// file's own doc comment: a field-level change does not touch that
-/// array). `models` stays a LIVE passthrough to `AppSchema.modelTypes`
-/// — V11 is the new latest version (see `AppSchemaV10`'s own doc
-/// comment immediately above for that version's own freeze). This
+/// Athlete Connection Foundation A: `models` was a live passthrough to
+/// `AppSchema.modelTypes` while V11 was the latest version; Flexible
+/// Weekly Planning V1 now freezes it to the exact 25-entity literal V11
+/// always actually had, plus a nested, frozen V11-era `PlannedActivity`
+/// copy (non-optional `localDateRaw: String`/`localDate: LocalDate`) —
+/// following this file's own "HOW TO ADD A NEW VERSION" step 1, same as
+/// every prior version before it. See `AppSchemaV12` immediately below
+/// for the new latest version and the reason this freeze was needed
+/// (`PlannedActivity.localDate` becoming optional).
+public enum AppSchemaV11: VersionedSchema {
+    public static var versionIdentifier: Schema.Version {
+        Schema.Version(11, 0, 0)
+    }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            AppDiagnosticsRecord.self,
+            AthleteProfile.self,
+            ParentProfile.self,
+            FamilyWorkspace.self,
+            WorkspaceParticipant.self,
+            AthleteAccessGrant.self,
+            WeekPlan.self,
+            AppSchemaV11.PlannedActivity.self,
+            LoggedActivity.self,
+            ActivityLoad.self,
+            ActivityReflection.self,
+            ParentObservation.self,
+            PlannedActivityDeletionTombstone.self,
+            WeeklyReflection.self,
+            RecurringPlannedActivity.self,
+            DailyStatus.self,
+            AthleteSettings.self,
+            Sport.self,
+            ActivityReminder.self,
+            CalendarPlanningMapping.self,
+            ExternalPlanningSource.self,
+            CalendarImportDecision.self,
+            DecomposedActivityLink.self,
+            DecompositionEvidence.self,
+            DecompositionEvidenceChild.self,
+        ]
+    }
+
+    /// FROZEN — the genuine V11-era shape of `PlannedActivity`, before
+    /// Flexible Weekly Planning V1 made `localDate` optional. This type
+    /// exists ONLY to give `AppSchemaV11.models` above an accurate
+    /// historical shape for migration purposes — nothing in this
+    /// codebase's live repositories/services/UI may construct or read
+    /// it; see `VoxtrPlanningDomain.PlannedActivity` for the real, live,
+    /// current type.
+    @Model
+    public final class PlannedActivity {
+        @Attribute(.unique) public var id: UUID
+        public var weekPlanId: UUID
+        public var athleteId: UUID
+        public var sportId: UUID?
+        public var categoryIds: [UUID]
+        public var activityType: ActivityType
+        public var title: String?
+        private var localDateRaw: String
+        public var startLocalTime: LocalTime?
+        public var timeZoneId: TimeZoneId
+        public var plannedDurationMinutes: Int?
+        public var plannedIntensity: Int?
+        public var externalSourceId: String?
+        public var externalSourceType: String?
+        public var notes: String?
+        public var location: String?
+        public var createdAt: Date
+        public var updatedAt: Date
+        public var schemaVersion: Int
+
+        public init(
+            id: UUID = UUID(),
+            weekPlanId: UUID,
+            athleteId: UUID,
+            sportId: UUID? = nil,
+            categoryIds: [UUID] = [],
+            activityType: ActivityType,
+            title: String?,
+            localDate: LocalDate,
+            startLocalTime: LocalTime? = nil,
+            timeZoneId: TimeZoneId,
+            plannedDurationMinutes: Int? = nil,
+            plannedIntensity: Int? = nil,
+            externalSourceId: String? = nil,
+            externalSourceType: String? = nil,
+            notes: String? = nil,
+            location: String? = nil,
+            createdAt: Date = .now,
+            updatedAt: Date = .now,
+            schemaVersion: Int = 1
+        ) {
+            self.id = id
+            self.weekPlanId = weekPlanId
+            self.athleteId = athleteId
+            self.sportId = sportId
+            self.categoryIds = categoryIds
+            self.activityType = activityType
+            self.title = title
+            self.localDateRaw = localDate.isoString
+            self.startLocalTime = startLocalTime
+            self.timeZoneId = timeZoneId
+            self.plannedDurationMinutes = plannedDurationMinutes
+            self.plannedIntensity = plannedIntensity
+            self.externalSourceId = externalSourceId
+            self.externalSourceType = externalSourceType
+            self.notes = notes
+            self.location = location
+            self.createdAt = createdAt
+            self.updatedAt = updatedAt
+            self.schemaVersion = schemaVersion
+        }
+
+        public var localDate: LocalDate {
+            get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
+            set { localDateRaw = newValue.isoString }
+        }
+    }
+}
+
+/// Flexible Weekly Planning V1: the current, live version. Makes
+/// `PlannedActivity.localDate` optional (`LocalDate?`, was `LocalDate`)
+/// — `nil` means "intended for this WeekPlan, no day chosen yet," a
+/// genuine first-class planning state introduced by this round, never a
+/// synthetic/default date and never a corrupted value. A field-level
+/// change (optionality) to an already-listed live type, not a new model
+/// *type*, so `AppSchema.modelTypes` itself is unchanged by this round
+/// (same reasoning as `AppSchemaV11`'s own `loggedByActorId` addition —
+/// see that file's own doc comment). `models` stays a LIVE passthrough
+/// to `AppSchema.modelTypes` — V12 is the new latest version. This
 /// passthrough is what `CompositionRoot.build`'s default
 /// `versionedSchema:` targets, and what `container.schema.entities.count`
 /// must equal `AppSchema.modelTypes.count` against in
 /// `PersistenceRecoveryTests.compositionRootDefaultPersistenceConstructsSuccessfully` —
-/// that test's own literal must be updated to `AppSchemaV11.self` here,
+/// that test's own literal must be updated to `AppSchemaV12.self` here,
 /// same as every prior version bump.
-public enum AppSchemaV11: VersionedSchema {
+public enum AppSchemaV12: VersionedSchema {
     public static var versionIdentifier: Schema.Version {
-        Schema.Version(11, 0, 0)
+        Schema.Version(12, 0, 0)
     }
 
     public static var models: [any PersistentModel.Type] {
@@ -1457,7 +1581,7 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
         [
             AppCurrentSchema.self, AppSchemaV2.self, AppSchemaV3.self, AppSchemaV4.self, AppSchemaV5.self,
             AppSchemaV6.self, AppSchemaV7.self, AppSchemaV8.self, AppSchemaV9.self, AppSchemaV10.self,
-            AppSchemaV11.self,
+            AppSchemaV11.self, AppSchemaV12.self,
         ]
     }
 
@@ -1608,6 +1732,20 @@ public enum AppSchemaMigrationPlan: SchemaMigrationPlan {
             // Athlete Connection Foundation A: purely additive (one new
             // optional column) — see this stage's own doc comment above.
             .lightweight(fromVersion: AppSchemaV10.self, toVersion: AppSchemaV11.self),
+            // Flexible Weekly Planning V1: `PlannedActivity.localDate`
+            // (required) becomes `LocalDate?` (optional) — the exact
+            // same class of change as V3→V4's `title` optionality
+            // transition (see `AppSchemaV4`'s own doc comment): no
+            // entity is added/removed, and relaxing a required column to
+            // optional is exactly the transformation Apple's own
+            // SwiftData migration guidance documents `.lightweight` as
+            // covering. Every existing `PlannedActivity` already has a
+            // real, non-nil stored value, which trivially satisfies the
+            // newly-optional type — no data transformation, no
+            // back-fill, and no existing row is ever set to `nil` by
+            // this migration; `nil` only ever appears going forward,
+            // through this feature's own explicit new-draft/edit paths.
+            .lightweight(fromVersion: AppSchemaV11.self, toVersion: AppSchemaV12.self),
         ]
     }
 }

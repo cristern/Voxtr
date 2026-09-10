@@ -188,6 +188,74 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("Flexible Weekly Planning V1: turning off newActivityHasDate creates a genuine undated weekly intention (localDate == nil), not a fake date")
+    @MainActor
+    func addActivityWithHasDateOffPersistsNilLocalDate() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Strength this week"
+        viewModel.newActivityHasDate = false
+        viewModel.newActivityHasStartTime = true
+
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.count == 1)
+        #expect(viewModel.activities.first?.title == "Strength this week")
+        #expect(viewModel.activities.first?.localDate == nil)
+        // A start time without a day is incoherent — never persisted
+        // even though the "Has start time" toggle itself was left on.
+        #expect(viewModel.activities.first?.startLocalTime == nil)
+        #expect(viewModel.errorMessage == nil)
+        // Form resets back to its normal dated default for the next entry.
+        #expect(viewModel.newActivityHasDate == true)
+    }
+
+    @Test("Flexible Weekly Planning V1: leaving newActivityHasDate on (the default) still creates a normal dated activity, unaffected by localDate becoming optional")
+    @MainActor
+    func addActivityWithHasDateOnPersistsRealDate() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
+            athleteId: AthleteId(),
+            committedByActorId: ActorId(),
+            weekStart: Self.fixedWeekStart
+        )
+        viewModel.loadOrCreateWeekPlan()
+        viewModel.newActivityTitle = "Endurance run"
+        viewModel.newActivityDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 6)) ?? .now
+
+        viewModel.addActivity()
+
+        #expect(viewModel.activities.count == 1)
+        #expect(viewModel.activities.first?.localDate == LocalDate(year: 2026, month: 1, day: 6))
+    }
+
     @Test("VX-040: a new manual activity draft defaults Activity Type to Team training")
     @MainActor
     func newActivityDraftDefaultsToTeamTraining() throws {
@@ -271,11 +339,18 @@ struct WeeklyPlanningViewModelTests {
         viewModel.newActivitySportId = SportId()
         viewModel.addActivity()
         let original = try #require(viewModel.activities.first)
+        // Flexible Weekly Planning V1: `original.localDate` is now
+        // `LocalDate?` — `addActivity()` above left `newActivityHasDate`
+        // at its default `true`, so this freshly created activity is
+        // genuinely dated and unwrapping here is a real assertion, not
+        // a fabricated fallback (a `?? someDate` would silently hide a
+        // regression where the activity unexpectedly became undated).
+        let originalLocalDate = try #require(original.localDate)
 
         viewModel.editActivity(
             original,
             title: "Renamed session",
-            localDate: original.localDate,
+            localDate: originalLocalDate,
             activityType: .individualTraining,
             sportId: nil
         )

@@ -202,7 +202,12 @@ public final class PlannedActivity {
     // Same fix as WeekPlan.weekStart above, applied proactively here:
     // fetching/sorting multiple PlannedActivity rows with differing
     // `localDate` values hits the identical documented SwiftData bug.
-    private var localDateRaw: String
+    //
+    // Flexible Weekly Planning V1: optional (was `String`) — `nil` is a
+    // genuine, first-class planning state ("intended for this WeekPlan,
+    // no day chosen yet"), never a corrupted/uninitialized value. See
+    // `localDate`'s own doc comment below for the full semantics.
+    private var localDateRaw: String?
     public var startLocalTime: LocalTime?
     public var timeZoneId: TimeZoneId
     public var plannedDurationMinutes: Int?
@@ -228,7 +233,7 @@ public final class PlannedActivity {
         categoryIds: [ActivityCategoryId] = [],
         activityType: ActivityType,
         title: String?,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         startLocalTime: LocalTime? = nil,
         timeZoneId: TimeZoneId,
         plannedDurationMinutes: Int? = nil,
@@ -274,6 +279,20 @@ public final class PlannedActivity {
         if let l = location {
             precondition(l.count <= 200, "location must be 0-200 characters")
         }
+        // PR #88 follow-up (correctness pass): a start time with no day
+        // chosen has nothing to anchor to — mirrors
+        // `PlanningService.validateLocalDate`'s own catchable guard
+        // exactly (see that method's own doc comment), same
+        // "precondition here, catchable guard at the Service boundary"
+        // pairing every other bound on this initializer already follows.
+        // Deliberately NOT enforced here: the OWNING WeekPlan's own
+        // 7-day range for `localDate` — this initializer only ever sees
+        // a bare `weekPlanId: WeekPlanId` reference, never the actual
+        // `WeekPlan` instance (its `weekStart`), so that cross-entity
+        // invariant can only be checked where the real `WeekPlan` is
+        // available — `PlanningService.validateLocalDate`, which fetches
+        // it through the repository.
+        precondition(localDate != nil || startLocalTime == nil, "startLocalTime requires a localDate — an undated activity cannot have a start time")
         self.id = id.rawValue
         self.weekPlanId = weekPlanId.rawValue
         self.athleteId = athleteId.rawValue
@@ -281,7 +300,7 @@ public final class PlannedActivity {
         self.categoryIds = categoryIds.map(\.rawValue)
         self.activityType = activityType
         self.title = normalizedTitle
-        self.localDateRaw = localDate.isoString
+        self.localDateRaw = localDate?.isoString
         self.startLocalTime = startLocalTime
         self.timeZoneId = timeZoneId
         self.plannedDurationMinutes = plannedDurationMinutes
@@ -297,9 +316,20 @@ public final class PlannedActivity {
 
     public var plannedActivityId: PlannedActivityId { PlannedActivityId(rawValue: id) }
 
-    public var localDate: LocalDate {
-        get { LocalDate(isoString: localDateRaw) ?? LocalDate(year: 1970, month: 1, day: 1) }
-        set { localDateRaw = newValue.isoString }
+    /// Flexible Weekly Planning V1: `nil` is a genuine, first-class
+    /// planning state — "intended for this `WeekPlan`, no day chosen
+    /// yet" — never a corrupted/uninitialized value and never a
+    /// synthetic/default date (e.g. the WeekPlan's own `weekStart`).
+    /// `weekPlanId` remains the sole canonical owner of week membership,
+    /// unchanged by this property's optionality — see
+    /// `PlanningService`'s own doc comments for how week ownership and
+    /// day-level placement are two separate facts. A malformed (but
+    /// non-nil) stored string still falls back to the epoch, exactly as
+    /// before this round — that failure mode is unrelated to the new
+    /// `nil` case and is not itself a planning state.
+    public var localDate: LocalDate? {
+        get { localDateRaw.map { LocalDate(isoString: $0) ?? LocalDate(year: 1970, month: 1, day: 1) } }
+        set { localDateRaw = newValue?.isoString }
     }
 }
 

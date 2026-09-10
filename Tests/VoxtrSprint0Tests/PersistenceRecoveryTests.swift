@@ -200,12 +200,13 @@ struct PersistenceRecoveryTests {
         // evidence): updated again to AppSchemaV9. VX-038 (External
         // Event Decomposition / Suggested Split): updated again to
         // AppSchemaV10. Athlete Connection Foundation A: updated again to
-        // AppSchemaV11, matching CompositionRoot.build's own real
+        // AppSchemaV11. Flexible Weekly Planning V1: updated again to
+        // AppSchemaV12, matching CompositionRoot.build's own real
         // default after that round's bump. Keep this literal in
         // lockstep with CompositionRoot's own default on every future
         // version bump too.
         let controller = SwiftDataPersistenceController(
-            versionedSchema: AppSchemaV11.self,
+            versionedSchema: AppSchemaV12.self,
             migrationPlan: AppSchemaMigrationPlan.self
         )
         let container = try controller.makeModelContainer()
@@ -876,6 +877,97 @@ struct PersistenceRecoveryTests {
             loggedByActorId: actorId
         )
         #expect(newLog.loggedByActorId == actorId.rawValue)
+    }
+
+    /// Flexible Weekly Planning V1: mirrors
+    /// `existingV10StoreMigratesToV11Successfully` immediately above,
+    /// one version later — proves the `localDate` optionality
+    /// migration's own explicit contract: a `PlannedActivity` row
+    /// created before this round exists has a real, non-nil `localDate`
+    /// and survives completely intact (never nulled, never a
+    /// synthetic/backfilled value), and the new optionality is genuinely
+    /// usable — not merely present — against the migrated store: a NEW
+    /// planned activity created against it can be genuinely undated.
+    @Test("Flexible Weekly Planning V1: a store created under AppSchemaV11 (with an existing dated PlannedActivity, from before localDate was ever optional) reopens successfully under AppSchemaV12 via the lightweight migration stage — the existing activity's localDate survives untouched (never nulled/fabricated), and a newly created planned activity against the migrated store can genuinely be created with localDate == nil")
+    @MainActor
+    func existingV11StoreMigratesToV12Successfully() throws {
+        let storeURL = URL.temporaryDirectory.appendingPathComponent("v11-to-v12-\(UUID().uuidString).sqlite")
+        defer { try? FileManager.default.removeItem(at: storeURL) }
+        let v11Schema = Schema(versionedSchema: AppSchemaV11.self)
+        var athleteRawId: UUID
+        var weekPlanRawId: UUID
+        var plannedActivityRawId: UUID
+        let originalLocalDate = LocalDate(year: 2026, month: 1, day: 6)
+        do {
+            let v11Container = try ModelContainer(
+                for: v11Schema,
+                migrationPlan: AppSchemaMigrationPlan.self,
+                configurations: [ModelConfiguration(schema: v11Schema, url: storeURL)]
+            )
+            let athlete = AthleteProfile(
+                workspaceId: WorkspaceId(), givenName: "Runner",
+                birthDate: LocalDate(year: 2013, month: 6, day: 2),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), developmentStage: .parentLed
+            )
+            v11Container.mainContext.insert(athlete)
+            try v11Container.mainContext.save()
+            athleteRawId = athlete.id
+
+            let weekPlan = WeekPlan(athleteId: AthleteId(rawValue: athlete.id), weekStart: originalLocalDate.startOfWeek)
+            v11Container.mainContext.insert(weekPlan)
+            try v11Container.mainContext.save()
+            weekPlanRawId = weekPlan.id
+
+            // Constructed via the FROZEN V11-era PlannedActivity type
+            // directly — this is exactly what an existing row looks like
+            // on disk before this migration: `localDate` has no
+            // optionality concept for it at all, only a real value.
+            let legacyActivity = AppSchemaV11.PlannedActivity(
+                weekPlanId: weekPlan.id, athleteId: athlete.id, activityType: .individualTraining,
+                title: "Swim practice", localDate: originalLocalDate,
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+            v11Container.mainContext.insert(legacyActivity)
+            try v11Container.mainContext.save()
+            plannedActivityRawId = legacyActivity.id
+        }
+        // Container above goes out of scope — genuinely closed, matching
+        // a real app relaunch rather than a container kept alive.
+
+        // The NEXT launch, on the SAME store file, targets the CURRENT
+        // schema (V12) — the real production default (CompositionRoot.build's
+        // own `versionedSchema: AppSchemaV12.self`).
+        let v12Schema = Schema(versionedSchema: AppSchemaV12.self)
+        let v12Container = try ModelContainer(
+            for: v12Schema,
+            migrationPlan: AppSchemaMigrationPlan.self,
+            configurations: [ModelConfiguration(schema: v12Schema, url: storeURL)]
+        )
+
+        // The pre-existing PlannedActivity survived completely untouched
+        // — its real, pre-migration date is neither nulled nor
+        // rewritten.
+        let planningRepository = PlanningRepository(modelContext: v12Container.mainContext)
+        let weekPlanId = WeekPlanId(rawValue: weekPlanRawId)
+        let migratedActivities = try planningRepository.fetchPlannedActivities(forWeekPlan: weekPlanId)
+        #expect(migratedActivities.count == 1)
+        #expect(migratedActivities.first?.id == plannedActivityRawId)
+        #expect(migratedActivities.first?.title == "Swim practice")
+        #expect(migratedActivities.first?.localDate == originalLocalDate)
+
+        // The new optionality is genuinely usable against the migrated
+        // store — proves the lightweight stage actually widened the
+        // column, not merely that the container opened. A newly created
+        // planned activity against the SAME migrated store can be
+        // genuinely undated.
+        let athleteId = AthleteId(rawValue: athleteRawId)
+        let undatedActivity = try planningRepository.insertPlannedActivity(
+            weekPlanId: weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        #expect(undatedActivity.localDate == nil)
+        #expect(try planningRepository.fetchPlannedActivities(forWeekPlan: weekPlanId).count == 2)
     }
 
     @Test("VX-023 review follow-up: a store created under AppCurrentSchema (V1, 15 entities) reopens successfully under AppSchemaV2 (17 entities) via the lightweight migration stage — existing data survives, and the newly-added Sleep model types are genuinely usable against the migrated store")

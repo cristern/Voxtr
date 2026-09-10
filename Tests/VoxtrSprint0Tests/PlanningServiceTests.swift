@@ -1551,6 +1551,240 @@ struct PlanningServiceTests {
         #expect(event.revision == weekPlan.revision)
         #expect(event.revision == 3)
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("Assigning a day to a previously undated PlannedActivity via editPlannedActivity preserves the same PlannedActivityId — planning-detail change, never new-plan creation")
+    @MainActor
+    func editPlannedActivityFromUndatedToDatedPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .teamTraining, title: "Strength this week",
+            localDate: LocalDate(year: 2026, month: 1, day: 7), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(edited.plannedActivityId == activity.plannedActivityId)
+        #expect(edited.localDate == LocalDate(year: 2026, month: 1, day: 7))
+        #expect(edited.weekPlanId == weekPlan.id)
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
+    }
+
+    @Test("Removing the day from a dated PlannedActivity via editPlannedActivity preserves the same PlannedActivityId")
+    @MainActor
+    func editPlannedActivityFromDatedToUndatedPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .individualTraining, title: "Endurance run",
+            localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(edited.plannedActivityId == activity.plannedActivityId)
+        #expect(edited.localDate == nil)
+        #expect(edited.weekPlanId == weekPlan.id)
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
+    }
+
+    @Test("Moving a dated PlannedActivity from Monday to Thursday (same week) via editPlannedActivity preserves the same PlannedActivityId")
+    @MainActor
+    func editPlannedActivityFromMondayToThursdayPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let edited = try service.editPlannedActivity(
+            activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+            activityType: .individualTraining, title: "Endurance run",
+            localDate: LocalDate(year: 2026, month: 1, day: 8), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(edited.plannedActivityId == activity.plannedActivityId)
+        #expect(edited.localDate == LocalDate(year: 2026, month: 1, day: 8))
+    }
+
+    @Test("Splitting an undated PlannedActivity is rejected — Split Activity requires an assigned day, per V1 scope")
+    @MainActor
+    func splitPlannedActivityRejectsUndatedOriginal() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            plannedDurationMinutes: 60
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.splitPlannedActivity(
+                activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+                children: [
+                    PlannedActivitySplitChild(activityType: .teamTraining, startOffsetMinutes: 0, durationMinutes: 30),
+                    PlannedActivitySplitChild(activityType: .individualTraining, startOffsetMinutes: 30, durationMinutes: 30)
+                ],
+                splitBy: ActorId()
+            )
+        }
+        // Rejected before any mutation — the original activity remains
+        // exactly as it was, still undated, still a single row.
+        let unchanged = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(unchanged?.localDate == nil)
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
+    }
+
+    // MARK: - PR #88 follow-up: WeekPlan-range and startTime-requires-date invariants
+
+    @Test("Adding a dated activity inside the owning WeekPlan's own week succeeds")
+    @MainActor
+    func addDatedActivityInsideOwningWeekPlanSucceeds() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        // Monday 2026-01-05 through Sunday 2026-01-11.
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 11),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(activity.localDate == LocalDate(year: 2026, month: 1, day: 11))
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 1)
+    }
+
+    @Test("Adding a dated activity outside the owning WeekPlan's own week is rejected — weekPlanId and localDate must agree on which week this activity belongs to")
+    @MainActor
+    func addDatedActivityOutsideOwningWeekPlanIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        // Monday 2026-01-05 through Sunday 2026-01-11 — 2026-01-12 is
+        // the FOLLOWING week's Monday, one day outside this range.
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+                title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 12),
+                timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
+    }
+
+    @Test("Editing an undated activity to a date outside the owning WeekPlan's own week is rejected, and the canonical activity remains completely unchanged (still undated)")
+    @MainActor
+    func editUndatedToDateOutsideOwningWeekPlanIsRejectedAndLeavesActivityUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+                activityType: .teamTraining, title: "Strength this week",
+                // 2026-01-12 belongs to the FOLLOWING week, not this
+                // WeekPlan's own 2026-01-05...2026-01-11 range.
+                localDate: LocalDate(year: 2026, month: 1, day: 12), timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+            )
+        }
+        let unchanged = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(unchanged?.plannedActivityId == activity.plannedActivityId)
+        #expect(unchanged?.localDate == nil)
+        #expect(unchanged?.title == "Strength this week")
+    }
+
+    @Test("Creating a planned activity with localDate == nil and a non-nil startLocalTime is rejected — a start time with no day chosen has nothing to anchor to")
+    @MainActor
+    func addActivityWithNilDateAndNonNilStartTimeIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.addPlannedActivity(
+                toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+                title: "Strength this week", localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                startLocalTime: LocalTime(hour: 18, minute: 0)
+            )
+        }
+        #expect(try container.mainContext.fetch(FetchDescriptor<PlannedActivity>()).count == 0)
+    }
+
+    @Test("Editing a planned activity to localDate == nil while leaving a non-nil startLocalTime is rejected — the canonical activity is never left in an incoherent nil-date/non-nil-time state")
+    @MainActor
+    func editActivityToNilDateAndNonNilStartTimeIsRejected() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let athleteId = AthleteId()
+        let weekPlan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try service.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Endurance run", localDate: LocalDate(year: 2026, month: 1, day: 6),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), startLocalTime: LocalTime(hour: 7, minute: 0)
+        )
+
+        #expect(throws: PlanningServiceError.self) {
+            try service.editPlannedActivity(
+                activity.plannedActivityId, expectedWeekPlanId: weekPlan.weekPlanId,
+                activityType: .individualTraining, title: "Endurance run",
+                localDate: nil, timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+                startLocalTime: LocalTime(hour: 7, minute: 0)
+            )
+        }
+        let unchanged = try repository.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(unchanged?.localDate == LocalDate(year: 2026, month: 1, day: 6))
+        #expect(unchanged?.startLocalTime == LocalTime(hour: 7, minute: 0))
+    }
 }
 
 // MARK: - Recurring Planned Activities

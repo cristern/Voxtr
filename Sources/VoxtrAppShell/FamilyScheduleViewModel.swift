@@ -456,9 +456,19 @@ public final class FamilyScheduleViewModel {
         // start time (no-start-time rows sorted after timed ones —
         // deterministic, same convention as Family Home's own today
         // list), and sort the groups themselves by date.
+        // Flexible Weekly Planning V1: `trainingPlanningCoordinationService
+        // .plannedActivitiesWithCompletion(forAthlete:from:through:)`
+        // already excludes any undated activity (`localDate == nil`)
+        // from this range fetch (see that method's own doc comment) —
+        // Family Schedule is a day-grouped surface, so an undated
+        // "planned this week" activity never reaches `merged` as a
+        // `.planned` row in the first place. `?? start` below is
+        // unreachable in practice, kept only as defense in depth rather
+        // than force-unwrapping a value this method's own upstream
+        // contract already guarantees is real.
         let grouped = Dictionary(grouping: merged) { row -> LocalDate in
             switch row {
-            case .planned(let familyRow): return familyRow.plannedActivity.localDate
+            case .planned(let familyRow): return familyRow.plannedActivity.localDate ?? start
             case .recurringSuggestion(_, _, _, let suggestion): return suggestion.occurrenceDate
             }
         }

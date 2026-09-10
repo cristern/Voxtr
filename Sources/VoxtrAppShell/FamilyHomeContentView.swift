@@ -671,12 +671,23 @@ public struct FamilyHomeContentView: View {
             } else if let duration = row.plannedActivity.plannedDurationMinutes {
                 parts.append("\(duration) min")
             }
-            parts.append(row.plannedActivity.localDate.isoString)
+            // Flexible Weekly Planning V1: every fetch that constructs a
+            // `FamilyHomeRow` (today's activities, Family Schedule's
+            // date-range fetch) already excludes undated activities
+            // (`localDate == nil`) — this is a day-specific row by
+            // construction — so `localDate` is real here in practice;
+            // this simply never appends a fabricated date if that
+            // upstream guarantee were ever violated.
+            if let localDate = row.plannedActivity.localDate {
+                parts.append(localDate.isoString)
+            }
         case .missed, .cancelled:
             if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
                 parts.append(timeLabel)
             }
-            parts.append(row.plannedActivity.localDate.isoString)
+            if let localDate = row.plannedActivity.localDate {
+                parts.append(localDate.isoString)
+            }
         case .none, .scheduled:
             if let timeLabel = PlannedTimeRangeFormatter.label(start: row.plannedActivity.startLocalTime, durationMinutes: row.plannedActivity.plannedDurationMinutes) {
                 parts.append(timeLabel)
