@@ -59,7 +59,32 @@ public struct QRCodeScannerView: UIViewControllerRepresentable {
 /// actually in a window yet) — so backgrounding or dismissing this screen
 /// always releases the camera, and re-presenting it always restarts a
 /// clean session.
-public final class QRCodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+///
+/// PR #84 follow-up (Codemagic Xcode 26.6 Swift 6 compile fix): this
+/// class is implicitly `@MainActor`-isolated (inherited from
+/// `UIViewController`'s own global-actor annotation in the modern SDK
+/// overlay), so every method here — including `metadataOutput(_:
+/// didOutput:from:)` below — is MainActor-isolated by default.
+/// `AVCaptureMetadataOutputObjectsDelegate`'s own protocol requirement,
+/// however, is declared `nonisolated` (ordinary legacy-Objective-C
+/// delegate shape) — Codemagic's authoritative compiler flagged exactly
+/// this mismatch: "conformance ... crosses into main actor-isolated code
+/// and can cause data races." The conformance below is written as `,
+/// @MainActor AVCaptureMetadataOutputObjectsDelegate` — an ISOLATED
+/// CONFORMANCE (not `@preconcurrency`, which would only silence the
+/// diagnostic without actually proving safety) — telling the compiler
+/// that THIS SPECIFIC conformance is only ever dispatched into on
+/// MainActor, which is exactly true here: `configureCaptureSession()`
+/// below explicitly registers this delegate via
+/// `output.setMetadataObjectsDelegate(self, queue: .main)`, so
+/// `metadataOutput(_:didOutput:from:)` is guaranteed to be invoked on
+/// the main queue/MainActor already, by this file's own existing
+/// design — the isolated-conformance annotation makes that existing
+/// guarantee explicit and statically checked, rather than papering over
+/// it. `metadataOutput(_:didOutput:from:)` itself is left exactly as
+/// written (implicitly MainActor-isolated, never `nonisolated`) — the
+/// fix is entirely in the conformance declaration, not the method body.
+public final class QRCodeScannerViewController: UIViewController, @MainActor AVCaptureMetadataOutputObjectsDelegate {
     var onScan: ((String) -> Void)?
     var onPermissionDenied: (() -> Void)?
 
