@@ -166,12 +166,18 @@ public final class PlanningService {
     /// (`fetchPlannedActivity(forExternalSourceId:weekPlanId:)` or the
     /// athlete-scoped `fetchPlannedActivities(forAthlete:externalSourceType:)`
     /// below) — this method itself does not re-check.
+    ///
+    /// Flexible Weekly Planning V1: `localDate` is now `LocalDate?` —
+    /// `nil` means "intended for this WeekPlan, no day chosen yet," a
+    /// genuine first-class planning state, never a synthetic/default
+    /// date. `weekPlanId` remains the sole canonical owner of week
+    /// membership regardless of whether a day has been chosen.
     public func addPlannedActivity(
         toWeekPlan weekPlanId: WeekPlanId,
         athleteId: AthleteId,
         activityType: ActivityType,
         title: String?,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -222,12 +228,20 @@ public final class PlanningService {
     /// `athleteId`, and `createdAt` are identity/ownership/audit fields
     /// and are not editable through this method — everything else
     /// `PlannedActivity` stores is.
+    ///
+    /// Flexible Weekly Planning V1: this is also the ONE mutation path
+    /// for assigning a day to a previously undated activity, or removing
+    /// a day to return a dated activity to the undated weekly state —
+    /// `localDate: LocalDate?`, passing `nil` here is a normal, explicit
+    /// edit, not a special case. Either direction preserves the same
+    /// `plannedActivityId` — this is "change planning detail," never
+    /// "create a new plan."
     public func editPlannedActivity(
         _ plannedActivityId: PlannedActivityId,
         expectedWeekPlanId weekPlanId: WeekPlanId,
         activityType: ActivityType,
         title: String?,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         timeZoneId: TimeZoneId,
         sportId: SportId? = nil,
         categoryIds: [ActivityCategoryId] = [],
@@ -618,6 +632,17 @@ public final class PlanningService {
         guard original.weekPlanId == weekPlanId.rawValue else {
             throw PlanningServiceError.plannedActivityDoesNotBelongToWeekPlan
         }
+        // Flexible Weekly Planning V1: Split is explicitly out of scope
+        // for an undated activity — every offset/day-rollover computation
+        // below (`localDateAndTime(offsetMinutes:)`, each child's own
+        // WeekPlan resolution) requires a real starting day to be
+        // meaningful, and fabricating one here would be exactly the kind
+        // of synthetic date this feature's own product contract forbids.
+        // The Parent must assign a day first (via `editPlannedActivity`)
+        // before this activity becomes splittable.
+        guard let originalLocalDateBeforeSplit = original.localDate else {
+            throw PlanningServiceError.invalidField("Split Activity requires the original activity to have an assigned day — assign a day before splitting")
+        }
 
         // Snapshot BEFORE the first child's `editPlannedActivity` call
         // mutates `original` in place — `original`/`updatedFirstChild`
@@ -638,7 +663,7 @@ public final class PlanningService {
         let athleteId = AthleteId(rawValue: original.athleteId)
         let sportId = original.sportId.map(SportId.init(rawValue:))
         let categoryIds = original.categoryIds.map(ActivityCategoryId.init(rawValue:))
-        let originalLocalDate = original.localDate
+        let originalLocalDate = originalLocalDateBeforeSplit
         let originalStartLocalTime = original.startLocalTime
 
         // Lead Review follow-up (Blocker 2): pure `LocalDate`/`LocalTime`

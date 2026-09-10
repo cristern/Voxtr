@@ -2184,7 +2184,14 @@ public final class CalendarPlanningCoordinationService {
             }
             let windowStartLocalDate = Self.localDateAndTime(for: windowStart, in: timeZoneId).0
             let windowEndLocalDate = Self.localDateAndTime(for: windowEnd, in: timeZoneId).0
-            guard activity.localDate >= windowStartLocalDate && activity.localDate <= windowEndLocalDate else { continue }
+            // Flexible Weekly Planning V1: Calendar Import remains
+            // dated-only — every externally-sourced `PlannedActivity`
+            // has a real `localDate` — but an undated row can never be
+            // window-matched against an external event's date range
+            // either way, so this excludes it defensively rather than
+            // assuming the invariant.
+            guard let activityLocalDate = activity.localDate,
+                  activityLocalDate >= windowStartLocalDate && activityLocalDate <= windowEndLocalDate else { continue }
 
             // Planning proposes; Training proves. Proven training truth
             // is never erased by an external source disappearing.

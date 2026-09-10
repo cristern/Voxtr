@@ -21,7 +21,7 @@ public struct LogActivityView: View {
                 Section {
                     LabeledContent("Athlete", value: viewModel.athleteDisplayName)
                     LabeledContent("Activity", value: ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: viewModel.plannedActivity))
-                    LabeledContent("Date", value: viewModel.plannedActivity.localDate.isoString)
+                    LabeledContent("Date", value: viewModel.plannedActivity.localDate?.isoString ?? "Planned this week")
                 }
                 .voxtrRowSurface()
                 .accessibilityIdentifier("logActivity.plannedContext")

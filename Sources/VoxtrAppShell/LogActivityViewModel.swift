@@ -318,10 +318,20 @@ public final class LogActivityViewModel {
     /// parent says otherwise (which this form doesn't currently ask,
     /// matching "do not ask the parent to reselect... date, time").
     private static func startedAt(for activity: PlannedActivity) -> Date {
+        guard let localDate = activity.localDate else {
+            // Flexible Weekly Planning V1: an undated planned activity
+            // (`localDate == nil`) has no planned day to combine into a
+            // start instant — actual timing is only known now, at
+            // logging time, so this uses the real current moment rather
+            // than fabricating a day. This never rewrites the canonical
+            // `PlannedActivity.localDate`; it only supplies the
+            // best-known `LoggedActivity.startedAt`.
+            return .now
+        }
         var components = DateComponents(
-            year: activity.localDate.year,
-            month: activity.localDate.month,
-            day: activity.localDate.day
+            year: localDate.year,
+            month: localDate.month,
+            day: localDate.day
         )
         if let startTime = activity.startLocalTime {
             components.hour = startTime.hour

@@ -58,6 +58,16 @@ public final class ActivityDetailViewModel {
     public var editTitle: String = ""
     public var editSportId: SportId?
     public var editDate: Date = .now
+    /// Flexible Weekly Planning V1: mirrors `editHasStartTime`/
+    /// `editHasDuration`'s own established "Has X" pattern — `false`
+    /// means "intended for this WeekPlan, no day chosen yet"
+    /// (`PlannedActivity.localDate == nil`), never a fake/default date.
+    /// `editDate` above keeps a sensible fallback value regardless (the
+    /// activity's own persisted day when it has one, otherwise `.now`)
+    /// so the date picker has something reasonable to show if the user
+    /// toggles this on, the same way `editStartTime`/`editDurationMinutes`
+    /// already behave while their own "Has X" toggle is off.
+    public var editHasDate: Bool = true
     public var editActivityType: ActivityType = .individualTraining
     public var editStartTime: Date = .now
     public var editHasStartTime: Bool = false
@@ -351,7 +361,13 @@ public final class ActivityDetailViewModel {
     public func prefillEditForm() {
         editTitle = activity.title ?? ""
         editSportId = activity.sportId.map { SportId(rawValue: $0) }
-        editDate = Self.date(from: activity.localDate)
+        if let localDate = activity.localDate {
+            editHasDate = true
+            editDate = Self.date(from: localDate)
+        } else {
+            editHasDate = false
+            editDate = .now
+        }
         editActivityType = activity.activityType
         if let startTime = activity.startLocalTime {
             editHasStartTime = true
@@ -479,15 +495,22 @@ public final class ActivityDetailViewModel {
     public func saveEdit() -> Bool {
         errorMessage = nil
         do {
+            // Flexible Weekly Planning V1: `editHasDate == false` is a
+            // normal, explicit edit — "return this activity to the
+            // undated weekly state" — never a fabricated date. A start
+            // time with no day is incoherent, so `editHasDate == false`
+            // also clears `startLocalTime` regardless of `editHasStartTime`'s
+            // own toggle, rather than persisting a time with nothing to
+            // anchor it to.
             let updated = try planningService.editPlannedActivity(
                 activity.plannedActivityId,
                 expectedWeekPlanId: weekPlanId,
                 activityType: editActivityType,
                 title: editTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                localDate: Self.localDate(from: editDate),
+                localDate: editHasDate ? Self.localDate(from: editDate) : nil,
                 timeZoneId: activity.timeZoneId,
                 sportId: editSportId,
-                startLocalTime: editHasStartTime ? Self.localTime(from: editStartTime) : nil,
+                startLocalTime: (editHasDate && editHasStartTime) ? Self.localTime(from: editStartTime) : nil,
                 plannedDurationMinutes: editHasDuration ? editDurationMinutes : nil,
                 notes: editNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editNotes,
                 location: editLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : editLocation
@@ -963,10 +986,17 @@ public final class ActivityDetailViewModel {
     /// instant `LoggedActivity.startedAt` needs), reused here for
     /// `cancelActivity()` rather than duplicated with different logic.
     private static func startedAt(for activity: PlannedActivity) -> Date {
+        guard let localDate = activity.localDate else {
+            // Flexible Weekly Planning V1: an undated planned activity
+            // (`localDate == nil`) has no planned day — same reasoning
+            // as `LogActivityViewModel.startedAt(for:)`'s own equivalent
+            // guard, reused here for `cancelActivity()`.
+            return .now
+        }
         var components = DateComponents(
-            year: activity.localDate.year,
-            month: activity.localDate.month,
-            day: activity.localDate.day
+            year: localDate.year,
+            month: localDate.month,
+            day: localDate.day
         )
         if let startTime = activity.startLocalTime {
             components.hour = startTime.hour

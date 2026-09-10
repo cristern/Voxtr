@@ -308,7 +308,11 @@ public struct StatisticsAthleteSummary: Equatable, Sendable {
 /// established for exactly this title-or-Sport fallback rule).
 public struct StatisticsPlannedActivityRow: Identifiable, Equatable, Sendable {
     public let plannedActivityId: PlannedActivityId
-    public let localDate: LocalDate
+    /// Flexible Weekly Planning V1: `nil` means this row is a genuine
+    /// undated weekly intention — still part of the week's plan (see
+    /// `StatisticsService.weekDetail`'s own doc comment), never a
+    /// fabricated day.
+    public let localDate: LocalDate?
     public let startLocalTime: LocalTime?
     public let sportId: SportId?
     public let activityType: ActivityType
@@ -323,7 +327,7 @@ public struct StatisticsPlannedActivityRow: Identifiable, Equatable, Sendable {
 
     public init(
         plannedActivityId: PlannedActivityId,
-        localDate: LocalDate,
+        localDate: LocalDate?,
         startLocalTime: LocalTime?,
         sportId: SportId?,
         activityType: ActivityType,
@@ -742,20 +746,37 @@ public final class StatisticsService {
         // (an entirely-future selected period) yields an empty planned
         // set rather than walking any weeks at all.
         let plannedIntervalEnd = min(intervalEnd, today)
-        let plannedActivities: [PlannedActivity]
+        let plannedActivities: [(activity: PlannedActivity, weekStart: LocalDate)]
         if intervalStart <= plannedIntervalEnd {
             let plannedWeekStarts = Self.weekStarts(from: intervalStart, through: plannedIntervalEnd)
+            // Flexible Weekly Planning V1: an undated activity
+            // (`localDate == nil`) is fully part of its owning week's
+            // plan and must not be invisible to Statistics merely
+            // because it has no day yet — but it also has no day-level
+            // fact to range-check against `intervalStart`/
+            // `plannedIntervalEnd` the way a dated activity does.
+            // `plannedWeekStarts` (used to fetch `plannedActivities`
+            // above) is already exactly the set of weeks this request is
+            // asking about, already clamped to `plannedIntervalEnd` — so
+            // an undated activity counts once it passes the SAME
+            // `filter.matches(_:)` a dated one does, without a
+            // synthetic/fabricated day standing in for the missing
+            // range check.
             plannedActivities = try Self.fetchPlannedActivities(
                 planningService: planningService,
                 forAthlete: athleteId,
                 weekStarts: plannedWeekStarts
             )
-            .filter { $0.localDate >= intervalStart && $0.localDate <= plannedIntervalEnd && filter.matches($0) }
+            .filter { pair in
+                guard filter.matches(pair.activity) else { return false }
+                guard let localDate = pair.activity.localDate else { return true }
+                return localDate >= intervalStart && localDate <= plannedIntervalEnd
+            }
         } else {
             plannedActivities = []
         }
         let plannedActivityCount = plannedActivities.count
-        let plannedMinutes = plannedActivities.compactMap(\.plannedDurationMinutes).reduce(0, +)
+        let plannedMinutes = plannedActivities.compactMap { $0.activity.plannedDurationMinutes }.reduce(0, +)
 
         // Weekly buckets: computed AFTER `reflectionByLoggedActivityId`/
         // `dailyStatuses` above so each week's Form/Sleep can reuse those
@@ -921,22 +942,47 @@ public final class StatisticsService {
         let plannedEffectiveEnd = min(effectiveEnd, today)
         var plannedActivities: [StatisticsPlannedActivityRow] = []
         if effectiveStart <= plannedEffectiveEnd {
+            // Flexible Weekly Planning V1: `weekStarts: [weekStart]`
+            // already scopes the fetch to exactly this ONE drilldown
+            // week, so an undated activity belonging to it counts
+            // directly (once it passes `filter.matches(_:)`, same as a
+            // dated one) — see `athleteSummary`'s own analogous doc
+            // comment for the full reasoning; there is no day-level fact
+            // to range-check for an undated row, and none is fabricated.
             let fetchedPlannedActivities = try Self.fetchPlannedActivities(
                 planningService: planningService,
                 forAthlete: athleteId,
                 weekStarts: [weekStart]
             )
-            .filter { $0.localDate >= effectiveStart && $0.localDate <= plannedEffectiveEnd && filter.matches($0) }
+            .map(\.activity)
+            .filter { activity in
+                guard filter.matches(activity) else { return false }
+                guard let localDate = activity.localDate else { return true }
+                return localDate >= effectiveStart && localDate <= plannedEffectiveEnd
+            }
 
-            // Ordering: chronological by `localDate`/`startLocalTime` —
-            // a planned activity with no recorded start time sorts
-            // AFTER timed ones, matching the same convention
+            // Ordering: undated activities first (matching
+            // `PlanningRepository`'s own established convention — see
+            // that type's own doc comment: calm, neutral ordering, never
+            // a priority/urgency signal), then chronological by
+            // `localDate`/`startLocalTime` — a planned activity with no
+            // recorded start time sorts AFTER timed ones on the same
+            // day, matching the same convention
             // `TodayActivityComposer.startLocalTimeSortKey` already
             // establishes — then stable `PlannedActivity.id` as the
             // final deterministic tiebreaker.
             plannedActivities = fetchedPlannedActivities
                 .sorted { lhs, rhs in
-                    if lhs.localDate != rhs.localDate { return lhs.localDate < rhs.localDate }
+                    switch (lhs.localDate, rhs.localDate) {
+                    case (nil, nil):
+                        break
+                    case (nil, _):
+                        return true
+                    case (_, nil):
+                        return false
+                    case let (l?, r?):
+                        if l != r { return l < r }
+                    }
                     switch (lhs.startLocalTime, rhs.startLocalTime) {
                     case (nil, nil): return lhs.id.uuidString < rhs.id.uuidString
                     case (nil, _): return false
@@ -1033,17 +1079,28 @@ public final class StatisticsService {
     /// the final interval/future-date/filter narrowing (see
     /// `athleteSummary` above) — this helper only ever fetches, it never
     /// filters, matching every other raw-fetch step in this service.
+    ///
+    /// Flexible Weekly Planning V1: each returned row is paired with the
+    /// `weekStart` it was actually fetched under (this loop already
+    /// knows that fact — the `WeekPlan` it just walked owns exactly one
+    /// `weekStart`), never derived from the activity's own `localDate`.
+    /// An undated activity (`localDate == nil`) has no day-level fact to
+    /// derive a week from, but it still has a real owning week — this is
+    /// what lets `weeklyBuckets` below bucket it correctly without
+    /// fabricating a date.
     private static func fetchPlannedActivities(
         planningService: PlanningService,
         forAthlete athleteId: AthleteId,
         weekStarts: [LocalDate]
-    ) throws -> [PlannedActivity] {
-        var result: [PlannedActivity] = []
+    ) throws -> [(activity: PlannedActivity, weekStart: LocalDate)] {
+        var result: [(activity: PlannedActivity, weekStart: LocalDate)] = []
         for weekStart in weekStarts {
             guard let weekPlan = try planningService.fetchWeekPlan(forAthlete: athleteId, weekStart: weekStart) else {
                 continue
             }
-            result.append(contentsOf: try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId))
+            for activity in try planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId) {
+                result.append((activity: activity, weekStart: weekStart))
+            }
         }
         return result
     }
@@ -1184,7 +1241,7 @@ public final class StatisticsService {
         for activities: [LoggedActivity],
         reflectionByLoggedActivityId: [UUID: ActivityReflection],
         dailyStatuses: [DailyStatus],
-        plannedActivities: [PlannedActivity],
+        plannedActivities: [(activity: PlannedActivity, weekStart: LocalDate)],
         from intervalStart: LocalDate,
         through intervalEnd: LocalDate,
         calendar: Calendar
@@ -1224,14 +1281,18 @@ public final class StatisticsService {
             sleepValuesByWeek[status.localDate.startOfWeek, default: []].append(sleepQuality)
         }
 
-        // Plan vs Actual round: bucketed by the SAME canonical
-        // `LocalDate.startOfWeek` boundary every other series above
-        // uses — `plannedActivities` is already fully narrowed by the
-        // caller (interval, future-date clamp, `filter`), so this is a
-        // pure bucketing pass, never a second filtering decision.
+        // Plan vs Actual round: bucketed by the `weekStart` each pair
+        // already carries (the week it was actually fetched under in
+        // `Self.fetchPlannedActivities`), never derived from the
+        // activity's own `localDate` — an undated activity
+        // (`localDate == nil`) has no day-level fact to derive a week
+        // from, but its real owning week is already known and carried
+        // alongside it. `plannedActivities` is already fully narrowed
+        // by the caller (interval, future-date clamp, `filter`), so
+        // this is a pure bucketing pass, never a second filtering
+        // decision.
         var plannedTotalsByWeek: [LocalDate: (minutes: Int, count: Int)] = [:]
-        for activity in plannedActivities {
-            let weekStart = activity.localDate.startOfWeek
+        for (activity, weekStart) in plannedActivities {
             var entry = plannedTotalsByWeek[weekStart] ?? (0, 0)
             entry.minutes += activity.plannedDurationMinutes ?? 0
             entry.count += 1

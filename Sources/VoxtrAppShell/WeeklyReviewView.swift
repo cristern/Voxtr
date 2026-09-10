@@ -159,9 +159,17 @@ public struct WeeklyReviewView: View {
                         // canonical `PlannedActivity.localDate` this
                         // section was already reading nothing else
                         // from.
-                        Text(WeeklyPlanningView.weekdayLabel(for: item.plannedActivity.localDate.weekday))
-                            .font(VoxtrTypography.metadata)
-                            .foregroundStyle(VoxtrColor.textSecondary)
+                        // Flexible Weekly Planning V1: an undated
+                        // activity (`localDate == nil`) has no weekday
+                        // to show here — this Weekly Review is already
+                        // scoped to one week, so simply omitting the
+                        // caption (rather than fabricating a day) is
+                        // enough context for the reader.
+                        if let localDate = item.plannedActivity.localDate {
+                            Text(WeeklyPlanningView.weekdayLabel(for: localDate.weekday))
+                                .font(VoxtrTypography.metadata)
+                                .foregroundStyle(VoxtrColor.textSecondary)
+                        }
                         HStack {
                             Text(ActivityLabelResolver(modelContext: modelContext).primaryLabel(for: item.plannedActivity))
                                 .font(VoxtrTypography.cardTitle)

@@ -241,10 +241,17 @@ public final class NotificationsPlanningCoordinationService {
     }
 
     private func computeFireDate(for activity: PlannedActivity, leadTimeMinutes: Int) throws -> Date {
-        guard let startLocalTime = activity.startLocalTime else {
+        // Flexible Weekly Planning V1: `localDate` is now optional too —
+        // an undated activity always has `startLocalTime == nil` as well
+        // (enforced at every mutation boundary: `WeeklyPlanningViewModel
+        // .addActivity()`/`ActivityDetailViewModel.saveEdit()` both clear
+        // `startLocalTime` whenever there is no date), so this second
+        // guard is defensive/type-safety only in practice — reusing the
+        // same error, since both mean "not enough scheduling info yet."
+        guard let startLocalTime = activity.startLocalTime, let localDate = activity.localDate else {
             throw CoordinationError.plannedActivityHasNoStartTime
         }
-        let fireInstant = try activity.localDate.absoluteDate(at: startLocalTime, in: activity.timeZoneId)
+        let fireInstant = try localDate.absoluteDate(at: startLocalTime, in: activity.timeZoneId)
         let fireDate = fireInstant.addingTimeInterval(-Double(leadTimeMinutes) * 60)
         guard fireDate > dateProvider.now else {
             throw CoordinationError.fireDateInPast
@@ -486,7 +493,13 @@ public final class NotificationsPlanningCoordinationService {
     /// reminder keeps its own lead time/text; only the fire instant is
     /// recomputed, per reminder.
     private func reschedule(_ reminders: [ActivityReminder], for activity: PlannedActivity) {
-        guard let startLocalTime = activity.startLocalTime else {
+        // Flexible Weekly Planning V1: an activity edited back to the
+        // undated weekly state also loses its `startLocalTime` (see
+        // `computeFireDate(for:leadTimeMinutes:)`'s own doc comment) —
+        // that alone already takes this same cancel-everything path
+        // below; `activity.localDate` is checked too, purely for type
+        // safety.
+        guard let startLocalTime = activity.startLocalTime, let localDate = activity.localDate else {
             // The activity no longer has a concrete start time to count
             // down from — there is nothing left to schedule against for
             // ANY of its reminders, so the honest outcome is cancelling
@@ -496,7 +509,7 @@ public final class NotificationsPlanningCoordinationService {
             }
             return
         }
-        guard let fireInstant = try? activity.localDate.absoluteDate(at: startLocalTime, in: activity.timeZoneId) else { return }
+        guard let fireInstant = try? localDate.absoluteDate(at: startLocalTime, in: activity.timeZoneId) else { return }
         for reminder in reminders {
             let fireDate = fireInstant.addingTimeInterval(-Double(reminder.leadTimeMinutes) * 60)
             // An edit that moves the activity such that THIS reminder's

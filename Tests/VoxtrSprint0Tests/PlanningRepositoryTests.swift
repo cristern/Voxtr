@@ -400,4 +400,83 @@ struct PlanningRepositoryTests {
             )
         }
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("Inserting a PlannedActivity with localDate == nil persists it as a genuine undated weekly intention, owned by its WeekPlan")
+    @MainActor
+    func insertPlannedActivityWithNilLocalDatePersists() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+        let weekPlan = try repository.insertWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        let activity = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .teamTraining,
+            title: "Strength this week",
+            localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(activity.localDate == nil)
+        #expect(activity.weekPlanId == weekPlan.id)
+        let fetched = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+        #expect(fetched.count == 1)
+        #expect(fetched.first?.localDate == nil)
+    }
+
+    @Test("Inserting a PlannedActivity with a real localDate remains unaffected by localDate becoming optional")
+    @MainActor
+    func insertPlannedActivityWithLocalDateUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+        let weekPlan = try repository.insertWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let plannedDate = LocalDate(year: 2026, month: 1, day: 6)
+
+        let activity = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId,
+            athleteId: athleteId,
+            activityType: .individualTraining,
+            title: "Endurance run",
+            localDate: plannedDate,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        #expect(activity.localDate == plannedDate)
+    }
+
+    @Test("fetchPlannedActivities(forWeekPlan:) sorts undated activities before dated ones, then dated activities chronologically")
+    @MainActor
+    func fetchPlannedActivitiesSortsUndatedFirst() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let athleteId = AthleteId()
+        let weekPlan = try repository.insertWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+
+        let thursday = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Thursday run", localDate: LocalDate(year: 2026, month: 1, day: 8),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let undated = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        let monday = try repository.insertPlannedActivity(
+            weekPlanId: weekPlan.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
+            title: "Monday run", localDate: LocalDate(year: 2026, month: 1, day: 5),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+
+        let fetched = try repository.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId)
+
+        #expect(fetched.map(\.id) == [undated.id, monday.id, thursday.id])
+    }
 }

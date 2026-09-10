@@ -2563,6 +2563,62 @@ struct Sprint1CoreFlowCompletionTests {
         #expect(secondViewModel.athleteId == athleteTwo.athleteId)
         #expect(firstViewModel.athleteId != secondViewModel.athleteId)
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    /// Training/completion requirement: an undated planned activity
+    /// (`localDate == nil`) may be completed/logged later — the log
+    /// creates a normal `LoggedActivity` linked via `plannedActivityId`,
+    /// with actual timing recorded independently on
+    /// `LoggedActivity.startedAt`, and `PlannedActivity.localDate` is
+    /// NEVER mutated merely because actual timing becomes known
+    /// ("Planning proposes; Training proves").
+    @Test("Logging an undated planned activity creates a LoggedActivity linked by plannedActivityId, without ever assigning a localDate to the original plan")
+    @MainActor
+    func loggingUndatedPlannedActivityPreservesNilLocalDate() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let planningRepository = PlanningRepository(modelContext: container.mainContext)
+        let planningService = PlanningService(repository: planningRepository)
+        let trainingRepository = TrainingRepository(modelContext: container.mainContext)
+        let trainingService = TrainingService(repository: trainingRepository)
+        let reflectionService = ReflectionService(repository: ReflectionRepository(modelContext: container.mainContext))
+        let coordinator = TrainingReflectionCoordinationService(
+            trainingService: trainingService, reflectionService: reflectionService
+        )
+        let athleteId = AthleteId()
+        let weekStart = TrainingPlanningCoordinationService.weekStart()
+        let weekPlan = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
+        let activity = try planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil,
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo")
+        )
+        #expect(activity.localDate == nil)
+
+        let logViewModel = LogActivityViewModel(
+            plannedActivity: activity,
+            athleteId: athleteId,
+            athleteDisplayName: "Oliver",
+            authorId: ActorId(),
+            trainingReflectionCoordinationService: coordinator,
+            onLogged: {}
+        )
+        logViewModel.durationMinutes = 40
+        logViewModel.sessionForm = 3
+
+        #expect(logViewModel.save())
+
+        let links = try trainingRepository.fetchLoggedActivities(forPlannedActivity: activity.plannedActivityId)
+        #expect(links.count == 1)
+        #expect(links.first?.durationMinutes == 40)
+
+        // The original planned activity remains exactly as it was —
+        // still a genuine, unresolved weekly intention. Logging never
+        // rewrites Planning truth after the fact.
+        let refetchedActivity = try planningService.fetchPlannedActivity(byId: activity.plannedActivityId)
+        #expect(refetchedActivity?.localDate == nil)
+    }
 }
 
 /// A minimal no-op stand-in, since this suite only needs to confirm

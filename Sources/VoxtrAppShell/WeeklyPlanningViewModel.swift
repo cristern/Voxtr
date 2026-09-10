@@ -20,6 +20,13 @@ public final class WeeklyPlanningViewModel {
     public var newActivityTitle: String = ""
     public var newActivitySportId: SportId?
     public var newActivityDate: Date = .now
+    /// Flexible Weekly Planning V1: mirrors `newActivityHasStartTime`/
+    /// `newActivityHasDuration`'s own established "Has X" pattern —
+    /// `true` by default so every existing add flow behaves exactly as
+    /// before this round unless the user explicitly opts out. `false`
+    /// means "intended for this WeekPlan, no day chosen yet"
+    /// (`PlannedActivity.localDate == nil`), never a fake/default date.
+    public var newActivityHasDate: Bool = true
     /// VX-040: a genuinely new, otherwise-unclassified activity draft
     /// defaults to `.teamTraining` (Internal Alpha usage shows this is
     /// the more common starting case) rather than `.individualTraining`
@@ -52,7 +59,11 @@ public final class WeeklyPlanningViewModel {
     /// already-saved `PlannedActivity.startLocalTime` to read yet (unlike
     /// the edit flow's `ActivityDetailViewModel.canSetReminder`), so this
     /// reads the draft's own `newActivityHasStartTime` toggle directly.
-    public var isNewActivityReminderAvailable: Bool { newActivityHasStartTime }
+    /// Flexible Weekly Planning V1: also requires `newActivityHasDate` —
+    /// an undated weekly intention has no start time to remind against
+    /// (see `addActivity()`'s own doc comment), so it must never offer a
+    /// reminder either.
+    public var isNewActivityReminderAvailable: Bool { newActivityHasDate && newActivityHasStartTime }
     /// Recent-text suggestions for this athlete — loaded once per
     /// screen load (`loadOrCreateWeekPlan()`), same source
     /// `ActivityDetailViewModel.recentReminderTextSuggestions` reads.
@@ -265,15 +276,21 @@ public final class WeeklyPlanningViewModel {
         let components = Calendar.current.dateComponents([.year, .month, .day], from: newActivityDate)
         let localDate = LocalDate(year: components.year ?? 1970, month: components.month ?? 1, day: components.day ?? 1)
         do {
+            // Flexible Weekly Planning V1: `newActivityHasDate == false`
+            // creates a genuinely undated weekly intention
+            // (`localDate == nil`) — a start time with no day is
+            // incoherent, so it is also never sent in that case,
+            // regardless of `newActivityHasStartTime`'s own toggle,
+            // mirroring `ActivityDetailViewModel.saveEdit()`'s own rule.
             let created = try service.addPlannedActivity(
                 toWeekPlan: weekPlan.weekPlanId,
                 athleteId: athleteId,
                 activityType: newActivityType,
                 title: trimmedTitle,
-                localDate: localDate,
+                localDate: newActivityHasDate ? localDate : nil,
                 timeZoneId: TimeZoneId(rawValue: TimeZone.current.identifier),
                 sportId: newActivitySportId,
-                startLocalTime: newActivityHasStartTime ? Self.localTime(from: newActivityStartTime) : nil,
+                startLocalTime: (newActivityHasDate && newActivityHasStartTime) ? Self.localTime(from: newActivityStartTime) : nil,
                 plannedDurationMinutes: newActivityHasDuration ? newActivityDurationMinutes : nil,
                 location: newActivityLocation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : newActivityLocation
             )
@@ -281,6 +298,7 @@ public final class WeeklyPlanningViewModel {
             newActivityTitle = ""
             newActivitySportId = nil
             newActivityDate = .now
+            newActivityHasDate = true
             newActivityLocation = ""
             newActivityHasStartTime = false
             newActivityStartTime = .now

@@ -533,4 +533,58 @@ struct ActivityDetailReminderUITests {
         #expect(viewModel.reminders.isEmpty)
         #expect(Set(fixture.scheduler.cancelledIds) == Set([eat.activityReminderId, packBag.activityReminderId]))
     }
+
+    // MARK: - Flexible Weekly Planning V1
+
+    @Test("Removing the date from a dated activity via editHasDate persists localDate == nil, preserves the same PlannedActivityId, and cancels reminders (a start time with no day is incoherent)")
+    @MainActor
+    func removingDateViaEditHasDatePersistsUndatedAndPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId, startLocalTime: LocalTime(hour: 18, minute: 0))
+        let originalId = activity.plannedActivityId
+        let reminder = try fixture.notificationsPlanningCoordinationService.createReminder(
+            athleteId: athleteId, plannedActivityId: activity.plannedActivityId, leadTimeMinutes: 30, reminderText: "Eat"
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.editHasDate == true)
+
+        viewModel.editHasDate = false
+        #expect(viewModel.saveEdit() == true)
+
+        #expect(viewModel.activity.plannedActivityId == originalId)
+        #expect(viewModel.activity.localDate == nil)
+        #expect(viewModel.activity.startLocalTime == nil)
+        #expect(fixture.scheduler.cancelledIds.contains(reminder.activityReminderId))
+        let refetched = try fixture.planningService.fetchPlannedActivity(byId: originalId)
+        #expect(refetched?.localDate == nil)
+    }
+
+    @Test("Assigning a day to a previously undated activity via editHasDate persists a real localDate and preserves the same PlannedActivityId")
+    @MainActor
+    func assigningDateViaEditHasDatePersistsDatedAndPreservesIdentity() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Strength this week", localDate: nil, timeZoneId: Self.oslo
+        )
+        let originalId = activity.plannedActivityId
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+        #expect(viewModel.editHasDate == false)
+
+        viewModel.editHasDate = true
+        viewModel.editDate = Calendar.current.date(from: DateComponents(year: 2026, month: 1, day: 7)) ?? .now
+        #expect(viewModel.saveEdit() == true)
+
+        #expect(viewModel.activity.plannedActivityId == originalId)
+        #expect(viewModel.activity.localDate == LocalDate(year: 2026, month: 1, day: 7))
+        let refetched = try fixture.planningService.fetchPlannedActivity(byId: originalId)
+        #expect(refetched?.localDate == LocalDate(year: 2026, month: 1, day: 7))
+    }
 }
