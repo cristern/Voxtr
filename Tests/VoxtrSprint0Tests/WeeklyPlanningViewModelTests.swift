@@ -339,11 +339,18 @@ struct WeeklyPlanningViewModelTests {
         viewModel.newActivitySportId = SportId()
         viewModel.addActivity()
         let original = try #require(viewModel.activities.first)
+        // Flexible Weekly Planning V1: `original.localDate` is now
+        // `LocalDate?` — `addActivity()` above left `newActivityHasDate`
+        // at its default `true`, so this freshly created activity is
+        // genuinely dated and unwrapping here is a real assertion, not
+        // a fabricated fallback (a `?? someDate` would silently hide a
+        // regression where the activity unexpectedly became undated).
+        let originalLocalDate = try #require(original.localDate)
 
         viewModel.editActivity(
             original,
             title: "Renamed session",
-            localDate: original.localDate,
+            localDate: originalLocalDate,
             activityType: .individualTraining,
             sportId: nil
         )
