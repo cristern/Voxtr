@@ -1968,10 +1968,15 @@ struct StatisticsServiceTests {
         let today = LocalDate(year: 2026, month: 3, day: 15)
         let week1 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 2))
         let week4 = try planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 3, day: 30))
-        // Past/today-relative plan: must count.
+        // Past/today-relative plan: must count. `day: 3` falls inside
+        // week1's own Mar 2-8 range (PR #88 follow-up: PlanningService
+        // now rejects a localDate outside its owning WeekPlan's week —
+        // `day: 10` here was a pre-existing typo that happened to land
+        // in the FOLLOWING week and was never caught before that guard
+        // existed).
         _ = try planningService.addPlannedActivity(
             toWeekPlan: week1.weekPlanId, athleteId: athleteId, activityType: .individualTraining,
-            title: "Already happened window", localDate: LocalDate(year: 2026, month: 3, day: 10),
+            title: "Already happened window", localDate: LocalDate(year: 2026, month: 3, day: 3),
             timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"), plannedDurationMinutes: 40
         )
         // Future plan (after `today`, later in the same selected month):
