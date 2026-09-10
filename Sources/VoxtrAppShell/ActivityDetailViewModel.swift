@@ -571,8 +571,8 @@ public final class ActivityDetailViewModel {
     /// established "never auto-propose a child outside the original's
     /// own envelope" guard, so the total planned time is never silently
     /// expanded merely by tapping "Add Another." New (non-first)
-    /// children default to `.individualTraining`, matching
-    /// `CalendarImportReviewViewModel.SplitChild.init`'s own default —
+    /// children default to `.teamTraining` (VX-040 — matches
+    /// `CalendarImportReviewViewModel.SplitChild.init`'s own default) —
     /// deliberately NOT `activity.activityType`, which could be the
     /// legacy `.physicalTraining` value `addPlannedActivity` rejects for
     /// any new row (only the FIRST child, which stays an in-place edit
@@ -581,12 +581,12 @@ public final class ActivityDetailViewModel {
         guard let previous = splitChildren.last else { return }
         let startOffsetMinutes = previous.startOffsetMinutes + previous.durationMinutes
         guard let envelopeDurationMinutes = activity.plannedDurationMinutes else {
-            splitChildren.append(SplitChildDraft(activityType: .individualTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: 30))
+            splitChildren.append(SplitChildDraft(activityType: .teamTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: 30))
             return
         }
         guard startOffsetMinutes < envelopeDurationMinutes else { return }
         let remainingMinutes = envelopeDurationMinutes - startOffsetMinutes
-        splitChildren.append(SplitChildDraft(activityType: .individualTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: remainingMinutes))
+        splitChildren.append(SplitChildDraft(activityType: .teamTraining, startOffsetMinutes: startOffsetMinutes, durationMinutes: remainingMinutes))
     }
 
     /// Removes one draft row. Never affects any sibling row's own

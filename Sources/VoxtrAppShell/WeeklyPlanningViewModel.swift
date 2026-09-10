@@ -20,7 +20,12 @@ public final class WeeklyPlanningViewModel {
     public var newActivityTitle: String = ""
     public var newActivitySportId: SportId?
     public var newActivityDate: Date = .now
-    public var newActivityType: ActivityType = .individualTraining
+    /// VX-040: a genuinely new, otherwise-unclassified activity draft
+    /// defaults to `.teamTraining` (Internal Alpha usage shows this is
+    /// the more common starting case) rather than `.individualTraining`
+    /// — a presentation default only, freely overridden by an explicit
+    /// choice before save. Never persists a separate default preference.
+    public var newActivityType: ActivityType = .teamTraining
     public var newActivityLocation: String = ""
     public var newActivityHasStartTime: Bool = false
     public var newActivityStartTime: Date = .now
@@ -101,7 +106,9 @@ public final class WeeklyPlanningViewModel {
     // Recurring-activity management form fields.
     public var recurringFormTitle: String = ""
     public var recurringFormSportId: SportId?
-    public var recurringFormActivityType: ActivityType = .individualTraining
+    /// VX-040: matches `newActivityType`'s own default — see that
+    /// property's doc comment.
+    public var recurringFormActivityType: ActivityType = .teamTraining
     /// Sprint 1.2B: one or more weekdays — replaces the previous
     /// single `recurringFormWeekday: Weekday`. `Set<Weekday>` (not
     /// an array) since UI multi-select has no meaningful order of
@@ -601,7 +608,7 @@ public final class WeeklyPlanningViewModel {
     public func resetRecurringForm() {
         recurringFormTitle = ""
         recurringFormSportId = nil
-        recurringFormActivityType = .individualTraining
+        recurringFormActivityType = .teamTraining
         recurringFormWeekdays = [.monday]
         recurringFormHasStartTime = false
         recurringFormStartTime = .now

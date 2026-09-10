@@ -139,7 +139,18 @@ public final class CalendarImportReviewViewModel {
 
         public var athleteId: AthleteId?
         public var sportId: SportId?
-        public var activityType: ActivityType = .individualTraining
+        /// VX-040: the UNTOUCHED fallback for an event with no stronger
+        /// classification evidence at all — used only by
+        /// `refreshQueueAndStaging()`'s own final `StagedClassification()`
+        /// fallback (see that method's own "PRECEDENCE" doc comment).
+        /// Every stronger tier (meaningful existing staging, a session
+        /// Ready match, Suggested Split evidence, a V1.1 exact remembered
+        /// match, or a V1.2 similar-event suggestion) constructs this
+        /// type with an EXPLICIT `activityType` of its own and never
+        /// observes this default. Matches
+        /// `WeeklyPlanningViewModel.newActivityType`'s own default and
+        /// rationale.
+        public var activityType: ActivityType = .teamTraining
         /// The Parent's own explicit confirmation ("Ready"/"Done") that
         /// THIS shown classification — including an intentional
         /// `sportId == nil` and whatever `activityType` is currently
@@ -184,9 +195,16 @@ public final class CalendarImportReviewViewModel {
             /// concept.
             public var isDurationDerivedFromEventRemainder: Bool = false
 
+            /// VX-040: matches `StagedClassification.activityType`'s own
+            /// default — a manually-added split child with no evidence
+            /// of its own (see `nextSequentialSplitChild(afterLastOf:
+            /// eventStart:eventEnd:)`'s first-child branch) defaults to
+            /// `.teamTraining`. Every evidence-derived child (Suggested
+            /// Split, session Ready match) passes its own explicit
+            /// `activityType` and never observes this default.
             public init(
                 id: UUID = UUID(),
-                activityType: ActivityType = .individualTraining,
+                activityType: ActivityType = .teamTraining,
                 startOffsetMinutes: Int = 0,
                 durationMinutes: Int = 30,
                 isDurationDerivedFromEventRemainder: Bool = false

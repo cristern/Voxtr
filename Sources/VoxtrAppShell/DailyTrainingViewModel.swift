@@ -22,7 +22,14 @@ public final class DailyTrainingViewModel {
     // nothing new.
     public var newLogTitle: String = ""
     public var newLogSportId: SportId?
-    public var newLogActivityType: ActivityType = .individualTraining
+    /// VX-040: a genuinely new, otherwise-unclassified activity draft
+    /// defaults to `.teamTraining` rather than `.individualTraining` —
+    /// see `WeeklyPlanningViewModel.newActivityType`'s own doc comment
+    /// for the full rationale. This is the ad hoc "Log Activity" form's
+    /// own new-draft default; unchanged otherwise — this field is freely
+    /// user-editable entry state, independent of the optional "Link to
+    /// planned activity" picker below.
+    public var newLogActivityType: ActivityType = .teamTraining
     public var newLogStartedAt: Date = .now
     /// Sprint 1.1 closeout, Item 5: 1 was the validation floor
     /// (`TrainingValidator.validateDurationMinutes`'s own minimum), not
