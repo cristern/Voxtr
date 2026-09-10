@@ -1,23 +1,15 @@
 import SwiftUI
 import VoxtrAppShell
 
-/// Deliberately minimal content — this is the CI/Sprint-0 placeholder
-/// UI, not real product UI. Real athlete-facing navigation/screens
-/// remain out of scope for Sprint 1 (S1.0-S1.5) per the approved plan;
-/// `AthleteApp` stays a placeholder that must keep building, nothing
-/// more, this sprint.
+/// This now builds the real composition root and gets a real, persisted
+/// `ModelContainer` at launch, via `CompositionRootLoaderView`, and
+/// presents `AthleteRootView` — the Athlete App Shell / UX Foundation
+/// root (see that type's own doc comment): a calm connection gate while
+/// not connected, or the athlete-facing tab shell once connected. The
+/// old Sprint-0 `NavigationShellView()` placeholder is gone (deleted
+/// this round — no remaining callers).
 ///
-/// What DID change in Sprint 1 (S1.0): this now actually builds the
-/// composition root and gets a real, persisted `ModelContainer` at
-/// launch, via `CompositionRootLoaderView` — Sprint 0 never called
-/// `CompositionRoot.build()` from either app target at all.
-///
-/// Athlete Connection Foundation B2.5: `AthleteRootView` replaces the
-/// previous direct `NavigationShellView()` call — it still shows that
-/// same Sprint 0 placeholder content, plus the minimal Internal Alpha
-/// connection status needed to validate the real CKShare acceptance →
-/// B2.2 → B2.3 → B2.4 chain on a signed TestFlight build. The
-/// `@UIApplicationDelegateAdaptor` below is the ONLY place
+/// The `@UIApplicationDelegateAdaptor` below is the ONLY place
 /// `AthleteCloudKitShareAppDelegate` is wired in — `ParentApp` never
 /// adds it, since Parent-side (owner) CloudKit sharing has no
 /// equivalent participant-acceptance callback to receive. Mirrors
