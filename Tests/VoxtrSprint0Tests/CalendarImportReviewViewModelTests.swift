@@ -180,6 +180,58 @@ struct CalendarImportReviewViewModelTests {
         #expect(try fixture.importDecisionRepository.fetchAll(forSource: fixture.source.externalPlanningSourceId).isEmpty)
     }
 
+    // MARK: - VX-040: default Activity Type for new activity creation
+
+    @Test("VX-040: a genuinely new event with no stronger classification evidence at all stages a default Activity Type of Team training")
+    @MainActor
+    func genuinelyNewEventDefaultsStagedActivityTypeToTeamTraining() throws {
+        let fixture = try makeFixture()
+        addEvent(fixture, identifier: "evt-1", title: "Some New Event", hoursFromReference: 1)
+        let viewModel = makeViewModel(fixture)
+        viewModel.load()
+        let item = try #require(viewModel.reviewQueue.first)
+
+        // Deliberately never calls setStagedActivityType — this is the
+        // UNTOUCHED default staging path (refreshQueueAndStaging()'s own
+        // final `StagedClassification()` fallback), not an explicit
+        // choice.
+        let staged = viewModel.stagedClassification(for: item.externalEventKey)
+
+        #expect(staged.activityType == .teamTraining)
+    }
+
+    @Test("VX-040: an event with an exact remembered classification preserves that classification, never falls back to the new-draft Team training default")
+    @MainActor
+    func exactRememberedClassificationIsPreservedOverNewDraftDefault() throws {
+        let fixture = try makeFixture()
+
+        // First occurrence: EXPLICITLY classified .individualTraining —
+        // deliberately the value that DIFFERS from VX-040's own new-draft
+        // default (.teamTraining), so a later match landing on
+        // .individualTraining can only be explained by remembered
+        // evidence winning, never by coincidentally matching the default.
+        addEvent(fixture, identifier: "evt-1", title: "Hockeytrening U14", hoursFromReference: 1)
+        let firstViewModel = makeViewModel(fixture)
+        firstViewModel.load()
+        let firstItem = try #require(firstViewModel.reviewQueue.first)
+        firstViewModel.setStagedAthlete(fixture.athleteId, for: firstItem.externalEventKey)
+        firstViewModel.setStagedActivityType(.individualTraining, for: firstItem.externalEventKey)
+        firstViewModel.markReady(for: firstItem.externalEventKey)
+        firstViewModel.bulkImportReadyItems()
+
+        // A SECOND event with the exact same normalized title — V1.1's
+        // exact remembered match should prefill from the FIRST import's
+        // own explicit classification, never the new-draft default.
+        addEvent(fixture, identifier: "evt-2", title: "Hockeytrening U14", hoursFromReference: 48)
+        let secondViewModel = makeViewModel(fixture)
+        secondViewModel.load()
+        let secondItem = try #require(secondViewModel.reviewQueue.first { $0.event.eventIdentifier == "evt-2" })
+
+        let staged = secondViewModel.stagedClassification(for: secondItem.externalEventKey)
+        #expect(staged.activityType == .individualTraining)
+        #expect(staged.suggestionKind == .exactRemembered)
+    }
+
     @Test("Lead Review follow-up: selecting Athlete alone does NOT move a new event to Ready — only the explicit markReady action does, and only once an Athlete is staged")
     @MainActor
     func selectingAthleteAloneDoesNotAutoCollapseToReady() throws {

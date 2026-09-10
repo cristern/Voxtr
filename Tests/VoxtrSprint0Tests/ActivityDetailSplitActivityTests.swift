@@ -198,6 +198,42 @@ struct ActivityDetailSplitActivityTests {
         #expect(try fixture.planningService.fetchPlannedActivities(forWeekPlan: weekPlan.weekPlanId).count == 1)
     }
 
+    @Test("VX-040: prefillEditForm() loads the persisted Activity Type unchanged — an individualTraining activity stays individualTraining")
+    @MainActor
+    func prefillEditFormLoadsPersistedIndividualTrainingUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        // makeActivity() persists .individualTraining explicitly.
+        let (weekPlan, activity) = try makeActivity(planningService: fixture.planningService, athleteId: athleteId)
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        viewModel.prefillEditForm()
+
+        #expect(viewModel.editActivityType == .individualTraining)
+    }
+
+    @Test("VX-040: prefillEditForm() loads the persisted Activity Type unchanged — a teamTraining activity stays teamTraining, never reset to the new-draft default")
+    @MainActor
+    func prefillEditFormLoadsPersistedTeamTrainingUnchanged() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let fixture = makeFixture(container: container)
+        let athleteId = AthleteId()
+        let weekPlan = try fixture.planningService.getOrCreateWeekPlan(athleteId: athleteId, weekStart: LocalDate(year: 2026, month: 1, day: 5))
+        let activity = try fixture.planningService.addPlannedActivity(
+            toWeekPlan: weekPlan.weekPlanId, athleteId: athleteId, activityType: .teamTraining,
+            title: "Team practice", localDate: LocalDate(year: 2026, month: 1, day: 6), timeZoneId: Self.oslo,
+            startLocalTime: LocalTime(hour: 17, minute: 0), plannedDurationMinutes: 90
+        )
+        let viewModel = makeViewModel(fixture: fixture, athleteId: athleteId, weekPlan: weekPlan, activity: activity)
+
+        viewModel.prefillEditForm()
+
+        #expect(viewModel.editActivityType == .teamTraining)
+    }
+
     @Test("beginSplit() seeds exactly one Calm-by-Default child (offset 0, duration 30) from the CURRENTLY PERSISTED activity, never from an unsaved Edit draft, and never the entire original duration")
     @MainActor
     func beginSplitReadsPersistedActivityNotUnsavedEditDraft() throws {
@@ -239,7 +275,8 @@ struct ActivityDetailSplitActivityTests {
 
         viewModel.addSplitChild()
         #expect(viewModel.splitChildren.count == 2)
-        #expect(viewModel.splitChildren[1].activityType == .individualTraining)
+        // VX-040: a new (non-first) split child defaults to .teamTraining.
+        #expect(viewModel.splitChildren[1].activityType == .teamTraining)
         #expect(viewModel.splitChildren[1].startOffsetMinutes == 30)
         // Remainder up to the original's own 90-minute total — never
         // more, matching "never silently expand the total planned time."

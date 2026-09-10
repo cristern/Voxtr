@@ -188,6 +188,30 @@ struct WeeklyPlanningViewModelTests {
         #expect(viewModel.errorMessage == nil)
     }
 
+    @Test("VX-040: a new manual activity draft defaults Activity Type to Team training")
+    @MainActor
+    func newActivityDraftDefaultsToTeamTraining() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let repository = PlanningRepository(modelContext: container.mainContext)
+        let service = PlanningService(repository: repository)
+        let viewModel = WeeklyPlanningViewModel(
+            service: service,
+            notificationsPlanningCoordinationService: NotificationsPlanningCoordinationService(
+                activityReminderService: ActivityReminderService(
+                    repository: ActivityReminderRepository(modelContext: container.mainContext),
+                    scheduler: NoOpActivityReminderScheduler()
+                ),
+                planningService: service
+            ),
+            athleteId: AthleteId(),
+            committedByActorId: ActorId()
+        )
+
+        #expect(viewModel.newActivityType == .teamTraining)
+        #expect(viewModel.recurringFormActivityType == .teamTraining)
+    }
+
     @Test("Planning form saves a Sport-only identity and clears Sport back to nil")
     @MainActor
     func addSportOnlyActivityPersistsSportAndClearsForm() throws {
