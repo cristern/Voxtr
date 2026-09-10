@@ -366,7 +366,11 @@ public final class ActivityDetailViewModel {
             editDate = Self.date(from: localDate)
         } else {
             editHasDate = false
-            editDate = .now
+            // PR #88 follow-up (correctness pass): seeded from the
+            // activity's OWNING WeekPlan, not a raw `.now` — see
+            // `Self.defaultAssignDayDate(weekPlanId:planningService:)`'s
+            // own doc comment for why.
+            editDate = Self.defaultAssignDayDate(weekPlanId: weekPlanId, planningService: planningService)
         }
         editActivityType = activity.activityType
         if let startTime = activity.startLocalTime {
@@ -1017,5 +1021,28 @@ public final class ActivityDetailViewModel {
     private static func localTime(from date: Date) -> LocalTime {
         let components = Calendar.current.dateComponents([.hour, .minute], from: date)
         return LocalTime(hour: components.hour ?? 0, minute: components.minute ?? 0)
+    }
+
+    /// PR #88 follow-up (correctness pass): the date shown if the user
+    /// toggles "Has a specific day" on for an undated activity — `.now`
+    /// when today genuinely falls inside the activity's OWNING
+    /// WeekPlan's own week (unchanged default for the common case),
+    /// otherwise that WeekPlan's own `weekStart` (Monday), so assigning
+    /// a day to an undated activity in a future/past week is never
+    /// silently rejected by `PlanningService.validateLocalDate`'s
+    /// WeekPlan-range guard merely because a stale `.now` default was
+    /// left untouched. `try?` matches this screen's own established
+    /// "read-only prefill" failure convention (see `prefillEditForm`'s
+    /// own doc comment) — a fetch failure falls back to `.now`, the
+    /// previous unconditional default, rather than blocking prefill.
+    private static func defaultAssignDayDate(weekPlanId: WeekPlanId, planningService: PlanningService) -> Date {
+        guard let weekPlan = try? planningService.fetchWeekPlan(byId: weekPlanId) else { return .now }
+        let weekStart = weekPlan.weekStart
+        let today = Self.localDate(from: .now)
+        let weekEnd = weekStart.adding(days: 6)
+        if today >= weekStart && today <= weekEnd {
+            return .now
+        }
+        return Self.date(from: weekStart)
     }
 }

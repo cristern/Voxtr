@@ -220,6 +220,14 @@ public final class WeeklyPlanningViewModel {
         weekPlan = nil
         activities = []
         recurringSuggestions = []
+        // PR #88 follow-up (correctness pass): re-seed the "Add
+        // activity" form's date default for the week actually being
+        // viewed — see `Self.defaultNewActivityDate(weekStart:)`'s own
+        // doc comment. Done unconditionally on every load/`switchToWeek`,
+        // not just the first one, so navigating away from and back to a
+        // non-current week never leaves a stale default from whichever
+        // week was viewed previously.
+        newActivityDate = Self.defaultNewActivityDate(weekStart: weekStart)
         do {
             let plan = try service.getOrCreateWeekPlan(athleteId: athleteId, weekStart: weekStart)
             weekPlan = plan
@@ -297,7 +305,7 @@ public final class WeeklyPlanningViewModel {
             let stagedReminders = newActivityReminders
             newActivityTitle = ""
             newActivitySportId = nil
-            newActivityDate = .now
+            newActivityDate = Self.defaultNewActivityDate(weekStart: weekStart)
             newActivityHasDate = true
             newActivityLocation = ""
             newActivityHasStartTime = false
@@ -660,6 +668,24 @@ public final class WeeklyPlanningViewModel {
 
     private static func date(from localDate: LocalDate) -> Date {
         Calendar.current.date(from: DateComponents(year: localDate.year, month: localDate.month, day: localDate.day)) ?? .now
+    }
+
+    /// PR #88 follow-up (correctness pass): `.now` when today genuinely
+    /// falls inside `weekStart`'s own 7-day week (preserves the exact
+    /// existing default for the common "add to the current week" case
+    /// unchanged), otherwise the viewed week's own `weekStart` (Monday)
+    /// — so a dated add on a future/past viewed week is never silently
+    /// rejected by `PlanningService.validateLocalDate`'s WeekPlan-range
+    /// guard merely because a stale `.now` default was left untouched.
+    /// Deliberately never a day outside the viewed week: `weekStart`
+    /// itself is always a safe, valid fallback for any week.
+    private static func defaultNewActivityDate(weekStart: LocalDate) -> Date {
+        let today = Self.localDate(from: .now)
+        let weekEnd = weekStart.adding(days: 6)
+        if today >= weekStart && today <= weekEnd {
+            return .now
+        }
+        return Self.date(from: weekStart)
     }
 
     private func reloadActivities(for weekPlan: WeekPlan) throws {

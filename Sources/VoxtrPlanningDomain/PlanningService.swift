@@ -189,7 +189,7 @@ public final class PlanningService {
         notes: String? = nil,
         location: String? = nil
     ) throws -> PlannedActivity {
-        guard try repository.fetchWeekPlan(byId: weekPlanId) != nil else {
+        guard let weekPlan = try repository.fetchWeekPlan(byId: weekPlanId) else {
             throw PlanningServiceError.weekPlanNotFound
         }
         if activityType == .physicalTraining {
@@ -202,6 +202,7 @@ public final class PlanningService {
             plannedIntensity: plannedIntensity,
             notes: notes
         )
+        try Self.validateLocalDate(localDate, startLocalTime: startLocalTime, weekPlan: weekPlan)
         return try repository.insertPlannedActivity(
             weekPlanId: weekPlanId,
             athleteId: athleteId,
@@ -273,6 +274,7 @@ public final class PlanningService {
             plannedIntensity: plannedIntensity,
             notes: notes
         )
+        try Self.validateLocalDate(localDate, startLocalTime: startLocalTime, weekPlan: weekPlan)
 
         activity.activityType = activityType
         activity.title = ActivityIdentity.normalizedName(title)
@@ -362,6 +364,42 @@ public final class PlanningService {
         // notes.
         if let notes, notes.count > 4000 {
             throw PlanningServiceError.invalidField("notes must be 0-4000 characters")
+        }
+    }
+
+    /// PR #88 follow-up (correctness pass): the one authoritative
+    /// Planning mutation boundary (`addPlannedActivity`/
+    /// `editPlannedActivity`, both call this before mutating anything)
+    /// enforces two canonical-state invariants no `PlannedActivity`
+    /// may violate, so neither API can ever persist a contradictory row:
+    ///
+    /// 1. A non-nil `localDate` must fall within the OWNING `WeekPlan`'s
+    ///    own 7-day week (`weekPlan.weekStart...weekPlan.weekStart.adding(days: 6)`,
+    ///    the exact same inclusive range `acceptSuggestion`'s own
+    ///    `recurringOccurrenceOutsideWeekPlan` guard already checks for
+    ///    the recurring path). `weekPlanId` says which week this
+    ///    activity belongs to; `localDate`, when present, must agree
+    ///    with that week — never silently point at a different one.
+    ///    Cross-week move stays explicitly out of V1 scope: this guard
+    ///    is what keeps that true at the domain boundary, not merely a
+    ///    UI convention the caller could bypass.
+    /// 2. `startLocalTime` requires a `localDate` — a start time with no
+    ///    day chosen has nothing to anchor to, so
+    ///    `localDate == nil && startLocalTime != nil` is rejected here
+    ///    too, not only prevented by callers remembering to clear it
+    ///    (as the UI's own "Has a specific day" toggle already does).
+    private static func validateLocalDate(
+        _ localDate: LocalDate?,
+        startLocalTime: LocalTime?,
+        weekPlan: WeekPlan
+    ) throws {
+        if let localDate {
+            let weekEnd = weekPlan.weekStart.adding(days: 6)
+            guard weekPlan.weekStart <= localDate && localDate <= weekEnd else {
+                throw PlanningServiceError.invalidField("localDate must fall within its owning WeekPlan's week")
+            }
+        } else if startLocalTime != nil {
+            throw PlanningServiceError.invalidField("startLocalTime requires a localDate — an undated activity cannot have a start time")
         }
     }
 

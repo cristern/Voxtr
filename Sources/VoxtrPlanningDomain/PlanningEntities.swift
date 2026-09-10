@@ -279,6 +279,20 @@ public final class PlannedActivity {
         if let l = location {
             precondition(l.count <= 200, "location must be 0-200 characters")
         }
+        // PR #88 follow-up (correctness pass): a start time with no day
+        // chosen has nothing to anchor to — mirrors
+        // `PlanningService.validateLocalDate`'s own catchable guard
+        // exactly (see that method's own doc comment), same
+        // "precondition here, catchable guard at the Service boundary"
+        // pairing every other bound on this initializer already follows.
+        // Deliberately NOT enforced here: the OWNING WeekPlan's own
+        // 7-day range for `localDate` — this initializer only ever sees
+        // a bare `weekPlanId: WeekPlanId` reference, never the actual
+        // `WeekPlan` instance (its `weekStart`), so that cross-entity
+        // invariant can only be checked where the real `WeekPlan` is
+        // available — `PlanningService.validateLocalDate`, which fetches
+        // it through the repository.
+        precondition(localDate != nil || startLocalTime == nil, "startLocalTime requires a localDate — an undated activity cannot have a start time")
         self.id = id.rawValue
         self.weekPlanId = weekPlanId.rawValue
         self.athleteId = athleteId.rawValue
