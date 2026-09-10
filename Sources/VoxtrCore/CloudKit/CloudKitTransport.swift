@@ -143,6 +143,20 @@ public final class CloudKitTransport {
         try await containerProvider.accept(metadata)
     }
 
+    /// Athlete Connection QR-first V1: resolves a QR-scanned, out-of-band
+    /// share URL into real `CKShare.Metadata` — a thin pass-through to
+    /// `containerProvider.fetchShareMetadata(with:)`, mirroring `accept(_:)`'s
+    /// own reasoning exactly, so callers (the QR scan orchestration) only
+    /// ever depend on this one public type, never the internal
+    /// `CloudKitContainerProviding` seam directly. The returned metadata is
+    /// handed to the SAME existing `AthleteRuntimeSession
+    /// .handleAcceptedCloudKitShare(_:)` entry point the system share-
+    /// acceptance callback already uses — this method invents no second
+    /// acceptance pipeline.
+    public func fetchShareMetadata(for url: URL) async throws -> CKShare.Metadata {
+        try await containerProvider.fetchShareMetadata(with: url)
+    }
+
     public func syncEngine(for scope: CloudKitDatabaseScope) -> CKSyncEngine {
         switch scope {
         case .private: privateEngine
