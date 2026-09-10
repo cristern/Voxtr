@@ -56,6 +56,47 @@ struct AthleteShellRoutingTests {
         #expect(AthleteShellRoute.route(for: .connected(actor)) == .shell(actor: actor))
     }
 
+    // MARK: - AthleteConnectionGateView.showsScanButton(for:)
+    //
+    // PR #86 follow-up (lead review): `.lifecycleServiceNotReady`
+    // previously shared `.notConnected`'s "Connect this app" / scan
+    // instruction copy but showed no action — a dead end. This table
+    // proves every gate-shown state (`.notConnected`, `.failed`,
+    // `.lifecycleServiceNotReady`) now exposes the scan action, while
+    // `.connecting` still shows none (no duplicate/re-entry action while
+    // a scan is already resolving) and `.connected` shows none either
+    // (structurally unreachable — `AthleteConnectionGateView` is only
+    // ever presented for `AthleteShellRoute.gate`, which never includes
+    // `.connected`).
+
+    @Test("notConnected shows the scan action")
+    func notConnectedShowsScanAction() {
+        #expect(AthleteConnectionGateView.showsScanButton(for: .notConnected))
+    }
+
+    @Test("failed shows the scan action")
+    func failedShowsScanAction() {
+        let error = AthleteConnectionLifecycleError.shareAcceptanceOrResolutionFailed(
+            NSError(domain: "test", code: 1)
+        )
+        #expect(AthleteConnectionGateView.showsScanButton(for: .failed(error)))
+    }
+
+    @Test("lifecycleServiceNotReady now shows the scan action, never a dead end")
+    func lifecycleServiceNotReadyShowsScanAction() {
+        #expect(AthleteConnectionGateView.showsScanButton(for: .lifecycleServiceNotReady))
+    }
+
+    @Test("connecting shows no duplicate/re-entry action")
+    func connectingShowsNoScanAction() {
+        #expect(!AthleteConnectionGateView.showsScanButton(for: .connecting))
+    }
+
+    @Test("connected shows no scan action")
+    func connectedShowsNoScanAction() {
+        #expect(!AthleteConnectionGateView.showsScanButton(for: .connected(Self.makeActor())))
+    }
+
     // MARK: - AthleteDisplayIdentity.resolvedName(for:athleteRepository:)
 
     @Test("resolvedName prefers preferredName over givenName")
