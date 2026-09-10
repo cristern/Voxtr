@@ -85,9 +85,9 @@ public struct AthleteConnectionScanView: View {
 
     @ViewBuilder
     private var overlayMessage: some View {
-        if let scanErrorMessage {
+        if let errorMessage = scanErrorMessage {
             VStack(spacing: 12) {
-                Text(scanErrorMessage)
+                Text(errorMessage)
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("athleteConnectionScan.errorMessage")
