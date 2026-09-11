@@ -302,30 +302,26 @@ struct DevelopmentTimelineChartTests {
         #expect(DevelopmentTimelineChart.resolveWeekStart(forSelectedIsoString: "2026-03-02", points: []) == nil)
     }
 
-    /// Required test 6 (Trend fallback) + required test 7 (Training-
-    /// hidden fallback): the week chip row — the deterministic,
-    /// accessible fallback — is shown in both states, and hidden
-    /// otherwise (ordinary Weekly usage with Training visible).
-    @Test("showsWeekChipRow: shown in Trend mode and when Training is hidden; hidden for ordinary Weekly usage with Training visible")
-    func showsWeekChipRowFallbackRule() {
-        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .trend, comparisonMode: .actual, isTrainingVisible: true) == true)
-        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .weekly, comparisonMode: .actual, isTrainingVisible: false) == true)
-        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .weekly, comparisonMode: .actual, isTrainingVisible: true) == false)
-        // Trend selected but not effective (Plan vs Actual active) — the
-        // chart itself renders the unchanged Weekly Plan vs Actual bars
-        // in that state, so the ordinary Training-visible rule applies:
-        // the chip row stays hidden, exactly as if Trend were never
-        // selected at all.
-        #expect(DevelopmentTimelineChart.showsWeekChipRow(trendMode: .trend, comparisonMode: .planVsActual, isTrainingVisible: true) == false)
-    }
+    // Week Drilldown discoverability round: `showsWeekChipRow` (and its
+    // own test, `showsWeekChipRowFallbackRule`) has been removed —
+    // the week chip row (`weekSelector`) is no longer conditionally
+    // gated by Trend mode/Training-visibility at all; it is now always
+    // rendered whenever a selection handler and at least one point
+    // exist (see `DevelopmentTimelineChart.body`'s own
+    // `if let onSelectWeek, !points.isEmpty` condition). There is no
+    // longer any pure comparison/trend/training-visibility render-policy
+    // function to unit-test here — the render condition itself is now
+    // independent of those three inputs, which is exactly the point:
+    // this was the actual discoverability defect (ordinary Weekly
+    // usage, the most common state, previously hid this row entirely).
 
     // Required test 9 (no second selected-week state introduced):
-    // `resolveWeekStart`/`showsWeekChipRow` are pure functions with no
-    // stored state; the chart's only local state, `chartXSelectionIsoString`,
-    // is `private` and unobservable from outside this type, so there is
-    // nothing for a runtime test to assert on here — this is verified
-    // by architecture/code review instead (see the delivery report's
-    // own architecture audit), not a vacuous always-true test.
+    // `resolveWeekStart` is a pure function with no stored state; the
+    // chart's only local state, `chartXSelectionIsoString`, is `private`
+    // and unobservable from outside this type, so there is nothing for
+    // a runtime test to assert on here — this is verified by
+    // architecture/code review instead (see the delivery report's own
+    // architecture audit), not a vacuous always-true test.
 
     // MARK: - PR #35 review follow-up: same-week re-entry lifecycle
 
