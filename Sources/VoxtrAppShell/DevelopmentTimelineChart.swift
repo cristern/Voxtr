@@ -254,18 +254,18 @@ public struct DevelopmentTimelineChart: View {
     /// this mode.
     public let trendMode: TimelineTrendMode
     /// Week Drilldown round: the sole entry point from Development
-    /// Timeline into Week Drilldown. Week Drilldown UX Refinement
-    /// round: now reached TWO ways, both converging on this ONE
-    /// closure — direct chart-bar tapping (`.chartXSelection` in
-    /// `chart`, resolving by X POSITION, never by bar ID/plotted-pixel
-    /// position/index — see `resolveWeekStart(forSelectedIsoString:points:)`)
-    /// as the primary interaction whenever it can be relied upon, and
-    /// the week chip row (`weekSelector`) as the deterministic,
-    /// accessible fallback otherwise — see `showsWeekChipRow`'s own doc
-    /// comment for exactly when each applies. Neither path is a second
-    /// selection source: both simply call this SAME closure with the
-    /// SAME canonical `weekStart`. `nil` (the default) disables both —
-    /// this chart remains fully usable with no selection behavior for
+    /// Timeline into Week Drilldown. Week Drilldown discoverability
+    /// round: reached TWO ways, both converging on this ONE closure —
+    /// the always-visible week chip row (`weekSelector`), the one
+    /// visible and individually accessible way a Parent discovers that
+    /// week-level detail exists, and direct chart-bar tapping
+    /// (`.chartXSelection` in `chart`, resolving by X POSITION, never by
+    /// bar ID/plotted-pixel position/index — see
+    /// `resolveWeekStart(forSelectedIsoString:points:)`) as a fast
+    /// secondary shortcut for anyone who already knows it. Neither path
+    /// is a second selection source: both simply call this SAME closure
+    /// with the SAME canonical `weekStart`. `nil` (the default) disables
+    /// both — this chart remains fully usable with no selection behavior for
     /// any caller that doesn't need it. Non-`nil` for every real
     /// Development Timeline caller (`AthleteStatisticsView`/
     /// `DevelopmentTimelineFullscreenView`, both passing the SAME
@@ -486,32 +486,6 @@ public struct DevelopmentTimelineChart: View {
             return ChartXSelectionChange(weekStartToSelect: nil, nextStoredSelection: newValue)
         }
         return ChartXSelectionChange(weekStartToSelect: weekStart, nextStoredSelection: nil)
-    }
-
-    /// Week Drilldown UX Refinement round: the week chip row becomes a
-    /// FALLBACK, shown only when direct chart-bar tapping cannot be
-    /// relied upon as the primary interaction — Trend mode (no factual
-    /// Training bars to tap; see this chart's own Trend View doc
-    /// comments) and "Training series hidden" (no Training marks drawn
-    /// at all, so a week with no Form/Sleep value that week may have no
-    /// mark anywhere on the x-axis). In ordinary Weekly-with-visible-
-    /// Training-bars usage, direct chart selection (`.chartXSelection`
-    /// below, resolved across the FULL fixed x-domain via `.chartXScale`
-    /// — see `chart`'s own doc comment) is primary and the chip row is
-    /// hidden, per the approved contract's own "simpler acceptable V1
-    /// rule." A zero-training week still has its own BarMark (height
-    /// zero) in `.total`/`.planVsActual` modes, and the fixed x-domain
-    /// guarantees it remains selectable even in stacked-breakdown modes
-    /// where a zero-training week draws no segment at all. `static` and
-    /// `internal` (not `private`), the same testability pattern
-    /// `isTrendEffective`/`resolveWeekStart(forSelectedIsoString:points:)`
-    /// above already establish.
-    static func showsWeekChipRow(trendMode: TimelineTrendMode, comparisonMode: TimelineComparisonMode, isTrainingVisible: Bool) -> Bool {
-        isTrendEffective(trendMode: trendMode, comparisonMode: comparisonMode) || !isTrainingVisible
-    }
-
-    private var showsWeekChipRow: Bool {
-        Self.showsWeekChipRow(trendMode: trendMode, comparisonMode: comparisonMode, isTrainingVisible: isTrainingVisible)
     }
 
     // MARK: - Training Breakdown
@@ -747,17 +721,23 @@ public struct DevelopmentTimelineChart: View {
                     .accessibilityIdentifier("developmentTimeline.noSeriesSelected")
             }
 
-            // Week Drilldown UX Refinement round: deliberately OUTSIDE
+            // Week Drilldown discoverability round: always shown
+            // whenever there is a week to select, deliberately OUTSIDE
             // the `hasAnyVisibleSeries` branch above — a week stays
             // selectable even with every series toggled off (direct
-            // chart tapping has nothing to tap on in that state; the
-            // chip row is exactly the FALLBACK `showsWeekChipRow`
-            // exists for — see that property's own doc comment). Direct
-            // chart-bar tapping (`.chartXSelection` in `chart` below) is
-            // now the PRIMARY interaction whenever it can be relied
-            // upon; this row is shown only as the deterministic,
-            // accessible fallback otherwise.
-            if let onSelectWeek, !points.isEmpty, showsWeekChipRow {
+            // chart tapping has nothing to tap on in that state).
+            // Direct chart-bar tapping (`.chartXSelection` in `chart`
+            // below) remains available as a fast secondary interaction
+            // for anyone who already knows it, but this row — not an
+            // invisible drag-to-select gesture — is the one visible,
+            // individually accessible way a Parent discovers that
+            // week-level detail exists at all. Previously gated behind
+            // a Trend/hidden-Training-only `showsWeekChipRow` fallback
+            // rule; that conditional visibility was the actual
+            // discoverability defect (ordinary Weekly usage, the most
+            // common state, hid this row entirely) and has been
+            // removed — see this round's own PR description.
+            if let onSelectWeek, !points.isEmpty {
                 weekSelector(onSelectWeek: onSelectWeek)
             }
 
@@ -1090,12 +1070,14 @@ public struct DevelopmentTimelineChart: View {
     /// above already use, for a consistent "W35 / Aug 24" identity
     /// style throughout this chart.
     ///
-    /// Week Drilldown UX Refinement round: only ever RENDERED while
-    /// `showsWeekChipRow` is true (see that property's own doc comment)
-    /// — direct chart-bar tapping is primary now; this remains the
-    /// deterministic fallback for Trend mode, "Training hidden," and,
-    /// implicitly, VoiceOver users (each chip is an ordinary, individually
-    /// accessible `Button`, unlike a chart gesture).
+    /// Week Drilldown discoverability round: always rendered whenever a
+    /// selection handler and at least one point exist (see this chart's
+    /// own `body`) — this row, not the chart's `.chartXSelection` drag
+    /// gesture, is the one visible, self-evident affordance a Parent
+    /// discovers Week Drilldown through, and it is the ONLY path
+    /// VoiceOver users have into Week Drilldown at all, since each chip
+    /// is an ordinary, individually accessible `Button` with its own
+    /// descriptive label, unlike a chart gesture.
     private func weekSelector(onSelectWeek: @escaping (LocalDate) -> Void) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
