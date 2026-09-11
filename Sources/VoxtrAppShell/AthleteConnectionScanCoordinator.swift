@@ -109,6 +109,28 @@ public final class AthleteConnectionScanCoordinator {
             do {
                 metadata = try await resolveShareMetadata(url)
             } catch {
+                // Observability follow-up (real two-device TestFlight
+                // validation: AthleteApp showed "Couldn't confirm this
+                // code with iCloud" with no way to tell which CKError
+                // actually occurred): reuses the SAME canonical
+                // `CloudKitErrorDiagnostics` classify/format pair already
+                // established for every other CloudKit-facing failure in
+                // this codebase (`FamilyWorkspaceOwnerShareCoordinator`,
+                // `CloudKitTransport`, `AthleteFamilyManagementViewModel`)
+                // — never a second/parallel diagnostic mechanism. `.appShell`
+                // matches `AthleteFamilyManagementViewModel`'s own
+                // established convention for a CloudKit-flavored
+                // diagnostic reported from a `VoxtrAppShell` type (as
+                // opposed to `.cloudKit`, used by types that live in
+                // `VoxtrCore`'s own CloudKit layer). Runs identically for
+                // both the generic test-exercised overload (an
+                // NSError-bridged `error`, harmless to classify/log) and
+                // the concrete production adapter (a real `CKError`) —
+                // this is the ONE catch site both share, never a second
+                // one added for production only. `.shareMetadataFetchFailed`
+                // and the existing user-facing copy are both unchanged.
+                let diagnostic = CloudKitErrorDiagnostics.classify(stage: "athlete-scan-metadata-fetch", error: error)
+                VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
                 return .shareMetadataFetchFailed
             }
             await handleAcceptedShare(metadata)
