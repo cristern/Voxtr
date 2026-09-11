@@ -2,6 +2,12 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
+/// ITMS-90683 fix: moved into its own `VoxtrAthleteScanner` target,
+/// linked only by `App/AthleteApp`'s own Xcode target — see that
+/// target's own doc comment in `Package.swift`. Unchanged otherwise;
+/// everything below is exactly as originally written for Athlete
+/// Connection QR-first V1.
+///
 /// Athlete Connection QR-first V1: CAMERA/UI ONLY — deliberately contains
 /// no QR payload parsing/validation and no CloudKit/domain logic
 /// whatsoever (see `AthleteConnectionQRCode`/`AthleteConnectionScanCoordinator`

@@ -35,6 +35,10 @@ let package = Package(
         // package product" for seven targets at once.
         .library(name: "VoxtrCoreContracts", targets: ["VoxtrCoreContracts"]),
         .library(name: "VoxtrCoreReferenceData", targets: ["VoxtrCoreReferenceData"]),
+        // ITMS-90683 fix: the AthleteApp-only QR scanner (real AVFoundation
+        // camera APIs) — see this target's own doc comment for why it is
+        // deliberately NOT a dependency of VoxtrAppShell.
+        .library(name: "VoxtrAthleteScanner", targets: ["VoxtrAthleteScanner"]),
         .library(name: "VoxtrAthleteDomain", targets: ["VoxtrAthleteDomain"]),
         .library(name: "VoxtrParentDomain", targets: ["VoxtrParentDomain"]),
         .library(name: "VoxtrPlanningDomain", targets: ["VoxtrPlanningDomain"]),
@@ -104,6 +108,26 @@ let package = Package(
         // in VoxtrAppShell (see CalendarPlanningCoordinationService).
         .target(name: "VoxtrCalendarPlanningDomain", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
         .target(name: "VoxtrSettings", dependencies: ["VoxtrCore", "VoxtrCoreContracts"]),
+
+        // ITMS-90683 fix (App Store Connect rejected ParentApp build 589:
+        // "Missing purpose string" for camera access ParentApp itself
+        // never performs): `QRCodeScannerView` (real `AVCaptureSession`/
+        // `AVCaptureDevice.requestAccess` code) previously lived inside
+        // `VoxtrAppShell` — the one composition-root target BOTH app
+        // targets link — so Apple's binary scan correctly found camera
+        // APIs referenced inside ParentApp.app even though ParentApp's
+        // own navigation graph never reaches AthleteApp's "Scan
+        // connection code" screen. Moved here, a small leaf target with
+        // no dependency on (or from) any *Domain target, and
+        // DELIBERATELY EXCLUDED from `VoxtrAppShell`'s own dependency
+        // list below — only `App/AthleteApp`'s own Xcode target links
+        // this product directly (see project.pbxproj), so this compiled
+        // code never reaches ParentApp.app at all. `AthleteConnectionScanView`
+        // (still in VoxtrAppShell) receives the concrete scanner view via
+        // an injected builder closure instead of constructing it
+        // directly — see `AthleteConnectionScannerBuilder`'s own doc
+        // comment in that file.
+        .target(name: "VoxtrAthleteScanner"),
 
         // MARK: - Composition root (the only target allowed to see every module)
         .target(
