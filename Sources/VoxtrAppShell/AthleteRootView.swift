@@ -26,10 +26,16 @@ import VoxtrAthleteDomain
 @MainActor
 public struct AthleteRootView: View {
     let root: CompositionRoot
+    /// ITMS-90683 fix: the real, AVFoundation-backed scanner view is
+    /// supplied by `App/AthleteApp/AthleteApp.swift` (the only place that
+    /// links the AthleteApp-only `VoxtrAthleteScanner` product) — see
+    /// `AthleteConnectionScannerBuilder`'s own doc comment.
+    let makeScannerView: AthleteConnectionScannerBuilder
     @State private var isPresentingScanner = false
 
-    public init(root: CompositionRoot) {
+    public init(root: CompositionRoot, makeScannerView: @escaping AthleteConnectionScannerBuilder) {
         self.root = root
+        self.makeScannerView = makeScannerView
     }
 
     public var body: some View {
@@ -40,7 +46,7 @@ public struct AthleteRootView: View {
                 )
             }
             .sheet(isPresented: $isPresentingScanner) {
-                AthleteConnectionScanView(transport: root.cloudKitTransport)
+                AthleteConnectionScanView(transport: root.cloudKitTransport, makeScannerView: makeScannerView)
             }
     }
 

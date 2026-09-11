@@ -2,22 +2,40 @@ import SwiftUI
 import UIKit
 import VoxtrCore
 
+/// ITMS-90683 fix: the type of the closure that supplies the actual
+/// camera-backed scanner view — see `Package.swift`'s own doc comment on
+/// the `VoxtrAthleteScanner` target for the full rationale. `VoxtrAppShell`
+/// (this file's own module) is linked into BOTH app targets, so it must
+/// never itself construct a real `AVCaptureSession`-based view or import
+/// AVFoundation at all; the AthleteApp Xcode target supplies the real
+/// implementation (its own `QRCodeScannerView`, from the AthleteApp-only
+/// `VoxtrAthleteScanner` product) via this seam, exactly the way
+/// `AthleteApp.swift` already supplies its own `@UIApplicationDelegateAdaptor`
+/// — real behavior lives with the app target that alone must ship it.
+public typealias AthleteConnectionScannerBuilder = (
+    _ onScan: @escaping (String) -> Void,
+    _ onPermissionDenied: @escaping () -> Void
+) -> AnyView
+
 /// Athlete Connection QR-first V1: AthleteApp's "Scan connection code"
-/// screen — the smallest calm V1 flow tying together `QRCodeScannerView`
-/// (camera/UI only), `AthleteConnectionQRCode`/`AthleteConnectionScanCoordinator`
+/// screen — the smallest calm V1 flow tying together the injected camera
+/// scanner view (`makeScannerView`, see `AthleteConnectionScannerBuilder`'s
+/// own doc comment), `AthleteConnectionQRCode`/`AthleteConnectionScanCoordinator`
 /// (payload validation + orchestration), and the EXISTING, unmodified
 /// `AthleteRuntimeSession` connection state machine. Presents no fake
 /// percentages/countdowns/urgency — matches Calm by Default.
 ///
 /// A fresh `scanAttempt` identity (`.id(scanAttempt)`) is the retry
-/// mechanism: incrementing it discards the previous `QRCodeScannerViewController`
-/// and constructs a brand-new one, which starts a clean capture session
-/// with its own single-shot `hasEmittedScan` guard — never a bespoke
-/// "resume scanning" state to keep in sync by hand.
+/// mechanism: incrementing it discards the previous scanner view instance
+/// and constructs a brand-new one, which (for the real AthleteApp
+/// implementation) starts a clean capture session with its own
+/// single-shot scan guard — never a bespoke "resume scanning" state to
+/// keep in sync by hand.
 @MainActor
 public struct AthleteConnectionScanView: View {
     let transport: CloudKitTransport
     let session: AthleteRuntimeSession
+    let makeScannerView: AthleteConnectionScannerBuilder
     @Environment(\.dismiss) private var dismiss
     /// PR #84 follow-up: one coordinator instance for this screen's own
     /// lifetime — see `AthleteConnectionScanCoordinator`'s own
@@ -32,9 +50,14 @@ public struct AthleteConnectionScanView: View {
     @State private var scanErrorMessage: String?
     @State private var isCameraPermissionDenied = false
 
-    public init(transport: CloudKitTransport, session: AthleteRuntimeSession = .shared) {
+    public init(
+        transport: CloudKitTransport,
+        session: AthleteRuntimeSession = .shared,
+        makeScannerView: @escaping AthleteConnectionScannerBuilder
+    ) {
         self.transport = transport
         self.session = session
+        self.makeScannerView = makeScannerView
     }
 
     public var body: some View {
@@ -64,11 +87,11 @@ public struct AthleteConnectionScanView: View {
 
     private var scanningView: some View {
         ZStack {
-            QRCodeScannerView(
-                onScan: { text in
+            makeScannerView(
+                { text in
                     Task { await handleScan(text) }
                 },
-                onPermissionDenied: {
+                {
                     isCameraPermissionDenied = true
                 }
             )

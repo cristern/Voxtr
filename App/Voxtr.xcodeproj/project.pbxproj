@@ -12,6 +12,7 @@
 		A20EF355BD9B8C47609A74D5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 887C5393CCCAFF3047798746 /* Assets.xcassets */; };
 		86AA17E166E0F62F22EE8EFF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 757E65D1420834776229303B /* Assets.xcassets */; };
 		621A0C82227ACA2A2BC4BD35 /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = F7C152C59F081247A6DA0577 /* VoxtrAppShell */; };
+		D4A6E2F83EC741B7837B5C5D /* VoxtrAthleteScanner in Frameworks */ = {isa = PBXBuildFile; productRef = AE304405B39943ECBBE9BBA4 /* VoxtrAthleteScanner */; };
 		12D256AFF53FD88447A9322E /* VoxtrAppShell in Frameworks */ = {isa = PBXBuildFile; productRef = 6091254BF755FE0296993ECB /* VoxtrAppShell */; };
 		0D81773B3A4D4813E95F54FD /* DomainModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBB26390B97A837AB448B151 /* DomainModelTests.swift */; };
 		8BD2440AF1B6FEE2554279FC /* EventBusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B8978A97683057A40946EF8 /* EventBusTests.swift */; };
@@ -156,6 +157,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				621A0C82227ACA2A2BC4BD35 /* VoxtrAppShell in Frameworks */,
+				D4A6E2F83EC741B7837B5C5D /* VoxtrAthleteScanner in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -320,6 +322,7 @@
 			name = AthleteApp;
 			packageProductDependencies = (
 				F7C152C59F081247A6DA0577 /* VoxtrAppShell */,
+				AE304405B39943ECBBE9BBA4 /* VoxtrAthleteScanner */,
 			);
 			productName = AthleteApp;
 			productReference = CDA203712D32CEA51967A212 /* AthleteApp.app */;
@@ -753,6 +756,10 @@
 		F7C152C59F081247A6DA0577 /* VoxtrAppShell */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoxtrAppShell;
+		};
+		AE304405B39943ECBBE9BBA4 /* VoxtrAthleteScanner */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrAthleteScanner;
 		};
 		6091254BF755FE0296993ECB /* VoxtrAppShell */ = {
 			isa = XCSwiftPackageProductDependency;
