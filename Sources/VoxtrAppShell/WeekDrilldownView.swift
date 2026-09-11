@@ -81,6 +81,23 @@ public struct WeekDrilldownView: View {
                     .accessibilityIdentifier("weekDrilldown.actual")
                 } header: {
                     VoxtrSectionHeading("Plan vs Actual")
+                } footer: {
+                    // Actual Clarification round: Statistics deliberately
+                    // never pairs Planned and Performed rows (see this
+                    // file's own doc comment), so Actual can exceed what
+                    // was planned — e.g. one planned activity completed
+                    // plus one unplanned one performed both count toward
+                    // Actual. Training's Weekly History separates
+                    // "Completed from plan" from "Additional" explicitly;
+                    // Statistics does not adopt that pairing, so this
+                    // note explains the difference in plain language
+                    // instead, matching the same low-emphasis footer
+                    // pattern already used below for the Weekly
+                    // Reflection partial-week note.
+                    Text("Actual includes all performed activities, including activities that were not planned.")
+                        .font(VoxtrTypography.metadata)
+                        .foregroundStyle(VoxtrColor.textSecondary)
+                        .accessibilityIdentifier("weekDrilldown.actualScopeNote")
                 }
                 .voxtrRowSurface()
 
