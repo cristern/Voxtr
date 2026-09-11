@@ -551,6 +551,15 @@ workflows:
       - name: Capture ParentApp final signed CloudKit entitlements
         script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/capture_parent_signed_entitlements.sh
 
+      # ITMS-90683 follow-up (PR #91): authoritative post-build proof that
+      # ParentApp's final signed executable genuinely contains no concrete
+      # AVFoundation camera symbols — inspects the exact .ipa the archive
+      # step above just produced (see the script's own doc comment).
+      # Deliberately NOT run for AthleteApp: it legitimately links these
+      # symbols for its own "Scan connection code" screen.
+      - name: Verify ParentApp final signed executable has no camera symbols
+        script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/check_no_camera_symbols.sh
+
     # ParentApp crash symbolication follow-up: `xcode-project build-ipa`
     # (used for both apps above) archives to `build/ios/xcarchive/*.xcarchive`
     # by default and never deletes it (no `--remove-xcarchive` flag is
@@ -713,6 +722,12 @@ workflows:
       # Release signing closeout.
       - name: Capture ParentApp final signed CloudKit entitlements
         script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/capture_parent_signed_entitlements.sh
+
+      # ITMS-90683 follow-up (PR #91): see testflight-release's own step
+      # comment above for the full rationale — this is the workflow most
+      # likely to be run manually to re-validate this exact regression.
+      - name: Verify ParentApp final signed executable has no camera symbols
+        script: APP_NAME=ParentApp BUNDLE_ID="$PARENT_BUNDLE_ID" bash Scripts/check_no_camera_symbols.sh
 
     # ParentApp crash symbolication follow-up: see testflight-release's own
     # artifacts comment above for the full rationale — same tool
