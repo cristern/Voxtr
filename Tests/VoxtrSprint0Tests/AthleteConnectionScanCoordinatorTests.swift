@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import VoxtrCore
 @testable import VoxtrAppShell
 
 // PR #84 follow-up (QR scan orchestration testability): `AthleteConnectionScanCoordinator
@@ -121,7 +122,7 @@ struct AthleteConnectionScanCoordinatorTests {
         #expect(await acceptCounter.count == 0)
     }
 
-    @Test("A metadata-resolution failure is reported as .shareMetadataFetchFailed, the resolver is called exactly once, and the acceptance handler is never invoked")
+    @Test("A metadata-resolution failure is reported as .shareMetadataFetchFailed carrying the SAME privacy-safe diagnostic CloudKitErrorDiagnostics produces for the thrown error, the resolver is called exactly once, and the acceptance handler is never invoked")
     func metadataResolutionFailureNeverReachesAcceptance() async {
         let coordinator = AthleteConnectionScanCoordinator()
         let resolveCounter = Counter()
@@ -138,7 +139,16 @@ struct AthleteConnectionScanCoordinatorTests {
             }
         )
 
-        #expect(outcome == .shareMetadataFetchFailed)
+        // Internal Alpha diagnostic surface follow-up: proves the
+        // diagnostic actually carried on `.shareMetadataFetchFailed`
+        // matches what the SAME canonical `CloudKitErrorDiagnostics`
+        // classify/format pair would produce for this exact thrown
+        // error — never a duplicated/hand-written expected string, so
+        // this test stays correct if that formatting ever changes.
+        let expectedDiagnostic = CloudKitErrorDiagnostics.format(
+            CloudKitErrorDiagnostics.classify(stage: "athlete-scan-metadata-fetch", error: FakeError.metadataFetchFailed)
+        )
+        #expect(outcome == .shareMetadataFetchFailed(diagnostic: expectedDiagnostic))
         #expect(await resolveCounter.count == 1)
         #expect(await acceptCounter.count == 0)
     }

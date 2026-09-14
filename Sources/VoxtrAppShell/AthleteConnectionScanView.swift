@@ -48,6 +48,15 @@ public struct AthleteConnectionScanView: View {
     @State private var scanAttempt = 0
     @State private var isProcessingScan = false
     @State private var scanErrorMessage: String?
+    /// Internal Alpha diagnostic surface follow-up (Product Owner has no
+    /// Mac — only an iPhone): the privacy-safe, greppable diagnostic line
+    /// carried by `AthleteConnectionScanCoordinator.ScanIntakeError
+    /// .shareMetadataFetchFailed(diagnostic:)`, offered as a secondary
+    /// "Copy diagnostic" affordance below — never shown as, or in place
+    /// of, the calm primary `scanErrorMessage`. `nil` whenever no
+    /// metadata-fetch-specific diagnostic applies (every other failure
+    /// case, or no failure at all).
+    @State private var scanDiagnosticCopyText: String?
     @State private var isCameraPermissionDenied = false
 
     public init(
@@ -114,8 +123,31 @@ public struct AthleteConnectionScanView: View {
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("athleteConnectionScan.errorMessage")
+                // Internal Alpha diagnostic surface follow-up: the SAME
+                // gate (`AthleteInviteDiagnosticVisibility`) and the SAME
+                // "Copy diagnostic" shape `AthleteFamilyManagementView`
+                // already established for the Parent-side "Connect
+                // Athlete App" failure — secondary, calm, never competing
+                // with the primary message above, and only present at
+                // all when this specific failure carried a diagnostic
+                // (only `.shareMetadataFetchFailed` does).
+                if AthleteInviteDiagnosticVisibility.isVisibleForCurrentBuild,
+                   let diagnosticCopyText = scanDiagnosticCopyText {
+                    Button {
+                        UIPasteboard.general.string = diagnosticCopyText
+                    } label: {
+                        Label("Copy diagnostic", systemImage: "doc.on.doc")
+                            .labelStyle(.iconOnly)
+                            .font(.caption)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.7))
+                    .accessibilityLabel("Copy diagnostic")
+                    .accessibilityIdentifier("athleteConnectionScan.copyDiagnosticButton")
+                }
                 Button("Scan again") {
                     scanErrorMessage = nil
+                    scanDiagnosticCopyText = nil
                     scanAttempt += 1
                 }
                 .accessibilityIdentifier("athleteConnectionScan.retryButton")
@@ -179,6 +211,7 @@ public struct AthleteConnectionScanView: View {
         guard !isProcessingScan else { return }
         isProcessingScan = true
         scanErrorMessage = nil
+        scanDiagnosticCopyText = nil
         let outcome = await scanCoordinator.handleScannedText(text, transport: transport, session: session)
         isProcessingScan = false
         switch outcome {
@@ -189,8 +222,9 @@ public struct AthleteConnectionScanView: View {
             // Otherwise session.state is now .connected — successView renders.
         case .invalidCode:
             scanErrorMessage = "That code isn't a Vǫxtr connection code. Try scanning again."
-        case .shareMetadataFetchFailed:
+        case .shareMetadataFetchFailed(let diagnostic):
             scanErrorMessage = "Couldn't confirm this code with iCloud. Check your connection and try again."
+            scanDiagnosticCopyText = diagnostic
         case .alreadyInFlight:
             // This screen's own isProcessingScan guard above already
             // prevents overlapping calls in the ordinary case — this
