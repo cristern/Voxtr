@@ -66,8 +66,18 @@ public final class AthleteConnectionScanCoordinator {
         case invalidCode
         /// Share-metadata resolution failed — a network/iCloud-availability
         /// failure, or the URL, while structurally plausible, does not
-        /// resolve to a real share.
-        case shareMetadataFetchFailed
+        /// resolve to a real share. Carries the SAME privacy-safe,
+        /// greppable line `CloudKitErrorDiagnostics.format(_:)` already
+        /// produces for this failure's `os.Logger` entry (stage
+        /// `"athlete-scan-metadata-fetch"`) — see this case's own
+        /// construction site below. Internal Alpha diagnostic surface
+        /// follow-up: lets `AthleteConnectionScanView` offer a secondary
+        /// "Copy diagnostic" affordance without itself depending on
+        /// `CloudKitErrorDiagnostics`/`CloudKit` at all, mirroring
+        /// `AthleteFamilyManagementViewModel.connectAthleteAppDiagnosticCopyText`'s
+        /// own established shape (a plain `String`, never the structured
+        /// diagnostic type, exposed to the View layer).
+        case shareMetadataFetchFailed(diagnostic: String)
         /// This coordinator instance is already handling an earlier scan
         /// that has not yet settled — the acceptance handler is NOT
         /// invoked for this call. See this type's own RE-ENTRANCE GUARD
@@ -130,8 +140,9 @@ public final class AthleteConnectionScanCoordinator {
                 // one added for production only. `.shareMetadataFetchFailed`
                 // and the existing user-facing copy are both unchanged.
                 let diagnostic = CloudKitErrorDiagnostics.classify(stage: "athlete-scan-metadata-fetch", error: error)
-                VoxtrLog.logger(.appShell).error("\(CloudKitErrorDiagnostics.format(diagnostic), privacy: .public)")
-                return .shareMetadataFetchFailed
+                let formattedDiagnostic = CloudKitErrorDiagnostics.format(diagnostic)
+                VoxtrLog.logger(.appShell).error("\(formattedDiagnostic, privacy: .public)")
+                return .shareMetadataFetchFailed(diagnostic: formattedDiagnostic)
             }
             await handleAcceptedShare(metadata)
             return nil
