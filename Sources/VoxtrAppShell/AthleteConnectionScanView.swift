@@ -123,25 +123,31 @@ public struct AthleteConnectionScanView: View {
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .accessibilityIdentifier("athleteConnectionScan.errorMessage")
-                // Internal Alpha diagnostic surface follow-up: the SAME
-                // gate (`AthleteInviteDiagnosticVisibility`) and the SAME
-                // "Copy diagnostic" shape `AthleteFamilyManagementView`
-                // already established for the Parent-side "Connect
-                // Athlete App" failure — secondary, calm, never competing
-                // with the primary message above, and only present at
-                // all when this specific failure carried a diagnostic
-                // (only `.shareMetadataFetchFailed` does).
+                // Internal Alpha diagnostic surface follow-up (PR #93
+                // visibility correction): real TestFlight validation
+                // showed the previous icon-only affordance was too
+                // subtle to discover — the Product Owner could not see
+                // the `doc.on.doc` glyph at all against the camera
+                // overlay. Now a normal text+icon `.bordered` button
+                // (same gate, same copied content, same `AthleteFamilyManagementView`-
+                // established diagnostic pattern this screen already
+                // reuses) — clearly legible and tappable, but
+                // `.controlSize(.small)` and a reduced-opacity white tint
+                // keep it visually secondary to the primary `Scan again`
+                // action immediately below. Only present at all when
+                // this specific failure carried a diagnostic (only
+                // `.shareMetadataFetchFailed` does).
                 if AthleteInviteDiagnosticVisibility.isVisibleForCurrentBuild,
                    let diagnosticCopyText = scanDiagnosticCopyText {
                     Button {
                         UIPasteboard.general.string = diagnosticCopyText
                     } label: {
                         Label("Copy diagnostic", systemImage: "doc.on.doc")
-                            .labelStyle(.iconOnly)
-                            .font(.caption)
+                            .font(.footnote)
                     }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .buttonStyle(.bordered)
+                    .tint(.white.opacity(0.85))
+                    .controlSize(.small)
                     .accessibilityLabel("Copy diagnostic")
                     .accessibilityIdentifier("athleteConnectionScan.copyDiagnosticButton")
                 }
