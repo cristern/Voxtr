@@ -39,6 +39,13 @@ let package = Package(
         // camera APIs) — see this target's own doc comment for why it is
         // deliberately NOT a dependency of VoxtrAppShell.
         .library(name: "VoxtrAthleteScanner", targets: ["VoxtrAthleteScanner"]),
+        // Athlete Connection V1 Security Contract Correction — "Focused
+        // Spike: Existing Workspace Ownership Verification" (proof-of-
+        // concept only, never shipped): see this target's own doc
+        // comment for why it is deliberately NOT a dependency of
+        // VoxtrAppShell, mirroring VoxtrAthleteScanner's own established
+        // isolation pattern.
+        .library(name: "VoxtrOwnershipEvidenceSpike", targets: ["VoxtrOwnershipEvidenceSpike"]),
         .library(name: "VoxtrAthleteDomain", targets: ["VoxtrAthleteDomain"]),
         .library(name: "VoxtrParentDomain", targets: ["VoxtrParentDomain"]),
         .library(name: "VoxtrPlanningDomain", targets: ["VoxtrPlanningDomain"]),
@@ -129,6 +136,19 @@ let package = Package(
         // comment in that file.
         .target(name: "VoxtrAthleteScanner"),
 
+        // Athlete Connection V1 Security Contract Correction — ownership
+        // verification spike (proof-of-concept only). Depends only on
+        // VoxtrCore (for CloudKitTransport/CloudKitDatabaseScope,
+        // matching every other CloudKit-facing target's own dependency
+        // shape) — never on VoxtrAppShell or any *Domain target, and
+        // never referenced BY VoxtrAppShell or either app target's own
+        // Xcode project. See this target's own source file for the full
+        // isolation rationale. Included only in VoxtrSprint0Tests'
+        // dependency list below, so Codemagic's existing package-tests
+        // workflow gives real compile validation without this code ever
+        // reaching a shipping binary.
+        .target(name: "VoxtrOwnershipEvidenceSpike", dependencies: ["VoxtrCore"]),
+
         // MARK: - Composition root (the only target allowed to see every module)
         .target(
             name: "VoxtrAppShell",
@@ -152,7 +172,7 @@ let package = Package(
                 "VoxtrCore", "VoxtrCoreContracts", "VoxtrCoreReferenceData", "VoxtrAppShell",
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain",
-                "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain",
+                "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain", "VoxtrOwnershipEvidenceSpike",
             ]
         ),
     ]
