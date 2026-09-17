@@ -1,4 +1,5 @@
 import CloudKit
+import Foundation
 import VoxtrCore
 
 /// SPIKE — NOT A PRODUCTION FEATURE. Athlete Connection V1 Security Contract
@@ -108,7 +109,13 @@ public enum WorkspaceOwnershipEvidenceSpike {
         // an explicit await for the implicit actor hop, exactly as any
         // other cross-actor call in this codebase does.
         let database = await transport.database(for: scope)
-        let operation = CKFetchWebAuthTokenOperation(APIToken: apiToken)
+        // Swift's Clang importer lowercases the leading acronym of the
+        // Objective-C initializer's parameter when forming the Swift
+        // label — `initWithAPIToken:` becomes `init(apiToken:)` in
+        // Swift, not `init(APIToken:)`; the ObjC selector spelling is
+        // not the Swift call-site spelling. Confirmed against real
+        // Swift usage examples for this exact initializer, not assumed.
+        let operation = CKFetchWebAuthTokenOperation(apiToken: apiToken)
         return try await withCheckedThrowingContinuation { continuation in
             operation.fetchWebAuthTokenCompletionBlock = { webAuthToken, operationError in
                 if let operationError {
