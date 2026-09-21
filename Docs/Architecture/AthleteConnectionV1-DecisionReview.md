@@ -1,57 +1,33 @@
-# Athlete Connection V1 — focused security contract decisions
+# Athlete Connection V1 — Product Owner security decision record
 
-Status: **PROPOSAL — awaiting Product Owner decisions; do not implement as an approved contract.** 2026-09-21. This is a bounded companion to `AthleteConnectionV1-RecoveredAPIContract.md` on documentation PR #97, not an independent source of truth. Superseded report details must not be silently promoted into Architecture.
+**Status: D1–D4 APPROVED 2026-09-21.** Supersedes the earlier *proposal / awaiting decision* text in this file. This is a decision ledger, not a second implementation contract. The [normative security contract](AthleteConnectionV1-NormativeSecurityContract.md) defines the approved outcomes and clearly labels remaining technical protocol work. The [backend ADR](ADR-AthleteConnection-BackendAuthorization.md) and [authorization architecture](AthleteConnectionV1-Authorization.md) remain the architectural references under the Product Constitution and living Architecture hierarchy.
 
 ## Purpose
 
-Make the nearby QR → Parent approves exact device → athlete hydrates and gets revocable access flow both privacy-safe and recoverable. Lock only materially consequential choices, then derive exact request/response and database contracts in the authoritative living Architecture. Backend Foundation V1 is merged but has no real auth schema or deployment.
+Make nearby QR → Parent approves exact device → protected hydration and revocable connection privacy-safe, recoverable and calm, without inventing a second athlete identity or falsely claiming offline revocation can erase downloaded data. Backend Foundation V1 is merged but neither backend authorization nor hosted deployment is implemented.
 
-## Already agreed; not reopened
+## Prior approvals preserved
 
-Parent selects canonical existing athlete; QR is an invitation to request, not permission; Parent explicitly approves specific device after displaying a matching request code; no minor PII in anonymous QR/API responses; backend DB time enforces 15-minute invitation expiry and one successful grant per invitation; server enforces revocation for future sensitive online operations; distinct membership/device grant/session; stable IDs; CloudKit business sync retained but no CKShare pairing; new workspace SIWA binding and clearly limited existing-workspace Internal Alpha enrollment. Signing-key ownership is not encryption. Old PR #95 must not be merged.
+Parent chooses exact existing athlete; QR only invites a request; Parent approves the request for the physically verified device; no minor PII in anonymous QR/public APIs; authoritative 15-minute invitation TTL and one successful connection per invitation; stable IDs; CloudKit remains for business sync, not CKShare pairing; separate workspace membership/device grant/runtime session; server-side online revocation. Signatures prove signing-key possession, not encryption. PR #95's public PII-bearing invitation remains unapproved.
 
-## Decisions requiring explicit approval
+## D1 — Data transport: APPROVED, HTTPS
 
-### D1. Post-approval hydration confidentiality and service visibility
+After Parent approval and device-authenticated authorization, the backend may temporarily process **only the necessary athlete hydration information** over protected HTTPS. Other QR holders and unapproved/different devices receive none. The backend is a trusted processor and is **not promised to be unable to read plaintext**. The old proposal to encrypt data to a `P256.Signing` public key was invalid; no end-to-end encryption requirement was approved. Any persistence must be private, minimal and subject to approved 24-hour retention, audit and operational backup limitations.
 
-**Option A (proposed for Internal Alpha):** only after verified Parent approval and proof of possession of the approved request's device signing key, deliver the minimal required hydration fields over authenticated HTTPS with an opaque, grant-bound short-lived server session. The service temporarily handles plaintext to deliver it; encrypt at rest under properly restricted server-managed mechanisms only if it must persist a recovery copy. Minimize fields and retention. Do NOT claim end-to-end encryption or that DB operators cannot read plaintext.
+## D2 — Recovery: APPROVED, 24 hours
 
-**Option B:** implement separate encryption/key-agreement key material, an explicit encryption protocol, ciphertext-only recovery and key-rotation/reinstall rules. More cryptography and client/server scope. Requires independent design and tests; the earlier report's encryption-to-P256-signing-key text is invalid.
+The **same approved installation** can resume an interrupted hydration without new Parent approval within **24 hours** after grant creation, after fresh proof of possession and active-grant checks. No second grant may be created. Retained temporary data are deleted on authenticated successful completion or by the deadline, whichever occurs first; revocation must also deny retrieval and remove retained recovery data. 24 hours does not extend the 15-minute window for the first claim: an unconsumed expired invitation requires a new invitation. Earlier 72-hour retention was illustrative and is superseded.
 
-**Recommendation: A**, provided V1 accepts the backend as a trusted data processor. If confidentiality from the backend operator itself is a requirement, choose B and formally specify the cryptographic envelope before implementation.
+## D3 — Offline: APPROVED, cached view with uncertainty
 
-### D2. Interrupted hydration, retries and retention
+Previously downloaded local information remains viewable offline. The app shows that the connection **cannot currently be verified**, not that it is active or revoked without evidence. No new protected synchronization operations while authorization cannot be verified. Server-side online sensitive operations check live grant status even if a session token has not expired. The earlier proposal for 15-minute sensitive-use freshness and ~1-hour token lifetime remains **unapproved engineering parameters**, not user-facing access requirements. Revocation cannot recall offline bytes.
 
-**Option A (proposed):** one grant per invitation; same-device cryptographically authenticated retry can resume an incomplete hydration through a bounded, one-time recovery payload; explicit `hydration-complete` acknowledgment deletes it, as does expiry; a new device always requires a new invitation. Proposed short retention window **24 hours**, not previously approved; exact duration needs approval. Never delete the only recovery copy upon mere HTTP response write, and never issue a second grant on retry.
+## D4 — Existing workspace ownership: APPROVED for Internal Alpha only
 
-**Option B:** no recovery storage; network failure during hydration requires starting new pairing. Less stored PII, more family friction. Remove/replace a committed grant only with an explicit server-side recovery protocol, never by overriding uniqueness.
+Parent signs in with Apple and deliberately confirms the existing workspace/display name. This is an explicitly bounded **human trust** enrollment, NOT independent cryptographic workspace ownership verification. `AccountId.pending`, client-returned `recordChangeTag`, or SIWA↔CloudKit coincidence must not be promoted into ownership proof. Owner-account change is a **separate controlled recovery process**, not automatic self-service rebind. New workspaces must bind authenticated SIWA identity at creation. The isolated CloudKit ownership spike did not live-prove SIWA identity equality.
 
-**Recommendation: A** if recoverability matters for nearby pairing. The original report's 72-hour figure was illustrative, not settled.
+## Consequences and implementation gate
 
-### D3. Runtime session, online revocation and offline state
+The Product Owner has approved all four behavior decisions. No further Product Owner selection is required among the old A/B options. Technical security design remains necessary before coding: exact wire API, trusted Parent onboarding and conflict policy, states/DDL/concurrency, signing challenge canonical bytes, token/session TTL and verification, sensitive-field inventory, private retention/cleanup/backup semantics, rate-limiting and cross-system CloudKit boundary. These are **engineering design obligations**, not permission to alter D1–D4. Recovered historical API paths/schema are candidates, not frozen contract. The [normative contract](AthleteConnectionV1-NormativeSecurityContract.md) gives the approved invariants, acceptance gates and explicit remaining parameters; the recovery ledger flags invalid old mechanisms.
 
-**Option A (proposed):** short-lived opaque server session stored in device-only Keychain; each sensitive online backend request checks the authoritative grant is active, not just an unexpired token. Signatures over fresh server challenges renew session; require online revalidation at app relaunch before representing the connection as live. When offline or check fails, distinguish `cannot verify` from `revoked`, don't claim remote deletion of already downloaded data. **Session lifetime and UI offline access policy remain parameters to approve**; original ~1 hour token and 15-minute sensitive-freshness numbers were suggestions, not fixed contract.
-
-**Option B:** token-only validation until TTL expiry, with delayed online revocation even while network is available; simpler but undermines the stated server-enforced revocation outcome. Not recommended for sensitive endpoints.
-
-**Recommendation: A**, with an explicit product decision on whether already-local non-sensitive offline history may still be viewed when online authorization cannot be verified; no silent claims of current access.
-
-### D4. Existing-workspace ownership enrollment and recovery
-
-**Already-approved Internal Alpha fallback:** verified SIWA sign-in and deliberate human display-name confirmation; trust is limited, not independent cryptographic ownership proof. Do not treat a client-reported CloudKit `recordChangeTag` or `AccountId.pending` as proof. Do not automatically migrate ownership to a new SIWA `sub` on account changes. **Proposal:** restrict existing-workspace enrollment to an explicit Parent-initiated internal-alpha operation; log non-PII audit metadata and make account-change recovery a separate reviewed flow. Live CloudKit token access test may strengthen access evidence but cannot prove SIWA↔CloudKit identity equivalence.
-
-Product Owner must accept the remaining risk and whether recovery/account changes are blocked pending manual intervention in V1.
-
-## Technical contracts for architecture review after decisions
-
-- Per-request P-256 Secure Enclave **signing** key; public key stored by request; display code shown separately only to the requesting device and authenticated Parent list. Code is human device matching, never a credential.
-- Server challenge bound to request ID, purpose, nonce and deadline; signature verified against approved request key before atomic claim, with replay rejection. Exact canonical signing bytes, challenge expiration and one-use behavior to be designed/tested, not inferred from old text.
-- Claim transaction must lock invitation (`SELECT ... FOR UPDATE OF i` or equivalent), recheck DB-time expiry, approved request/key and consumption, atomically issue one grant with `UNIQUE(grants.invitation_id)`; distinguish verified same-device idempotency from a second device. Run two-request concurrency tests against real isolated PostgreSQL.
-- Private authorization tables outside exposed Data API; no direct `anon`/`authenticated` privilege; Edge Functions are policy gate. JWT/JWKS verify audience, issuer, signature, expiry and nonce for SIWA; store privileged credentials server-side only. New workspace binds identity before creation; existing workspace fallback does not become a claimed ownership proof.
-- No implementation or hosted Supabase changes in documentation PR #97.
-
-## Closeout sequence
-
-1. Product Owner chooses D1–D4 and exact D2 retention/session/offline parameters or authorizes a narrower V1 fallback.
-2. Incorporate settled choices into **living Architecture**, followed by linked ADR and Domain & Data Model/Project Context; explicitly mark provenance and supplant historical CKShare and earlier `recordChangeTag` text. Update backend `CLAUDE.md` to point to one authoritative source after the documentation PR is approved/merged.
-3. Only then write one bounded Claude prompt for first real migration/CI integration tests. Backend foundation CI success is not proof of authorization security.
+Documentation PR #97 changes documentation only. It does not authorize implementation, Supabase mutation, merge, or deployment; all require the established separate review and explicit approvals.
