@@ -349,7 +349,9 @@ This document does not redesign or retest the already-merged claim-proof functio
 
 **Still open / not silently approved:** whether device-bound Parent sessions or action-bound proof should be developed (§2.6), whether approval notifications should be introduced, operational secret rotation and abuse controls prior to actual hosted deployment, and new-workspace creation sequencing. Physical-device authentication, hosted security/retention evidence and CloudKit revocation remain separately gated by issue #98.
 
-Current implementation checkpoint (2026-09-28): backend PR #6 merged at `8a3999d5a516f537c92d5fd605e44f6da2123292`; backend PR #7 merged at `f58b5ea27f2aebda87ca38a21ef9992221e0d848`. These establish Parent auth/session HTTP flows and existing-workspace redemption, respectively. Operator issuance/cancellation HTTP, iOS SIWA integration and hosted deployment remain outstanding.\n\nTechnical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
+Current implementation checkpoint (2026-09-28): backend PR #6 merged at `8a3999d5a516f537c92d5fd605e44f6da2123292`; backend PR #7 merged at `f58b5ea27f2aebda87ca38a21ef9992221e0d848`. These establish Parent auth/session HTTP flows and existing-workspace redemption, respectively. Operator issuance/cancellation HTTP, iOS SIWA integration and hosted deployment remain outstanding.
+
+Technical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
 
 ---
 
