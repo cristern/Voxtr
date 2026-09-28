@@ -35,8 +35,7 @@ Tests must exercise real isolated PostgreSQL transactions: simultaneous claims, 
 
 ## 5. Review and merge boundary
 
-**Dated 2026-09-21 review boundary:** The following paragraph was written before backend Stages B–D and the Parent authentication contract. It is retained as historical context; current decisions and implementation status are recorded in §6 and [the Parent authentication contract](AthleteConnectionV1-ParentAuthenticationContract.md). No merge or hosted deployment follows from this document alone. iOS PR #95 remains unmerged and unapproved.
-
+The 2026-09-21 protocol review predates the backend Stages B–D and the [merged Parent authentication contract](AthleteConnectionV1-ParentAuthenticationContract.md). The latter governs Parent authentication and existing-workspace enrollment engineering. Internal Alpha session lifetime, sensitive-action freshness, operator preauthorization and manual owner-binding revocation were approved on 2026-09-28 as recorded in §7. The authentication nonce TTL remains proposed at 60 seconds. SIWA integration for newly created workspaces, exact hydration inventory, hosted retention, abuse controls and CloudKit revocation remain open. This PR changes documentation only and requires separate Product Owner merge approval.
 
 ## 6. Dated implementation-evidence addendum — 2026-09-25
 
