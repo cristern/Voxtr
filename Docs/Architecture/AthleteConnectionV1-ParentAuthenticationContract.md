@@ -1,12 +1,12 @@
 # Athlete Connection V1 — Parent authentication and existing-workspace enrollment contract
 
-Status: **reviewed engineering contract for Parent Sign in with Apple authentication, Parent sessions, and existing-workspace Internal Alpha enrollment, submitted for Product/Architecture review.** It builds on, and does not reopen, the Product Owner-approved D1–D4 outcomes in [the decision ledger](AthleteConnectionV1-DecisionReview.md) and the security outcomes in [the normative contract](AthleteConnectionV1-NormativeSecurityContract.md). Where a specific number, an operational-process choice, or a security posture below is not already covered by an approved decision, it is explicitly marked **PROPOSED** and requires separate Product Owner sign-off before implementation — this document does not grant that approval itself. It corrects specific technical weaknesses identified in an earlier, unreviewed pseudocode draft produced during discovery for [issue #100](https://github.com/cristern/Voxtr/issues/100); those corrections are noted inline. This document does not modify product philosophy, does not supersede the Product Constitution, and does not introduce an owner-transfer or account-recovery policy.
+Status: **canonical technical contract for Parent Sign in with Apple authentication, Parent sessions, and existing-workspace Internal Alpha enrollment.** It builds on, and does not reopen, the Product Owner-approved D1–D4 outcomes in [the decision ledger](AthleteConnectionV1-DecisionReview.md) and the security outcomes in [the normative contract](AthleteConnectionV1-NormativeSecurityContract.md). Where a specific number, an operational-process choice, or a security posture below is not already covered by an approved decision, it is explicitly marked **PROPOSED** and requires separate Product Owner sign-off before implementation — this document does not grant that approval itself. It corrects specific technical weaknesses identified in an earlier, unreviewed pseudocode draft produced during discovery for [issue #100](https://github.com/cristern/Voxtr/issues/100); those corrections are noted inline. This document does not modify product philosophy, does not supersede the Product Constitution, and does not introduce an owner-transfer or account-recovery policy.
 
-Backend milestones this document builds on, verified directly against `cristern/Voxtr-Backend` `develop` at `271ba976683f97981d6283785fe35daeecc552a8`: Stage B (private `authz` schema — `parents`, `workspace_enrollment_authorizations`, `workspace_owner_bindings`, `invitations`, `connection_requests`, `claim_challenges`, `device_grants`, `audit_events`), Stage C (`authz.claim_device_grant`), Stage D (P-256 claim-proof handlers), and PR #5 (the independent SIWA ID-token verifier, `supabase/functions/_shared/siwaVerifier.ts`, `createAppleIdTokenVerifier({expectedAudience,...}).verify(idToken, expectedNonce)`). No new database function, migration, or Edge Function described below exists yet — this is a contract for implementation, not a report of implemented state.
+Backend milestones this document builds on, verified directly against `cristern/Voxtr-Backend` `develop` at `271ba976683f97981d6283785fe35daeecc552a8`: Stage B (private `authz` schema — `parents`, `workspace_enrollment_authorizations`, `workspace_owner_bindings`, `invitations`, `connection_requests`, `claim_challenges`, `device_grants`, `audit_events`), Stage C (`authz.claim_device_grant`), Stage D (P-256 claim-proof handlers), and PR #5 (the independent SIWA ID-token verifier, `supabase/functions/_shared/siwaVerifier.ts`, `createAppleIdTokenVerifier({expectedAudience,...}).verify(idToken, expectedNonce)`). This paragraph records the baseline at the time of contract review. Backend PR #6 (Parent authentication) and PR #7 (existing-workspace redemption) were subsequently merged to `develop`; see the current implementation checkpoint below. No hosted deployment is established.
 
 `cristern/Voxtr` `develop` at `4a7ac5a52869f76947266c2937c082b2e179c2c5` — the iOS repository is unchanged since the discovery round this document finalizes; every iOS finding below is carried forward from that verified inspection (`ParentEntities.swift`, `ParentWorkspaceRepository.swift`, `AthleteIdentityHydrationService.swift`, `Package.swift`), not re-derived.
 
-[`cristern/Voxtr#99`](https://github.com/cristern/Voxtr/pull/99) remains open and unmerged as of this writing and is treated as proposed documentation, not canonical. This document does not modify or merge it. It touches `AthleteConnectionV1-NormativeSecurityContract.md` and `AthleteConnectionV1-ProjectStatus-2026-09-21.md`; this document deliberately does not edit either file, to keep the two PRs' diffs disjoint and reconcilable independently.
+At initial review, [`cristern/Voxtr#99`](https://github.com/cristern/Voxtr/pull/99) was open. It has since merged. This dated observation is retained as historical context.
 
 ## Evidence note on external documentation
 
@@ -255,7 +255,7 @@ Nothing here upgrades SIWA-plus-display-name confirmation into cryptographic own
 
 The earlier discovery-round pseudocode had three weaknesses, corrected here:
 
-1. **`p_parent_id` was not explicitly pinned to server-derived origin.** Corrected: this is now a **hard, stated invariant** — `p_parent_id` is *never* a value the Edge Function reads from request JSON; it is exclusively the output of `authz.validate_parent_session` on the caller's own session header, for every single call including the idempotent-retry branch. Without this invariant stated as non-negotiable, a careless future refactor that accepted `parent_id` "for convenience" from the request body would let anyone who merely learned a *previously redeemed* `(redemption_code_hash, parent_id)` pair — e.g. via a log leak — replay it and receive a "success" response confirming binding details, without ever having authenticated as that Parent. Pinning `p_parent_id` to the session closes this regardless of what the request body claims.
+1. **Parent identity must come from the presented session.** The Edge Function never reads `parent_id` from request JSON. The redemption function locks and validates the presented session in its own transaction and derives the Parent ID from that row on every call, including idempotent retry. A separate preflight `validate_parent_session` followed by a call carrying `parent_id` would leave a revocation/rotation race and is not the implementation contract.
 2. **Ambiguous outcome for a legitimately-revoked binding replaying its original authorization.** The prior draft returned `inconsistent_state` (implying a genuine invariant violation) when a since-revoked binding's original authorization was replayed by its original Parent — but a revoked binding coexisting with a redeemed authorization is normal after a legitimate revocation, not an error. Corrected below to a distinct, honest outcome.
 3. **Cancellation was unaddressed.** Corrected by adding an additive `cancelled_at` column and folding it into the same anti-enumeration failure bucket as expiry/not-found for the Parent-facing path (an authenticated Parent probing many codes for a workspace they already know the ID of should not learn *which* specific reason a code failed).
 
@@ -269,107 +269,23 @@ ALTER TABLE authz.workspace_enrollment_authorizations
 
 ### 5.3 `authz.redeem_workspace_enrollment_authorization`
 
+The merged implementation is the normative transaction definition: [backend migration `20260929090000_authz_workspace_enrollment_redemption_v1.sql`](https://github.com/cristern/Voxtr-Backend/blob/develop/supabase/migrations/20260929090000_authz_workspace_enrollment_redemption_v1.sql). Its signature and return shape are:
+
 ```sql
-CREATE OR REPLACE FUNCTION authz.redeem_workspace_enrollment_authorization(
-    p_workspace_id UUID,
-    p_redemption_code_hash TEXT,
-    p_parent_id UUID              -- INVARIANT: caller MUST derive this from
-                                   -- authz.validate_parent_session(...) on
-                                   -- every call. Never accept it from an
-                                   -- HTTP request body.
+authz.redeem_workspace_enrollment_authorization(
+  p_workspace_id UUID,
+  p_redemption_code_hash TEXT,
+  p_session_token_hash TEXT
 ) RETURNS TABLE (outcome TEXT, owner_binding_id UUID)
-LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $$
-DECLARE
-    v_auth authz.workspace_enrollment_authorizations%ROWTYPE;
-    v_binding_id UUID;
-BEGIN
-    -- Lock the ONE authorization row this exact code claims to redeem.
-    -- Serializes every caller presenting the SAME code; does NOT by
-    -- itself serialize against a DIFFERENT, concurrently-redeemed
-    -- authorization for the same workspace_id — see the exception
-    -- handler below for that case, and the deadlock analysis in 5.4.
-    SELECT * INTO v_auth FROM authz.workspace_enrollment_authorizations AS wea
-      WHERE wea.workspace_id = p_workspace_id
-        AND wea.redemption_code_hash = p_redemption_code_hash
-      FOR UPDATE;
-
-    -- Folds not-found, expired, and cancelled into ONE generic outcome:
-    -- an authenticated Parent probing codes for a workspace they
-    -- already know the id of should not learn which specific reason a
-    -- guess failed.
-    IF NOT FOUND OR v_auth.cancelled_at IS NOT NULL
-       OR v_auth.expires_at < clock_timestamp() THEN
-        outcome := 'authorization_not_available';
-        RETURN NEXT; RETURN;
-    END IF;
-
-    IF v_auth.redeemed_at IS NOT NULL THEN
-        IF v_auth.redeemed_by_parent_id = p_parent_id THEN
-            -- Idempotent retry after a lost HTTP response — the SAME
-            -- session-authenticated parent_id as before.
-            SELECT id INTO v_binding_id FROM authz.workspace_owner_bindings
-              WHERE enrollment_authorization_id = v_auth.id;
-            IF v_binding_id IS NULL THEN
-                outcome := 'inconsistent_state';           -- genuine invariant violation: redeemed but no binding row at all ever existed
-            ELSIF EXISTS (SELECT 1 FROM authz.workspace_owner_bindings
-                          WHERE id = v_binding_id AND revoked_at IS NULL) THEN
-                outcome := 'already_redeemed_same_parent';  -- true idempotent-retry success
-            ELSE
-                outcome := 'binding_revoked';                -- CORRECTED: no longer misreported as inconsistent_state
-            END IF;
-            owner_binding_id := v_binding_id;
-            RETURN NEXT; RETURN;
-        ELSE
-            outcome := 'authorization_already_redeemed';    -- burned by a DIFFERENT (session-authenticated) parent_id
-            RETURN NEXT; RETURN;
-        END IF;
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM authz.workspace_owner_bindings
-               WHERE workspace_id = p_workspace_id AND revoked_at IS NULL) THEN
-        outcome := 'workspace_already_bound';               -- fast-path conflict check
-        RETURN NEXT; RETURN;
-    END IF;
-
-    UPDATE authz.workspace_enrollment_authorizations
-      SET redeemed_at = clock_timestamp(), redeemed_by_parent_id = p_parent_id
-      WHERE id = v_auth.id;
-
-    BEGIN
-        INSERT INTO authz.workspace_owner_bindings
-          (workspace_id, parent_id, binding_source, enrollment_authorization_id)
-          VALUES (p_workspace_id, p_parent_id, 'alpha_enrollment', v_auth.id)
-          RETURNING id INTO v_binding_id;
-    EXCEPTION WHEN unique_violation THEN
-        -- Lost a genuine race against a DIFFERENT authorization's
-        -- concurrent redemption for the same workspace_id (see 5.4).
-        -- Un-burn this authorization: nothing was actually granted.
-        UPDATE authz.workspace_enrollment_authorizations
-          SET redeemed_at = NULL, redeemed_by_parent_id = NULL
-          WHERE id = v_auth.id;
-        outcome := 'workspace_already_bound';
-        RETURN NEXT; RETURN;
-    END;
-
-    INSERT INTO authz.audit_events
-      (event_type, workspace_id, enrollment_authorization_id, owner_binding_id, detail)
-      VALUES ('workspace_owner_binding.created', p_workspace_id, v_auth.id, v_binding_id,
-              jsonb_build_object('binding_source', 'alpha_enrollment'));
-
-    outcome := 'bound';
-    owner_binding_id := v_binding_id;
-    RETURN NEXT;
-END;
-$$;
 ```
 
-Paired narrow bridge `public.authz_redeem_workspace_enrollment_authorization`, `REVOKE ALL`, `GRANT EXECUTE TO service_role` only — identical shape to the four existing bridges.
+The Edge Function accepts only `workspace_id` and `code` in the body, hashes the raw UTF-8 bytes of the submitted code with SHA-256 to lowercase hex without trimming or normalization, hashes the opaque session header, and calls the service-role-only `public.authz_redeem_workspace_enrollment_authorization` bridge. It never accepts a Parent ID from JSON. The transaction locks the session row and derives `parent_id` from it. A revoked or absent session yields `session_invalid`. The session and authorization deadline checks use fresh database time after the authorization-row lock (**check A**) and again after the workspace-scoped transaction advisory lock (**check B**) on the path that can create a binding. Expired sessions yield `session_expired`; SIWA authentication older than the approved 10-minute freshness window yields `reauthentication_required`. Not-found, cancelled, and expired enrollment authorizations all yield `authorization_not_available`.
 
-### 5.4 Lock ordering, uniqueness violations, rollback — stated explicitly, as required
+An already-redeemed authorization returns `already_redeemed_same_parent` to the same Parent if its binding remains active, `binding_revoked` if that binding was revoked, `inconsistent_state` if the binding row is missing, or `authorization_already_redeemed` to a different Parent. An active workspace binding blocks a different authorization with `workspace_already_bound`, leaving the losing authorization unconsumed. A successful redemption atomically marks the authorization redeemed, creates one owner binding and its minimal audit event, and returns `bound`. Only `service_role` can execute the private function or its narrow bridge; the `authz` schema is not exposed through PostgREST.
 
-- **Same-authorization concurrency**: serialized by the `FOR UPDATE` row lock; no deadlock risk since only one row is ever locked by this function.
-- **Different-authorization concurrency for the same workspace**: two transactions locking two *different* authorization rows never contend on those locks (no shared resource, no cycle) — they only contend later, at `INSERT`, on `wob_active_workspace_uk`. Postgres resolves this deterministically: the second inserter blocks until the first's transaction resolves (commit or rollback), then either proceeds (if the first rolled back) or raises `unique_violation` (if the first committed) — this is a wait with a guaranteed resolution, not a deadlock, because neither transaction ever needs a lock the other is holding.
-- **Rollback**: the `EXCEPTION WHEN unique_violation` block is the only case this function catches; every other error propagates and rolls back the entire function invocation via ordinary Postgres transaction semantics. The caught case explicitly un-burns the losing authorization rather than leaving it permanently wasted with no resulting binding.
+### 5.4 Lock ordering, deadlines and uniqueness
+
+The fixed order is **session row → authorization row → workspace-scoped `pg_advisory_xact_lock(hashtext(p_workspace_id::text))`**. The last lock is taken only when creating a new binding; a hash collision can over-serialize unrelated workspaces but cannot permit two bindings for one workspace. Session expiration, 10-minute freshness and authorization expiration are re-evaluated after contention resolves, immediately before the write. Same-code attempts serialize on the authorization row; distinct codes for one workspace serialize at the advisory lock, then re-read the active-binding state. The partial unique index remains a backstop. A caught `unique_violation` from another write path un-burns the losing authorization and returns `workspace_already_bound`; other errors roll back normally. Cancellation of an authorization races safely via its row lock. The lock-wait boundary cases are exercised by real PostgreSQL concurrency tests in backend PR #7.
 
 ### 5.5 Authorization cancellation
 
@@ -433,7 +349,7 @@ This document does not redesign or retest the already-merged claim-proof functio
 
 **Still open / not silently approved:** whether device-bound Parent sessions or action-bound proof should be developed (§2.6), whether approval notifications should be introduced, operational secret rotation and abuse controls prior to actual hosted deployment, and new-workspace creation sequencing. Physical-device authentication, hosted security/retention evidence and CloudKit revocation remain separately gated by issue #98.
 
-Technical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
+Current implementation checkpoint (2026-09-28): backend PR #6 merged at `8a3999d5a516f537c92d5fd605e44f6da2123292`; backend PR #7 merged at `f58b5ea27f2aebda87ca38a21ef9992221e0d848`. These establish Parent auth/session HTTP flows and existing-workspace redemption, respectively. Operator issuance/cancellation HTTP, iOS SIWA integration and hosted deployment remain outstanding.\n\nTechnical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
 
 ---
 
@@ -441,8 +357,8 @@ Technical design decisions in this document remain: SHA-256 for high-entropy sec
 
 | Slice | Scope | Depends on |
 |---|---|---|
-| A | Parent authentication: `parent_auth_nonces`, `parent_sessions`, their functions, `auth-nonce`/`parent-auth-complete`/`refresh`/`revoke` functions | SIWA verifier (done) |
-| B | Enrollment redemption transaction (§5) + `cancelled_at`/binding-revocation functions | A |
+| A — merged backend PR #6 | Parent authentication: `parent_auth_nonces`, `parent_sessions`, their functions, `auth-nonce`/`parent-auth-complete`/`refresh`/`revoke` functions | SIWA verifier (done) |
+| B — merged backend PR #7 | Enrollment redemption transaction (§5) + `cancelled_at`/binding-revocation functions | A |
 | C | Operator issuance mechanism (§4) | B |
 | D | iOS: new auth module, SIWA UI, Keychain, redemption call | A–C |
 
