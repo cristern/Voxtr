@@ -78,9 +78,9 @@ Every rejection at every step (nonce not found/expired/already used; Apple signa
 
 ## 2. Parent session contract
 
-### 2.1 Category confirmed, specific numbers still open
+### 2.1 Category and Internal Alpha parameters
 
-The previously proposed **opaque, backend-issued, short-lived, Keychain-stored session** is the right category — it matches the already-approved contract language and requires no new cryptographic machinery (no Parent-side device key, no JWT-based session). What is evaluated here, and remains **PROPOSED**, is the exact lifetime numbers and the freshness-check mechanism in §2.6.
+The previously proposed **opaque, backend-issued, short-lived, Keychain-stored session** is the right category — it matches the already-approved contract language and requires no new cryptographic machinery (no Parent-side device key, no JWT-based session). The Product Owner has approved the 24-hour sliding lifetime, 30-day absolute maximum and 10-minute sensitive-operation freshness window **for Internal Alpha**. The documented residual risk from replay of a stolen, still-fresh bearer token remains; this decision does not close the separate live-security validation gates.
 
 ### 2.2 Generation and storage
 
@@ -95,7 +95,7 @@ Session token: 256-bit CSPRNG value (Deno `crypto.getRandomValues`), base64url-e
 
 **`absolute_expires_at` closes a real gap: without it, repeated rotation could extend a session indefinitely, contradicting the proposed 30-day ceiling in §2.3.** Session `expires_at` is a *sliding* window that rotation is allowed to push forward; `absolute_expires_at` is a *hard* ceiling that rotation must never push forward. Both are timestamps, both matter, and they answer different questions: "is this specific credential still valid right now" (`expires_at`) versus "has this entire chain of rotations, starting from one real SIWA handshake, run for longer than is ever permitted" (`absolute_expires_at`). Distinct again from `authenticated_at` (freshness): a session can be simultaneously non-expired, within its absolute lifetime, and still stale for freshness purposes — the three concepts are independent axes, not substitutes for one another. The rule, precisely, mirroring `authenticated_at`'s own treatment:
 
-- `absolute_expires_at` is computed **exactly once, at session creation**, inside `authz.upsert_parent_and_issue_session`, as `clock_timestamp() + ABSOLUTE_MAX_LIFETIME` (**PROPOSED: 30 days**, §2.3) — a database-time computation local to that function call, never a client-supplied timestamp of any kind.
+- `absolute_expires_at` is computed **exactly once, at session creation**, inside `authz.upsert_parent_and_issue_session`, as `clock_timestamp() + ABSOLUTE_MAX_LIFETIME` (**APPROVED FOR INTERNAL ALPHA: 30 days**, §2.3) — a database-time computation local to that function call, never a client-supplied timestamp of any kind.
 - Session **rotation** (§2.4) carries `absolute_expires_at` forward **verbatim, unchanged**, from the session being rotated onto its replacement — rotation never recomputes or extends it, no matter how many times a chain has already been rotated.
 - The replacement session's own sliding `expires_at` is capped at rotation time so it **can never exceed the inherited `absolute_expires_at`** — see §2.4 for the exact computation. This is the specific mechanism that makes the 30-day ceiling actually enforceable across arbitrarily many rotations, rather than merely stated as an intention.
 - A **new** SIWA handshake (§1) always creates a **new, distinct** session row with its **own fresh** `absolute_expires_at` — exactly the same "always mint a new chain, never upgrade one in place" rule already established for `authenticated_at` above, so no separate session-family/lineage model is needed: the column itself, carried forward by value, is sufficient to enforce the ceiling.
@@ -105,11 +105,11 @@ All of the above — `authenticated_at`, `absolute_expires_at`, and ordinary `ex
 
 Hash-based lookup (not constant-time raw comparison) is appropriate here: the token is high-entropy CSPRNG output, so an indexed hash-equality lookup carries no exploitable timing signal about the secret itself — the same reasoning already applies to `redemption_code_hash` lookups elsewhere in this schema.
 
-### 2.3 Lifetime — PROPOSED, with justification
+### 2.3 Lifetime — approved for Internal Alpha
 
-**PROPOSED: 24-hour sliding session, 30-day absolute maximum, refresh rotates the token and extends up to — but never past — that ceiling.** Rationale: Parent interactions here are low-frequency and checkpoint-style (review a request, revoke a grant) rather than continuous; the bare 10-minute figure floated in the earlier technical review would force re-authentication mid-interruption for an ordinary phone call, which is a real usability cost the approved contract never asked for. The **blast radius of session possession alone is bounded** by §2.6's freshness gate on the operations that actually matter (approve/revoke) — a longer sliding window for *low-stakes* reads (list pending requests) does not by itself increase what a stolen token can accomplish, provided §2.6 is implemented. This is a security/usability trade-off requiring explicit sign-off, presented with its reasoning rather than asserted as already decided.
+**APPROVED FOR INTERNAL ALPHA: 24-hour sliding session, 30-day absolute maximum; refresh rotates the token and extends up to — but never past — that ceiling.** Rationale: Parent interactions here are low-frequency and checkpoint-style (review a request, revoke a grant) rather than continuous; the bare 10-minute figure floated in the earlier technical review would force re-authentication mid-interruption for an ordinary phone call, which is a real usability cost the approved contract never asked for. The **blast radius of session possession alone is bounded** by §2.6's freshness gate on the operations that actually matter (approve/revoke) — a longer sliding window for *low-stakes* reads (list pending requests) does not by itself increase what a stolen token can accomplish, provided §2.6 is implemented. This is a security/usability trade-off requiring explicit sign-off, presented with its reasoning rather than asserted as already decided.
 
-These are two independent numbers with two independent jobs: 24 hours bounds how long any *single* credential is valid before it must rotate; 30 days bounds how long a Parent can keep extending access to one continuous chain of rotations without ever repeating the full SIWA handshake. **Only the mechanism that makes the second number actually enforceable — `absolute_expires_at`, carried forward unchanged across every rotation and used to cap each rotation's new `expires_at` — is specified as settled engineering design in §2.2/§2.4 below; the exact 24-hour and 30-day figures themselves remain PROPOSED, pending the same Product Owner sign-off as before.** Fixing the enforcement gap does not itself decide the numbers.
+These are two independent numbers with two independent jobs: 24 hours bounds how long any *single* credential is valid before it must rotate; 30 days bounds how long a Parent can keep extending access to one continuous chain of rotations without ever repeating the full SIWA handshake. **Only the mechanism that makes the second number actually enforceable — `absolute_expires_at`, carried forward unchanged across every rotation and used to cap each rotation's new `expires_at` — is specified as settled engineering design in §2.2/§2.4 below; the exact 24-hour and 30-day figures are now approved for Internal Alpha; later release policy and real-device verification remain separate.** Fixing the enforcement gap does not itself decide the numbers.
 
 ### 2.4 Renewal and rotation, including lost-response recovery
 
@@ -132,7 +132,7 @@ ELSIF clock_timestamp() >= v_old.expires_at THEN
     outcome := 'session_expired';                     -- ordinary sliding-window expiry
 ELSE
     v_new_expires_at := LEAST(
-        clock_timestamp() + SLIDING_WINDOW_INTERVAL,  -- PROPOSED 24h, §2.3
+        clock_timestamp() + SLIDING_WINDOW_INTERVAL,  -- approved Internal Alpha 24h, §2.3
         v_old.absolute_expires_at                     -- inherited, unchanged, the actual enforcement
     );
     INSERT INTO authz.parent_sessions
@@ -154,7 +154,7 @@ The `LEAST(...)` computation is the entire enforcement mechanism the earlier dra
   |---|---|---|---|---|
   | `t=20` | `44` | `44` | `44` | increased (from the initial `24`) |
   | `t=40` | `64` | `64` | `64` | increased |
-  | `t=700` | `724` | `720` | `720` | increased (now capped) |
+  | `t=700` (after valid intermediate renewals) | `724` | `720` | `720` | increased (now capped) |
   | `t=710` | `734` | `720` | `720` | **unchanged — capped, does not increase further** |
   | `t=721` (attempted) | — | — | rejected | `clock_timestamp() >= absolute_expires_at` → `absolute_lifetime_exceeded` |
 
@@ -175,7 +175,7 @@ Two concurrent `rotate_parent_session` calls presenting the *same* old token: th
 
 **Threat, stated concretely**: a stolen Parent session bearer token grants everything a live SIWA-authenticated Parent can do for that Parent's workspaces — creating an invitation, and, critically, **approving a connection request**, which is the single action that actually confers device access to a specific child's profile. An attacker holding a stolen session does not need physical proximity, the QR code, or the visual display-code comparison at all: they can call the approve endpoint directly. **Session rotation does not mitigate this** — rotation only shortens the window during which an *already-superseded* copy of a token remains dangerous; it does nothing to a *currently valid* stolen token during its live window, which is exactly when this attack happens.
 
-**Mitigation adopted for v1 (PROPOSED) — and precisely what it does and does not achieve**: distinguish **ordinary** operations (list pending requests, view workspace enrollment status — session validity alone suffices) from **sensitive** operations (approve/reject a connection request, revoke a device grant, redeem an enrollment authorization). Every sensitive operation additionally requires, evaluated **server-side, at the moment that specific sensitive operation executes** — never inferred from an earlier UI screen, an earlier successful call, or the mere fact that some login happened recently on some device — `now() - session.authenticated_at < FRESHNESS_WINDOW` (**PROPOSED: 10–15 minutes**), read from the **exact session row presented with that request** (§2.2); if stale, the backend returns a distinct `reauthentication_required` outcome, and the iOS app must run the **full** SIWA nonce-handshake again (§1), producing a **new** session (§2.2) — before the sensitive call can succeed.
+**Internal Alpha freshness control (10 minutes approved) — and precisely what it does and does not achieve**: distinguish **ordinary** operations (list pending requests, view workspace enrollment status — session validity alone suffices) from **sensitive** operations (approve/reject a connection request, revoke a device grant, redeem an enrollment authorization). Every sensitive operation additionally requires, evaluated **server-side, at the moment that specific sensitive operation executes** — never inferred from an earlier UI screen, an earlier successful call, or the mere fact that some login happened recently on some device — `now() - session.authenticated_at < FRESHNESS_WINDOW` (**APPROVED FOR INTERNAL ALPHA: 10 minutes**), read from the **exact session row presented with that request** (§2.2); if stale, the backend returns a distinct `reauthentication_required` outcome, and the iOS app must run the **full** SIWA nonce-handshake again (§1), producing a **new** session (§2.2) — before the sensitive call can succeed.
 
 **This is corrected from an earlier draft that overstated it.** The freshness gate does **not** make a stolen session incapable of performing a sensitive action — it **limits the window** during which a stolen, currently-valid bearer token remains usable for one. Concretely: if an attacker steals the session bearer token itself *while it is still within its freshness window* (e.g., immediately after the real Parent's own genuine sign-in), that stolen token **can** successfully call the sensitive operation for as long as the window remains open — freshness constrains *how long* a theft stays dangerous, it does not detect or prevent the theft, and it does not require the attacker to possess anything beyond the bearer token itself during that window. **A session refresh does not renew this freshness** — §2.2/§2.4 establish that rotation carries `authenticated_at` forward unchanged, precisely so that merely keeping a stolen session alive via refresh can never manufacture new freshness. The genuine security value this gate provides is bounding the *duration* of exposure to something much shorter than the session's own lifetime (§2.3), and forcing an attacker who wants access *outside* that narrow window to also compromise a live Apple ID sign-in (Face ID/biometric-gated, on the real device) — a materially harder bar than holding a copied bearer string, but not one this document claims eliminates the risk during the window itself.
 
@@ -224,7 +224,7 @@ No endpoint ever infers layer 2, 3, or 4 from layer 1. `parent-auth-complete` pe
 
 ## 4. Existing-workspace operator preauthorization
 
-### 4.1 Recommendation: Option B — a dedicated, operator-secret-gated Edge Function
+### 4.1 Internal Alpha decision: Option B — a dedicated, operator-secret-gated Edge Function
 
 Reassessed against operational complexity, credential exposure, auditability, code-delivery, and recovery:
 
@@ -237,11 +237,11 @@ Reassessed against operational complexity, credential exposure, auditability, co
 | Recovery | Manual ad hoc SQL | A small paired "cancel" function gives a real, typed recovery path | Second script invocation |
 | Works with no Mac, browser-only | Yes | Yes (Dashboard's function-invoke UI, or `curl`/Postman) | Yes (Codespaces/cloud shell) |
 
-**B is recommended**: it is not a new service — it's the fourth Edge Function of the same kind as the three already **implemented and merged** to `develop` (`health`, `claim-challenge`, `claim-submit`; **none of the three is deployed to the hosted `voxtr-auth-dev` project** — merged source, verified by isolated CI and local Supabase/PostgREST integration tests only, is not the same claim as hosted deployment, and this document makes none about hosted status for any function, existing or proposed). It keeps the service-role key's blast radius completely undisturbed, and it moves every correctness-sensitive operation into tested code rather than operator hand-entry. **C remains a documented, acceptable fallback** if even one more function, once actually deployed, is judged unwarranted for a low-frequency Alpha-only action.
+**B is approved for Internal Alpha**: it is not a new service — it's the fourth Edge Function of the same kind as the three already **implemented and merged** to `develop` (`health`, `claim-challenge`, `claim-submit`; **none of the three is deployed to the hosted `voxtr-auth-dev` project** — merged source, verified by isolated CI and local Supabase/PostgREST integration tests only, is not the same claim as hosted deployment, and this document makes none about hosted status for any function, existing or proposed). It keeps the service-role key's blast radius completely undisturbed, and it moves every correctness-sensitive operation into tested code rather than operator hand-entry. **C remains a documented, acceptable fallback** if even one more function, once actually deployed, is judged unwarranted for a low-frequency Alpha-only action.
 
 ### 4.2 Who authorizes, and how the credential reaches the Parent
 
-**PROPOSED, requires explicit confirmation**: the repository owner is the sole operator for Internal Alpha (no multi-operator tooling is being built). The operator calls `operator-issue-enrollment { workspace_id, ttl_minutes }` (gated by a static `OPERATOR_SECRET` header, independent of Apple/session auth entirely — a different trust mechanism, not layered into §3's four layers), receives the plaintext redemption code exactly once in the response, and relays it to the genuine Parent through **an already-trusted, pre-existing communication channel the operator personally controls** (e.g., a direct message or call to someone they already know is the real Parent) — never a new, unauthenticated channel invented for this purpose. The exact channel is an operational choice for the Product Owner to confirm, not a technical one this document can settle.
+**APPROVED FOR INTERNAL ALPHA**: the Product Owner/repository owner is the sole operator for Internal Alpha (no multi-operator tooling is being built). The operator calls `operator-issue-enrollment { workspace_id, ttl_minutes }` (gated by a static `OPERATOR_SECRET` header, independent of Apple/session auth entirely — a different trust mechanism, not layered into §3's four layers), receives the plaintext redemption code exactly once in the response, and relays it to the genuine Parent through **an already-trusted, pre-existing communication channel the operator personally controls** (e.g., a direct message or call to someone they already know is the real Parent) — never a new, unauthenticated channel invented for this purpose. **Approved delivery rule for Internal Alpha:** use an existing, personally trusted direct communication channel with the intended Parent; the operator chooses the specific channel case by case. No unauthenticated broadcast, unverified new contact channel, or automatic delivery is authorized.
 
 ### 4.3 Preserving the accepted limited-trust model
 
@@ -377,7 +377,7 @@ Paired narrow bridge `public.authz_redeem_workspace_enrollment_authorization`, `
 
 ### 5.6 Binding revocation — the plumbing only, not a recovery policy
 
-`authz.revoke_workspace_owner_binding(p_owner_binding_id, p_reason) RETURNS (outcome)` — operator-invoked, sets `revoked_at`, writes an audit event. This is deliberately **only the primitive**. Recovery from a lost/compromised Parent identity is: an operator revokes the stale binding, then issues a fresh `workspace_enrollment_authorizations` row through the ordinary flow above for the (possibly different) real Parent to redeem — reusing the existing mechanism rather than inventing a second one. **Who decides to invoke revocation, and under what evidentiary standard, remains an explicit outstanding Product Owner decision** (§8) — this document supplies the mechanism, not the policy.
+`authz.revoke_workspace_owner_binding(p_owner_binding_id, p_reason) RETURNS (outcome)` — operator-invoked, sets `revoked_at`, writes an audit event. This is deliberately **only the primitive**. Recovery from a lost/compromised Parent identity is: an operator revokes the stale binding, then issues a fresh `workspace_enrollment_authorizations` row through the ordinary flow above for the (possibly different) real Parent to redeem — reusing the existing mechanism rather than inventing a second one. **Approved Internal Alpha policy:** the Product Owner acts as sole operator and decides revocation manually, after checking the request against the known Parent relationship through an existing trusted channel. No automatic revocation, owner transfer, or self-service account recovery is authorized. This is an operational Alpha safeguard, not a claim of cryptographic CloudKit ownership proof.
 
 ---
 
@@ -408,7 +408,7 @@ One new, minimal Swift package target owns exactly: the SIWA handshake (`ASAutho
 
 1. `expires_at` **never exceeds** `absolute_expires_at`, for any rotation, at any simulated time — the one invariant every other criterion below serves.
 2. `expires_at` **can and normally does increase** across successive successful rotations while the chain is still below its cap — e.g., under the §2.4 worked example, a rotation simulated at `t=20h` producing `expires_at=44h` followed by one at `t=40h` producing `expires_at=64h` (an increase), reproducing the table in §2.4 exactly, not merely asserting the property in the abstract.
-3. Once `expires_at` reaches `absolute_expires_at`, a further successful rotation **does not extend it further** — e.g., a rotation simulated at `t=700h` (capped at `720h`) followed by one at `t=710h` must both return `expires_at=720h`, identical, not increasing.
+3. Once `expires_at` reaches `absolute_expires_at`, a further successful rotation **does not extend it further** — e.g., a rotation simulated at `t=700h` (following valid intermediate renewals, capped at `720h`) followed by one at `t=710h` must both return `expires_at=720h`, identical, not increasing.
 4. The **duration of newly granted validity** (`new expires_at − rotation time`) shrinks as the simulated clock approaches the cap — `24h` early in the chain, `10h` at `t=710h` in the same example — confirmed numerically, not merely asserted.
 5. A rotation attempted once `clock_timestamp() >= absolute_expires_at` (simulated at or past `t=720h`) is rejected outright with the distinct `absolute_lifetime_exceeded` outcome, never returning a session.
 6. Two concurrent rotations of the same session near the absolute ceiling serialize correctly (§2.5) and never produce two divergent `expires_at` values from a stale read.
@@ -421,18 +421,18 @@ This document does not redesign or retest the already-merged claim-proof functio
 
 ---
 
-## 8. Outstanding Product Owner decisions
+## 8. Internal Alpha decisions and remaining open items
 
-Separated explicitly from the technical choices this document does settle:
+**Product Owner approval (2026-09-28), limited to Internal Alpha:**
 
-1. Session lifetime numbers (§2.3: 24h sliding / 30-day max) and the sensitive-operation freshness window (§2.6: 10–15 min) — only the numbers remain open; the mechanism that makes the 30-day figure actually enforceable across repeated rotations (`absolute_expires_at`, §2.2/§2.4) is settled engineering design, not itself a pending decision.
-2. Operator-preauthorization approach: confirm B over C (§4.1).
-3. Who acts as operator, and the exact out-of-band channel for relaying redemption codes (§4.2).
-4. Who is authorized to invoke binding revocation, and under what evidentiary standard (§5.6) — explicitly not decided here.
-5. Whether device-bound Parent sessions (§2.6's deferred option) are ever required, and on what timeline.
-6. Whether an out-of-band "connection approved" notification is worth building as a follow-up (§2.6).
+1. Parent session: 24-hour sliding credential expiration; 30-day absolute session-chain lifetime, enforced by inherited `absolute_expires_at` (§2.2–2.4).
+2. Sensitive operations: a 10-minute authentication freshness window evaluated against the requesting session at operation time (§2.6). A stolen bearer token **can still be used within that window**; approval of this bounded Alpha policy does not close the live-security gates in issue #98.
+3. Operator workflow: Option B, a narrow operator-secret-gated Edge Function for issuing/cancelling existing-workspace enrollment authorizations (§4). The Product Owner is the sole Internal Alpha operator, delivering redemption codes case by case via an existing, personally trusted direct channel with the intended Parent. No administration application or broad service-role access on client devices.
+4. Workspace owner-binding revocation: manual decision by the sole Alpha operator after checking the request through an existing trusted channel. No automatic owner transfer or self-service recovery policy is approved (§5.6).
 
-Technical choices made in this document, open to review but not requiring product-level sign-off: SHA-256 for all hashing; eager nonce consumption (§1.5); the four-layer header separation (§3.3); `verify_jwt=false` for every new function (§3.2); no new SwiftData model (§6); enforcing absolute session lifetime by carrying `absolute_expires_at` forward by value across rotations and capping each rotation's `expires_at` at that inherited ceiling, server-computed from `clock_timestamp()` only, rather than introducing a separate session-family/lineage model (§2.2/§2.4).
+**Still open / not silently approved:** whether device-bound Parent sessions or action-bound proof should be developed (§2.6), whether approval notifications should be introduced, the exact nonce TTL (60 seconds remains proposed in §1.5), operational secret rotation and abuse controls prior to actual hosted deployment, and new-workspace creation sequencing. Physical-device authentication, hosted security/retention evidence and CloudKit revocation remain separately gated by issue #98.
+
+Technical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
 
 ---
 
