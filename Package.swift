@@ -46,6 +46,15 @@ let package = Package(
         // VoxtrAppShell, mirroring VoxtrAthleteScanner's own established
         // isolation pattern.
         .library(name: "VoxtrOwnershipEvidenceSpike", targets: ["VoxtrOwnershipEvidenceSpike"]),
+        // Athlete Connection V1 — Parent authentication and existing-
+        // workspace redemption (Docs/Architecture/AthleteConnectionV1-
+        // ParentAuthenticationContract.md §6): the one new minimal
+        // package target owning the SIWA nonce handshake, Keychain
+        // Parent-session storage, and the Parent authentication/
+        // redemption HTTP client. Deliberately has no dependency on
+        // VoxtrParentDomain/VoxtrCoreContracts — see this target's own
+        // source files for the domain-ownership rationale.
+        .library(name: "VoxtrParentAuthentication", targets: ["VoxtrParentAuthentication"]),
         .library(name: "VoxtrAthleteDomain", targets: ["VoxtrAthleteDomain"]),
         .library(name: "VoxtrParentDomain", targets: ["VoxtrParentDomain"]),
         .library(name: "VoxtrPlanningDomain", targets: ["VoxtrPlanningDomain"]),
@@ -149,6 +158,17 @@ let package = Package(
         // reaching a shipping binary.
         .target(name: "VoxtrOwnershipEvidenceSpike", dependencies: ["VoxtrCore"]),
 
+        // Athlete Connection V1 — Parent authentication and existing-
+        // workspace redemption. No dependency on any target in this
+        // package: only system frameworks (Foundation, CryptoKit,
+        // Security, SwiftUI, AuthenticationServices). Deliberately does
+        // not depend on VoxtrParentDomain/VoxtrCoreContracts — this
+        // target owns the SIWA handshake, Keychain session storage, and
+        // HTTP client only, never the SwiftData domain model; the
+        // caller (VoxtrAppShell) maps FamilyWorkspace.workspaceId to
+        // this target's own EnrollableWorkspace at the call site.
+        .target(name: "VoxtrParentAuthentication"),
+
         // MARK: - Composition root (the only target allowed to see every module)
         .target(
             name: "VoxtrAppShell",
@@ -157,6 +177,7 @@ let package = Package(
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain", "VoxtrDevelopmentDomain",
                 "VoxtrDecisionSupportDomain", "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain", "VoxtrSettings",
+                "VoxtrParentAuthentication",
             ],
             // Sprint 15 (revised): the first resource this target has
             // ever declared — StaticQuoteRepository's bundled
@@ -173,6 +194,7 @@ let package = Package(
                 "VoxtrAthleteDomain", "VoxtrParentDomain", "VoxtrPlanningDomain",
                 "VoxtrTrainingDomain", "VoxtrReflectionDomain", "VoxtrCoachingDomain", "VoxtrMotivationDomain",
                 "VoxtrNotificationsDomain", "VoxtrCalendarPlanningDomain", "VoxtrOwnershipEvidenceSpike",
+                "VoxtrParentAuthentication",
             ]
         ),
     ]

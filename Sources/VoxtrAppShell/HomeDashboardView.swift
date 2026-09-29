@@ -7,6 +7,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrParentAuthentication
 
 /// TestFlight regression fix (stale mounted Athlete Home after Log/Cancel):
 /// temporary, `#if DEBUG`-only tracing for the exact boundary this
@@ -206,6 +207,11 @@ public struct HomeDashboardView: View {
     /// "Manage Athletes" sheet's own `FamilyCalendarSourcesViewModel`,
     /// same rationale as `athleteRepository` immediately above.
     private let workspaceId: WorkspaceId
+    /// Athlete Connection V1 (Slice D): same rationale as
+    /// `athleteRepository` immediately above — needed only to build the
+    /// "Manage Athletes" sheet's own `AthleteFamilyManagementView`.
+    private let parentAuthenticationService: ParentAuthenticationService
+    private let enrollableWorkspaces: [EnrollableWorkspace]
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -228,7 +234,9 @@ public struct HomeDashboardView: View {
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         sportRepository: SportRepository,
         athleteRepository: AthleteRepository,
-        workspaceId: WorkspaceId
+        workspaceId: WorkspaceId,
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -250,6 +258,8 @@ public struct HomeDashboardView: View {
         self.sportRepository = sportRepository
         self.athleteRepository = athleteRepository
         self.workspaceId = workspaceId
+        self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
     }
 
     public var body: some View {
@@ -324,7 +334,9 @@ public struct HomeDashboardView: View {
                         sportRepository: sportRepository,
                         workspaceId: workspaceId,
                         actorId: committedByActorId
-                    )
+                    ),
+                    parentAuthenticationService: parentAuthenticationService,
+                    enrollableWorkspaces: enrollableWorkspaces
                 )
             }
         }

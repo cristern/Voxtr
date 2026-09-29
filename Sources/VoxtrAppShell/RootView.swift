@@ -6,6 +6,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrParentAuthentication
 
 /// S1.4 requirement 1: `FamilyRestorationState` is the ONLY thing this
 /// view switches on — there is no separate "just finished onboarding"
@@ -48,7 +49,9 @@ public struct RootView: View {
                 statisticsService: root.container.resolve(StatisticsService.self),
                 sportRepository: root.container.resolve(SportRepository.self),
                 calendarPlanningCoordinationService: root.container.resolve(CalendarPlanningCoordinationService.self),
-                athleteConnectionOwnerHandoffService: root.container.resolve(AthleteConnectionOwnerHandoffService.self)
+                athleteConnectionOwnerHandoffService: root.container.resolve(AthleteConnectionOwnerHandoffService.self),
+                parentAuthenticationService: root.container.resolve(ParentAuthenticationService.self),
+                enrollableWorkspaces: makeEnrollableWorkspaces()
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)
@@ -72,6 +75,22 @@ public struct RootView: View {
             restorationState = .inconsistentGraph(
                 reason: "\(OnboardingStrings.couldNotReloadAfterCreation) \(error.localizedDescription)"
             )
+        }
+    }
+
+    /// Athlete Connection V1 (Slice D): the one place `FamilyWorkspace`
+    /// (SwiftData, `VoxtrParentDomain`) is mapped to
+    /// `VoxtrParentAuthentication.EnrollableWorkspace` — that package
+    /// deliberately never imports `VoxtrParentDomain` itself (see its
+    /// own doc comments), so only `VoxtrAppShell` is allowed to bridge
+    /// the two. A failure here means this device's local workspace list
+    /// couldn't be read; the enrollment screen degrades to "no workspace
+    /// found" rather than crashing or inventing fallback content.
+    private func makeEnrollableWorkspaces() -> [EnrollableWorkspace] {
+        let repository = root.container.resolve(ParentWorkspaceRepository.self)
+        guard let workspaces = try? repository.fetchAllWorkspaces() else { return [] }
+        return workspaces.map { workspace in
+            EnrollableWorkspace(id: workspace.workspaceId.rawValue, displayName: workspace.displayName)
         }
     }
 }

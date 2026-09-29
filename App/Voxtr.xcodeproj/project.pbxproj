@@ -373,6 +373,7 @@
 				335E17C6FA68E37AE01F9A2F /* VoxtrCoachingDomain */,
 				3E156DBDC4319849811AF2E5 /* VoxtrMotivationDomain */,
 				1CC957A077D85F1303CD0AC8 /* VoxtrOwnershipEvidenceSpike */,
+				4156889783848025995BCE55 /* VoxtrParentAuthentication */,
 			);
 			productName = VoxtrSprint0Tests;
 			productReference = 6A6BF721CDCD53F76E3CAB39 /* VoxtrSprint0Tests.xctest */;
@@ -813,6 +814,10 @@
 		1CC957A077D85F1303CD0AC8 /* VoxtrOwnershipEvidenceSpike */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VoxtrOwnershipEvidenceSpike;
+		};
+		4156889783848025995BCE55 /* VoxtrParentAuthentication */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VoxtrParentAuthentication;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

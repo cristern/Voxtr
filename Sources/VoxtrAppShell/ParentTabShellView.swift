@@ -7,6 +7,7 @@ import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
 import VoxtrCalendarPlanningDomain
+import VoxtrParentAuthentication
 
 /// Bottom Navigation / Information Architecture Foundation package:
 /// the Parent shell's five approved primary destinations — Home | Plan
@@ -76,6 +77,15 @@ public struct ParentTabShellView: View {
     /// shell owns (the Home tab's, via `FamilyHomeView`, and the Profile
     /// tab's own, directly below).
     public let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
+    /// Athlete Connection V1 (Slice D): same threading rationale as
+    /// `athleteConnectionOwnerHandoffService` above — resolved once in
+    /// `CompositionRoot`, passed down through `RootView`, threaded to
+    /// the Profile tab's `AthleteFamilyManagementView` construction
+    /// below. `enrollableWorkspaces` is built by `RootView` from
+    /// `ParentWorkspaceRepository.fetchAllWorkspaces()` — this shell
+    /// never resolves that repository itself.
+    public let parentAuthenticationService: ParentAuthenticationService
+    public let enrollableWorkspaces: [EnrollableWorkspace]
 
     public init(
         family: RestoredFamily,
@@ -95,7 +105,9 @@ public struct ParentTabShellView: View {
         statisticsService: StatisticsService,
         sportRepository: SportRepository,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
-        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
+        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService,
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         self.family = family
         self.planningService = planningService
@@ -115,6 +127,8 @@ public struct ParentTabShellView: View {
         self.sportRepository = sportRepository
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
+        self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
     }
 
     public var body: some View {
@@ -142,7 +156,9 @@ public struct ParentTabShellView: View {
                 sleepChangeBroadcaster: sleepChangeBroadcaster,
                 calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 sportRepository: sportRepository,
-                athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService
+                athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService,
+                parentAuthenticationService: parentAuthenticationService,
+                enrollableWorkspaces: enrollableWorkspaces
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -250,7 +266,9 @@ public struct ParentTabShellView: View {
                         sportRepository: sportRepository,
                         workspaceId: WorkspaceId(rawValue: family.workspace.id),
                         actorId: family.currentActor.actorId
-                    )
+                    ),
+                    parentAuthenticationService: parentAuthenticationService,
+                    enrollableWorkspaces: enrollableWorkspaces
                 )
             }
             .tabItem { Label("Profile", systemImage: "person.crop.circle") }

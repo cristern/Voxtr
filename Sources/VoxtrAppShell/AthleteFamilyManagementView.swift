@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import VoxtrCoreContracts
 import VoxtrAthleteDomain
+import VoxtrParentAuthentication
 
 /// Multi-Athlete Family Foundation. The minimum UI this work package
 /// asks for: list every athlete, add, edit, archive/delete, and a
@@ -95,17 +96,31 @@ public struct AthleteFamilyManagementView: View {
     /// doc comment for why Calendar Planning Source V1's athlete-scoped
     /// mapping was retired).
     private let familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
+    /// Athlete Connection V1 (Slice D): same family-level threading
+    /// rationale as `familyCalendarSourcesViewModel` above — Parent
+    /// authentication/enrollment is a family-configuration concern, not
+    /// per-athlete. `ParentEnrollmentView` itself resolves its own
+    /// `EnrollableWorkspace` picker state from `enrollableWorkspaces`,
+    /// which the caller built by mapping this device's existing
+    /// `FamilyWorkspace`s — this view never touches
+    /// `VoxtrParentDomain`/SwiftData directly.
+    private let parentAuthenticationService: ParentAuthenticationService
+    private let enrollableWorkspaces: [EnrollableWorkspace]
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
         presentationMode: PresentationMode,
         sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel,
-        familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel
+        familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel,
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
         self.sleepSettingsViewModel = sleepSettingsViewModel
         self.familyCalendarSourcesViewModel = familyCalendarSourcesViewModel
+        self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
     }
 
     public var body: some View {
@@ -236,6 +251,20 @@ public struct AthleteFamilyManagementView: View {
                     Text(CalendarPlanningStrings.screenTitle)
                 }
                 .accessibilityIdentifier("athleteManagement.calendarSourcesLink")
+
+                // Athlete Connection V1 (Slice D): Parent sign-in +
+                // existing-workspace enrollment redemption — family-
+                // level, same section rationale as the Calendar Sources
+                // link immediately above.
+                NavigationLink {
+                    ParentEnrollmentView(
+                        service: parentAuthenticationService,
+                        workspaces: enrollableWorkspaces
+                    )
+                } label: {
+                    Text("Parent Account")
+                }
+                .accessibilityIdentifier("athleteManagement.parentAccountLink")
             } header: {
                 VoxtrSectionHeading("Family configuration")
             }
