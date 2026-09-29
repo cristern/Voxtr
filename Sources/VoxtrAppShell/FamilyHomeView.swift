@@ -6,6 +6,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrParentAuthentication
 
 /// S1.4: shown when `FamilyRestorationState` is `.existingFamily`.
 /// S2.4: also links to `WeeklyPlanningView`. S3.3: also links to
@@ -67,6 +68,16 @@ public struct FamilyHomeView: View {
     /// every other cross-domain service above — used only by
     /// `makeAthleteManagementViewModel()` below.
     public let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
+    /// Athlete Connection V1 (Slice D): same threading rationale as
+    /// `athleteConnectionOwnerHandoffService` above — passed straight
+    /// through to both branches below (the zero-active-athletes
+    /// `AthleteFamilyManagementView` fallback here, and
+    /// `FamilyHomeContentView`'s own `HomeDashboardView` "Manage
+    /// Athletes" sheet), so the same Parent Account entry point is
+    /// reachable from every presentation of this shared configuration
+    /// screen, not just the Profile tab's.
+    public let parentAuthenticationService: ParentAuthenticationService
+    public let enrollableWorkspaces: [EnrollableWorkspace]
 
     public init(
         family: RestoredFamily,
@@ -85,7 +96,9 @@ public struct FamilyHomeView: View {
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         sportRepository: SportRepository,
-        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService
+        athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService,
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         self.family = family
         self.planningService = planningService
@@ -104,6 +117,8 @@ public struct FamilyHomeView: View {
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
         self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
+        self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
     }
 
     public var body: some View {
@@ -124,7 +139,9 @@ public struct FamilyHomeView: View {
                 sleepCoordinationService: sleepCoordinationService,
                 sleepChangeBroadcaster: sleepChangeBroadcaster,
                 calendarPlanningCoordinationService: calendarPlanningCoordinationService,
-                sportRepository: sportRepository
+                sportRepository: sportRepository,
+                parentAuthenticationService: parentAuthenticationService,
+                enrollableWorkspaces: enrollableWorkspaces
             )
         } else {
             NavigationStack {
@@ -144,7 +161,9 @@ public struct FamilyHomeView: View {
                         sportRepository: sportRepository,
                         workspaceId: WorkspaceId(rawValue: family.workspace.id),
                         actorId: family.currentActor.actorId
-                    )
+                    ),
+                    parentAuthenticationService: parentAuthenticationService,
+                    enrollableWorkspaces: enrollableWorkspaces
                 )
             }
         }

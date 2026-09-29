@@ -9,6 +9,7 @@ import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
 import VoxtrNotificationsDomain
 import VoxtrCalendarPlanningDomain
+import VoxtrParentAuthentication
 
 /// Wires together every Core service and every domain module exactly
 /// once. Both `AthleteApp` and `ParentApp` call `CompositionRoot.build()`
@@ -114,7 +115,18 @@ public final class CompositionRoot {
         ),
         sync: SyncProviding = NoopSyncProvider(),
         featureFlags: FeatureFlagProviding = LocalFeatureFlagProvider(),
-        cloudKitTransport: CloudKitTransport = CloudKitTransport()
+        cloudKitTransport: CloudKitTransport = CloudKitTransport(),
+        // Athlete Connection V1 (Slice D): where the backend's Parent
+        // authentication/redemption Edge Functions live. This default is
+        // a LOCAL-DEVELOPMENT-ONLY placeholder (the conventional local
+        // Supabase Functions port) — never a hosted project URL or
+        // credential of any kind. Real hosted configuration must be
+        // supplied explicitly by the caller before any physical-device
+        // testing against a deployed backend; see this task's own
+        // delivery report for the follow-up this implies.
+        parentAuthenticationConfiguration: ParentAuthenticationConfiguration = ParentAuthenticationConfiguration(
+            baseURL: URL(string: "http://localhost:54321/functions/v1")!
+        )
     ) async throws -> CompositionRoot {
         let container = DIContainer()
         let eventBus = EventBus()
@@ -122,6 +134,16 @@ public final class CompositionRoot {
         container.register(SyncProviding.self) { sync }
         container.register(FeatureFlagProviding.self) { featureFlags }
         container.register(CloudKitTransport.self) { cloudKitTransport }
+
+        // Athlete Connection V1 (Slice D): registration only — no
+        // network call happens here. `URLSessionParentAuthenticationTransport`
+        // and `KeychainParentSessionStore` are this service's own
+        // defaults (see `ParentAuthenticationService.init`), so neither
+        // needs to be constructed explicitly here.
+        let parentAuthenticationService = ParentAuthenticationService(
+            configuration: parentAuthenticationConfiguration
+        )
+        container.register(ParentAuthenticationService.self) { parentAuthenticationService }
 
         let modelContainer = try persistence.makeModelContainer()
 

@@ -6,6 +6,7 @@ import VoxtrPlanningDomain
 import VoxtrTrainingDomain
 import VoxtrReflectionDomain
 import VoxtrCoreReferenceData
+import VoxtrParentAuthentication
 
 /// Sprint 1 (Daily Use Foundation), Part 1. Each destination carries
 /// its own identity directly — there is no shared, mutable "currently
@@ -184,6 +185,12 @@ public struct FamilyHomeContentView: View {
     /// that screen's own "Manage Athletes" `FamilyCalendarSourcesViewModel`
     /// — see `HomeDashboardView`'s own `athleteRepository` doc comment).
     private let athleteRepository: AthleteRepository
+    /// Athlete Connection V1 (Slice D): threaded to every `HomeDashboardView`
+    /// this view constructs (`athleteOverview(for:)` below), for that
+    /// screen's own "Manage Athletes" sheet — same rationale as
+    /// `calendarPlanningCoordinationService` above.
+    private let parentAuthenticationService: ParentAuthenticationService
+    private let enrollableWorkspaces: [EnrollableWorkspace]
 
     public init(
         family: RestoredFamily,
@@ -201,7 +208,9 @@ public struct FamilyHomeContentView: View {
         sleepCoordinationService: SleepCoordinationService,
         sleepChangeBroadcaster: AthleteSleepChangeBroadcaster,
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
-        sportRepository: SportRepository
+        sportRepository: SportRepository,
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         self.family = family
         self.planningService = planningService
@@ -219,6 +228,8 @@ public struct FamilyHomeContentView: View {
         self.calendarPlanningCoordinationService = calendarPlanningCoordinationService
         self.sportRepository = sportRepository
         self.athleteRepository = athleteRepository
+        self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -939,7 +950,9 @@ public struct FamilyHomeContentView: View {
             calendarPlanningCoordinationService: calendarPlanningCoordinationService,
             sportRepository: sportRepository,
             athleteRepository: athleteRepository,
-            workspaceId: WorkspaceId(rawValue: family.workspace.id)
+            workspaceId: WorkspaceId(rawValue: family.workspace.id),
+            parentAuthenticationService: parentAuthenticationService,
+            enrollableWorkspaces: enrollableWorkspaces
         )
     }
 
