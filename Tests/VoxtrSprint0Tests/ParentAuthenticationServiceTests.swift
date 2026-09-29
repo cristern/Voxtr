@@ -60,13 +60,24 @@ private final class FakeParentAuthenticationTransport: ParentAuthenticationTrans
 }
 
 private final class FakeParentSessionStore: ParentSessionStoring, @unchecked Sendable {
+    struct SaveFailure: Error {}
+
     var currentToken: String?
     private(set) var savedTokens: [String] = []
     private(set) var deleteCallCount = 0
+    /// When `true`, `saveToken(_:)` throws instead of persisting —
+    /// models a real Keychain write failure (disk full, device locked
+    /// in an unusual state, etc.) so callers can be tested for correct
+    /// fail-closed behavior rather than assumed to always succeed.
+    var failNextSave = false
 
     func loadToken() -> String? { currentToken }
 
     func saveToken(_ token: String) throws {
+        if failNextSave {
+            failNextSave = false
+            throw SaveFailure()
+        }
         currentToken = token
         savedTokens.append(token)
     }
@@ -74,6 +85,95 @@ private final class FakeParentSessionStore: ParentSessionStoring, @unchecked Sen
     func deleteToken() {
         currentToken = nil
         deleteCallCount += 1
+    }
+}
+
+/// A fake transport that reports, for each request it sees, whether the
+/// session store's token was already `nil` at the moment the request was
+/// DISPATCHED (i.e. the instant `send(_:)` began running) — not when its
+/// response eventually arrives. Since Swift executes a function's
+/// synchronous prefix up to its own first suspension point before any
+/// other code can interleave, this is a fully deterministic way to
+/// assert an ordering invariant ("X happens before this network call is
+/// even sent") without any timing-dependent `Task.sleep`/`Task.yield`
+/// guessing.
+private final class OrderRecordingTransport: ParentAuthenticationTransport, @unchecked Sendable {
+    private let sessionStore: FakeParentSessionStore
+    private let statusCode: Int
+    private(set) var tokenWasNilWhenRequestDispatched: Bool?
+
+    init(sessionStore: FakeParentSessionStore, statusCode: Int = 200) {
+        self.sessionStore = sessionStore
+        self.statusCode = statusCode
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        tokenWasNilWhenRequestDispatched = (sessionStore.currentToken == nil)
+        let body = try! JSONSerialization.data(withJSONObject: ["outcome": "revoked"] as [String: Any])
+        let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
+        return (body, response)
+    }
+}
+
+/// A fake transport whose `send(_:)` call for ONE specific path
+/// (`gatedPath`) suspends indefinitely until the test calls `release()`
+/// — every other path responds immediately with a canned success. Used
+/// to deterministically construct "this async call is suspended on its
+/// own network await right now" scenarios (via real `CheckedContinuation`
+/// signaling, never a timing guess) so a concurrent `signOut()` can be
+/// driven to completion while the gated call is still in flight,
+/// exercising `sessionGeneration`'s own race guard. An `actor` (not a
+/// `@unchecked Sendable` class) — the whole point of this fake is to be
+/// genuinely thread-safe under real concurrent access from two tasks.
+private actor SuspendableFakeTransport: ParentAuthenticationTransport {
+    private let gatedPath: String
+    private let gatedStatusCode: Int
+    private let gatedBody: Data
+    private var hasStarted = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+    private var shouldRelease = false
+    private var releaseContinuation: CheckedContinuation<Void, Never>?
+
+    init(gatedPath: String, statusCode: Int, body: Data) {
+        self.gatedPath = gatedPath
+        self.gatedStatusCode = statusCode
+        self.gatedBody = body
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        guard request.url?.lastPathComponent == gatedPath else {
+            let body = try! JSONSerialization.data(withJSONObject: ["outcome": "revoked"] as [String: Any])
+            let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            return (body, response)
+        }
+        hasStarted = true
+        startedContinuation?.resume()
+        startedContinuation = nil
+        await waitForRelease()
+        let response = HTTPURLResponse(url: request.url!, statusCode: gatedStatusCode, httpVersion: nil, headerFields: nil)!
+        return (gatedBody, response)
+    }
+
+    /// Suspends until the gated `send(_:)` call has actually started
+    /// (i.e. reached its own suspension point) — never a fixed delay.
+    func waitUntilStarted() async {
+        if hasStarted { return }
+        await withCheckedContinuation { continuation in
+            startedContinuation = continuation
+        }
+    }
+
+    func release() {
+        shouldRelease = true
+        releaseContinuation?.resume()
+        releaseContinuation = nil
+    }
+
+    private func waitForRelease() async {
+        if shouldRelease { return }
+        await withCheckedContinuation { continuation in
+            releaseContinuation = continuation
+        }
     }
 }
 
@@ -251,9 +351,65 @@ struct ParentAuthenticationServiceTests {
         #expect(transport.sentRequests.isEmpty)
     }
 
+    @Test("refreshSessionIfPossible() fails closed — if the backend rotated but the Keychain save throws, the old token is discarded rather than kept as a falsely-usable session")
+    func refreshFailsClosedWhenSaveThrows() async {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "old-token"
+        sessionStore.failNextSave = true
+        transport.enqueue(path: "parent-session-refresh", statusCode: 200, json: [
+            "outcome": "rotated",
+            "session_token": "rotated-token-that-cannot-be-persisted",
+            "expires_at": "2026-09-30T00:00:00Z",
+        ])
+
+        let didRefresh = await service.refreshSessionIfPossible()
+
+        #expect(didRefresh == false)
+        // The backend already rotated server-side (orphaning "old-token"),
+        // and the replacement couldn't be persisted — the old token must
+        // not be left in place looking usable; only a fresh SIWA
+        // handshake can recover from here.
+        #expect(sessionStore.currentToken == nil)
+        #expect(sessionStore.savedTokens.isEmpty)
+    }
+
+    @Test("An in-flight refreshSessionIfPossible() cannot write a token back if signOut() runs while it is suspended on the network await")
+    func refreshCannotResurrectTokenAfterConcurrentSignOut() async throws {
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "old-token"
+        let rotatedBody = try JSONSerialization.data(withJSONObject: [
+            "outcome": "rotated",
+            "session_token": "rotated-token-that-should-be-discarded",
+            "expires_at": "2026-09-30T00:00:00Z",
+        ] as [String: Any])
+        let transport = SuspendableFakeTransport(gatedPath: "parent-session-refresh", statusCode: 200, body: rotatedBody)
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+
+        let refreshTask = Task { await service.refreshSessionIfPossible() }
+        await transport.waitUntilStarted()
+
+        // The refresh call is now suspended on its own network await,
+        // already holding a "rotated" response it intends to write back
+        // once released — sign out while it's stuck there.
+        let signedOut = await service.signOut()
+        #expect(signedOut == true)
+        #expect(sessionStore.currentToken == nil)
+
+        await transport.release()
+        let didRefresh = await refreshTask.value
+
+        #expect(didRefresh == false)
+        #expect(sessionStore.currentToken == nil, "the in-flight refresh must not resurrect a session after signOut()")
+        #expect(sessionStore.savedTokens.isEmpty)
+    }
+
     // MARK: - Sign-out
 
-    @Test("signOut() clears the local token even when the network revoke call fails outright")
+    @Test("signOut() clears the local token even when the network revoke call fails outright, and reports the server side as unconfirmed")
     func signOutClearsTokenEvenWhenNetworkFails() async {
         struct AlwaysFailingTransport: ParentAuthenticationTransport {
             struct Failure: Error {}
@@ -267,33 +423,104 @@ struct ParentAuthenticationServiceTests {
             sessionStore: sessionStore
         )
 
-        await service.signOut()
+        let serverConfirmed = await service.signOut()
 
+        #expect(serverConfirmed == false)
         #expect(sessionStore.currentToken == nil)
         #expect(sessionStore.deleteCallCount == 1)
     }
 
-    @Test("signOut() attempts a real revoke call carrying the session header, then clears the local token")
+    @Test("signOut() returns false — never claiming server-side success — when the revoke request returns a non-200 status")
+    func signOutReturnsFalseOnNon200Revoke() async {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "token-to-revoke"
+        transport.enqueue(path: "parent-session-revoke", statusCode: 500, json: [:])
+
+        let serverConfirmed = await service.signOut()
+
+        #expect(serverConfirmed == false)
+        #expect(sessionStore.currentToken == nil)
+    }
+
+    @Test("signOut() attempts a real revoke call carrying the session header, then clears the local token, and reports server confirmation truthfully")
     func signOutSendsRevokeThenClearsToken() async {
         let (service, transport, sessionStore) = makeService()
         sessionStore.currentToken = "token-to-revoke"
         transport.enqueue(path: "parent-session-revoke", statusCode: 200, json: ["outcome": "revoked"])
 
-        await service.signOut()
+        let serverConfirmed = await service.signOut()
 
+        #expect(serverConfirmed == true)
         #expect(transport.sentRequests.count == 1)
         #expect(transport.sentRequests[0].value(forHTTPHeaderField: "X-Voxtr-Parent-Session") == "token-to-revoke")
         #expect(sessionStore.currentToken == nil)
     }
 
-    @Test("signOut() with no stored token does nothing — no request sent, no spurious delete")
+    @Test("signOut() with no stored token does nothing — no request sent, no spurious delete — and reports true (nothing needed revoking)")
     func signOutWithNoStoredTokenIsANoOp() async {
         let (service, transport, sessionStore) = makeService()
 
-        await service.signOut()
+        let serverConfirmed = await service.signOut()
 
+        #expect(serverConfirmed == true)
         #expect(transport.sentRequests.isEmpty)
         #expect(sessionStore.deleteCallCount == 0)
+    }
+
+    @Test("signOut() clears the local token BEFORE the revoke request is even dispatched — the UI must never appear signed in during that network call")
+    func signOutClearsTokenBeforeDispatchingRevoke() async {
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "token-to-clear"
+        let transport = OrderRecordingTransport(sessionStore: sessionStore)
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+
+        _ = await service.signOut()
+
+        #expect(transport.tokenWasNilWhenRequestDispatched == true)
+    }
+
+    @Test("An in-flight completeSignIn() cannot write a token back if signOut() runs while it is suspended on the network await")
+    func completeSignInCannotResurrectTokenAfterConcurrentSignOut() async throws {
+        let sessionStore = FakeParentSessionStore()
+        let authenticatedBody = try JSONSerialization.data(withJSONObject: [
+            "outcome": "authenticated",
+            "session_token": "new-token-that-should-be-discarded",
+            "expires_at": "2026-09-30T00:00:00Z",
+            "authenticated_at": "2026-09-29T00:00:00Z",
+        ] as [String: Any])
+        let transport = SuspendableFakeTransport(gatedPath: "parent-auth-complete", statusCode: 200, body: authenticatedBody)
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let handshake = PendingSiwaHandshake(nonceId: "nonce-id", hashedNonceHex: "hash")
+
+        let completeTask = Task {
+            try await service.completeSignIn(
+                handshake: handshake,
+                credential: AppleIdentityCredential(identityToken: "identity-token")
+            )
+        }
+        await transport.waitUntilStarted()
+
+        // completeSignIn() is now suspended on its own network await,
+        // already holding a freshly-authenticated response it intends
+        // to persist once released — sign out (of nothing, in this
+        // first-time-sign-in scenario) while it's stuck there.
+        let signedOut = await service.signOut()
+        #expect(signedOut == true)
+
+        await transport.release()
+        let outcome = try await completeTask.value
+
+        #expect(outcome == .authenticationFailed)
+        #expect(sessionStore.currentToken == nil, "the in-flight completion must not resurrect a session after signOut()")
+        #expect(sessionStore.savedTokens.isEmpty)
     }
 
     // MARK: - Existing-workspace enrollment redemption

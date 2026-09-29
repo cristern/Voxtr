@@ -34,6 +34,16 @@ public final class ParentAuthenticationService {
     private let configuration: ParentAuthenticationConfiguration
     private let transport: ParentAuthenticationTransport
     private let sessionStore: ParentSessionStoring
+    /// Bumped by every `signOut()` call. `completeSignIn(handshake:credential:)`
+    /// and `refreshSessionIfPossible()` each capture this value before
+    /// their own network `await`, and refuse to write a token back if it
+    /// changed while they were suspended — the actor's own reentrancy
+    /// means a `signOut()` call CAN interleave with either of those
+    /// methods across an `await` point, and without this guard the
+    /// in-flight call could resurrect a session the user just explicitly
+    /// signed out of. See each method's own doc comment for the exact
+    /// check.
+    private var sessionGeneration = 0
 
     public init(
         configuration: ParentAuthenticationConfiguration,
@@ -55,18 +65,41 @@ public final class ParentAuthenticationService {
         sessionStore.loadToken() != nil
     }
 
-    /// Clears the local token regardless of whether the network call
-    /// completes — per this task's own explicit requirement: "Revoke/
-    /// sign-out clears the local token even if the network request
-    /// cannot complete, with a truthful user state." The revoke call is
-    /// still attempted (best-effort server-side cleanup), but its
-    /// result never gates the local clear.
-    func signOut() async {
-        guard let token = sessionStore.loadToken() else { return }
+    /// Clears the local token BEFORE attempting the network revoke call —
+    /// per this task's own explicit requirement: the UI must never
+    /// appear signed in during a slow or failed network call, so
+    /// `isSignedIn()` reflects sign-out immediately, synchronously,
+    /// before any `await`. The revoke call is still attempted
+    /// (best-effort server-side cleanup) using the token captured before
+    /// it was cleared, but its result never gates the local clear.
+    ///
+    /// Also bumps `sessionGeneration`, so a `completeSignIn`/
+    /// `refreshSessionIfPossible` call already in flight when this runs
+    /// cannot write a new token back afterward (see that field's own doc
+    /// comment).
+    ///
+    /// Returns whether the server actually confirmed revocation —
+    /// `true` when nothing needed revoking (no token was stored) or the
+    /// revoke call returned 200, `false` when the network call failed or
+    /// returned anything else. Callers must not claim server-side
+    /// revocation succeeded when this returns `false`; the local token
+    /// is cleared unconditionally either way.
+    @discardableResult
+    func signOut() async -> Bool {
+        // Bumped unconditionally, even when there is no local token to
+        // clear — an in-flight FIRST-TIME `completeSignIn` has no token
+        // stored yet either (that's exactly what it's suspended trying
+        // to write), so gating the bump on "a token existed" would miss
+        // precisely that race. Sign-out always invalidates any
+        // authentication attempt already in flight, regardless of
+        // whether a stale token happened to exist locally when it ran.
+        sessionGeneration += 1
+        guard let token = sessionStore.loadToken() else { return true }
+        sessionStore.deleteToken()
         var request = makeRequest(path: "parent-session-revoke")
         request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
-        _ = try? await transport.send(request)
-        sessionStore.deleteToken()
+        guard let (_, response) = try? await transport.send(request) else { return false }
+        return response.statusCode == 200
     }
 
     // MARK: - Step 1: begin the SIWA handshake
@@ -101,6 +134,7 @@ public final class ParentAuthenticationService {
         handshake: PendingSiwaHandshake,
         credential: AppleIdentityCredential
     ) async throws -> SignInOutcome {
+        let generationAtStart = sessionGeneration
         var request = makeRequest(path: "parent-auth-complete")
         request.httpBody = try encode(ParentAuthCompleteRequestBody(
             nonceId: handshake.nonceId,
@@ -113,6 +147,18 @@ public final class ParentAuthenticationService {
         case "authenticated":
             guard let token = decoded.sessionToken else {
                 throw ParentAuthenticationError.malformedResponse
+            }
+            // The backend really did authenticate this handshake and
+            // hand back a live session — but if the user signed out
+            // while this call was suspended on the network await above,
+            // writing that session back locally would silently
+            // resurrect a session the user just explicitly ended. Treat
+            // it the same as an unsuccessful attempt from THIS caller's
+            // perspective: nothing is persisted, and the newly-created
+            // server-side session is simply left unused rather than
+            // stored (see `sessionGeneration`'s own doc comment).
+            guard generationAtStart == sessionGeneration else {
+                return .authenticationFailed
             }
             try sessionStore.saveToken(token)
             return .authenticated
@@ -139,6 +185,7 @@ public final class ParentAuthenticationService {
     /// itself remains valid.
     @discardableResult
     func refreshSessionIfPossible() async -> Bool {
+        let generationAtStart = sessionGeneration
         guard let token = sessionStore.loadToken() else { return false }
         var request = makeRequest(path: "parent-session-refresh")
         request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
@@ -151,8 +198,27 @@ public final class ParentAuthenticationService {
         else {
             return false
         }
-        try? sessionStore.saveToken(newToken)
-        return true
+        // The user signed out while this call was suspended on the
+        // network await above — the backend already rotated server-side
+        // (orphaning the OLD token this call started with), but writing
+        // the new one back now would resurrect a session the user just
+        // explicitly ended. Discard it, same rationale as
+        // `completeSignIn`'s own generation check.
+        guard generationAtStart == sessionGeneration else { return false }
+        do {
+            try sessionStore.saveToken(newToken)
+            return true
+        } catch {
+            // The backend already rotated server-side, orphaning the
+            // token this call started with — if the replacement can't be
+            // persisted locally, that old token is now dead everywhere.
+            // Fail closed rather than keep presenting an invalid token
+            // as signed-in: clear it so `isSignedIn()` correctly reports
+            // `false` and the only path forward is a fresh SIWA
+            // handshake.
+            sessionStore.deleteToken()
+            return false
+        }
     }
 
     // MARK: - Existing-workspace enrollment redemption
