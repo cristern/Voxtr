@@ -1,14 +1,23 @@
 import SwiftUI
 import AuthenticationServices
-import Foundation
 
 /// Athlete Connection V1 — the modest ParentApp entry point for sign-in,
 /// workspace selection, and enrollment code entry (see cristern/Voxtr
 /// Docs/Architecture/AthleteConnectionV1-ParentAuthenticationContract.md
 /// §6). This is the ONLY place in this package that touches
-/// `AuthenticationServices` UI directly — `ParentAuthenticationService`
-/// itself has no dependency on it at all, so the orchestration logic is
-/// fully testable without ever presenting a real system sign-in sheet.
+/// `AuthenticationServices` UI directly — neither `ParentAuthenticationService`
+/// nor `ParentSignInCoordinator` depend on it at all, so the sign-in
+/// state machine is fully testable without ever presenting a real
+/// system sign-in sheet.
+///
+/// The sign-in ATTEMPT lifecycle (pinning a handshake at Apple request
+/// creation, keeping it immune to idle nonce renewal, disabling the
+/// button for the attempt's whole lifetime, ending it exactly once) all
+/// lives in `ParentSignInCoordinator` — see that type's own doc comment
+/// for the race it fixes. This view only wires SwiftUI/
+/// `AuthenticationServices` callbacks to that coordinator and renders
+/// its state; workspace selection and code redemption (unrelated to the
+/// sign-in race) remain here.
 ///
 /// `workspaces` is supplied by the caller (`VoxtrAppShell`), which is
 /// the only place allowed to call `ParentWorkspaceRepository
@@ -20,55 +29,30 @@ public struct ParentEnrollmentView: View {
     private let service: ParentAuthenticationService
     private let workspaces: [EnrollableWorkspace]
 
-    @State private var isSignedIn: Bool
+    @State private var coordinator: ParentSignInCoordinator
     @State private var selectedWorkspace: EnrollableWorkspace?
     @State private var code: String = ""
-    @State private var statusMessage: String?
     @State private var isSubmitting = false
-    @State private var pendingHandshake: PendingSiwaHandshake?
-    /// When `pendingHandshake` was fetched, on THIS device's own clock —
-    /// never the backend's `expires_at`, since this is only a
-    /// conservative client-side safety margin, not the source of truth
-    /// for the nonce's actual server-side lifetime. See
-    /// `nonceFreshnessBound`'s own doc comment.
-    @State private var pendingHandshakeFetchedAt: Date?
-    @State private var isFetchingNonce = false
-    @State private var nonceFetchFailed = false
 
     public init(service: ParentAuthenticationService, workspaces: [EnrollableWorkspace]) {
         self.service = service
         self.workspaces = workspaces
-        _isSignedIn = State(initialValue: service.isSignedIn())
+        _coordinator = State(initialValue: ParentSignInCoordinator(service: service))
         _selectedWorkspace = State(initialValue: workspaces.first)
     }
 
-    /// The backend's `auth-nonce` nonce is valid for 60 seconds (see the
-    /// contract's own §1 nonce-lifetime note and the merged `auth-nonce`
-    /// handler). This is deliberately a conservative margin under that,
-    /// not the backend's own value — the device must stop presenting a
-    /// nonce as usable well before the backend would actually reject it,
-    /// since `configureAppleRequest(_:)` below cannot itself await a
-    /// fresh one mid-tap (`SignInWithAppleButton.onRequest` is
-    /// synchronous).
-    private static let nonceFreshnessBound: TimeInterval = 45
-    /// How often `keepNonceFresh()` checks whether the current handshake
-    /// has crossed `nonceFreshnessBound` while sitting unused — short
-    /// enough that the sign-in button is never left disabled for long,
-    /// long enough not to hammer `auth-nonce`.
+    /// How often the background poll checks whether the coordinator's
+    /// idle handshake is due for renewal — short enough that the
+    /// sign-in button is never left disabled for long, long enough not
+    /// to hammer `auth-nonce`. The coordinator itself decides WHETHER a
+    /// fetch is actually useful right now (`shouldFetchReadyHandshake`)
+    /// — in particular, it refuses outright for as long as an attempt is
+    /// active, regardless of this timer.
     private static let nonceFreshnessPollInterval: Duration = .seconds(5)
-
-    private var isPendingHandshakeFresh: Bool {
-        guard let fetchedAt = pendingHandshakeFetchedAt else { return false }
-        return Date().timeIntervalSince(fetchedAt) < Self.nonceFreshnessBound
-    }
-
-    private var canAttemptSignIn: Bool {
-        pendingHandshake != nil && isPendingHandshakeFresh
-    }
 
     public var body: some View {
         Form {
-            if !isSignedIn {
+            if !coordinator.isSignedIn {
                 signInSection
             } else {
                 enrollmentSection
@@ -77,13 +61,13 @@ public struct ParentEnrollmentView: View {
         }
         .navigationTitle("Parent Account")
         // Keyed on `isSignedIn` rather than a one-shot `.task`: SwiftUI
-        // cancels and restarts this task whenever `isSignedIn` changes,
-        // which is exactly what "signing out must enable a new SIWA
-        // attempt without navigating away" needs — no manual task
-        // bookkeeping in `signOut()` below. While signed in, the guard
-        // makes this an immediate no-op (no reason to hold a nonce).
-        .task(id: isSignedIn) {
-            guard !isSignedIn else { return }
+        // cancels and restarts this task whenever it changes, which is
+        // exactly what "signing out must enable a new SIWA attempt
+        // without navigating away" needs — no manual task bookkeeping
+        // in `signOut()`. While signed in, the guard makes this an
+        // immediate no-op (no reason to hold an idle nonce).
+        .task(id: coordinator.isSignedIn) {
+            guard !coordinator.isSignedIn else { return }
             await keepNonceFresh()
         }
     }
@@ -92,18 +76,18 @@ public struct ParentEnrollmentView: View {
         Section {
             SignInWithAppleButton(.signIn, onRequest: configureAppleRequest, onCompletion: handleAppleCompletion)
                 .frame(height: 44)
-                .disabled(!canAttemptSignIn)
+                .disabled(!coordinator.canAttemptSignIn)
                 .accessibilityIdentifier("parentEnrollment.signInButton")
-            if nonceFetchFailed {
+            if coordinator.nonceFetchFailed {
                 Button("Retry") {
-                    Task { await fetchNonce() }
+                    Task { await coordinator.fetchReadyHandshakeIfNeeded() }
                 }
                 .accessibilityIdentifier("parentEnrollment.retryNonceButton")
             }
         } header: {
             Text("Sign in")
         } footer: {
-            if let statusMessage {
+            if let statusMessage = coordinator.statusMessage {
                 Text(statusMessage)
                     .accessibilityIdentifier("parentEnrollment.statusMessage")
             }
@@ -135,7 +119,7 @@ public struct ParentEnrollmentView: View {
         } header: {
             Text("Enroll this workspace")
         } footer: {
-            if let statusMessage {
+            if let statusMessage = coordinator.statusMessage {
                 Text(statusMessage)
                     .accessibilityIdentifier("parentEnrollment.statusMessage")
             }
@@ -144,8 +128,15 @@ public struct ParentEnrollmentView: View {
 
     private var signOutSection: some View {
         Section {
+            // Synchronous on purpose: `ParentSignInCoordinator.signOut()`
+            // flips `isSignedIn` immediately, before any network call,
+            // and returns its own best-effort revocation `Task`
+            // internally rather than requiring the caller to await one —
+            // wrapping this in `Task { await ... }` would reintroduce
+            // exactly the delay this fix removes.
             Button("Sign out", role: .destructive) {
-                Task { await signOut() }
+                code = ""
+                coordinator.signOut()
             }
             .accessibilityIdentifier("parentEnrollment.signOutButton")
         }
@@ -154,86 +145,37 @@ public struct ParentEnrollmentView: View {
     // MARK: - Nonce lifecycle
 
     /// Runs for as long as the sign-in section is visible (SwiftUI
-    /// cancels it automatically once `isSignedIn` flips `true`, or this
-    /// view goes away) — fetches a nonce immediately if needed, then
-    /// polls to replace it before it crosses this view's own
-    /// conservative freshness bound, so the Sign in with Apple button is
-    /// available whenever possible rather than going permanently stale.
-    /// Every place a handshake is CONSUMED (a completion attempt,
-    /// success or failure) also triggers an immediate `fetchNonce()` of
-    /// its own rather than waiting out this loop's own poll interval —
-    /// this loop is the steady-state/idle-staleness safety net, not the
-    /// only path to a fresh nonce.
+    /// cancels it automatically once `coordinator.isSignedIn` flips
+    /// `true`, or this view goes away) — the coordinator itself decides
+    /// whether each poll actually does anything.
     private func keepNonceFresh() async {
         while !Task.isCancelled {
-            if pendingHandshake == nil || !isPendingHandshakeFresh {
-                await fetchNonce()
-            }
+            await coordinator.fetchReadyHandshakeIfNeeded()
             try? await Task.sleep(for: Self.nonceFreshnessPollInterval)
-        }
-    }
-
-    /// Fetches a fresh handshake and records when it was fetched (for
-    /// `isPendingHandshakeFresh`'s own bound check). `isFetchingNonce`
-    /// guards against wasteful concurrent duplicate fetches — the
-    /// background poll loop and an explicit consumption-triggered call
-    /// can otherwise both land at nearly the same moment.
-    private func fetchNonce() async {
-        guard !isFetchingNonce else { return }
-        isFetchingNonce = true
-        defer { isFetchingNonce = false }
-        do {
-            let handshake = try await service.beginSignIn()
-            pendingHandshake = handshake
-            pendingHandshakeFetchedAt = Date()
-            nonceFetchFailed = false
-        } catch {
-            pendingHandshake = nil
-            pendingHandshakeFetchedAt = nil
-            nonceFetchFailed = true
-            statusMessage = "Couldn't prepare sign-in. Check your connection and try again."
         }
     }
 
     // MARK: - Sign-in
 
     /// `SignInWithAppleButton.onRequest` is a SYNCHRONOUS callback — it
-    /// cannot itself await the nonce fetch — so `pendingHandshake` must
-    /// already have been populated by `keepNonceFresh()` before the
-    /// button becomes enabled (see `.disabled(!canAttemptSignIn)`).
-    /// Re-checks freshness here too, defensively: `canAttemptSignIn`
-    /// already keeps the button disabled once a handshake goes stale,
-    /// but if one somehow slipped past that (a narrow window between
-    /// SwiftUI evaluating `.disabled` and this callback firing), this
-    /// never signs the request with a nonce past this view's own
-    /// conservative bound — an empty nonce is safely rejected by the
-    /// backend, which triggers the same `authentication_failed` recovery
-    /// path as any other rejected attempt. Only `.nonce` is set; no
-    /// scopes are requested, since nothing in this flow uses an Apple-
-    /// provided name/email (`ParentProfile`'s name comes from local
-    /// onboarding, never from Apple).
+    /// cannot itself await a nonce fetch. `coordinator.beginAttempt()`
+    /// is itself synchronous for exactly this reason: it atomically pins
+    /// whatever idle handshake is currently ready as THIS attempt's
+    /// handshake, in one call with no `await` in between, so there is no
+    /// window for a concurrent renewal to race it. If no idle handshake
+    /// is available/fresh right now (should be unreachable given
+    /// `.disabled(!coordinator.canAttemptSignIn)`, but never trusted
+    /// blindly), an empty nonce is signed instead of reusing anything —
+    /// the backend safely rejects that the same way it rejects any other
+    /// failed attempt. Only `.nonce` is set; no scopes are requested,
+    /// since nothing in this flow uses an Apple-provided name/email
+    /// (`ParentProfile`'s name comes from local onboarding, never from
+    /// Apple).
     private func configureAppleRequest(_ request: ASAuthorizationAppleIDRequest) {
-        guard let pendingHandshake, isPendingHandshakeFresh else {
-            request.nonce = ""
-            return
-        }
-        request.nonce = pendingHandshake.hashedNonceHex
+        request.nonce = coordinator.beginAttempt()?.hashedNonceHex ?? ""
     }
 
     private func handleAppleCompletion(_ result: Result<ASAuthorization, Error>) {
-        guard let handshake = pendingHandshake else {
-            statusMessage = "Please try again."
-            return
-        }
-        // Consume the handshake immediately, synchronously, before any
-        // awaiting begins — a nonce is single-use, and this is also
-        // what prevents a duplicate/tapped-twice completion of this
-        // exact handshake: `canAttemptSignIn` requires `pendingHandshake
-        // != nil`, so the button is already disabled by the time either
-        // branch below starts its own async work.
-        pendingHandshake = nil
-        pendingHandshakeFetchedAt = nil
-
         switch result {
         case .success(let authorization):
             guard
@@ -241,70 +183,26 @@ public struct ParentEnrollmentView: View {
                 let tokenData = credential.identityToken,
                 let identityToken = String(data: tokenData, encoding: .utf8)
             else {
-                statusMessage = "Sign in with Apple did not return a usable credential."
-                Task { await fetchNonce() }
+                coordinator.cancelActiveAttempt()
+                coordinator.statusMessage = "Sign in with Apple did not return a usable credential."
+                Task { await coordinator.fetchReadyHandshakeIfNeeded() }
                 return
             }
-            Task { await completeSignIn(handshake: handshake, identityToken: identityToken) }
-        case .failure:
-            // Cancellation or an Apple-side failure — the nonce this
-            // handshake carried is discarded (never reused), and the
-            // sign-in section must remain usable, so fetch a fresh one
-            // right away rather than waiting for the background poll.
-            statusMessage = "Sign-in was cancelled or failed."
-            Task { await fetchNonce() }
-        }
-    }
-
-    private func completeSignIn(handshake: PendingSiwaHandshake, identityToken: String) async {
-        do {
-            let outcome = try await service.completeSignIn(
-                handshake: handshake,
-                credential: AppleIdentityCredential(identityToken: identityToken)
-            )
-            switch outcome {
-            case .authenticated:
-                isSignedIn = true
-                statusMessage = nil
-            case .authenticationFailed:
-                // Also reached if the backend authenticated the
-                // handshake but the service discarded the resulting
-                // session because the user signed out while this call
-                // was in flight (see `ParentAuthenticationService
-                // .completeSignIn`'s own generation-guard doc comment) —
-                // either way, a fresh nonce is what lets the user try
-                // again. Because the Apple sheet itself can take long
-                // enough for the nonce to have expired server-side
-                // before this call reached `parent-auth-complete`, this
-                // is also the path that recovers from that case: a
-                // stale nonce reads to the backend as an ordinary failed
-                // authentication (§1's anti-enumeration design — the
-                // wire response never distinguishes "wrong credential"
-                // from "expired nonce"), so restarting with a brand-new
-                // nonce here is the correct, sufficient recovery for
-                // both causes.
-                statusMessage = "Sign-in failed. Please try again."
-                await fetchNonce()
+            Task {
+                await coordinator.completeActiveAttempt(identityToken: identityToken)
+                // The attempt just ended (success or failure) — fetch a
+                // fresh idle handshake right away rather than waiting
+                // out the background poll's own interval.
+                await coordinator.fetchReadyHandshakeIfNeeded()
             }
-        } catch {
-            statusMessage = "Could not reach the server. Please try again."
-            await fetchNonce()
+        case .failure:
+            // Cancellation or an Apple-side failure — the pinned
+            // attempt handshake is discarded (never reused), and the
+            // sign-in section must remain usable, so fetch a fresh idle
+            // one right away.
+            coordinator.cancelActiveAttempt()
+            Task { await coordinator.fetchReadyHandshakeIfNeeded() }
         }
-    }
-
-    private func signOut() async {
-        let serverConfirmedRevocation = await service.signOut()
-        isSignedIn = false
-        code = ""
-        // The local token is always cleared by `service.signOut()`
-        // regardless of network outcome — never claim the SERVER side
-        // succeeded when it didn't.
-        statusMessage = serverConfirmedRevocation
-            ? nil
-            : "Signed out on this device. We couldn't confirm your session was closed on the server."
-        // `isSignedIn` flipping to `false` restarts the `.task(id:)`
-        // above on its own, which calls `keepNonceFresh()` and fetches a
-        // new handshake immediately — no manual fetch needed here.
     }
 
     // MARK: - Redemption
@@ -315,7 +213,7 @@ public struct ParentEnrollmentView: View {
         defer { isSubmitting = false }
         do {
             let outcome = try await service.redeemEnrollment(workspace: workspace, code: code)
-            statusMessage = message(for: outcome)
+            coordinator.statusMessage = message(for: outcome)
             switch outcome {
             case .bound, .alreadyRedeemedBySameParent:
                 code = ""
@@ -325,23 +223,21 @@ public struct ParentEnrollmentView: View {
         } catch let error as ParentAuthenticationError {
             switch error {
             case .sessionInvalid, .sessionExpired, .notSignedIn:
-                isSignedIn = false
-                statusMessage = "Your session has expired. Please sign in again."
+                coordinator.forceSignedOut(statusMessage: "Your session has expired. Please sign in again.")
             case .reauthenticationRequired:
                 // Rotation cannot satisfy this — only a brand-new SIWA
                 // handshake can (§2.6). Returning to the sign-in section
-                // starts exactly that (via the `.task(id: isSignedIn)`
-                // restart above), without discarding the still-live
-                // (just not fresh enough) token — see
+                // starts exactly that (via the `.task(id:)` restart
+                // above), without discarding the still-live (just not
+                // fresh enough) token — see
                 // ParentAuthenticationService.redeemEnrollment's own doc
                 // comment.
-                isSignedIn = false
-                statusMessage = "For your security, please sign in again to confirm it's you."
+                coordinator.forceSignedOut(statusMessage: "For your security, please sign in again to confirm it's you.")
             case .network, .malformedResponse:
-                statusMessage = "Something went wrong. Please try again."
+                coordinator.statusMessage = "Something went wrong. Please try again."
             }
         } catch {
-            statusMessage = "Something went wrong. Please try again."
+            coordinator.statusMessage = "Something went wrong. Please try again."
         }
     }
 
