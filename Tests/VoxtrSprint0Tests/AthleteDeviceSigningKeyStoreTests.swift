@@ -1,6 +1,7 @@
 import Testing
 import CryptoKit
 import Foundation
+import Security
 @testable import VoxtrAppShell
 
 // Athlete Connection V1 (backend device authorization, review round 2).
