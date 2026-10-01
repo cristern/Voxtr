@@ -259,7 +259,7 @@ struct AthleteDeviceAuthorizationServiceTests {
                 "display_code": badCode,
             ])
 
-            await #expect(throws: AthleteDeviceAuthorizationError.malformedResponse, "badCode: \(badCode)") {
+            await #expect(throws: AthleteDeviceAuthorizationError.malformedResponse) {
                 try await service.submitConnectionRequest(invitationId: Self.invitationId)
             }
         }
