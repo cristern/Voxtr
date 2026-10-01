@@ -42,6 +42,22 @@ public struct AthleteDeviceAuthorizationScanView: View {
                     }
                 }
         }
+        // Review round 2: resumes a receipt from a previous interrupted
+        // session exactly once, before any scan — never on every body
+        // re-evaluation (SwiftUI only runs `.task` again if its own
+        // identity changes, and this view's identity is stable for the
+        // sheet's lifetime).
+        .task {
+            coordinator.resumePendingAttemptIfAny()
+        }
+        // Cancels any in-flight network/poll work the instant this
+        // screen leaves the hierarchy — fires for an explicit Cancel tap
+        // AND an interactive swipe dismissal alike (`.onDisappear` runs
+        // either way), so no orphaned poll loop keeps running after the
+        // Athlete has left this screen.
+        .onDisappear {
+            coordinator.cancel()
+        }
     }
 
     @ViewBuilder
@@ -49,6 +65,8 @@ public struct AthleteDeviceAuthorizationScanView: View {
         switch coordinator.state {
         case .idle:
             scanningView
+        case .resuming:
+            waitingView(message: "Resuming your previous connection attempt…")
         case .submitting, .claiming:
             waitingView(message: "Confirming…")
         case .awaitingApproval(_, let displayCode):
@@ -67,7 +85,7 @@ public struct AthleteDeviceAuthorizationScanView: View {
         } else {
             ZStack {
                 makeScannerView(
-                    { text in Task { await coordinator.beginPairing(scannedText: text) } },
+                    { text in coordinator.beginPairing(scannedText: text) },
                     { isCameraPermissionDenied = true }
                 )
                 .id(scanAttempt)
@@ -119,13 +137,23 @@ public struct AthleteDeviceAuthorizationScanView: View {
         .accessibilityIdentifier("athleteDeviceAuthorizationScan.awaitingApproval")
     }
 
+    /// Review round 2: deliberately NOT "Connected" — this slice's own
+    /// boundary ends at confirmed backend device authorization. It never
+    /// hydrates athlete data, accepts a CKShare, activates business
+    /// membership, or shows the normal athlete dashboard as a
+    /// consequence of this result, so the copy says exactly that rather
+    /// than implying a fuller connection than what actually happened.
     private var successView: some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(.green)
-            Text("Connected")
+            Text("Device authorized")
                 .font(VoxtrTypography.cardTitle)
+            Text("This device is now authorized with Vǫxtr. Setting up the athlete's data on this device isn't available yet.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .padding(.horizontal, 32)
             Button("Done") { dismiss() }
                 .accessibilityIdentifier("athleteDeviceAuthorizationScan.doneButton")
         }

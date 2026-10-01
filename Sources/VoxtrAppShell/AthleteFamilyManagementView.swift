@@ -295,7 +295,8 @@ public struct AthleteFamilyManagementView: View {
                 athlete: athlete,
                 sleepSettingsViewModel: sleepSettingsViewModel(athlete),
                 athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
-                parentAuthenticationService: parentAuthenticationService
+                parentAuthenticationService: parentAuthenticationService,
+                enrollableWorkspaces: enrollableWorkspaces
             )
         } label: {
             HStack(spacing: 8) {
@@ -426,6 +427,7 @@ struct AthleteSettingsView: View {
     /// — a separate sheet presentation, never a replacement.
     private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     private let parentAuthenticationService: ParentAuthenticationService
+    private let enrollableWorkspaces: [EnrollableWorkspace]
     @State private var isPresentingDeviceAuthorizationInvitation = false
 
     init(
@@ -433,7 +435,8 @@ struct AthleteSettingsView: View {
         athlete: AthleteProfile,
         sleepSettingsViewModel: AthleteSleepSettingsViewModel,
         athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
-        parentAuthenticationService: ParentAuthenticationService
+        parentAuthenticationService: ParentAuthenticationService,
+        enrollableWorkspaces: [EnrollableWorkspace]
     ) {
         self.viewModel = viewModel
         self.athlete = athlete
@@ -441,6 +444,7 @@ struct AthleteSettingsView: View {
         _selectedColor = State(initialValue: viewModel.resolvedColor(for: athlete))
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
         self.parentAuthenticationService = parentAuthenticationService
+        self.enrollableWorkspaces = enrollableWorkspaces
     }
 
     var body: some View {
@@ -765,6 +769,7 @@ struct AthleteSettingsView: View {
                 workspaceId: viewModel.currentWorkspaceId,
                 invitedBy: viewModel.currentParentActorId,
                 athleteDisplayName: athlete.givenName,
+                enrollableWorkspaces: enrollableWorkspaces,
                 onDismiss: { isPresentingDeviceAuthorizationInvitation = false }
             )
         }

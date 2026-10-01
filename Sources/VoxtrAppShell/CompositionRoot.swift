@@ -126,6 +126,21 @@ public final class CompositionRoot {
         // delivery report for the follow-up this implies.
         parentAuthenticationConfiguration: ParentAuthenticationConfiguration = ParentAuthenticationConfiguration(
             baseURL: URL(string: "http://localhost:54321/functions/v1")!
+        ),
+        // Athlete Connection V1 (backend device authorization, review
+        // round 2): the Supabase project `apikey`/`Authorization: Bearer`
+        // gateway credential `AthleteDeviceAuthorizationService` attaches
+        // to `connection-request-submit`/`claim-challenge`/`claim-submit`
+        // — see that service's own `AthleteDeviceAuthorizationGatewayConfiguration`
+        // doc comment. This default is an OBVIOUSLY NON-FUNCTIONAL
+        // placeholder string, never a real hosted anon key of any kind
+        // (matching `.env.example`'s own
+        // `SUPABASE_ANON_KEY=replace-with-local-or-dashboard-anon-key`
+        // convention in cristern/Voxtr-Backend) — real configuration
+        // must be supplied explicitly by the caller before any
+        // physical-device testing against a deployed or local backend.
+        athleteDeviceAuthorizationGatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration = AthleteDeviceAuthorizationGatewayConfiguration(
+            anonKey: "REPLACE_WITH_SUPABASE_ANON_KEY"
         )
     ) async throws -> CompositionRoot {
         let container = DIContainer()
@@ -157,7 +172,8 @@ public final class CompositionRoot {
         // resolves this, from `AthleteRootView`, after an explicit
         // "Connect this device" tap.
         let athleteDeviceAuthorizationService = AthleteDeviceAuthorizationService(
-            configuration: parentAuthenticationConfiguration
+            configuration: parentAuthenticationConfiguration,
+            gatewayConfiguration: athleteDeviceAuthorizationGatewayConfiguration
         )
         container.register(AthleteDeviceAuthorizationService.self) { athleteDeviceAuthorizationService }
 

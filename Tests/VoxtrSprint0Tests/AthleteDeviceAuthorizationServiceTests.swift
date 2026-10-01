@@ -51,18 +51,38 @@ private final class FakeDeviceAuthorizationTransport: ParentAuthenticationTransp
 /// A deterministic fake signing key — never real CryptoKit/Keychain I/O
 /// — so these tests can assert exactly what gets sent on the wire
 /// without depending on a real generated key's own (correctly random,
-/// hence unpredictable) bytes.
+/// hence unpredictable) bytes. Review round 2: tracks `loadOrCreateSigningKey()`
+/// and `loadExistingSigningKey()` calls SEPARATELY, and can be made to
+/// fail each independently, so tests can prove
+/// `submitConnectionRequest` only ever calls the former and `submitClaim`
+/// only ever calls the latter.
 private final class FakeSigningKeyStore: AthleteDeviceSigningKeyStoring, @unchecked Sendable {
     let fixedPublicKey = Data([0x04] + Array(repeating: 0xAB, count: 64))
     let fixedSignature = Data(Array(repeating: 0xCD, count: 64))
     private(set) var signedMessages: [Data] = []
-    var throwOnLoad = false
+    private(set) var loadOrCreateCallCount = 0
+    private(set) var loadExistingCallCount = 0
+    var throwOnLoadOrCreate = false
+    var throwOnLoadExisting = false
 
     func loadOrCreateSigningKey() throws -> AthleteDeviceSigningKey {
-        if throwOnLoad {
-            throw AthleteDeviceSigningKeyStoreError.keyReconstitutionFailed
+        loadOrCreateCallCount += 1
+        if throwOnLoadOrCreate {
+            throw AthleteDeviceSigningKeyStoreError.corruptedKeyMaterial
         }
-        return AthleteDeviceSigningKey(fixedPublicKey: fixedPublicKey, fixedSignature: fixedSignature) { [weak self] message in
+        return makeKey()
+    }
+
+    func loadExistingSigningKey() throws -> AthleteDeviceSigningKey {
+        loadExistingCallCount += 1
+        if throwOnLoadExisting {
+            throw AthleteDeviceSigningKeyStoreError.noKeyForCurrentInstallation
+        }
+        return makeKey()
+    }
+
+    private func makeKey() -> AthleteDeviceSigningKey {
+        AthleteDeviceSigningKey(fixedPublicKey: fixedPublicKey, fixedSignature: fixedSignature) { [weak self] message in
             self?.signedMessages.append(message)
         }
     }
@@ -76,13 +96,20 @@ struct AthleteDeviceAuthorizationServiceTests {
     private static let invitationId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
     private static let requestId = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
     private static let challengeId = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+    private static let anonKey = "test-anon-key"
+    /// A well-formed 32-byte nonce — the exact length
+    /// `claim-challenge`'s own `NONCE_LENGTH_BYTES` requires; review
+    /// round 2's strict validation rejects anything shorter.
+    private static let wellFormedNonce = Data((0..<32).map { UInt8($0) })
 
     private func makeService(
         transport: FakeDeviceAuthorizationTransport = FakeDeviceAuthorizationTransport(),
-        signingKeyStore: FakeSigningKeyStore = FakeSigningKeyStore()
+        signingKeyStore: FakeSigningKeyStore = FakeSigningKeyStore(),
+        anonKey: String = Self.anonKey
     ) -> (AthleteDeviceAuthorizationService, FakeDeviceAuthorizationTransport, FakeSigningKeyStore) {
         let service = AthleteDeviceAuthorizationService(
             configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            gatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration(anonKey: anonKey),
             transport: transport,
             signingKeyStore: signingKeyStore
         )
@@ -129,6 +156,51 @@ struct AthleteDeviceAuthorizationServiceTests {
         #expect(AthleteDeviceAuthorizationService.base64UrlDecode(encoded) == original)
     }
 
+    @Test("base64UrlDecode strictly rejects any character outside the base64url alphabet — never partially decodes embedded +, /, or =")
+    func base64UrlDecodeRejectsNonAlphabetCharacters() {
+        #expect(AthleteDeviceAuthorizationService.base64UrlDecode("AQID+") == nil)
+        #expect(AthleteDeviceAuthorizationService.base64UrlDecode("AQID/") == nil)
+        #expect(AthleteDeviceAuthorizationService.base64UrlDecode("AQID=") == nil)
+        #expect(AthleteDeviceAuthorizationService.base64UrlDecode("") == nil)
+    }
+
+    // MARK: - Gateway configuration (review round 2)
+
+    @Test("Every one of the three endpoints attaches the Supabase apikey/Authorization gateway header pair, never a Parent session header")
+    func allThreeEndpointsAttachGatewayHeaders() async throws {
+        let (service, transport, _) = makeService()
+        transport.enqueue(path: "connection-request-submit", statusCode: 200, json: ["outcome": "invitation_not_available"])
+        transport.enqueue(path: "claim-challenge", statusCode: 200, json: ["outcome": "request_not_available"])
+        transport.enqueue(path: "claim-submit", statusCode: 200, json: ["outcome": "challenge_invalid"])
+
+        _ = try await service.submitConnectionRequest(invitationId: Self.invitationId)
+        _ = try await service.requestClaimChallenge(connectionRequestId: Self.requestId)
+        _ = try await service.submitClaim(invitationId: Self.invitationId, connectionRequestId: Self.requestId, challengeId: Self.challengeId, nonce: Self.wellFormedNonce)
+
+        #expect(transport.sentRequests.count == 3)
+        for request in transport.sentRequests {
+            #expect(request.value(forHTTPHeaderField: "apikey") == Self.anonKey)
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer \(Self.anonKey)")
+            #expect(request.value(forHTTPHeaderField: "X-Voxtr-Parent-Session") == nil)
+        }
+    }
+
+    @Test("Every one of the three endpoints throws .gatewayConfigurationMissing and sends NO request when the anon key is empty")
+    func allThreeEndpointsFailClosedOnMissingGatewayConfiguration() async {
+        let (service, transport, _) = makeService(anonKey: "")
+
+        await #expect(throws: AthleteDeviceAuthorizationError.gatewayConfigurationMissing) {
+            try await service.submitConnectionRequest(invitationId: Self.invitationId)
+        }
+        await #expect(throws: AthleteDeviceAuthorizationError.gatewayConfigurationMissing) {
+            try await service.requestClaimChallenge(connectionRequestId: Self.requestId)
+        }
+        await #expect(throws: AthleteDeviceAuthorizationError.gatewayConfigurationMissing) {
+            try await service.submitClaim(invitationId: Self.invitationId, connectionRequestId: Self.requestId, challengeId: Self.challengeId, nonce: Self.wellFormedNonce)
+        }
+        #expect(transport.sentRequests.isEmpty)
+    }
+
     // MARK: - connection-request-submit
 
     @Test("submitConnectionRequest() sends the invitation id and the base64url-encoded x963 public key, and maps .submitted")
@@ -146,6 +218,17 @@ struct AthleteDeviceAuthorizationServiceTests {
         let body = try requestBodyJSON(transport.sentRequests[0])
         #expect(body["invitation_id"] as? String == Self.invitationId.uuidString)
         #expect(body["device_public_key"] as? String == AthleteDeviceAuthorizationService.base64UrlEncode(signingKeyStore.fixedPublicKey))
+    }
+
+    @Test("submitConnectionRequest() uses loadOrCreateSigningKey() — it STARTS a new attempt — and never touches loadExistingSigningKey()")
+    func submitConnectionRequestUsesLoadOrCreateOnly() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        transport.enqueue(path: "connection-request-submit", statusCode: 200, json: ["outcome": "invitation_not_available"])
+
+        _ = try await service.submitConnectionRequest(invitationId: Self.invitationId)
+
+        #expect(signingKeyStore.loadOrCreateCallCount == 1)
+        #expect(signingKeyStore.loadExistingCallCount == 0)
     }
 
     @Test("submitConnectionRequest() maps every documented non-success outcome")
@@ -166,10 +249,26 @@ struct AthleteDeviceAuthorizationServiceTests {
         }
     }
 
+    @Test("submitConnectionRequest() throws .malformedResponse for a submitted outcome whose display_code isn't exactly 6 uppercase hex characters")
+    func submitConnectionRequestRejectsMalformedDisplayCode() async {
+        for badCode in ["a1b2c3", "A1B2C", "A1B2C3X", ""] {
+            let (service, transport, _) = makeService()
+            transport.enqueue(path: "connection-request-submit", statusCode: 200, json: [
+                "outcome": "submitted",
+                "connection_request_id": Self.requestId.uuidString,
+                "display_code": badCode,
+            ])
+
+            await #expect(throws: AthleteDeviceAuthorizationError.malformedResponse, "badCode: \(badCode)") {
+                try await service.submitConnectionRequest(invitationId: Self.invitationId)
+            }
+        }
+    }
+
     @Test("submitConnectionRequest() throws .signingKeyUnavailable, sending no request, when the key store fails")
     func submitConnectionRequestThrowsWhenKeyUnavailable() async {
         let signingKeyStore = FakeSigningKeyStore()
-        signingKeyStore.throwOnLoad = true
+        signingKeyStore.throwOnLoadOrCreate = true
         let (service, transport, _) = makeService(signingKeyStore: signingKeyStore)
 
         await #expect(throws: AthleteDeviceAuthorizationError.signingKeyUnavailable) {
@@ -180,14 +279,13 @@ struct AthleteDeviceAuthorizationServiceTests {
 
     // MARK: - claim-challenge
 
-    @Test("requestClaimChallenge() maps .issued, decoding the base64url nonce back to raw bytes")
+    @Test("requestClaimChallenge() maps .issued, decoding the base64url nonce back to raw bytes, and never touches the signing key store")
     func requestClaimChallengeMapsIssued() async throws {
-        let (service, transport, _) = makeService()
-        let nonceBytes = Data([0xAA, 0xBB, 0xCC])
+        let (service, transport, signingKeyStore) = makeService()
         transport.enqueue(path: "claim-challenge", statusCode: 200, json: [
             "outcome": "issued",
             "challenge_id": Self.challengeId.uuidString,
-            "nonce": AthleteDeviceAuthorizationService.base64UrlEncode(nonceBytes),
+            "nonce": AthleteDeviceAuthorizationService.base64UrlEncode(Self.wellFormedNonce),
             "expires_at": "2026-10-01T00:01:00Z",
         ])
 
@@ -198,7 +296,25 @@ struct AthleteDeviceAuthorizationServiceTests {
             return
         }
         #expect(challengeId == Self.challengeId)
-        #expect(nonce == nonceBytes)
+        #expect(nonce == Self.wellFormedNonce)
+        #expect(signingKeyStore.loadOrCreateCallCount == 0)
+        #expect(signingKeyStore.loadExistingCallCount == 0)
+    }
+
+    @Test("requestClaimChallenge() throws .malformedResponse when the nonce does not decode to exactly 32 bytes")
+    func requestClaimChallengeRejectsWrongLengthNonce() async {
+        let (service, transport, _) = makeService()
+        let shortNonce = Data([0xAA, 0xBB, 0xCC])
+        transport.enqueue(path: "claim-challenge", statusCode: 200, json: [
+            "outcome": "issued",
+            "challenge_id": Self.challengeId.uuidString,
+            "nonce": AthleteDeviceAuthorizationService.base64UrlEncode(shortNonce),
+            "expires_at": "2026-10-01T00:01:00Z",
+        ])
+
+        await #expect(throws: AthleteDeviceAuthorizationError.malformedResponse) {
+            try await service.requestClaimChallenge(connectionRequestId: Self.requestId)
+        }
     }
 
     @Test("requestClaimChallenge() maps the anti-enumeration .requestNotAvailable fold")
@@ -213,10 +329,9 @@ struct AthleteDeviceAuthorizationServiceTests {
 
     // MARK: - claim-submit
 
-    @Test("submitClaim() signs the exact canonical message and sends the base64url-encoded signature")
+    @Test("submitClaim() signs the exact canonical message and sends the base64url-encoded signature, using loadExistingSigningKey() — never loadOrCreateSigningKey()")
     func submitClaimSignsCanonicalMessageAndSendsSignature() async throws {
         let (service, transport, signingKeyStore) = makeService()
-        let nonce = Data([0x01, 0x02, 0x03])
         transport.enqueue(path: "claim-submit", statusCode: 200, json: [
             "outcome": "granted",
             "grant_id": "44444444-4444-4444-4444-444444444444",
@@ -227,7 +342,7 @@ struct AthleteDeviceAuthorizationServiceTests {
             invitationId: Self.invitationId,
             connectionRequestId: Self.requestId,
             challengeId: Self.challengeId,
-            nonce: nonce
+            nonce: Self.wellFormedNonce
         )
 
         #expect(outcome == .granted(
@@ -238,11 +353,26 @@ struct AthleteDeviceAuthorizationServiceTests {
             challengeId: Self.challengeId,
             requestId: Self.requestId,
             invitationId: Self.invitationId,
-            nonce: nonce
+            nonce: Self.wellFormedNonce
         )
         #expect(signingKeyStore.signedMessages == [expectedMessage])
         let body = try requestBodyJSON(transport.sentRequests[0])
         #expect(body["signature"] as? String == AthleteDeviceAuthorizationService.base64UrlEncode(signingKeyStore.fixedSignature))
+        #expect(signingKeyStore.loadExistingCallCount == 1)
+        #expect(signingKeyStore.loadOrCreateCallCount == 0)
+    }
+
+    @Test("submitClaim() throws .signingKeyUnavailable, sending no request, when loadExistingSigningKey() fails — a known pairing attempt must fail safely, never silently sign with a different key")
+    func submitClaimThrowsWhenExistingKeyUnavailable() async {
+        let signingKeyStore = FakeSigningKeyStore()
+        signingKeyStore.throwOnLoadExisting = true
+        let (service, transport, _) = makeService(signingKeyStore: signingKeyStore)
+
+        await #expect(throws: AthleteDeviceAuthorizationError.signingKeyUnavailable) {
+            try await service.submitClaim(invitationId: Self.invitationId, connectionRequestId: Self.requestId, challengeId: Self.challengeId, nonce: Self.wellFormedNonce)
+        }
+        #expect(transport.sentRequests.isEmpty)
+        #expect(signingKeyStore.loadOrCreateCallCount == 0)
     }
 
     @Test("submitClaim() maps every documented claim_device_grant outcome plus the anti-enumeration challenge_invalid fold")
@@ -269,10 +399,10 @@ struct AthleteDeviceAuthorizationServiceTests {
                 invitationId: Self.invitationId,
                 connectionRequestId: Self.requestId,
                 challengeId: Self.challengeId,
-                nonce: Data([0x01])
+                nonce: Self.wellFormedNonce
             )
 
-            #expect(outcome == testCase.expected, "wire outcome: \(testCase.wire["outcome"] ?? "?")")
+            #expect(outcome == testCase.expected, "wire outcome: \(testCase.wire["outcome"] as? String ?? "?")")
         }
     }
 }

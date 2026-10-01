@@ -49,7 +49,17 @@ public enum ClaimOutcome: Equatable {
 /// Every way a call into `AthleteDeviceAuthorizationService` can fail to
 /// even reach a business outcome.
 public enum AthleteDeviceAuthorizationError: Error, Equatable {
+    /// `loadOrCreateSigningKey()`/`loadExistingSigningKey()` failed —
+    /// includes the explicit "no key for this known, already-submitted
+    /// attempt" case (`AthleteDeviceSigningKeyStoreError
+    /// .noKeyForCurrentInstallation`), never silently papered over by
+    /// generating and continuing with a different key.
     case signingKeyUnavailable
+    /// Review round 2: thrown BEFORE any network attempt when
+    /// `AthleteDeviceAuthorizationGatewayConfiguration.anonKey` is empty
+    /// — fails clearly instead of sending a request the Supabase gateway
+    /// can only ever reject.
+    case gatewayConfigurationMissing
     case network
     case malformedResponse
 }

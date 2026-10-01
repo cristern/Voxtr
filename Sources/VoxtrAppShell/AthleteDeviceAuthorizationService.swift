@@ -1,15 +1,40 @@
 import Foundation
 import VoxtrParentAuthentication
 
+/// Where Supabase's own project gateway requires at least the anon
+/// key, for the THREE Athlete-facing functions whose `verify_jwt` is
+/// left at its default (`true`) — `connection-request-submit`,
+/// `claim-challenge`, `claim-submit` (see `cristern/Voxtr-Backend`'s own
+/// `supabase/config.toml` comments on those three functions, and
+/// `tests/integration/postgrest_bridge_integration.ts`'s own
+/// `apikey`/`authorization: Bearer <ANON_KEY>` header pair for the
+/// tested pattern this mirrors exactly). This is Supabase's OWN gateway
+/// gate, not a Vǫxtr credential of any kind — it carries no Parent
+/// session, no service-role key, and no operator secret; those three
+/// never belong on an Athlete-side call.
+///
+/// `anonKey` is deliberately just a plain string with NO safe default —
+/// see `CompositionRoot`'s own local-development-only placeholder
+/// comment for why a real hosted key is never committed here.
+public struct AthleteDeviceAuthorizationGatewayConfiguration: Sendable {
+    public let anonKey: String
+
+    public init(anonKey: String) {
+        self.anonKey = anonKey
+    }
+}
+
 /// Athlete Connection V1 (backend device authorization): the ONE type
 /// that talks to the backend from the ATHLETE side —
-/// `connection-request-submit`, `claim-challenge`, `claim-submit`. All
-/// three are UNAUTHENTICATED (no Parent session, no `X-Voxtr-Parent-
-/// Session` header at all — see each handler's own `verify_jwt`
-/// posture); this is the Athlete-side counterpart to
+/// `connection-request-submit`, `claim-challenge`, `claim-submit`. None
+/// of the three carry a Parent session (no `X-Voxtr-Parent-Session`
+/// header at all) — this is the Athlete-side counterpart to
 /// `ParentAuthenticationService`, deliberately a separate type with a
 /// separate error vocabulary (see `AthleteDeviceAuthorizationModels.swift`),
-/// never a Parent-session-flavored one.
+/// never a Parent-session-flavored one. They DO require the ordinary
+/// Supabase gateway `apikey`/`Authorization: Bearer <anon key>` pair —
+/// see `AthleteDeviceAuthorizationGatewayConfiguration`'s own doc
+/// comment for exactly why and where that's attached.
 ///
 /// REUSES `VoxtrParentAuthentication`'s plain HTTP primitives
 /// (`ParentAuthenticationConfiguration`, `ParentAuthenticationTransport`,
@@ -30,15 +55,18 @@ import VoxtrParentAuthentication
 @MainActor
 public final class AthleteDeviceAuthorizationService {
     private let configuration: ParentAuthenticationConfiguration
+    private let gatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration
     private let transport: ParentAuthenticationTransport
     private let signingKeyStore: AthleteDeviceSigningKeyStoring
 
     public init(
         configuration: ParentAuthenticationConfiguration,
+        gatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration,
         transport: ParentAuthenticationTransport = URLSessionParentAuthenticationTransport(),
         signingKeyStore: AthleteDeviceSigningKeyStoring = KeychainAthleteDeviceSigningKeyStore()
     ) {
         self.configuration = configuration
+        self.gatewayConfiguration = gatewayConfiguration
         self.transport = transport
         self.signingKeyStore = signingKeyStore
     }
@@ -47,12 +75,19 @@ public final class AthleteDeviceAuthorizationService {
 
     /// Submits this installation's OWN signing key's public half against
     /// `invitationId` — the endpoint an Athlete installation calls after
-    /// scanning a Parent's device-authorization QR. Loads/creates this
-    /// installation's own signing key first (same key reused across
-    /// retries — see `AthleteDeviceSigningKeyStore`'s own doc comment).
+    /// scanning a Parent's device-authorization QR. This STARTS a new
+    /// pairing attempt, so it uses `loadOrCreateSigningKey()` (may
+    /// generate a fresh key for a new/reinstalled install) — never
+    /// `loadExistingSigningKey()`, which is reserved for CONTINUING an
+    /// attempt already bound to a specific key (see `submitClaim` below).
     public func submitConnectionRequest(invitationId: UUID) async throws -> ConnectionRequestSubmissionOutcome {
-        let signingKey = try loadSigningKey()
-        var request = makeRequest(path: "connection-request-submit")
+        let signingKey: AthleteDeviceSigningKey
+        do {
+            signingKey = try signingKeyStore.loadOrCreateSigningKey()
+        } catch {
+            throw AthleteDeviceAuthorizationError.signingKeyUnavailable
+        }
+        var request = try makeGatewayRequest(path: "connection-request-submit")
         request.httpBody = try encode(ConnectionRequestSubmitRequestBody(
             invitationId: invitationId.uuidString,
             devicePublicKey: Self.base64UrlEncode(signingKey.publicKeyX963Representation)
@@ -71,9 +106,10 @@ public final class AthleteDeviceAuthorizationService {
     /// approval, already claimed, etc.) into the same
     /// `.requestNotAvailable` outcome — this is the anti-enumeration fold
     /// the caller is expected to simply retry/poll against, never a
-    /// distinguishable failure.
+    /// distinguishable failure. Does not touch the signing key at all —
+    /// issuing a challenge requires no signature yet.
     public func requestClaimChallenge(connectionRequestId: UUID) async throws -> ClaimChallengeOutcome {
-        var request = makeRequest(path: "claim-challenge")
+        var request = try makeGatewayRequest(path: "claim-challenge")
         request.httpBody = try encode(ClaimChallengeRequestBody(connectionRequestId: connectionRequestId.uuidString))
         let (data, response) = try await send(request)
         guard response.statusCode == 200 else { throw AthleteDeviceAuthorizationError.network }
@@ -85,17 +121,28 @@ public final class AthleteDeviceAuthorizationService {
 
     /// Builds the exact canonical message bytes
     /// `cristern/Voxtr-Backend`'s `_shared/canonicalMessage.ts` requires,
-    /// signs them with THIS installation's own stored key, and submits
-    /// the proof. `invitationId`/`connectionRequestId`/`challengeId`/
-    /// `nonce` must be exactly the values the corresponding
-    /// `claim-challenge` response carried — never re-derived or guessed.
+    /// signs them with THIS installation's own ALREADY-ESTABLISHED key,
+    /// and submits the proof. This CONTINUES an attempt already bound to
+    /// a specific key (the one `submitConnectionRequest` already
+    /// submitted its public half of) — it uses `loadExistingSigningKey()`,
+    /// which throws explicitly rather than creating a replacement if the
+    /// key is missing or corrupt, so a known pairing attempt fails
+    /// safely instead of silently signing with a mismatched new key.
+    /// `invitationId`/`connectionRequestId`/`challengeId`/`nonce` must be
+    /// exactly the values the corresponding `claim-challenge` response
+    /// carried — never re-derived or guessed.
     public func submitClaim(
         invitationId: UUID,
         connectionRequestId: UUID,
         challengeId: UUID,
         nonce: Data
     ) async throws -> ClaimOutcome {
-        let signingKey = try loadSigningKey()
+        let signingKey: AthleteDeviceSigningKey
+        do {
+            signingKey = try signingKeyStore.loadExistingSigningKey()
+        } catch {
+            throw AthleteDeviceAuthorizationError.signingKeyUnavailable
+        }
         let message = Self.canonicalMessageBytes(
             challengeId: challengeId,
             requestId: connectionRequestId,
@@ -109,7 +156,7 @@ public final class AthleteDeviceAuthorizationService {
             throw AthleteDeviceAuthorizationError.signingKeyUnavailable
         }
 
-        var request = makeRequest(path: "claim-submit")
+        var request = try makeGatewayRequest(path: "claim-submit")
         request.httpBody = try encode(ClaimSubmitRequestBody(
             invitationId: invitationId.uuidString,
             connectionRequestId: connectionRequestId.uuidString,
@@ -120,14 +167,6 @@ public final class AthleteDeviceAuthorizationService {
         guard response.statusCode == 200 else { throw AthleteDeviceAuthorizationError.network }
         let decoded = try decode(ClaimSubmitResponseBody.self, from: data)
         return try Self.mapClaimOutcome(decoded)
-    }
-
-    private func loadSigningKey() throws -> AthleteDeviceSigningKey {
-        do {
-            return try signingKeyStore.loadOrCreateSigningKey()
-        } catch {
-            throw AthleteDeviceAuthorizationError.signingKeyUnavailable
-        }
     }
 
     // MARK: - Canonical message (mirrors _shared/canonicalMessage.ts
@@ -144,7 +183,8 @@ public final class AthleteDeviceAuthorizationService {
     }
 
     // MARK: - base64url (RFC 4648 §5, no padding — mirrors
-    // _shared/base64url.ts's own encode/decode exactly)
+    // _shared/base64url.ts's own encode/decode exactly, including its
+    // own strict charset check BEFORE attempting to decode)
 
     static func base64UrlEncode(_ data: Data) -> String {
         data.base64EncodedString()
@@ -153,7 +193,16 @@ public final class AthleteDeviceAuthorizationService {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// Strict: only the base64url alphabet (`A-Za-z0-9_-`) is accepted —
+    /// matches `_shared/base64url.ts`'s own `decodeBase64Url`, which
+    /// rejects embedded `+`/`/`/`=` or any other character up front
+    /// rather than relying on a lenient underlying decoder's own
+    /// behavior. Returns `nil` for anything that doesn't strictly match,
+    /// never partially decodes.
     static func base64UrlDecode(_ string: String) -> Data? {
+        guard !string.isEmpty, string.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
+            return nil
+        }
         var base64 = string
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
@@ -169,7 +218,7 @@ public final class AthleteDeviceAuthorizationService {
         case "submitted":
             guard
                 let rawId = body.connectionRequestId, let id = UUID(uuidString: rawId),
-                let displayCode = body.displayCode
+                let displayCode = body.displayCode, Self.isWellFormedDisplayCode(displayCode)
             else {
                 throw AthleteDeviceAuthorizationError.malformedResponse
             }
@@ -188,7 +237,7 @@ public final class AthleteDeviceAuthorizationService {
         case "issued":
             guard
                 let rawChallengeId = body.challengeId, let challengeId = UUID(uuidString: rawChallengeId),
-                let rawNonce = body.nonce, let nonce = Self.base64UrlDecode(rawNonce),
+                let rawNonce = body.nonce, let nonce = Self.base64UrlDecode(rawNonce), nonce.count == Self.expectedNonceByteCount,
                 let rawExpiresAt = body.expiresAt, let expiresAt = Self.parseISO8601(rawExpiresAt)
             else {
                 throw AthleteDeviceAuthorizationError.malformedResponse
@@ -227,6 +276,18 @@ public final class AthleteDeviceAuthorizationService {
         }
     }
 
+    /// Exactly matches `authz.submit_connection_request`'s own
+    /// generation: `upper(substr(replace(gen_random_uuid()::text, '-',
+    /// ''), 1, 6))` — 6 uppercase hex characters, never anything else.
+    static let expectedDisplayCodeLength = 6
+    private static func isWellFormedDisplayCode(_ code: String) -> Bool {
+        code.count == expectedDisplayCodeLength && code.allSatisfy { $0.isASCII && $0.isHexDigit && !$0.isLowercase }
+    }
+
+    /// Exactly matches `claim-challenge/index.ts`'s own
+    /// `NONCE_LENGTH_BYTES = 32`.
+    static let expectedNonceByteCount = 32
+
     /// Same rationale as `ParentAuthenticationService`'s own
     /// `parseISO8601`: these wire DTOs keep timestamps as `String` and
     /// parse explicitly here, tolerating both with- and
@@ -242,10 +303,23 @@ public final class AthleteDeviceAuthorizationService {
 
     // MARK: - HTTP plumbing
 
-    private func makeRequest(path: String) -> URLRequest {
+    /// Builds the request AND attaches the Supabase gateway credential
+    /// pair — throws immediately, before any network attempt, if
+    /// `gatewayConfiguration.anonKey` is empty, rather than letting a
+    /// request go out that the gateway can only ever reject. All three
+    /// of this service's own endpoints need this pair (see this file's
+    /// own `AthleteDeviceAuthorizationGatewayConfiguration` doc comment);
+    /// none of them ever carry a Parent session, service-role key, or
+    /// operator secret.
+    private func makeGatewayRequest(path: String) throws -> URLRequest {
+        guard !gatewayConfiguration.anonKey.isEmpty else {
+            throw AthleteDeviceAuthorizationError.gatewayConfigurationMissing
+        }
         var request = URLRequest(url: configuration.baseURL.appendingPathComponent(path))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(gatewayConfiguration.anonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(gatewayConfiguration.anonKey)", forHTTPHeaderField: "Authorization")
         return request
     }
 
@@ -254,7 +328,14 @@ public final class AthleteDeviceAuthorizationService {
     /// REUSED `VoxtrParentAuthentication` transport type, whose own
     /// thrown error type is internal to that package and not nameable
     /// here; catching broadly and remapping keeps this service's own
-    /// thrown error surface single-vocabulary for every caller.
+    /// thrown error surface single-vocabulary for every caller. A caller
+    /// that observes `.network` from `submitClaim` specifically cannot
+    /// tell whether the backend received and processed the proof before
+    /// the connection dropped — that ambiguity is inherent and must be
+    /// handled by retrying with a FRESH challenge for the same request,
+    /// never by resubmitting the connection request itself (see
+    /// `AthleteDeviceAuthorizationPairingCoordinator`'s own recovery
+    /// handling).
     private func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         do {
             return try await transport.send(request)
