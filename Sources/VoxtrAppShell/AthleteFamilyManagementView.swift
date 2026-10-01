@@ -106,6 +106,11 @@ public struct AthleteFamilyManagementView: View {
     /// `VoxtrParentDomain`/SwiftData directly.
     private let parentAuthenticationService: ParentAuthenticationService
     private let enrollableWorkspaces: [EnrollableWorkspace]
+    /// Athlete Connection V1 (backend device authorization): same
+    /// family-level threading rationale as `parentAuthenticationService`
+    /// above — passed straight through to `AthleteSettingsView` below
+    /// for its own "Connect this device" entry point.
+    private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
@@ -113,7 +118,8 @@ public struct AthleteFamilyManagementView: View {
         sleepSettingsViewModel: @escaping (AthleteProfile) -> AthleteSleepSettingsViewModel,
         familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel,
         parentAuthenticationService: ParentAuthenticationService,
-        enrollableWorkspaces: [EnrollableWorkspace]
+        enrollableWorkspaces: [EnrollableWorkspace],
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
@@ -121,6 +127,7 @@ public struct AthleteFamilyManagementView: View {
         self.familyCalendarSourcesViewModel = familyCalendarSourcesViewModel
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
+        self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
     }
 
     public var body: some View {
@@ -286,7 +293,9 @@ public struct AthleteFamilyManagementView: View {
             AthleteSettingsView(
                 viewModel: viewModel,
                 athlete: athlete,
-                sleepSettingsViewModel: sleepSettingsViewModel(athlete)
+                sleepSettingsViewModel: sleepSettingsViewModel(athlete),
+                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                parentAuthenticationService: parentAuthenticationService
             )
         } label: {
             HStack(spacing: 8) {
@@ -412,16 +421,26 @@ struct AthleteSettingsView: View {
     /// `viewModel.archiveAthlete(athlete)` call lives solely in the
     /// dialog's own destructive action.
     @State private var isPresentingArchiveConfirmation = false
+    /// Athlete Connection V1 (backend device authorization): ADDITIVE,
+    /// alongside the existing "Connect Athlete App" CKShare action below
+    /// — a separate sheet presentation, never a replacement.
+    private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    private let parentAuthenticationService: ParentAuthenticationService
+    @State private var isPresentingDeviceAuthorizationInvitation = false
 
     init(
         viewModel: AthleteFamilyManagementViewModel,
         athlete: AthleteProfile,
-        sleepSettingsViewModel: AthleteSleepSettingsViewModel
+        sleepSettingsViewModel: AthleteSleepSettingsViewModel,
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentAuthenticationService: ParentAuthenticationService
     ) {
         self.viewModel = viewModel
         self.athlete = athlete
         _sleepSettingsViewModel = State(initialValue: sleepSettingsViewModel)
         _selectedColor = State(initialValue: viewModel.resolvedColor(for: athlete))
+        self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentAuthenticationService = parentAuthenticationService
     }
 
     var body: some View {
@@ -620,6 +639,16 @@ struct AthleteSettingsView: View {
                 }
                 .disabled(viewModel.isConnectingAthleteApp)
                 .accessibilityIdentifier("athleteSettings.connectAthleteAppButton.\(athlete.id.uuidString)")
+
+                // Athlete Connection V1 (backend device authorization):
+                // a SEPARATE, additive action alongside "Connect Athlete
+                // App" above — never a replacement. See
+                // `AthleteDeviceAuthorizationQRPayload`'s own doc comment
+                // for why this slice adds a second flow.
+                Button("Connect this device") {
+                    isPresentingDeviceAuthorizationInvitation = true
+                }
+                .accessibilityIdentifier("athleteSettings.startDeviceAuthorizationButton.\(athlete.id.uuidString)")
             } header: {
                 VoxtrSectionHeading("Athlete App")
             } footer: {
@@ -723,6 +752,21 @@ struct AthleteSettingsView: View {
                     onDismiss: { viewModel.dismissConnectAthleteApp() }
                 )
             }
+        }
+        // Athlete Connection V1 (backend device authorization): a
+        // SEPARATE sheet from the one directly above — own local
+        // `@State`, own fresh coordinator per presentation (see
+        // `AthleteDeviceAuthorizationInvitationView`'s own doc comment).
+        .sheet(isPresented: $isPresentingDeviceAuthorizationInvitation) {
+            AthleteDeviceAuthorizationInvitationView(
+                invitationService: athleteDeviceAuthorizationInvitationService,
+                parentAuthenticationService: parentAuthenticationService,
+                athleteId: athlete.athleteId,
+                workspaceId: viewModel.currentWorkspaceId,
+                invitedBy: viewModel.currentParentActorId,
+                athleteDisplayName: athlete.givenName,
+                onDismiss: { isPresentingDeviceAuthorizationInvitation = false }
+            )
         }
     }
 

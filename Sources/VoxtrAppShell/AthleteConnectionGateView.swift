@@ -19,6 +19,13 @@ import SwiftUI
 struct AthleteConnectionGateView: View {
     let state: AthleteConnectionRuntimeState
     let onScanConnectionCode: () -> Void
+    /// Athlete Connection V1 (backend device authorization): a SEPARATE,
+    /// additive entry point into the new backend-authorized pairing flow
+    /// (`AthleteDeviceAuthorizationScanView`) — alongside, never instead
+    /// of, the existing `onScanConnectionCode` CKShare flow above. See
+    /// `AthleteDeviceAuthorizationQRPayload`'s own doc comment for why
+    /// this slice adds a second flow rather than replacing the first.
+    let onStartDeviceAuthorization: () -> Void
 
     var body: some View {
         VStack(spacing: 24) {
@@ -52,6 +59,10 @@ struct AthleteConnectionGateView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(VoxtrColor.accent)
                     .accessibilityIdentifier("athleteConnection.scanButton")
+
+                Button("Connect this device", action: onStartDeviceAuthorization)
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("athleteConnection.deviceAuthorizationButton")
             }
 
             Spacer()

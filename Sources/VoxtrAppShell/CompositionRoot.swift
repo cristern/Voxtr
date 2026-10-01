@@ -145,6 +145,22 @@ public final class CompositionRoot {
         )
         container.register(ParentAuthenticationService.self) { parentAuthenticationService }
 
+        // Athlete Connection V1 (backend device authorization):
+        // registration only, same as every other B2.x/Slice D service
+        // above — no network call happens here, and nothing here submits
+        // a connection request or signs anything. Reuses the SAME
+        // `parentAuthenticationConfiguration` base URL the Parent-side
+        // service above was just given: both sides talk to the same
+        // backend project, and this type carries no Parent-session
+        // concept of its own (see `AthleteDeviceAuthorizationService`'s
+        // own doc comment). `AthleteApp` is the only caller that ever
+        // resolves this, from `AthleteRootView`, after an explicit
+        // "Connect this device" tap.
+        let athleteDeviceAuthorizationService = AthleteDeviceAuthorizationService(
+            configuration: parentAuthenticationConfiguration
+        )
+        container.register(AthleteDeviceAuthorizationService.self) { athleteDeviceAuthorizationService }
+
         let modelContainer = try persistence.makeModelContainer()
 
         // Sport / Activity Identity domain foundation, Part 1/2:
@@ -289,6 +305,18 @@ public final class CompositionRoot {
             transport: cloudKitTransport
         )
         container.register(AthleteConnectionOwnerHandoffService.self) { athleteConnectionOwnerHandoffService }
+
+        // Athlete Connection V1 (backend device authorization): the
+        // ParentApp-side counterpart to `athleteDeviceAuthorizationService`
+        // above — registration only, same rationale as every other B2.x
+        // service: no network call happens here, and nothing here calls
+        // `prepareInvitation(...)`, which only ever runs from an explicit
+        // Parent "Connect this device" tap.
+        let athleteDeviceAuthorizationInvitationService = AthleteDeviceAuthorizationInvitationService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            parentAuthenticationService: parentAuthenticationService
+        )
+        container.register(AthleteDeviceAuthorizationInvitationService.self) { athleteDeviceAuthorizationInvitationService }
 
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's

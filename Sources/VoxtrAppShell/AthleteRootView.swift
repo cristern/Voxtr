@@ -32,6 +32,11 @@ public struct AthleteRootView: View {
     /// `AthleteConnectionScannerBuilder`'s own doc comment.
     let makeScannerView: AthleteConnectionScannerBuilder
     @State private var isPresentingScanner = false
+    /// Athlete Connection V1 (backend device authorization): a SEPARATE
+    /// sheet presentation state from `isPresentingScanner` above —
+    /// additive, alongside the existing CKShare scan flow, never a
+    /// replacement of it.
+    @State private var isPresentingDeviceAuthorizationScanner = false
 
     public init(root: CompositionRoot, makeScannerView: @escaping AthleteConnectionScannerBuilder) {
         self.root = root
@@ -48,6 +53,12 @@ public struct AthleteRootView: View {
             .sheet(isPresented: $isPresentingScanner) {
                 AthleteConnectionScanView(transport: root.cloudKitTransport, makeScannerView: makeScannerView)
             }
+            .sheet(isPresented: $isPresentingDeviceAuthorizationScanner) {
+                AthleteDeviceAuthorizationScanView(
+                    service: root.container.resolve(AthleteDeviceAuthorizationService.self),
+                    makeScannerView: makeScannerView
+                )
+            }
     }
 
     @ViewBuilder
@@ -57,7 +68,8 @@ public struct AthleteRootView: View {
         case .gate:
             AthleteConnectionGateView(
                 state: state,
-                onScanConnectionCode: { isPresentingScanner = true }
+                onScanConnectionCode: { isPresentingScanner = true },
+                onStartDeviceAuthorization: { isPresentingDeviceAuthorizationScanner = true }
             )
         case .shell(let actor):
             AthleteShellView(

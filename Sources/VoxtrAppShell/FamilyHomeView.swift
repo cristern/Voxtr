@@ -78,6 +78,9 @@ public struct FamilyHomeView: View {
     /// screen, not just the Profile tab's.
     public let parentAuthenticationService: ParentAuthenticationService
     public let enrollableWorkspaces: [EnrollableWorkspace]
+    /// Athlete Connection V1 (backend device authorization): same
+    /// threading rationale as `parentAuthenticationService` above.
+    public let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
 
     public init(
         family: RestoredFamily,
@@ -98,7 +101,8 @@ public struct FamilyHomeView: View {
         sportRepository: SportRepository,
         athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService,
         parentAuthenticationService: ParentAuthenticationService,
-        enrollableWorkspaces: [EnrollableWorkspace]
+        enrollableWorkspaces: [EnrollableWorkspace],
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     ) {
         self.family = family
         self.planningService = planningService
@@ -119,6 +123,7 @@ public struct FamilyHomeView: View {
         self.athleteConnectionOwnerHandoffService = athleteConnectionOwnerHandoffService
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
+        self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
     }
 
     public var body: some View {
@@ -141,7 +146,8 @@ public struct FamilyHomeView: View {
                 calendarPlanningCoordinationService: calendarPlanningCoordinationService,
                 sportRepository: sportRepository,
                 parentAuthenticationService: parentAuthenticationService,
-                enrollableWorkspaces: enrollableWorkspaces
+                enrollableWorkspaces: enrollableWorkspaces,
+                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
             )
         } else {
             NavigationStack {
@@ -163,7 +169,8 @@ public struct FamilyHomeView: View {
                         actorId: family.currentActor.actorId
                     ),
                     parentAuthenticationService: parentAuthenticationService,
-                    enrollableWorkspaces: enrollableWorkspaces
+                    enrollableWorkspaces: enrollableWorkspaces,
+                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
                 )
             }
         }

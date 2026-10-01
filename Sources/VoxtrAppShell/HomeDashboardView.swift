@@ -212,6 +212,9 @@ public struct HomeDashboardView: View {
     /// "Manage Athletes" sheet's own `AthleteFamilyManagementView`.
     private let parentAuthenticationService: ParentAuthenticationService
     private let enrollableWorkspaces: [EnrollableWorkspace]
+    /// Athlete Connection V1 (backend device authorization): same
+    /// rationale as `parentAuthenticationService` above.
+    private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -236,7 +239,8 @@ public struct HomeDashboardView: View {
         athleteRepository: AthleteRepository,
         workspaceId: WorkspaceId,
         parentAuthenticationService: ParentAuthenticationService,
-        enrollableWorkspaces: [EnrollableWorkspace]
+        enrollableWorkspaces: [EnrollableWorkspace],
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -260,6 +264,7 @@ public struct HomeDashboardView: View {
         self.workspaceId = workspaceId
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
+        self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
     }
 
     public var body: some View {
@@ -336,7 +341,8 @@ public struct HomeDashboardView: View {
                         actorId: committedByActorId
                     ),
                     parentAuthenticationService: parentAuthenticationService,
-                    enrollableWorkspaces: enrollableWorkspaces
+                    enrollableWorkspaces: enrollableWorkspaces,
+                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
                 )
             }
         }

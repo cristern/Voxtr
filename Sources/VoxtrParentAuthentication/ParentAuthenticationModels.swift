@@ -82,11 +82,101 @@ enum RedemptionOutcome: Equatable, Sendable {
 /// (never a refresh/rotation) can produce a session fresh enough; the
 /// existing token is deliberately left in place, not cleared, since it
 /// remains valid for ordinary purposes.
-enum ParentAuthenticationError: Error, Equatable, Sendable {
+/// Athlete Connection V1: made `public` (unlike every other type in this
+/// file, deliberately kept `internal` since only `ParentEnrollmentView`
+/// and this package's own tests ever needed them) because the three new
+/// connection-invitation/request/decision methods below ARE `public` —
+/// see those methods' own doc comments for why: their caller
+/// (`VoxtrAppShell`'s own invitation/approval UI) genuinely lives outside
+/// this package, since it needs `ParentWorkspaceRepository`/
+/// `AthleteProfile` to resolve the athlete being connected, and this
+/// package deliberately never imports `VoxtrParentDomain`/
+/// `VoxtrCoreContracts` (§6) — unlike SIWA sign-in/redemption, whose only
+/// caller is this package's own `ParentEnrollmentView`.
+public enum ParentAuthenticationError: Error, Equatable, Sendable {
     case notSignedIn
     case sessionInvalid
     case sessionExpired
     case reauthenticationRequired
     case network
     case malformedResponse
+}
+
+/// `connection-invitation-create`'s non-session outcome family (see
+/// cristern/Voxtr-Backend's own `authzBridge.ts`
+/// `CreateConnectionInvitationOutcome` for the authoritative wire set).
+/// The three session-related outcomes are surfaced as thrown
+/// `ParentAuthenticationError` cases instead — same convention as
+/// `RedemptionOutcome` — since `connection-invitation-create` is a
+/// SENSITIVE operation per the backend's own 10-minute freshness gate.
+/// `ownerBindingNotActive` means this device's workspace ownership
+/// binding is not (or no longer) active server-side; never inferred
+/// locally.
+public enum ConnectionInvitationCreationOutcome: Equatable, Sendable {
+    case created(invitationId: UUID, expiresAt: Date)
+    case ownerBindingNotActive
+}
+
+/// `connection-request-list`'s own per-row shape. `displayCode` is the
+/// code the Parent visually compares against the Athlete's actual
+/// device before approving — a selection consistency check, never
+/// authorization itself (per cristern/Voxtr-Backend's
+/// `connection-request-decide/index.ts` own doc comment).
+public struct ConnectionRequestSummary: Equatable, Sendable, Identifiable {
+    public let id: UUID
+    public let displayCode: String
+    public let status: ConnectionRequestStatus
+    public let createdAt: Date
+
+    public init(id: UUID, displayCode: String, status: ConnectionRequestStatus, createdAt: Date) {
+        self.id = id
+        self.displayCode = displayCode
+        self.status = status
+        self.createdAt = createdAt
+    }
+}
+
+/// Mirrors `authzBridge.ts`'s own `ConnectionRequestListItem.status`
+/// union exactly.
+public enum ConnectionRequestStatus: String, Equatable, Sendable {
+    case pending
+    case approved
+    case rejected
+    case claimed
+}
+
+/// `connection-request-list`'s non-session outcome family — this
+/// operation is ORDINARY (only ordinary session validity is required,
+/// never freshness), so unlike `ConnectionInvitationCreationOutcome`
+/// there is no `reauthenticationRequired` case at all on this endpoint.
+public enum ConnectionRequestListOutcome: Equatable, Sendable {
+    case ok(requests: [ConnectionRequestSummary])
+    case invitationNotFound
+    case ownerBindingNotActive
+}
+
+/// The decision a Parent makes for one specific connection request —
+/// mirrors `connection-request-decide`'s own `decision` field exactly.
+public enum ConnectionRequestDecision: String, Equatable, Sendable {
+    case approved
+    case rejected
+}
+
+/// `connection-request-decide`'s non-session outcome family (see
+/// `authzBridge.ts`'s own `DecideConnectionRequestOutcome` for the
+/// authoritative wire set). Every invitation-state conflict is its own
+/// distinct, named outcome — never collapsed to a generic failure —
+/// matching this package's own established explicit-outcome convention.
+public enum ConnectionRequestDecisionOutcome: Equatable, Sendable {
+    case approved
+    case rejected
+    case invitationNotFound
+    case requestNotFound
+    case ownerBindingNotActive
+    case codeMismatch
+    case requestClaimed
+    case alreadyDecided
+    case invitationExpired
+    case invitationConsumed
+    case invitationAlreadyHasApprovedRequest
 }

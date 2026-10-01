@@ -654,6 +654,167 @@ struct ParentAuthenticationServiceTests {
         }
     }
 
+    // MARK: - Athlete Connection V1 (backend device authorization):
+    // createConnectionInvitation / listConnectionRequests /
+    // decideConnectionRequest
+
+    private static let invitationId = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
+    private static let workspaceId = UUID(uuidString: "44444444-4444-4444-4444-444444444444")!
+    private static let participantId = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+    private static let athleteId = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+    private static let requestId = UUID(uuidString: "77777777-7777-7777-7777-777777777777")!
+
+    @Test("createConnectionInvitation() sends the session header and all three ids exactly as given")
+    func createConnectionInvitationSendsIdsExactly() async throws {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
+            "outcome": "created",
+            "invitation_id": Self.invitationId.uuidString,
+            "expires_at": "2026-10-01T00:15:00Z",
+        ])
+
+        let outcome = try await service.createConnectionInvitation(
+            workspaceId: Self.workspaceId,
+            participantId: Self.participantId,
+            athleteId: Self.athleteId
+        )
+
+        #expect(outcome == .created(invitationId: Self.invitationId, expiresAt: Self.date("2026-10-01T00:15:00Z")))
+        let sent = transport.sentRequests[0]
+        #expect(sent.value(forHTTPHeaderField: "X-Voxtr-Parent-Session") == "live-session-token")
+        let body = try requestBodyJSON(sent)
+        #expect(body["workspace_id"] as? String == Self.workspaceId.uuidString)
+        #expect(body["participant_id"] as? String == Self.participantId.uuidString)
+        #expect(body["athlete_id"] as? String == Self.athleteId.uuidString)
+    }
+
+    @Test("createConnectionInvitation() maps owner_binding_not_active")
+    func createConnectionInvitationMapsOwnerBindingNotActive() async throws {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: ["outcome": "owner_binding_not_active"])
+
+        let outcome = try await service.createConnectionInvitation(
+            workspaceId: Self.workspaceId,
+            participantId: Self.participantId,
+            athleteId: Self.athleteId
+        )
+
+        #expect(outcome == .ownerBindingNotActive)
+    }
+
+    @Test("createConnectionInvitation() maps reauthentication_required WITHOUT clearing the stored token — a SENSITIVE operation")
+    func createConnectionInvitationReauthenticationRequiredLeavesTokenInPlace() async {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-invitation-create", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await #expect(throws: ParentAuthenticationError.reauthenticationRequired) {
+            try await service.createConnectionInvitation(workspaceId: Self.workspaceId, participantId: Self.participantId, athleteId: Self.athleteId)
+        }
+        #expect(sessionStore.currentToken == "live-session-token")
+    }
+
+    @Test("listConnectionRequests() sends only invitation_id and maps a real requests array")
+    func listConnectionRequestsMapsOkOutcome() async throws {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-request-list", statusCode: 200, json: [
+            "outcome": "ok",
+            "requests": [
+                [
+                    "id": Self.requestId.uuidString,
+                    "display_code": "A1B2C3",
+                    "status": "pending",
+                    "created_at": "2026-10-01T00:10:00Z",
+                ],
+            ],
+        ])
+
+        let outcome = try await service.listConnectionRequests(invitationId: Self.invitationId)
+
+        guard case .ok(let requests) = outcome else {
+            Issue.record("expected .ok, got \(outcome)")
+            return
+        }
+        #expect(requests == [
+            ConnectionRequestSummary(id: Self.requestId, displayCode: "A1B2C3", status: .pending, createdAt: Self.date("2026-10-01T00:10:00Z")),
+        ])
+        let body = try requestBodyJSON(transport.sentRequests[0])
+        #expect(body.count == 1)
+        #expect(body["invitation_id"] as? String == Self.invitationId.uuidString)
+    }
+
+    @Test("listConnectionRequests() never surfaces .reauthenticationRequired — ORDINARY operation, so an unrecognized 401 fails closed as .sessionInvalid")
+    func listConnectionRequestsUnrecognized401FailsClosed() async {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-request-list", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await #expect(throws: ParentAuthenticationError.sessionInvalid) {
+            try await service.listConnectionRequests(invitationId: Self.invitationId)
+        }
+        #expect(sessionStore.currentToken == nil)
+    }
+
+    @Test("decideConnectionRequest() sends invitation_id, connection_request_id, decision, and display_code exactly as given")
+    func decideConnectionRequestSendsFieldsExactly() async throws {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+
+        let outcome = try await service.decideConnectionRequest(
+            invitationId: Self.invitationId,
+            connectionRequestId: Self.requestId,
+            decision: .approved,
+            displayCode: "A1B2C3"
+        )
+
+        #expect(outcome == .approved)
+        let body = try requestBodyJSON(transport.sentRequests[0])
+        #expect(body["invitation_id"] as? String == Self.invitationId.uuidString)
+        #expect(body["connection_request_id"] as? String == Self.requestId.uuidString)
+        #expect(body["decision"] as? String == "approved")
+        #expect(body["display_code"] as? String == "A1B2C3")
+    }
+
+    @Test("decideConnectionRequest() maps every documented business outcome")
+    func decideConnectionRequestMapsAllBusinessOutcomes() async throws {
+        let cases: [(wire: String, expected: ConnectionRequestDecisionOutcome)] = [
+            ("approved", .approved),
+            ("rejected", .rejected),
+            ("invitation_not_found", .invitationNotFound),
+            ("request_not_found", .requestNotFound),
+            ("owner_binding_not_active", .ownerBindingNotActive),
+            ("code_mismatch", .codeMismatch),
+            ("request_claimed", .requestClaimed),
+            ("already_decided", .alreadyDecided),
+            ("invitation_expired", .invitationExpired),
+            ("invitation_consumed", .invitationConsumed),
+            ("invitation_already_has_approved_request", .invitationAlreadyHasApprovedRequest),
+        ]
+
+        for testCase in cases {
+            let (service, transport, sessionStore) = makeService()
+            sessionStore.currentToken = "live-session-token"
+            transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": testCase.wire])
+
+            let outcome = try await service.decideConnectionRequest(
+                invitationId: Self.invitationId,
+                connectionRequestId: Self.requestId,
+                decision: .rejected,
+                displayCode: "A1B2C3"
+            )
+
+            #expect(outcome == testCase.expected, "wire outcome: \(testCase.wire)")
+        }
+    }
+
+    private static func date(_ iso: String) -> Date {
+        ISO8601DateFormatter().date(from: iso)!
+    }
+
     // MARK: - Keychain round trip (real Keychain-backed store)
 
     // NOTE: like the other platform-framework-backed tests in this suite
