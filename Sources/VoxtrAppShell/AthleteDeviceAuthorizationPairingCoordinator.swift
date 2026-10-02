@@ -2,8 +2,16 @@ import Foundation
 
 /// Injectable so deterministic tests never actually sleep — mirrors
 /// `ParentSignInCoordinator`'s own `ParentSignInClock` seam exactly, for
-/// the same reason.
-public protocol AthleteDeviceAuthorizationPollingClock {
+/// the same reason. `Sendable` (matching `ParentSignInClock`'s own
+/// declaration exactly): both `AthleteDeviceAuthorizationPairingCoordinator`
+/// and `AthleteDeviceAuthorizationInvitationCoordinator` are `@MainActor`
+/// and store their own `clock` as a stored property, then call
+/// `clock.sleep(for:)` from inside an owned `Task` — without `Sendable`
+/// here, Swift 6's strict concurrency checking treats that as sending a
+/// main-actor-isolated, non-Sendable value across an isolation boundary
+/// into `sleep(for:)`'s own nonisolated context, which is a real compile
+/// error (confirmed by Codemagic), not a hypothetical one.
+public protocol AthleteDeviceAuthorizationPollingClock: Sendable {
     func sleep(for seconds: Double) async throws
 }
 
