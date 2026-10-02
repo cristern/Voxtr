@@ -1,15 +1,17 @@
-# Athlete Connection V1 — iOS Pairing Implementation Checkpoint (review round 3)
+# Athlete Connection V1 — iOS Pairing Implementation Checkpoint (review round 4)
 
 This records what changed in `claude/athlete-connection-ios-pairing-v1`
-(cristern/Voxtr PR #106) across review rounds 2 and 3, and the exact
+(cristern/Voxtr PR #106) across review rounds 2 through 4, and the exact
 current state of each area. It does not restate the whole feature — see
 `AthleteConnectionV1-NormativeSecurityContract.md`,
 `AthleteConnectionV1-ParentAuthenticationContract.md`, and
 `ADR-AthleteConnection-BackendAuthorization.md` for that.
 
-Round 2 is sections 1–8 below. Round 3 — the current round, prompted by
-three concrete implementation findings against commit `fe4ea86` (a Swift
-6 Sendable-only fix; no behavior change) — is recorded in "Round 3" below.
+Round 2 is sections 1–8 below. Round 3, prompted by three concrete
+implementation findings against commit `fe4ea86` (a Swift 6
+Sendable-only fix; no behavior change), is recorded in "Round 3" below.
+Round 4 — the current round, two concluding UI findings against round
+3's own `904d531` — is recorded in "Round 4" below.
 
 ## Scope correction
 
@@ -312,6 +314,82 @@ invitation after reauthentication, never creating a new one. All
 pre-existing cancellation/generation tests for both coordinators are
 preserved unchanged.
 
+## Round 4
+
+Two concluding UI findings against round 3's own `904d531`:
+
+### 13. The comparison code is now shown under pending resume
+
+`resumeStoredReceipt()`'s no-grant branch previously set a bare
+`.resuming` state, which the Athlete scan view rendered as only a
+spinner ("Resuming your previous connection attempt…") — even when the
+receipt already had its own `displayCode`. `State.resuming` now carries
+`displayCode: String?` (the receipt's own comparison code, `nil`-safe for
+a receipt saved before that field existed), and the scan view renders it
+through the EXISTING `awaitingApprovalView` (now widened to accept an
+`Optional<String>`), reusing its `athleteDeviceAuthorizationScan.displayCode`
+identifier rather than introducing a parallel one. This state is set
+BEFORE `pollForApprovalAndClaim` ever calls `claim-challenge`, so the
+code is visible immediately on resume — including through every
+`request_not_available` tick — never only after a timeout. A receipt
+without a stored code shows an honest "Waiting for the parent to
+approve on their device" message instead of fabricating one. Resuming
+still never calls `connection-request-submit` (unchanged from round 2's
+own design) and still uses the SAME `invitationId`/`connectionRequestId`
+and the SAME already-established signing key (unchanged from round 3's
+key-ownership check).
+
+Also fixed in the same pass: `attemptClaim`'s post-grant `saveReceipt`
+call was dropping `displayCode` entirely (defaulting to `nil`) every
+time a receipt was re-saved after a confirmed grant — now threads the
+SAME `displayCode` the attempt has been carrying throughout, so it
+survives being overwritten by the grant-bearing receipt.
+
+### 14. The Parent can reopen reauthentication after dismissing it
+
+`authenticationRequiredView` previously showed only a `ProgressView` —
+including after the Parent explicitly cancelled/swiped away the
+reauthentication sheet, when no operation was actually running at all,
+which read as a perpetual, misleading spinner. It now shows a "Sign in
+to continue" action that reopens the SAME sheet for the SAME
+`pendingOperation` (untouched by dismissal, so nothing needs to be
+re-derived or re-requested).
+
+The underlying presentation state (whether the sheet is shown, and how
+dismiss/reopen/a state change interact) is now extracted into
+`AthleteDeviceAuthorizationReauthenticationSheetPresentation` — a pure,
+SwiftUI-free struct with no reference to the coordinator and no way to
+trigger a decision or a retry — so it is deterministically unit-tested
+directly (`AthleteDeviceAuthorizationReauthenticationSheetPresentationTests`)
+rather than only exercising the coordinator's own network-facing state.
+`AthleteDeviceAuthorizationInvitationView` now delegates to it from the
+sheet's `isPresented` binding, the Cancel button, `onReauthenticated`,
+and the `.onChange(of: coordinator.state)` reset — replacing the earlier
+plain `@State private var isReauthenticationSheetDismissed` flag
+one-for-one. Cancel/dismiss still never sends a decision or retry: only
+`onReauthenticated` (a real completed SIWA handshake plus the Parent's
+own explicit Continue tap) calls `retryAfterReauthentication()`.
+
+### 15. Round 4 deterministic tests
+
+`AthleteDeviceAuthorizationPairingCoordinatorTests` gained a new
+`GatedClaimChallengeTransport` (continuation-based, mirroring the
+existing `GatedSubmitTransport`) so a test can observe `.resuming`'s own
+published `displayCode` BEFORE any `claim-challenge` round trip
+completes — never a fixed real-time wait raced against a poll loop whose
+fake clock never truly sleeps. Covers: the stored code is visible the
+moment resume begins and stays visible through to poll-budget exhaustion
+without ever calling `connection-request-submit`; an older receipt with
+no stored code resumes honestly without inventing one. A new, fully pure
+`AthleteDeviceAuthorizationReauthenticationSheetPresentationTests` covers
+the sheet's own presentation state directly: shown exactly when
+authentication is required; hidden after `dismiss()` even while still
+required; shown again after `reopen()`; a dismissal clears once state
+genuinely leaves `.authenticationRequired` but never while the SAME
+failure persists; and `dismiss()` can never itself cause a presentation
+when none is required — by construction, since the type holds no
+coordinator reference at all.
+
 ## Known limitations carried forward
 
 - No local Swift toolchain exists in the authoring environment —
@@ -322,6 +400,8 @@ preserved unchanged.
   and TestFlight.
 - Retiring the legacy CKShare pairing screens is explicitly out of scope
   for this checkpoint — see "Scope correction" above.
-- This round's own round-3 behavior (the resumable receipt-reconfirmation
-  path, "Continue connection", and forced Parent reauthentication) is
-  likewise unverified on a physical device/TestFlight outside Codemagic.
+- Round 3's own behavior (the resumable receipt-reconfirmation path,
+  "Continue connection", and forced Parent reauthentication) and round
+  4's own UI finish (the comparison code shown under pending resume, and
+  reopening reauthentication after dismissal) are likewise unverified on
+  a physical device/TestFlight outside Codemagic.

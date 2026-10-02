@@ -20,16 +20,25 @@ import VoxtrParentAuthentication
 /// display code shown per pending request is a selection consistency
 /// check, never authorization itself (Normative Security Contract §3).
 ///
-/// AUTHENTICATION RECOVERY (review round 2): when the coordinator
-/// reports `.authenticationRequired`, this view presents the EXISTING,
-/// unmodified `ParentEnrollmentView` (the package's own public SIWA
-/// surface — `ParentSignInCoordinator` itself is package-internal, so
-/// this is the only way `VoxtrAppShell` can "reuse the existing Parent
-/// SIWA flow" rather than re-implementing it) as a sheet. The selected
+/// AUTHENTICATION RECOVERY (review round 2, extended in round 3, finished
+/// in round 4): when the coordinator reports `.authenticationRequired`,
+/// this view presents the EXISTING, unmodified `ParentEnrollmentView`
+/// (the package's own
+/// public SIWA surface — `ParentSignInCoordinator` itself is
+/// package-internal, so this is the only way `VoxtrAppShell` can "reuse
+/// the existing Parent SIWA flow" rather than re-implementing it) as a
+/// sheet, in its own `forcesReauthentication` mode. The selected
 /// athlete/invitation/request is never lost — the coordinator's own
-/// `pendingOperation` preserves exactly what to retry, and nothing
-/// retries automatically: dismissing that sheet is the Parent's own
-/// explicit action, which is when `retryAfterReauthentication()` runs.
+/// `pendingOperation` preserves exactly what to retry. Nothing retries
+/// automatically: dismissing the sheet (Cancel, swipe, or SwiftUI's own
+/// setter) is purely a presentation-level choice —
+/// `AthleteDeviceAuthorizationReauthenticationSheetPresentation` tracks
+/// it without ever touching `pendingOperation` — and the Parent can
+/// reopen the SAME sheet for the SAME operation at any time via
+/// `authenticationRequiredView`'s own "Sign in to continue" action. Only
+/// `onReauthenticated` (fired by `ParentEnrollmentView` itself, after a
+/// brand-new completed SIWA handshake plus the Parent's own explicit
+/// Continue tap) calls `retryAfterReauthentication()`.
 @MainActor
 public struct AthleteDeviceAuthorizationInvitationView: View {
     let athleteId: AthleteId
@@ -52,15 +61,16 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     /// specific request — never an ambient "currently selected" request
     /// that could go stale while the dialog is open.
     @State private var pendingApprovalConfirmation: PendingApprovalConfirmation?
-    /// Review round 3: the Parent's own explicit dismissal (Cancel tap
-    /// or interactive swipe) of the reauthentication sheet — tracked
-    /// here, NOT derived purely from `coordinator.state`, because the
-    /// state alone can't tell "the Parent dismissed this" apart from
-    /// "this is still the same authentication failure as before." Reset
-    /// the moment `coordinator.state` leaves `.authenticationRequired`,
-    /// so a LATER, genuinely new auth failure can present the sheet
-    /// again.
-    @State private var isReauthenticationSheetDismissed = false
+    /// Review round 4: the Parent reauthentication sheet's own
+    /// presentation state — extracted into a pure, testable type (see
+    /// `AthleteDeviceAuthorizationReauthenticationSheetPresentation`'s own
+    /// doc comment) rather than derived purely from `coordinator.state`,
+    /// because the state alone can't tell "the Parent dismissed this"
+    /// apart from "this is still the same authentication failure as
+    /// before." Resets the moment `coordinator.state` leaves
+    /// `.authenticationRequired`, so a LATER, genuinely new auth failure
+    /// can present the sheet again.
+    @State private var reauthenticationSheetPresentation = AthleteDeviceAuthorizationReauthenticationSheetPresentation()
 
     private struct PendingApprovalConfirmation: Identifiable {
         let invitation: AthleteDeviceAuthorizationInvitation
@@ -154,9 +164,9 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
                 // failure after a retry), it's cleared, so a genuinely
                 // new failure can present the sheet again.
                 .onChange(of: coordinator.state) { _, newState in
-                    if case .authenticationRequired = newState {} else {
-                        isReauthenticationSheetDismissed = false
-                    }
+                    let authenticationRequired: Bool
+                    if case .authenticationRequired = newState { authenticationRequired = true } else { authenticationRequired = false }
+                    reauthenticationSheetPresentation.noteStateChanged(authenticationRequired: authenticationRequired)
                 }
         }
     }
@@ -166,16 +176,17 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     /// has nothing to write to, so SwiftUI's own `isPresented` getter
     /// (derived from `coordinator.state`, which dismissal alone never
     /// changes) would just report "still presented" and fight the
-    /// Parent's own swipe. `isReauthenticationSheetDismissed` gives the
+    /// Parent's own swipe. `reauthenticationSheetPresentation` gives the
     /// setter somewhere real to write.
     private var isPresentingReauthentication: Binding<Bool> {
         Binding(
             get: {
-                guard case .authenticationRequired = coordinator.state else { return false }
-                return !isReauthenticationSheetDismissed
+                let authenticationRequired: Bool
+                if case .authenticationRequired = coordinator.state { authenticationRequired = true } else { authenticationRequired = false }
+                return reauthenticationSheetPresentation.isPresented(authenticationRequired: authenticationRequired)
             },
             set: { isPresented in
-                if !isPresented { isReauthenticationSheetDismissed = true }
+                if !isPresented { reauthenticationSheetPresentation.dismiss() }
             }
         )
     }
@@ -201,14 +212,14 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
                 workspaces: enrollableWorkspaces,
                 forcesReauthentication: true,
                 onReauthenticated: {
-                    isReauthenticationSheetDismissed = true
+                    reauthenticationSheetPresentation.dismiss()
                     Task { await coordinator.retryAfterReauthentication() }
                 }
             )
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        isReauthenticationSheetDismissed = true
+                        reauthenticationSheetPresentation.dismiss()
                     }
                     .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.reauthCancelButton")
                 }
@@ -233,13 +244,28 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
         }
     }
 
+    /// Review round 4: shown both WHILE the reauthentication sheet is
+    /// presented (as the content behind it) and, now, AFTER the Parent
+    /// has explicitly dismissed it without completing a fresh SIWA
+    /// handshake — no operation is actually running at that point, so
+    /// this never shows a perpetual spinner; instead it offers a
+    /// "Sign in to continue" action that simply reopens the SAME sheet
+    /// for the SAME still-pending operation
+    /// (`coordinator.pendingOperation` is untouched by dismissal).
     private func authenticationRequiredView(requirement: AthleteParentAuthenticationRequirement) -> some View {
         VStack(spacing: 16) {
-            ProgressView()
+            Image(systemName: "person.crop.circle.badge.exclamationmark")
+                .font(.system(size: 40))
+                .foregroundStyle(VoxtrColor.textSecondary)
             Text(Self.message(for: requirement))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(VoxtrColor.textSecondary)
                 .padding(.horizontal, 32)
+            Button("Sign in to continue") {
+                reauthenticationSheetPresentation.reopen()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.reauthenticateButton")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.authenticationRequired")

@@ -65,8 +65,8 @@ public struct AthleteDeviceAuthorizationScanView: View {
         switch coordinator.state {
         case .idle:
             scanningView
-        case .resuming:
-            waitingView(message: "Resuming your previous connection attempt…")
+        case .resuming(let displayCode):
+            awaitingApprovalView(displayCode: displayCode)
         case .reconfirmingPreviousGrant:
             waitingView(message: "Confirming your previous connection with Vǫxtr…")
         case .submitting, .claiming:
@@ -123,18 +123,28 @@ public struct AthleteDeviceAuthorizationScanView: View {
     /// here, never retypes or confirms it; the Parent's visual compare +
     /// explicit approval is what matters (Normative Security Contract
     /// §3: "a comparison code is ONLY a human visual check, never an
-    /// auth token").
-    private func awaitingApprovalView(displayCode: String) -> some View {
+    /// auth token"). Review round 4: also used for a RESUMED pending
+    /// receipt (`.resuming`), whose own `displayCode` may be `nil` for a
+    /// receipt saved before this field existed — handled honestly (a
+    /// plain "waiting" message) rather than inventing a code to show.
+    private func awaitingApprovalView(displayCode: String?) -> some View {
         VStack(spacing: 16) {
-            Text("Compare this code")
-                .font(VoxtrTypography.cardTitle)
-            Text(displayCode)
-                .font(.system(size: 40, weight: .bold, design: .monospaced))
-                .accessibilityIdentifier("athleteDeviceAuthorizationScan.displayCode")
-            Text("Ask the parent to check this matches what they see, then approve on their device.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(VoxtrColor.textSecondary)
-                .padding(.horizontal, 32)
+            if let displayCode {
+                Text("Compare this code")
+                    .font(VoxtrTypography.cardTitle)
+                Text(displayCode)
+                    .font(.system(size: 40, weight: .bold, design: .monospaced))
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.displayCode")
+                Text("Ask the parent to check this matches what they see, then approve on their device.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+            } else {
+                Text("Waiting for the parent to approve on their device.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+            }
             ProgressView()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

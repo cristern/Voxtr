@@ -90,8 +90,15 @@ public final class AthleteDeviceAuthorizationPairingCoordinator {
     public enum State: Equatable {
         case idle
         /// Resuming a receipt that has NOT yet recorded a grant —
-        /// polling for approval exactly as a fresh submission would.
-        case resuming
+        /// polling for approval exactly as a fresh submission would, for
+        /// the SAME already-submitted request (never a new
+        /// `connection-request-submit`). Review round 4's own UI finish:
+        /// `displayCode` carries the receipt's own comparison code, if it
+        /// saved one, so the resumed screen can show it immediately
+        /// rather than only a spinner — `nil` for a receipt saved before
+        /// this field existed, handled honestly rather than fabricating a
+        /// code.
+        case resuming(displayCode: String?)
         /// Resuming a receipt that already recorded a PAST grant — this
         /// is shown while that is being reconfirmed with the backend via
         /// a fresh challenge + signed claim, NEVER while simply trusting
@@ -237,7 +244,7 @@ public final class AthleteDeviceAuthorizationPairingCoordinator {
             }
         } else {
             startNewAttempt { [weak self] myGeneration in
-                self?.state = .resuming
+                self?.state = .resuming(displayCode: receipt.displayCode)
                 await self?.pollForApprovalAndClaim(
                     invitationId: receipt.invitationId,
                     connectionRequestId: receipt.connectionRequestId,
@@ -453,6 +460,7 @@ public final class AthleteDeviceAuthorizationPairingCoordinator {
                 try receiptStore.saveReceipt(AthleteDeviceAuthorizationReceipt(
                     invitationId: invitationId,
                     connectionRequestId: connectionRequestId,
+                    displayCode: displayCode,
                     grantId: grantId,
                     recoveryDeadline: recoveryDeadline
                 ))

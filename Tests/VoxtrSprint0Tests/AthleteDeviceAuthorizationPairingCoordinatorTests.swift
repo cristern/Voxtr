@@ -590,6 +590,84 @@ struct AthleteDeviceAuthorizationPairingCoordinatorTests {
         #expect(transport.sentPaths == ["claim-challenge", "claim-submit"])
     }
 
+    // MARK: - Review round 4's own UI finish: show the comparison code under pending resume
+
+    @Test("resumePendingAttemptIfAny() with a receipt that has NOT yet recorded a grant shows its stored display code the MOMENT resume begins — before any claim-challenge round trip even completes, never only after a timeout — and never calls connection-request-submit")
+    func resumeWithoutGrantShowsStoredDisplayCodeImmediately() async {
+        let receiptStore = FakeReceiptStore()
+        receiptStore.storedReceipt = AthleteDeviceAuthorizationReceipt(
+            invitationId: Self.invitationId,
+            connectionRequestId: Self.requestId,
+            displayCode: "Q1W2E3"
+        )
+        let gate = SuspensionGate()
+        let transport = GatedClaimChallengeTransport(gate: gate)
+        let service = AthleteDeviceAuthorizationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            gatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration(anonKey: "test-anon-key"),
+            transport: transport,
+            signingKeyStore: FakeSigningKeyStore()
+        )
+        let coordinator = AthleteDeviceAuthorizationPairingCoordinator(service: service, clock: FakePollingClock(), receiptStore: receiptStore)
+
+        coordinator.resumePendingAttemptIfAny()
+        // Deterministic via real suspension signaling, never a timing
+        // guess: wait until the coordinator's own FIRST claim-challenge
+        // call has genuinely started. `state` was already set to
+        // `.resuming` before that call was even made, and no response —
+        // not even `request_not_available` — has arrived yet, which is
+        // exactly the point: the code must be visible immediately on
+        // resume, never only once the backend answers or the poll
+        // budget runs out.
+        await gate.waitUntilEntered()
+
+        guard case .resuming(let displayCode) = coordinator.state else {
+            Issue.record("expected .resuming, got \(coordinator.state)")
+            return
+        }
+        #expect(displayCode == "Q1W2E3", "the receipt's own comparison code must be shown immediately on resume, not only after a timeout")
+        #expect(transport.sentPaths == ["claim-challenge"], "resuming must never call connection-request-submit")
+
+        await gate.release()
+        await waitForSettled(coordinator, timeoutMS: 5000)
+
+        guard case .interrupted(let finalDisplayCode) = coordinator.state else {
+            Issue.record("expected .interrupted once the poll budget is exhausted, got \(coordinator.state)")
+            return
+        }
+        #expect(finalDisplayCode == "Q1W2E3", "the SAME display code must still be preserved after the attempt interrupts")
+        #expect(transport.sentPaths.allSatisfy { $0 == "claim-challenge" }, "resuming must never call connection-request-submit, at any point")
+    }
+
+    @Test("A receipt with NO stored display code resumes honestly without fabricating one")
+    func resumeWithoutDisplayCodeNeverInventsOne() async {
+        let receiptStore = FakeReceiptStore()
+        receiptStore.storedReceipt = AthleteDeviceAuthorizationReceipt(
+            invitationId: Self.invitationId,
+            connectionRequestId: Self.requestId
+        )
+        let gate = SuspensionGate()
+        let transport = GatedClaimChallengeTransport(gate: gate)
+        let service = AthleteDeviceAuthorizationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            gatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration(anonKey: "test-anon-key"),
+            transport: transport,
+            signingKeyStore: FakeSigningKeyStore()
+        )
+        let coordinator = AthleteDeviceAuthorizationPairingCoordinator(service: service, clock: FakePollingClock(), receiptStore: receiptStore)
+
+        coordinator.resumePendingAttemptIfAny()
+        await gate.waitUntilEntered()
+
+        guard case .resuming(let displayCode) = coordinator.state else {
+            Issue.record("expected .resuming, got \(coordinator.state)")
+            return
+        }
+        #expect(displayCode == nil, "an older receipt saved before displayCode existed must never have one invented for it")
+
+        await gate.release()
+    }
+
     @Test("reset() discards any stored receipt — the explicit 'Scan again' action starts a genuinely new attempt, never silently leaving a stale pending/interrupted receipt behind")
     func resetDiscardsStoredReceipt() async {
         let receiptStore = FakeReceiptStore()
@@ -693,6 +771,32 @@ private final class GatedSubmitTransport: ParentAuthenticationTransport, @unchec
         await gate.markEntered()
         await gate.waitForRelease()
         let body = try! JSONSerialization.data(withJSONObject: ["outcome": "invitation_not_available"] as [String: Any])
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        return (body, response)
+    }
+}
+
+/// Suspends indefinitely on its FIRST call until the test releases it,
+/// then answers every call (including that first one) with
+/// `request_not_available` — lets a test observe `.resuming`'s own
+/// published state deterministically BEFORE any claim-challenge round
+/// trip completes, rather than racing a fixed real-time wait against a
+/// poll loop whose own fake clock never actually sleeps. Tracks every
+/// path called so a test can assert `connection-request-submit` is
+/// never among them.
+private final class GatedClaimChallengeTransport: ParentAuthenticationTransport, @unchecked Sendable {
+    private let gate: SuspensionGate
+    private(set) var sentPaths: [String] = []
+
+    init(gate: SuspensionGate) {
+        self.gate = gate
+    }
+
+    func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
+        sentPaths.append(request.url!.lastPathComponent)
+        await gate.markEntered()
+        await gate.waitForRelease()
+        let body = try! JSONSerialization.data(withJSONObject: ["outcome": "request_not_available"] as [String: Any])
         let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
         return (body, response)
     }
