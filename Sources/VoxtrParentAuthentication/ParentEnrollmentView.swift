@@ -28,16 +28,40 @@ import AuthenticationServices
 public struct ParentEnrollmentView: View {
     private let service: ParentAuthenticationService
     private let workspaces: [EnrollableWorkspace]
+    /// Review round 3: when `true`, this view is being presented
+    /// specifically to satisfy `ParentAuthenticationError
+    /// .reauthenticationRequired` for some OTHER sensitive operation
+    /// elsewhere (e.g. `AthleteDeviceAuthorizationInvitationCoordinator`'s
+    /// own `start`/`decide`) — it shows ONLY the SIWA attempt, directly,
+    /// even though `coordinator.isSignedIn` is already `true` (a live
+    /// but not-fresh-enough session is exactly this situation); it never
+    /// shows workspace enrollment or sign-out, which are not what this
+    /// presentation is for.
+    private let forcesReauthentication: Bool
+    /// Fires once, only after a BRAND-NEW SIWA handshake has actually
+    /// completed successfully in `forcesReauthentication` mode AND the
+    /// Parent has explicitly tapped Continue — never merely from
+    /// `coordinator.isSignedIn` already being `true`, and never from
+    /// this view simply being dismissed. `nil` outside
+    /// `forcesReauthentication` mode.
+    private let onReauthenticated: (() -> Void)?
 
     @State private var coordinator: ParentSignInCoordinator
     @State private var selectedWorkspace: EnrollableWorkspace?
     @State private var code: String = ""
     @State private var isSubmitting = false
 
-    public init(service: ParentAuthenticationService, workspaces: [EnrollableWorkspace]) {
+    public init(
+        service: ParentAuthenticationService,
+        workspaces: [EnrollableWorkspace],
+        forcesReauthentication: Bool = false,
+        onReauthenticated: (() -> Void)? = nil
+    ) {
         self.service = service
         self.workspaces = workspaces
-        _coordinator = State(initialValue: ParentSignInCoordinator(service: service))
+        self.forcesReauthentication = forcesReauthentication
+        self.onReauthenticated = onReauthenticated
+        _coordinator = State(initialValue: ParentSignInCoordinator(service: service, forceFreshSignIn: forcesReauthentication))
         _selectedWorkspace = State(initialValue: workspaces.first)
     }
 
@@ -52,7 +76,13 @@ public struct ParentEnrollmentView: View {
 
     public var body: some View {
         Form {
-            if !coordinator.isSignedIn {
+            if forcesReauthentication {
+                if coordinator.justCompletedFreshSignIn {
+                    freshSignInConfirmedSection
+                } else {
+                    signInSection
+                }
+            } else if !coordinator.isSignedIn {
                 signInSection
             } else {
                 enrollmentSection
@@ -64,11 +94,32 @@ public struct ParentEnrollmentView: View {
         // cancels and restarts this task whenever it changes, which is
         // exactly what "signing out must enable a new SIWA attempt
         // without navigating away" needs — no manual task bookkeeping
-        // in `signOut()`. While signed in, the guard makes this an
-        // immediate no-op (no reason to hold an idle nonce).
+        // in `signOut()`. In `forcesReauthentication` mode this must
+        // start even though `isSignedIn` is already (and stays) `true`
+        // — a live-but-stale session still needs a fresh idle handshake
+        // offered directly; `keepNonceFresh()` itself stops once a
+        // fresh sign-in actually completes.
         .task(id: coordinator.isSignedIn) {
-            guard !coordinator.isSignedIn else { return }
+            guard forcesReauthentication || !coordinator.isSignedIn else { return }
             await keepNonceFresh()
+        }
+    }
+
+    /// Shown only in `forcesReauthentication` mode, only once a BRAND
+    /// NEW handshake has actually completed — requires its own explicit
+    /// tap before firing `onReauthenticated`, so neither the flip to
+    /// `justCompletedFreshSignIn` alone nor merely dismissing this sheet
+    /// can be mistaken for that confirmation.
+    private var freshSignInConfirmedSection: some View {
+        Section {
+            Button("Continue") {
+                onReauthenticated?()
+            }
+            .accessibilityIdentifier("parentEnrollment.continueAfterReauthButton")
+        } header: {
+            Text("Signed in")
+        } footer: {
+            Text("You're signed in again. Tap Continue to pick up where you left off.")
         }
     }
 
@@ -150,6 +201,7 @@ public struct ParentEnrollmentView: View {
     /// whether each poll actually does anything.
     private func keepNonceFresh() async {
         while !Task.isCancelled {
+            if forcesReauthentication && coordinator.justCompletedFreshSignIn { return }
             await coordinator.fetchReadyHandshakeIfNeeded()
             try? await Task.sleep(for: Self.nonceFreshnessPollInterval)
         }

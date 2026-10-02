@@ -51,7 +51,8 @@ public struct RootView: View {
                 calendarPlanningCoordinationService: root.container.resolve(CalendarPlanningCoordinationService.self),
                 athleteConnectionOwnerHandoffService: root.container.resolve(AthleteConnectionOwnerHandoffService.self),
                 parentAuthenticationService: root.container.resolve(ParentAuthenticationService.self),
-                enrollableWorkspaces: makeEnrollableWorkspaces()
+                enrollableWorkspaces: makeEnrollableWorkspaces(),
+                athleteDeviceAuthorizationInvitationService: root.container.resolve(AthleteDeviceAuthorizationInvitationService.self)
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)

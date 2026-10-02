@@ -68,6 +68,14 @@ public final class AthleteFamilyManagementViewModel {
 
     private let workspaceId: WorkspaceId
     private let participantId: UUID
+    /// Athlete Connection V1 (backend device authorization): read-only
+    /// exposure of this ViewModel's own `workspaceId`/`participantId` —
+    /// needed by `AthleteSettingsView`'s own "Connect this device" entry
+    /// point to construct `AthleteDeviceAuthorizationInvitationView`,
+    /// which (unlike the existing CKShare flow's `AthleteConnectionOwnerHandoffService`
+    /// call, made from THIS ViewModel) is driven directly by that View.
+    public var currentWorkspaceId: WorkspaceId { workspaceId }
+    public var currentParentActorId: ActorId { ActorId(rawValue: participantId) }
     private let athleteRepository: AthleteRepository
     private let athleteFamilyManagementService: AthleteFamilyManagementService
     private let athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService

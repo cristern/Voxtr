@@ -126,6 +126,21 @@ public final class CompositionRoot {
         // delivery report for the follow-up this implies.
         parentAuthenticationConfiguration: ParentAuthenticationConfiguration = ParentAuthenticationConfiguration(
             baseURL: URL(string: "http://localhost:54321/functions/v1")!
+        ),
+        // Athlete Connection V1 (backend device authorization, review
+        // round 2): the Supabase project `apikey`/`Authorization: Bearer`
+        // gateway credential `AthleteDeviceAuthorizationService` attaches
+        // to `connection-request-submit`/`claim-challenge`/`claim-submit`
+        // — see that service's own `AthleteDeviceAuthorizationGatewayConfiguration`
+        // doc comment. This default is an OBVIOUSLY NON-FUNCTIONAL
+        // placeholder string, never a real hosted anon key of any kind
+        // (matching `.env.example`'s own
+        // `SUPABASE_ANON_KEY=replace-with-local-or-dashboard-anon-key`
+        // convention in cristern/Voxtr-Backend) — real configuration
+        // must be supplied explicitly by the caller before any
+        // physical-device testing against a deployed or local backend.
+        athleteDeviceAuthorizationGatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration = AthleteDeviceAuthorizationGatewayConfiguration(
+            anonKey: "REPLACE_WITH_SUPABASE_ANON_KEY"
         )
     ) async throws -> CompositionRoot {
         let container = DIContainer()
@@ -144,6 +159,23 @@ public final class CompositionRoot {
             configuration: parentAuthenticationConfiguration
         )
         container.register(ParentAuthenticationService.self) { parentAuthenticationService }
+
+        // Athlete Connection V1 (backend device authorization):
+        // registration only, same as every other B2.x/Slice D service
+        // above — no network call happens here, and nothing here submits
+        // a connection request or signs anything. Reuses the SAME
+        // `parentAuthenticationConfiguration` base URL the Parent-side
+        // service above was just given: both sides talk to the same
+        // backend project, and this type carries no Parent-session
+        // concept of its own (see `AthleteDeviceAuthorizationService`'s
+        // own doc comment). `AthleteApp` is the only caller that ever
+        // resolves this, from `AthleteRootView`, after an explicit
+        // "Connect this device" tap.
+        let athleteDeviceAuthorizationService = AthleteDeviceAuthorizationService(
+            configuration: parentAuthenticationConfiguration,
+            gatewayConfiguration: athleteDeviceAuthorizationGatewayConfiguration
+        )
+        container.register(AthleteDeviceAuthorizationService.self) { athleteDeviceAuthorizationService }
 
         let modelContainer = try persistence.makeModelContainer()
 
@@ -289,6 +321,18 @@ public final class CompositionRoot {
             transport: cloudKitTransport
         )
         container.register(AthleteConnectionOwnerHandoffService.self) { athleteConnectionOwnerHandoffService }
+
+        // Athlete Connection V1 (backend device authorization): the
+        // ParentApp-side counterpart to `athleteDeviceAuthorizationService`
+        // above — registration only, same rationale as every other B2.x
+        // service: no network call happens here, and nothing here calls
+        // `prepareInvitation(...)`, which only ever runs from an explicit
+        // Parent "Connect this device" tap.
+        let athleteDeviceAuthorizationInvitationService = AthleteDeviceAuthorizationInvitationService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            parentAuthenticationService: parentAuthenticationService
+        )
+        container.register(AthleteDeviceAuthorizationInvitationService.self) { athleteDeviceAuthorizationInvitationService }
 
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's

@@ -277,7 +277,221 @@ public final class ParentAuthenticationService {
         return try Self.mapRedemptionOutcome(decoded)
     }
 
+    // MARK: - Athlete Connection V1: invitation creation, request listing, decision
+
+    /// Creates a new connection invitation for exactly the given
+    /// `(workspaceId, participantId, athleteId)` triple — three opaque,
+    /// already-resolved iOS-owned stable identifiers (the caller, in
+    /// `VoxtrAppShell`, is responsible for resolving `participantId` to
+    /// the intended athlete's own `WorkspaceParticipant.id`, exactly as
+    /// `connection-invitation-create/index.ts`'s own header describes).
+    /// This method neither infers nor validates their relationship to
+    /// each other — the backend cannot either. SENSITIVE operation per
+    /// the backend's own 10-minute freshness gate, so a stale-but-live
+    /// session surfaces as `.reauthenticationRequired` without clearing
+    /// the stored token — same shape as `redeemEnrollment`. `public`
+    /// (unlike every other method in this class — see
+    /// `ParentAuthenticationError`'s own updated doc comment for why):
+    /// this method's real caller lives in `VoxtrAppShell`, not inside
+    /// this package.
+    public func createConnectionInvitation(
+        workspaceId: UUID,
+        participantId: UUID,
+        athleteId: UUID
+    ) async throws -> ConnectionInvitationCreationOutcome {
+        guard let token = sessionStore.loadToken() else {
+            throw ParentAuthenticationError.notSignedIn
+        }
+        var request = makeRequest(path: "connection-invitation-create")
+        request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
+        request.httpBody = try encode(ConnectionInvitationCreateRequestBody(
+            workspaceId: workspaceId.uuidString,
+            participantId: participantId.uuidString,
+            athleteId: athleteId.uuidString
+        ))
+        let (data, response) = try await transport.send(request)
+
+        if response.statusCode == 401 {
+            let decoded = try? decode(ErrorResponseBody.self, from: data)
+            switch decoded?.error {
+            case "session_invalid":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            case "session_expired":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionExpired
+            case "reauthentication_required":
+                throw ParentAuthenticationError.reauthenticationRequired
+            default:
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            }
+        }
+
+        guard response.statusCode == 200 else { throw ParentAuthenticationError.network }
+        let decoded = try decode(ConnectionInvitationCreateResponseBody.self, from: data)
+        return try Self.mapConnectionInvitationCreationOutcome(decoded)
+    }
+
+    /// Lists every connection request submitted against `invitationId` —
+    /// ORDINARY operation (only ordinary session validity is required,
+    /// never the 10-minute freshness gate), so unlike
+    /// `createConnectionInvitation`/`decideConnectionRequest` a 401 here
+    /// never means `.reauthenticationRequired`. `public` — same reason as
+    /// `createConnectionInvitation`.
+    public func listConnectionRequests(invitationId: UUID) async throws -> ConnectionRequestListOutcome {
+        guard let token = sessionStore.loadToken() else {
+            throw ParentAuthenticationError.notSignedIn
+        }
+        var request = makeRequest(path: "connection-request-list")
+        request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
+        request.httpBody = try encode(ConnectionRequestListRequestBody(invitationId: invitationId.uuidString))
+        let (data, response) = try await transport.send(request)
+
+        if response.statusCode == 401 {
+            let decoded = try? decode(ErrorResponseBody.self, from: data)
+            switch decoded?.error {
+            case "session_invalid":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            case "session_expired":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionExpired
+            default:
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            }
+        }
+
+        guard response.statusCode == 200 else { throw ParentAuthenticationError.network }
+        let decoded = try decode(ConnectionRequestListResponseBody.self, from: data)
+        return try Self.mapConnectionRequestListOutcome(decoded)
+    }
+
+    /// Approves or rejects exactly one connection request, carrying back
+    /// the exact `displayCode` the Parent visually compared on screen —
+    /// a selection consistency check, never authorization itself (see
+    /// `connection-request-decide/index.ts`'s own header). SENSITIVE
+    /// operation, same session-handling shape as
+    /// `createConnectionInvitation`. `public` — same reason as that
+    /// method.
+    public func decideConnectionRequest(
+        invitationId: UUID,
+        connectionRequestId: UUID,
+        decision: ConnectionRequestDecision,
+        displayCode: String
+    ) async throws -> ConnectionRequestDecisionOutcome {
+        guard let token = sessionStore.loadToken() else {
+            throw ParentAuthenticationError.notSignedIn
+        }
+        var request = makeRequest(path: "connection-request-decide")
+        request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
+        request.httpBody = try encode(ConnectionRequestDecideRequestBody(
+            invitationId: invitationId.uuidString,
+            connectionRequestId: connectionRequestId.uuidString,
+            decision: decision.rawValue,
+            displayCode: displayCode
+        ))
+        let (data, response) = try await transport.send(request)
+
+        if response.statusCode == 401 {
+            let decoded = try? decode(ErrorResponseBody.self, from: data)
+            switch decoded?.error {
+            case "session_invalid":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            case "session_expired":
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionExpired
+            case "reauthentication_required":
+                throw ParentAuthenticationError.reauthenticationRequired
+            default:
+                sessionStore.deleteToken()
+                throw ParentAuthenticationError.sessionInvalid
+            }
+        }
+
+        guard response.statusCode == 200 else { throw ParentAuthenticationError.network }
+        let decoded = try decode(ConnectionRequestDecideResponseBody.self, from: data)
+        return try Self.mapConnectionRequestDecisionOutcome(decoded)
+    }
+
     // MARK: - Wire mapping
+
+    private static func mapConnectionInvitationCreationOutcome(_ body: ConnectionInvitationCreateResponseBody) throws -> ConnectionInvitationCreationOutcome {
+        switch body.outcome {
+        case "created":
+            guard
+                let rawId = body.invitationId, let id = UUID(uuidString: rawId),
+                let rawExpiresAt = body.expiresAt, let expiresAt = Self.parseISO8601(rawExpiresAt)
+            else {
+                throw ParentAuthenticationError.malformedResponse
+            }
+            return .created(invitationId: id, expiresAt: expiresAt)
+        case "owner_binding_not_active":
+            return .ownerBindingNotActive
+        default:
+            throw ParentAuthenticationError.malformedResponse
+        }
+    }
+
+    private static func mapConnectionRequestListOutcome(_ body: ConnectionRequestListResponseBody) throws -> ConnectionRequestListOutcome {
+        switch body.outcome {
+        case "ok":
+            let summaries = try (body.requests ?? []).map { item -> ConnectionRequestSummary in
+                guard
+                    let id = UUID(uuidString: item.id),
+                    let status = ConnectionRequestStatus(rawValue: item.status),
+                    let createdAt = Self.parseISO8601(item.createdAt)
+                else {
+                    throw ParentAuthenticationError.malformedResponse
+                }
+                return ConnectionRequestSummary(id: id, displayCode: item.displayCode, status: status, createdAt: createdAt)
+            }
+            return .ok(requests: summaries)
+        case "invitation_not_found":
+            return .invitationNotFound
+        case "owner_binding_not_active":
+            return .ownerBindingNotActive
+        default:
+            throw ParentAuthenticationError.malformedResponse
+        }
+    }
+
+    private static func mapConnectionRequestDecisionOutcome(_ body: ConnectionRequestDecideResponseBody) throws -> ConnectionRequestDecisionOutcome {
+        switch body.outcome {
+        case "approved": return .approved
+        case "rejected": return .rejected
+        case "invitation_not_found": return .invitationNotFound
+        case "request_not_found": return .requestNotFound
+        case "owner_binding_not_active": return .ownerBindingNotActive
+        case "code_mismatch": return .codeMismatch
+        case "request_claimed": return .requestClaimed
+        case "already_decided": return .alreadyDecided
+        case "invitation_expired": return .invitationExpired
+        case "invitation_consumed": return .invitationConsumed
+        case "invitation_already_has_approved_request": return .invitationAlreadyHasApprovedRequest
+        default:
+            throw ParentAuthenticationError.malformedResponse
+        }
+    }
+
+    /// None of this package's existing wire DTOs decode a timestamp
+    /// field as `Date` (see `AuthNonceResponseBody.expiresAt`'s own
+    /// `String` type) — `decode<T>`'s shared `JSONDecoder` is left at
+    /// its default (non-ISO8601) date strategy so it stays correct for
+    /// every other call site. These three new outcome types need real
+    /// `Date` values, so parsing happens explicitly here instead,
+    /// tolerating both with- and without-fractional-seconds ISO 8601
+    /// (Postgres `timestamptz` text output includes fractional seconds).
+    private static func parseISO8601(_ string: String) -> Date? {
+        let withFractionalSeconds = ISO8601DateFormatter()
+        withFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = withFractionalSeconds.date(from: string) {
+            return date
+        }
+        return ISO8601DateFormatter().date(from: string)
+    }
 
     private static func mapRedemptionOutcome(_ body: WorkspaceEnrollmentRedeemResponseBody) throws -> RedemptionOutcome {
         func requireOwnerBindingId() throws -> UUID {
@@ -376,4 +590,43 @@ private struct WorkspaceEnrollmentRedeemResponseBody: Decodable, Sendable {
 
 private struct ErrorResponseBody: Decodable, Sendable {
     let error: String?
+}
+
+private struct ConnectionInvitationCreateRequestBody: Encodable, Sendable {
+    let workspaceId: String
+    let participantId: String
+    let athleteId: String
+}
+
+private struct ConnectionInvitationCreateResponseBody: Decodable, Sendable {
+    let outcome: String
+    let invitationId: String?
+    let expiresAt: String?
+}
+
+private struct ConnectionRequestListRequestBody: Encodable, Sendable {
+    let invitationId: String
+}
+
+private struct ConnectionRequestListItemBody: Decodable, Sendable {
+    let id: String
+    let displayCode: String
+    let status: String
+    let createdAt: String
+}
+
+private struct ConnectionRequestListResponseBody: Decodable, Sendable {
+    let outcome: String
+    let requests: [ConnectionRequestListItemBody]?
+}
+
+private struct ConnectionRequestDecideRequestBody: Encodable, Sendable {
+    let invitationId: String
+    let connectionRequestId: String
+    let decision: String
+    let displayCode: String
+}
+
+private struct ConnectionRequestDecideResponseBody: Decodable, Sendable {
+    let outcome: String
 }

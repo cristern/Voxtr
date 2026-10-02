@@ -191,6 +191,9 @@ public struct FamilyHomeContentView: View {
     /// `calendarPlanningCoordinationService` above.
     private let parentAuthenticationService: ParentAuthenticationService
     private let enrollableWorkspaces: [EnrollableWorkspace]
+    /// Athlete Connection V1 (backend device authorization): same
+    /// threading rationale as `parentAuthenticationService` above.
+    private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
 
     public init(
         family: RestoredFamily,
@@ -210,7 +213,8 @@ public struct FamilyHomeContentView: View {
         calendarPlanningCoordinationService: CalendarPlanningCoordinationService,
         sportRepository: SportRepository,
         parentAuthenticationService: ParentAuthenticationService,
-        enrollableWorkspaces: [EnrollableWorkspace]
+        enrollableWorkspaces: [EnrollableWorkspace],
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     ) {
         self.family = family
         self.planningService = planningService
@@ -230,6 +234,7 @@ public struct FamilyHomeContentView: View {
         self.athleteRepository = athleteRepository
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
+        self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -952,7 +957,8 @@ public struct FamilyHomeContentView: View {
             athleteRepository: athleteRepository,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
             parentAuthenticationService: parentAuthenticationService,
-            enrollableWorkspaces: enrollableWorkspaces
+            enrollableWorkspaces: enrollableWorkspaces,
+            athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
         )
     }
 
