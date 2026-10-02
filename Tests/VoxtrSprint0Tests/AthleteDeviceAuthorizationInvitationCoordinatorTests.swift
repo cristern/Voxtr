@@ -362,6 +362,62 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         #expect(fixture.transport.sentPaths == ["connection-invitation-create"])
     }
 
+    // MARK: - Review round 3: polling auth failure preserves the SAME invitation
+
+    @Test("An authentication failure while polling connection-request-list preserves the EXACT same invitation — retryAfterReauthentication() resumes polling it directly, never creating a new invitation")
+    func pollingAuthFailureResumesSameInvitationAfterReauthentication() async throws {
+        let fixture = try Self.makeFixture()
+        let invitationId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
+            "outcome": "created",
+            "invitation_id": invitationId.uuidString,
+            "expires_at": "2026-10-01T00:15:00Z",
+        ])
+        fixture.transport.enqueue(path: "connection-request-list", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await fixture.coordinator.start(forAthlete: fixture.athleteId, workspaceId: fixture.workspaceId, invitedBy: fixture.invitedBy)
+        await waitUntil(fixture.coordinator) { state in
+            if case .authenticationRequired = state { return true }
+            return false
+        }
+
+        guard case .authenticationRequired(.reauthenticationRequired) = fixture.coordinator.state else {
+            Issue.record("expected .authenticationRequired(.reauthenticationRequired), got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(fixture.transport.sentPaths == ["connection-invitation-create", "connection-request-list"])
+
+        let requestId = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        fixture.transport.enqueue(path: "connection-request-list", statusCode: 200, json: [
+            "outcome": "ok",
+            "requests": [
+                ["id": requestId.uuidString, "display_code": "A1B2C3", "status": "pending", "created_at": "2026-10-01T00:10:00Z"],
+            ],
+        ])
+
+        await fixture.coordinator.retryAfterReauthentication()
+
+        guard case .awaitingRequests(let invitation, _) = fixture.coordinator.state else {
+            Issue.record("expected .awaitingRequests immediately after retryAfterReauthentication(), got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(invitation.invitationId == invitationId, "resuming must pick the SAME invitation back up, never create a new one")
+
+        await waitUntil(fixture.coordinator) { state in
+            if case .awaitingRequests(_, let requests) = state { return !requests.isEmpty }
+            return false
+        }
+        guard case .awaitingRequests(let resumedInvitation, let requests) = fixture.coordinator.state else {
+            Issue.record("expected .awaitingRequests with requests after resuming, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(resumedInvitation.invitationId == invitationId)
+        #expect(requests.map(\.id) == [requestId])
+        // Exactly ONE connection-invitation-create for the whole test —
+        // reauthentication never triggers a second one.
+        #expect(fixture.transport.sentPaths.filter { $0 == "connection-invitation-create" }.count == 1)
+    }
+
     // MARK: - decide()
 
     @Test("decide() sends invitation/request/decision/displayCode exactly as given and moves to .decided")

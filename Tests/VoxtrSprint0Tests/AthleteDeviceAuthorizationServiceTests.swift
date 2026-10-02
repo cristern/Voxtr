@@ -375,6 +375,21 @@ struct AthleteDeviceAuthorizationServiceTests {
         #expect(signingKeyStore.loadOrCreateCallCount == 0)
     }
 
+    @Test("currentInstallationHasExistingSigningKey() reports true/false exactly as loadExistingSigningKey() would succeed/throw, without ever generating a replacement")
+    func currentInstallationHasExistingSigningKeyMirrorsLoadExisting() {
+        let availableKeyStore = FakeSigningKeyStore()
+        let (availableService, _, _) = makeService(signingKeyStore: availableKeyStore)
+        #expect(availableService.currentInstallationHasExistingSigningKey() == true)
+        #expect(availableKeyStore.loadExistingCallCount == 1)
+        #expect(availableKeyStore.loadOrCreateCallCount == 0)
+
+        let missingKeyStore = FakeSigningKeyStore()
+        missingKeyStore.throwOnLoadExisting = true
+        let (missingService, _, _) = makeService(signingKeyStore: missingKeyStore)
+        #expect(missingService.currentInstallationHasExistingSigningKey() == false)
+        #expect(missingKeyStore.loadOrCreateCallCount == 0, "a missing key must never be silently replaced just by checking availability")
+    }
+
     @Test("submitClaim() maps every documented claim_device_grant outcome plus the anti-enumeration challenge_invalid fold")
     func submitClaimMapsAllOutcomes() async throws {
         let cases: [(wire: [String: Any?], expected: ClaimOutcome)] = [

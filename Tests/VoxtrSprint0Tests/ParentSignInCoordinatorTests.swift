@@ -418,4 +418,148 @@ struct ParentSignInCoordinatorTests {
         #expect(transport.sentRequests.isEmpty)
         #expect(coordinator.canAttemptSignIn == false)
     }
+
+    // MARK: - Review round 3: forceFreshSignIn (a live-but-stale session still offers SIWA directly)
+
+    @Test("With forceFreshSignIn, a live-but-stale session (isSignedIn already true) still offers a fresh SIWA attempt directly — never gated behind the Parent finding a sign-out action first")
+    func forceFreshSignInOffersSIWADirectlyEvenWhileSignedIn() async {
+        let transport = FakeParentAuthenticationTransport()
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "live-but-stale-session-token"
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let coordinator = ParentSignInCoordinator(service: service, forceFreshSignIn: true)
+        #expect(coordinator.isSignedIn == true, "the session is still live — this is exactly the reauthenticationRequired shape, not a signed-out one")
+        #expect(coordinator.shouldFetchReadyHandshake == true, "forced mode must offer a fresh handshake despite isSignedIn already being true")
+
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-A", "nonce": "raw-a", "expires_at": "2026-09-30T00:00:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+
+        #expect(transport.sentRequests.count == 1, "forced mode must actually be able to fetch, not just report true")
+        #expect(coordinator.canAttemptSignIn == true)
+        // The still-live token is left completely untouched — forcing a
+        // fresh attempt is never itself a sign-out.
+        #expect(sessionStore.currentToken == "live-but-stale-session-token")
+    }
+
+    @Test("Without forceFreshSignIn, the exact same live-but-stale session still refuses to offer a handshake — the one-line gate is additive, never a behavior change for ordinary sign-in")
+    func ordinaryModeStillRefusesWhileSignedIn() async {
+        let transport = FakeParentAuthenticationTransport()
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "live-but-stale-session-token"
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let coordinator = ParentSignInCoordinator(service: service, forceFreshSignIn: false)
+
+        #expect(coordinator.shouldFetchReadyHandshake == false)
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        #expect(transport.sentRequests.isEmpty)
+    }
+
+    @Test("justCompletedFreshSignIn flips true only once a BRAND NEW handshake actually completes successfully — never merely from isSignedIn being true")
+    func justCompletedFreshSignInFlipsOnlyAfterARealCompletedHandshake() async throws {
+        let transport = FakeParentAuthenticationTransport()
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "live-but-stale-session-token"
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let coordinator = ParentSignInCoordinator(service: service, forceFreshSignIn: true)
+        #expect(coordinator.justCompletedFreshSignIn == false, "merely being signed in must never be read as a fresh completion")
+
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-A", "nonce": "raw-a", "expires_at": "2026-09-30T00:00:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        coordinator.beginAttempt()
+        #expect(coordinator.justCompletedFreshSignIn == false)
+
+        transport.enqueue(path: "parent-auth-complete", statusCode: 200, json: [
+            "outcome": "authenticated",
+            "session_token": "brand-new-session-token",
+            "expires_at": "2026-09-30T00:00:00Z",
+            "authenticated_at": "2026-09-29T00:00:00Z",
+        ])
+        await coordinator.completeActiveAttempt(identityToken: "identity-token")
+
+        #expect(coordinator.justCompletedFreshSignIn == true)
+    }
+
+    @Test("A cancelled or failed SIWA attempt never marks justCompletedFreshSignIn — only a genuinely successful completion does")
+    func cancelledOrFailedAttemptNeverMarksJustCompletedFreshSignIn() async throws {
+        let transport = FakeParentAuthenticationTransport()
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "live-but-stale-session-token"
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let coordinator = ParentSignInCoordinator(service: service, forceFreshSignIn: true)
+
+        // Cancellation (Apple sheet dismissed/failed before the backend).
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-A", "nonce": "raw-a", "expires_at": "2026-09-30T00:00:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        coordinator.beginAttempt()
+        coordinator.cancelActiveAttempt()
+        #expect(coordinator.justCompletedFreshSignIn == false)
+
+        // A completed attempt, but the BACKEND reports authentication_failed.
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-B", "nonce": "raw-b", "expires_at": "2026-09-30T00:01:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        coordinator.beginAttempt()
+        transport.enqueue(path: "parent-auth-complete", statusCode: 200, json: ["outcome": "authentication_failed"])
+        await coordinator.completeActiveAttempt(identityToken: "identity-token")
+
+        #expect(coordinator.justCompletedFreshSignIn == false, "a backend-reported authentication_failed is not a fresh completion either")
+    }
+
+    @Test("beginAttempt() pinning a NEW attempt clears a PREVIOUS attempt's justCompletedFreshSignIn — it can never be read as still fresh for a later attempt")
+    func beginningANewAttemptClearsThePreviousCompletionFlag() async throws {
+        let transport = FakeParentAuthenticationTransport()
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "live-but-stale-session-token"
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: transport,
+            sessionStore: sessionStore
+        )
+        let coordinator = ParentSignInCoordinator(service: service, forceFreshSignIn: true)
+
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-A", "nonce": "raw-a", "expires_at": "2026-09-30T00:00:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        coordinator.beginAttempt()
+        transport.enqueue(path: "parent-auth-complete", statusCode: 200, json: [
+            "outcome": "authenticated",
+            "session_token": "brand-new-session-token",
+            "expires_at": "2026-09-30T00:00:00Z",
+            "authenticated_at": "2026-09-29T00:00:00Z",
+        ])
+        await coordinator.completeActiveAttempt(identityToken: "identity-token")
+        #expect(coordinator.justCompletedFreshSignIn == true)
+
+        transport.enqueue(path: "auth-nonce", statusCode: 200, json: [
+            "nonce_id": "nonce-B", "nonce": "raw-b", "expires_at": "2026-09-30T00:01:00Z",
+        ])
+        await coordinator.fetchReadyHandshakeIfNeeded()
+        coordinator.beginAttempt()
+
+        #expect(coordinator.justCompletedFreshSignIn == false)
+    }
 }

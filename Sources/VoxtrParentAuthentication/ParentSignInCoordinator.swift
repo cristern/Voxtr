@@ -69,16 +69,40 @@ final class ParentSignInCoordinator {
     /// attempt; it never expires an attempt already pinned into
     /// `activeAttempt` (see this type's own doc comment).
     private let freshnessBound: TimeInterval
+    /// Review round 3: when `true`, this coordinator offers a fresh SIWA
+    /// attempt even while `isSignedIn` is ALREADY `true` — i.e. a live
+    /// but not-fresh-enough session, exactly the shape
+    /// `ParentAuthenticationError.reauthenticationRequired` describes. A
+    /// plain token refresh/rotation can never satisfy that requirement;
+    /// only a brand-new handshake through this same coordinator can, so
+    /// callers needing that (`ParentEnrollmentView`'s own
+    /// `forcesReauthentication` mode) must still be able to reach
+    /// `canAttemptSignIn`/`shouldFetchReadyHandshake` without first
+    /// requiring the Parent to sign out.
+    private let forceFreshSignIn: Bool
+
+    /// Review round 3: `true` for exactly one fresh, successfully
+    /// completed SIWA handshake — never for `isSignedIn` being true from
+    /// a stored session, and never from a refresh/rotation (which never
+    /// goes through this coordinator's own attempt lifecycle at all).
+    /// Cleared the moment a NEW attempt is pinned (`beginAttempt()`), so
+    /// it can never be read as "still fresh" across a later attempt.
+    /// Exists specifically so a caller in `forceFreshSignIn` mode can
+    /// require an explicit continuation after this flips `true`, rather
+    /// than treating the flip itself (or a mere "Done" tap) as proof.
+    private(set) var justCompletedFreshSignIn = false
 
     init(
         service: ParentAuthenticationService,
         clock: ParentSignInClock = SystemParentSignInClock(),
-        freshnessBound: TimeInterval = 45
+        freshnessBound: TimeInterval = 45,
+        forceFreshSignIn: Bool = false
     ) {
         self.service = service
         self.isSignedIn = service.isSignedIn()
         self.clock = clock
         self.freshnessBound = freshnessBound
+        self.forceFreshSignIn = forceFreshSignIn
     }
 
     // MARK: - Idle nonce freshness
@@ -97,13 +121,16 @@ final class ParentSignInCoordinator {
     }
 
     /// Whether fetching a new idle handshake is currently useful —
-    /// `false` while signed in (nothing left to sign in for) or while an
-    /// attempt is active (there is nothing to renew: the active
-    /// handshake is pinned and must not be touched), `true` whenever
-    /// idle, signed out, and either nothing is held or what's held has
-    /// gone stale.
+    /// `false` while signed in with that being enough (nothing left to
+    /// sign in for) or while an attempt is active (there is nothing to
+    /// renew: the active handshake is pinned and must not be touched),
+    /// `true` whenever either genuinely signed out OR `forceFreshSignIn`
+    /// is set (a live-but-stale session still needs a brand-new
+    /// handshake offered directly, never gated behind the Parent finding
+    /// a sign-out action first), and either nothing is held or what's
+    /// held has gone stale.
     var shouldFetchReadyHandshake: Bool {
-        !isSignedIn && activeAttempt == nil && (readyHandshake == nil || !isReadyHandshakeFresh)
+        (forceFreshSignIn || !isSignedIn) && activeAttempt == nil && (readyHandshake == nil || !isReadyHandshakeFresh)
     }
 
     /// Fetches a new idle handshake, replacing `readyHandshake` — but
@@ -151,6 +178,10 @@ final class ParentSignInCoordinator {
         activeAttempt = handshake
         readyHandshake = nil
         readyHandshakeFetchedAt = nil
+        // A NEW attempt starting means any PREVIOUS attempt's freshness
+        // is no longer what's current — never read as "still fresh" for
+        // this one.
+        justCompletedFreshSignIn = false
         return handshake
     }
 
@@ -184,6 +215,7 @@ final class ParentSignInCoordinator {
             case .authenticated:
                 isSignedIn = true
                 statusMessage = nil
+                justCompletedFreshSignIn = true
             case .authenticationFailed:
                 // Also reached if the backend authenticated the
                 // handshake but the service itself discarded the

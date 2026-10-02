@@ -52,6 +52,15 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     /// specific request — never an ambient "currently selected" request
     /// that could go stale while the dialog is open.
     @State private var pendingApprovalConfirmation: PendingApprovalConfirmation?
+    /// Review round 3: the Parent's own explicit dismissal (Cancel tap
+    /// or interactive swipe) of the reauthentication sheet — tracked
+    /// here, NOT derived purely from `coordinator.state`, because the
+    /// state alone can't tell "the Parent dismissed this" apart from
+    /// "this is still the same authentication failure as before." Reset
+    /// the moment `coordinator.state` leaves `.authenticationRequired`,
+    /// so a LATER, genuinely new auth failure can present the sheet
+    /// again.
+    @State private var isReauthenticationSheetDismissed = false
 
     private struct PendingApprovalConfirmation: Identifiable {
         let invitation: AthleteDeviceAuthorizationInvitation
@@ -139,39 +148,71 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
                 .sheet(isPresented: isPresentingReauthentication) {
                     reauthenticationSheet
                 }
+                // The dismissed flag only means anything WHILE
+                // `.authenticationRequired` — the moment that state is
+                // left (a later success, failure, or a brand-new auth
+                // failure after a retry), it's cleared, so a genuinely
+                // new failure can present the sheet again.
+                .onChange(of: coordinator.state) { _, newState in
+                    if case .authenticationRequired = newState {} else {
+                        isReauthenticationSheetDismissed = false
+                    }
+                }
         }
     }
 
+    /// A REAL dismissible binding, unlike a binding whose `set` is a
+    /// no-op: without a working setter, an interactive swipe-to-dismiss
+    /// has nothing to write to, so SwiftUI's own `isPresented` getter
+    /// (derived from `coordinator.state`, which dismissal alone never
+    /// changes) would just report "still presented" and fight the
+    /// Parent's own swipe. `isReauthenticationSheetDismissed` gives the
+    /// setter somewhere real to write.
     private var isPresentingReauthentication: Binding<Bool> {
         Binding(
             get: {
-                if case .authenticationRequired = coordinator.state { return true }
-                return false
+                guard case .authenticationRequired = coordinator.state else { return false }
+                return !isReauthenticationSheetDismissed
             },
-            set: { _ in }
+            set: { isPresented in
+                if !isPresented { isReauthenticationSheetDismissed = true }
+            }
         )
     }
 
-    /// Wraps the EXISTING, unmodified `ParentEnrollmentView` with a
-    /// "Done" action — that view has no dismiss affordance of its own
-    /// (it's designed to live in the Profile tab's own NavigationStack),
-    /// so this sheet supplies one. Tapping Done is the Parent's own
-    /// explicit signal that they're finished signing in; only THEN does
-    /// `retryAfterReauthentication()` run, resuming exactly the
-    /// operation (`start`/`decide`) that originally failed, for the
-    /// exact same athlete/invitation/request — nothing here retries on
-    /// its own.
+    /// Wraps the EXISTING, unmodified `ParentEnrollmentView` in its own
+    /// `forcesReauthentication` mode — shows the SIWA attempt directly
+    /// even though the Parent's session is still nominally live (just
+    /// not fresh enough), never the ordinary enrollment/sign-out
+    /// sections. Cancelling here is the Parent's own explicit choice to
+    /// not continue right now: it just dismisses, and does NOT call
+    /// `retryAfterReauthentication()` — `pendingOperation` stays intact
+    /// for a later retry. Only `onReauthenticated` (fired by
+    /// `ParentEnrollmentView` itself, and ONLY after a brand-new SIWA
+    /// handshake actually completed AND the Parent tapped its own
+    /// explicit Continue) both dismisses this sheet and resumes exactly
+    /// the operation (`start`/`decide`/`resumePolling`) that originally
+    /// failed, for the exact same athlete/invitation/request — a mere
+    /// "Done" tap is never treated as proof of that on its own.
     private var reauthenticationSheet: some View {
         NavigationStack {
-            ParentEnrollmentView(service: parentAuthenticationService, workspaces: enrollableWorkspaces)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
-                            Task { await coordinator.retryAfterReauthentication() }
-                        }
-                        .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.reauthDoneButton")
-                    }
+            ParentEnrollmentView(
+                service: parentAuthenticationService,
+                workspaces: enrollableWorkspaces,
+                forcesReauthentication: true,
+                onReauthenticated: {
+                    isReauthenticationSheetDismissed = true
+                    Task { await coordinator.retryAfterReauthentication() }
                 }
+            )
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        isReauthenticationSheetDismissed = true
+                    }
+                    .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.reauthCancelButton")
+                }
+            }
         }
     }
 

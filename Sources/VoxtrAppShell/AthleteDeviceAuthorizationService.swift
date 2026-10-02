@@ -71,6 +71,21 @@ public final class AthleteDeviceAuthorizationService {
         self.signingKeyStore = signingKeyStore
     }
 
+    /// Review round 3: lets a caller check, BEFORE attempting to resume
+    /// or reconfirm an attempt already bound to a specific key, whether
+    /// this installation can still produce that key — mirrors
+    /// `loadExistingSigningKey()`'s own contract exactly (never
+    /// generates a replacement) without actually needing a message to
+    /// sign yet. A reinstall (orphaned Keychain material under a
+    /// mismatched installation marker), a missing key, or corrupted key
+    /// material all report `false` here, exactly as `loadExistingSigningKey()`
+    /// would throw for each — so a caller can refuse to resume an old
+    /// request/receipt for a key this installation no longer has,
+    /// without ever silently minting a new one to continue it.
+    public func currentInstallationHasExistingSigningKey() -> Bool {
+        (try? signingKeyStore.loadExistingSigningKey()) != nil
+    }
+
     // MARK: - connection-request-submit
 
     /// Submits this installation's OWN signing key's public half against

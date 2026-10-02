@@ -67,12 +67,16 @@ public struct AthleteDeviceAuthorizationScanView: View {
             scanningView
         case .resuming:
             waitingView(message: "Resuming your previous connection attempt…")
+        case .reconfirmingPreviousGrant:
+            waitingView(message: "Confirming your previous connection with Vǫxtr…")
         case .submitting, .claiming:
             waitingView(message: "Confirming…")
         case .awaitingApproval(_, let displayCode):
             awaitingApprovalView(displayCode: displayCode)
         case .authorized:
             successView
+        case .interrupted(let displayCode):
+            interruptedView(displayCode: displayCode)
         case .failed(let message):
             failedView(message: message)
         }
@@ -137,12 +141,15 @@ public struct AthleteDeviceAuthorizationScanView: View {
         .accessibilityIdentifier("athleteDeviceAuthorizationScan.awaitingApproval")
     }
 
-    /// Review round 2: deliberately NOT "Connected" — this slice's own
-    /// boundary ends at confirmed backend device authorization. It never
-    /// hydrates athlete data, accepts a CKShare, activates business
-    /// membership, or shows the normal athlete dashboard as a
-    /// consequence of this result, so the copy says exactly that rather
-    /// than implying a fuller connection than what actually happened.
+    /// Deliberately NOT "Connected" — this slice's own boundary ends at
+    /// confirmed backend device authorization. It never hydrates athlete
+    /// data, accepts a CKShare, activates business membership, or shows
+    /// the normal athlete dashboard as a consequence of this result, so
+    /// the copy says exactly that rather than implying a fuller
+    /// connection than what actually happened. When the backend
+    /// confirmed this but the local receipt recording it couldn't be
+    /// saved, `coordinator.unpersistedAuthorizationWarning` says so
+    /// honestly too, rather than silently hiding that gap.
     private var successView: some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
@@ -154,11 +161,53 @@ public struct AthleteDeviceAuthorizationScanView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(VoxtrColor.textSecondary)
                 .padding(.horizontal, 32)
+            if let warning = coordinator.unpersistedAuthorizationWarning {
+                Text(warning)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.unpersistedWarning")
+            }
             Button("Done") { dismiss() }
                 .accessibilityIdentifier("athleteDeviceAuthorizationScan.doneButton")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("athleteDeviceAuthorizationScan.successState")
+    }
+
+    /// A resumable interruption: the receipt this attempt was bound to
+    /// is still intact, so "Continue connection" requests a fresh
+    /// challenge for the SAME request/key rather than starting over —
+    /// never automatically, always this explicit tap. "Scan again"
+    /// remains available as a SEPARATE, explicit choice for a genuinely
+    /// new attempt, which discards that receipt (see `reset()`'s own
+    /// doc comment).
+    private func interruptedView(displayCode: String?) -> some View {
+        VStack(spacing: 16) {
+            Text("Connection interrupted")
+                .font(VoxtrTypography.cardTitle)
+            Text("We couldn't finish confirming this connection. If the parent already approved, you can continue — nothing needs to be scanned again.")
+                .multilineTextAlignment(.center)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .padding(.horizontal, 32)
+            if let displayCode {
+                Text(displayCode)
+                    .font(.system(size: 32, weight: .bold, design: .monospaced))
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.interruptedDisplayCode")
+            }
+            Button("Continue connection") {
+                coordinator.continuePendingAttempt()
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("athleteDeviceAuthorizationScan.continueButton")
+            Button("Scan again") {
+                coordinator.reset()
+                scanAttempt += 1
+            }
+            .accessibilityIdentifier("athleteDeviceAuthorizationScan.retryButton")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("athleteDeviceAuthorizationScan.interruptedState")
     }
 
     private func failedView(message: String) -> some View {

@@ -1,11 +1,15 @@
-# Athlete Connection V1 — iOS Pairing Implementation Checkpoint (review round 2)
+# Athlete Connection V1 — iOS Pairing Implementation Checkpoint (review round 3)
 
 This records what changed in `claude/athlete-connection-ios-pairing-v1`
-(cristern/Voxtr PR #106) in response to the first round of review, and
-the exact current state of each area. It does not restate the whole
-feature — see `AthleteConnectionV1-NormativeSecurityContract.md`,
+(cristern/Voxtr PR #106) across review rounds 2 and 3, and the exact
+current state of each area. It does not restate the whole feature — see
+`AthleteConnectionV1-NormativeSecurityContract.md`,
 `AthleteConnectionV1-ParentAuthenticationContract.md`, and
 `ADR-AthleteConnection-BackendAuthorization.md` for that.
+
+Round 2 is sections 1–8 below. Round 3 — the current round, prompted by
+three concrete implementation findings against commit `fe4ea86` (a Swift
+6 Sendable-only fix; no behavior change) — is recorded in "Round 3" below.
 
 ## Scope correction
 
@@ -169,6 +173,145 @@ dashboard as a consequence of backend device authorization; that
 boundary is unchanged from the first round and remains exactly where the
 Normative Security Contract draws it.
 
+## Round 3
+
+Three findings against `fe4ea86`: a stored receipt's `grantId` was
+treated as current authorization without any backend check; a transient
+failure or poll-timeout offered only "Scan again" (a brand-new
+connection request), with no same-request resume and no preserved
+comparison code; and Parent reauthentication opened the ordinary account
+screen (which shows enrollment/sign-out, not SIWA, while a token is
+still present) and lost the in-progress operation on a polling auth
+failure. None of these required a new backend endpoint — the fix reuses
+the backend's own existing D2 recovery semantics (`authz
+.issue_claim_challenge` issues a fresh challenge for an already-claimed
+request within its 24-hour recovery deadline; `claim-submit` answers with
+`already_granted`).
+
+### 9. Receipts are never proof of current authorization
+
+`AthleteDeviceAuthorizationReceipt` gained `displayCode: String?` —
+local metadata only (`nil`-safe for receipts saved before this field
+existed). `AthleteDeviceAuthorizationService.currentInstallationHasExistingSigningKey()`
+is a new non-generating pre-check mirroring `loadExistingSigningKey()`'s
+own contract.
+
+`AthleteDeviceAuthorizationPairingCoordinator.resumePendingAttemptIfAny()`
+no longer shortcuts a `grantId`-bearing receipt straight to
+`.authorized`. It now always:
+
+1. Checks `currentInstallationHasExistingSigningKey()` first — a
+   reinstalled/orphaned receipt or a missing/corrupt key is cleared
+   (`receiptStore.clearReceipt()`) and reported `.failed`, with **no
+   network call and no replacement key generated**, whether or not the
+   receipt already recorded a grant.
+2. Otherwise requests a fresh `claim-challenge` and submits a signed
+   `claim-submit` for the same request/key — a receipt with a prior
+   grant goes through `.reconfirmingPreviousGrant(grantId:)` (a new
+   `State` case, distinct from `.authorized` on purpose) and the backend
+   answers `already_granted` if the grant is still active and within its
+   recovery window. A locally stored `recoveryDeadline` already in the
+   past is never itself treated as proof of revocation or of continued
+   validity — only the backend's response decides.
+
+`saveReceipt` failures are now handled explicitly instead of `try?`:
+
+- Right after a connection request is submitted, a save failure stops
+  the attempt (`.failed`) **before any claim is ever sent** — the
+  backend-side request remains submitted and visible to the Parent, but
+  this installation does not proceed into a claim it cannot durably
+  record.
+- Right after the backend confirms a grant, a save failure still reports
+  `.authorized` truthfully (the backend really did confirm it), but sets
+  a new published `unpersistedAuthorizationWarning` string explaining
+  that a future relaunch may not be able to show this without a new
+  scan — shown in the scan view's success state.
+
+### 10. Same-request resumability in the Athlete UI ("Continue connection")
+
+A new `State.interrupted(displayCode: String?)` case covers every
+resumable interruption: a transient network failure requesting a
+challenge, a permanent local failure, or poll-budget exhaustion. A new
+public `continuePendingAttempt()` resumes the same stored receipt (same
+invitation/request/key) with a fresh challenge — it never calls
+`connection-request-submit` again. `reset()` ("Scan again") is now the
+explicit, separate action that discards the stored receipt
+(`receiptStore.clearReceipt()`) and starts over.
+
+`attemptClaim`'s error handling now distinguishes PERMANENT local
+failures (`.signingKeyUnavailable`, `.gatewayConfigurationMissing`) from
+AMBIGUOUS network failures (`.network`, `.malformedResponse`): the
+former sets `.interrupted` and stops immediately — it is never retried
+automatically up to the 100-attempt poll budget, since nothing about
+retrying the exact same request can fix a missing key or configuration.
+The latter is unchanged — fall through to the next poll tick with a
+fresh challenge.
+
+`AthleteDeviceAuthorizationScanView` renders `.reconfirmingPreviousGrant`
+as a waiting state and `.interrupted` as a new screen offering "Continue
+connection" (primary) alongside "Scan again" (secondary, explicit), with
+the receipt's own comparison code shown when available.
+
+### 11. Parent reauthentication is now explicit and resumable
+
+`ParentSignInCoordinator` gained `forceFreshSignIn: Bool` (constructor
+parameter) and `justCompletedFreshSignIn: Bool` (published, cleared the
+moment a new attempt is pinned). `shouldFetchReadyHandshake` now also
+fires when `forceFreshSignIn` is set, even while `isSignedIn` is already
+`true` — a live-but-stale session (exactly
+`ParentAuthenticationError.reauthenticationRequired`'s own shape) is
+offered a brand-new SIWA attempt directly, never gated behind the Parent
+finding "Sign out" first. An ordinary token refresh still cannot satisfy
+this; only a completed handshake through this coordinator can.
+
+`ParentEnrollmentView` gained `forcesReauthentication: Bool` and
+`onReauthenticated: (() -> Void)?`. In forced mode it shows only the SIWA
+button or, once `justCompletedFreshSignIn` is `true`, an explicit
+"Continue" button — never the enrollment/sign-out sections, and never
+treating `justCompletedFreshSignIn` or a mere dismissal as proof on its
+own. `onReauthenticated` fires only after that explicit tap.
+
+`AthleteDeviceAuthorizationInvitationView`'s reauthentication sheet
+binding had a `set: { _ in }` no-op — unable to respond to interactive
+swipe-dismiss, which fought the Parent's own gesture. It now uses a real
+`@State private var isReauthenticationSheetDismissed` flag with a
+working setter, reset via `.onChange(of: coordinator.state)` when state
+leaves `.authenticationRequired`. The sheet's toolbar button is now
+"Cancel" (dismisses only, does not retry) rather than a "Done" that
+always retried; only `ParentEnrollmentView`'s own `onReauthenticated`
+(after a real fresh SIWA completion plus explicit Continue) calls
+`retryAfterReauthentication()`.
+
+`AthleteDeviceAuthorizationInvitationCoordinator.PendingOperation` gained
+`.resumePolling(invitation:)`: an authentication failure while polling
+`connection-request-list` now preserves the exact invitation already
+being polled, and `retryAfterReauthentication()` resumes polling it
+directly rather than requiring (or creating) a new invitation.
+
+### 12. Deterministic regression tests (round 3)
+
+All new tests use controlled fakes (a non-sleeping polling clock,
+continuation-based gated transports) — no timing guesses. Highlights
+(see the four touched test files for the complete list): a granted
+receipt reconfirms over the network before reporting `.authorized`; a
+reinstalled/orphaned receipt or missing key never authorizes and never
+generates a replacement key (with or without a grant already recorded);
+a pending-receipt save failure blocks the claim; a post-grant save
+failure still reports `.authorized` with a warning
+(`FakeReceiptStore.failOnSaveCallNumber` — deterministically fails the
+Nth `saveReceipt` call, replacing an earlier, rejected `Task.yield()`-based
+draft that would have been a timing guess); a transient failure's
+`continuePendingAttempt()` resumes with a fresh challenge and never
+resubmits the connection request; poll-budget exhaustion and a permanent
+local failure are both resumable/non-looping; `forceFreshSignIn` offers
+SIWA directly while signed in (with an explicit regression test that
+ordinary mode is unaffected); `justCompletedFreshSignIn` only flips after
+a real completed handshake, never from cancellation/failure/mere
+sign-in; and a polling authentication failure resumes the same
+invitation after reauthentication, never creating a new one. All
+pre-existing cancellation/generation tests for both coordinators are
+preserved unchanged.
+
 ## Known limitations carried forward
 
 - No local Swift toolchain exists in the authoring environment —
@@ -179,3 +322,6 @@ Normative Security Contract draws it.
   and TestFlight.
 - Retiring the legacy CKShare pairing screens is explicitly out of scope
   for this checkpoint — see "Scope correction" above.
+- This round's own round-3 behavior (the resumable receipt-reconfirmation
+  path, "Continue connection", and forced Parent reauthentication) is
+  likewise unverified on a physical device/TestFlight outside Codemagic.

@@ -78,12 +78,19 @@ public final class AthleteDeviceAuthorizationInvitationCoordinator {
     }
 
     /// Exactly what `retryAfterReauthentication()` resumes — preserves
-    /// the selected athlete/workspace for a failed `start`, or the exact
+    /// the selected athlete/workspace for a failed `start`, the exact
     /// invitation/request/decision/display code for a failed `decide`,
-    /// across the reauthentication round trip.
+    /// or the exact invitation already being polled for an auth failure
+    /// hit mid-poll (`listConnectionRequests`), across the
+    /// reauthentication round trip.
     private enum PendingOperation {
         case start(athleteId: AthleteId, workspaceId: WorkspaceId, invitedBy: ActorId)
         case decide(invitation: AthleteDeviceAuthorizationInvitation, requestId: UUID, decision: ConnectionRequestDecision, displayCode: String)
+        /// An authentication failure happened while polling an ALREADY-
+        /// created invitation (never while creating one — that's
+        /// `.start`) — resuming this must pick the SAME invitation back
+        /// up, never create a new one.
+        case resumePolling(invitation: AthleteDeviceAuthorizationInvitation)
     }
 
     public private(set) var state: State = .idle
@@ -160,6 +167,11 @@ public final class AthleteDeviceAuthorizationInvitationCoordinator {
             await start(forAthlete: athleteId, workspaceId: workspaceId, invitedBy: invitedBy)
         case .decide(let invitation, let requestId, let decision, let displayCode):
             await decide(invitation: invitation, requestId: requestId, decision: decision, displayCode: displayCode)
+        case .resumePolling(let invitation):
+            generation += 1
+            let myGeneration = generation
+            state = .awaitingRequests(invitation: invitation, requests: [])
+            beginPolling(invitation: invitation, myGeneration: myGeneration)
         }
     }
 
@@ -217,6 +229,11 @@ public final class AthleteDeviceAuthorizationInvitationCoordinator {
                 return
             }
             stopPolling()
+            // Preserves the SAME invitation already being polled —
+            // `retryAfterReauthentication()` resumes polling it
+            // directly, never creating a new invitation just because
+            // the Parent's session went stale mid-poll.
+            pendingOperation = .resumePolling(invitation: invitation)
             state = .authenticationRequired(requirement)
             return
         } catch {

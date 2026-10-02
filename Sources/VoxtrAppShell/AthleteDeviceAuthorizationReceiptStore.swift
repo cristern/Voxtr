@@ -23,14 +23,42 @@ import Security
 public struct AthleteDeviceAuthorizationReceipt: Codable, Equatable {
     public let invitationId: UUID
     public let connectionRequestId: UUID
+    /// The Parent-visible comparison code for `connectionRequestId`,
+    /// preserved as LOCAL METADATA ONLY (same contract as every other
+    /// field here) so a resumed "awaiting approval"/interrupted screen
+    /// can keep showing it — never authorization itself, and never
+    /// re-derived or guessed. `nil` for a receipt saved before this
+    /// field existed (an older app version) or any other decode that
+    /// happens to be missing it; callers must treat `nil` as "code
+    /// unavailable right now," never synthesize a replacement.
+    public let displayCode: String?
     /// Present only once `claim-submit` has actually returned `granted`/
-    /// `already_granted` for this attempt — `nil` before that.
+    /// `already_granted` for this attempt — `nil` before that. Review
+    /// round 3: presence of this field is NEVER, by itself, treated as
+    /// proof of CURRENT authorization — only the backend's own live
+    /// reconfirmation (a fresh challenge + signed claim, which reports
+    /// back `already_granted` for a still-valid grant) is. See
+    /// `AthleteDeviceAuthorizationPairingCoordinator.resumePendingAttemptIfAny()`'s
+    /// own doc comment.
     public let grantId: UUID?
+    /// Never used as local authorization proof, and an expired local
+    /// deadline is never itself treated as evidence the grant was
+    /// revoked — the backend's own `authz.issue_claim_challenge`/
+    /// `claim_device_grant` are the sole authority on whether the
+    /// 24-hour recovery window (Normative Security Contract §2 D2) is
+    /// still open.
     public let recoveryDeadline: Date?
 
-    public init(invitationId: UUID, connectionRequestId: UUID, grantId: UUID? = nil, recoveryDeadline: Date? = nil) {
+    public init(
+        invitationId: UUID,
+        connectionRequestId: UUID,
+        displayCode: String? = nil,
+        grantId: UUID? = nil,
+        recoveryDeadline: Date? = nil
+    ) {
         self.invitationId = invitationId
         self.connectionRequestId = connectionRequestId
+        self.displayCode = displayCode
         self.grantId = grantId
         self.recoveryDeadline = recoveryDeadline
     }
