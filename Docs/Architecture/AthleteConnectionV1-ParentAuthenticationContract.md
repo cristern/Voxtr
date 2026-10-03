@@ -349,7 +349,7 @@ This document does not redesign or retest the already-merged claim-proof functio
 
 **Still open / not silently approved:** whether device-bound Parent sessions or action-bound proof should be developed (§2.6), whether approval notifications should be introduced, operational secret rotation and abuse controls prior to actual hosted deployment, and new-workspace creation sequencing. Physical-device authentication, hosted security/retention evidence and CloudKit revocation remain separately gated by issue #98.
 
-Current implementation checkpoint (2026-09-28): backend PR #6 merged at `8a3999d5a516f537c92d5fd605e44f6da2123292`; backend PR #7 merged at `f58b5ea27f2aebda87ca38a21ef9992221e0d848`. These establish Parent auth/session HTTP flows and existing-workspace redemption, respectively. Operator issuance/cancellation HTTP, iOS SIWA integration and hosted deployment remain outstanding.
+Current implementation checkpoint (2026-09-28): backend PR #6 merged at `8a3999d5a516f537c92d5fd605e44f6da2123292`; backend PR #7 merged at `f58b5ea27f2aebda87ca38a21ef9992221e0d848`. These establish Parent auth/session HTTP flows and existing-workspace redemption, respectively. Operator issuance/cancellation HTTP was merged in backend PR #8 at `1f0c58ccff63ea48996bb3118afc08d544f115aa`. It uses a dedicated operator secret and issues 32-byte base64url codes with 1–1440 minute lifetime as implementation defaults, not newly approved product values. iOS SIWA integration and hosted deployment remain outstanding.
 
 Technical design decisions in this document remain: SHA-256 for high-entropy secrets; eager nonce consumption (§1.5); the four-layer admission/authentication/authorization separation (§3.3); explicit proposed `verify_jwt=false` posture with independent checks (§3.2), subject to live Supabase verification; no new SwiftData model (§6); absolute-lifetime propagation and server-side expiration capping (§2.2/§2.4).
 
@@ -361,7 +361,7 @@ Technical design decisions in this document remain: SHA-256 for high-entropy sec
 |---|---|---|
 | A — merged backend PR #6 | Parent authentication: `parent_auth_nonces`, `parent_sessions`, their functions, `auth-nonce`/`parent-auth-complete`/`refresh`/`revoke` functions | SIWA verifier (done) |
 | B — merged backend PR #7 | Enrollment redemption transaction (§5) + `cancelled_at`/binding-revocation functions | A |
-| C | Operator issuance mechanism (§4) | B |
+| C — merged backend PR #8 | Operator issuance and cancellation (§4) | B |
 | D | iOS: new auth module, SIWA UI, Keychain, redemption call | A–C |
 
 ---
