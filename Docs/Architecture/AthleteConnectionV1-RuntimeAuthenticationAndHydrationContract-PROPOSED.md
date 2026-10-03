@@ -198,7 +198,9 @@ Unchanged (hydration field list; pre-grant staging retention bound).
 
 Unchanged (CloudKit/legacy screen retirement timing).
 
-## 10. ChatGPT review — finding-to-change map, all three rounds
+## 10. ChatGPT review — finding-to-change map, all five rounds
+
+Round 6 ([comment](https://github.com/cristern/Voxtr/pull/108#issuecomment-5969116873)) found no further substantive contract defect and marked this document technically review-complete as documentation — still explicitly **PROPOSED, NOT APPROVED**, not an implementation authorization. It asked that the Product Owner explicitly accept or change each choice in §9 before this proposal is treated as an accepted engineering direction, and recommended accepting the fail-closed historical-provenance treatment (§9.4) specifically. This paragraph is the only change round 6 required beyond this heading's own round count.
 
 ### Round 1 (`a422ec3`) — device proof; identity facts; upload ordering/durability; authorization/concurrency; renewal vs. re-pairing; CloudKit/status evidence. See prior HEAD's §10 for detail; all six carried forward and refined in later rounds below.
 
