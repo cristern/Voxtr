@@ -32,7 +32,9 @@ deno run --no-config --allow-read Scripts/DeviceActions/verify.ts build/device-a
 ```
 
 The `device-action-signing-evidence` workflow runs only on pushes to the exact
-#114 branch and is also manually runnable. It exports fixtures, full iOS SHA,
+#114 branch and is also manually runnable. A matching GitHub Actions workflow runs on
+`macos-14` for the same exact branch as an independent Mac CI path. Both export
+fixtures, full iOS SHA,
 backend hashes, macOS/Swift/Deno versions, signing/verification logs and fixture
 SHA-256. No app build/signing, credentials, deployment or publication occurs.
 
