@@ -903,3 +903,46 @@ workflows:
         notify:
           success: true
           failure: true
+
+  # Isolated #114 evidence only. Exact task-branch push trigger allows Mac
+  # execution while PR creation is deliberately held behind backend #13.
+  device-action-signing-evidence:
+    name: Swift CryptoKit → pinned production Deno evidence
+    instance_type: mac_mini_m2
+    max_build_duration: 15
+    environment:
+      xcode: latest
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: codex/athlete-device-action-swift-deno-fixtures
+          include: true
+          source: true
+      cancel_previous_builds: true
+    scripts:
+      - name: Sign all four device actions using actual Mac CryptoKit
+        script: |
+          set -euo pipefail
+          mkdir -p build/device-action-evidence
+          git rev-parse HEAD > build/device-action-evidence/ios-revision.txt
+          export FIXTURE_IOS_REVISION=$(git rev-parse HEAD)
+          sw_vers > build/device-action-evidence/mac-version.txt
+          xcrun swift --version > build/device-action-evidence/swift-version.txt
+          python3 Scripts/DeviceActions/check_pin.py
+          xcrun swift Scripts/DeviceActions/sign.swift build/device-action-evidence/swift-fixtures.json \
+            | tee build/device-action-evidence/swift-signing.log
+      - name: Verify with unchanged production Deno modules from backend number 12
+        script: |
+          set -euo pipefail
+          export DENO_INSTALL="$CM_BUILD_DIR/build/deno"
+          curl -fsSL https://deno.land/install.sh | sh -s v2.9.6
+          "$DENO_INSTALL/bin/deno" --version > build/device-action-evidence/deno-version.txt
+          "$DENO_INSTALL/bin/deno" run --no-config --allow-read Scripts/DeviceActions/verify.ts \
+            build/device-action-evidence/swift-fixtures.json \
+            | tee build/device-action-evidence/deno-verification.log
+          cp Tests/Fixtures/DeviceActions/backend-pin.json build/device-action-evidence/
+          shasum -a 256 build/device-action-evidence/swift-fixtures.json \
+            > build/device-action-evidence/fixture-sha256.txt
+    artifacts:
+      - build/device-action-evidence/**

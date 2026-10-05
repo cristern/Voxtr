@@ -1,0 +1,18 @@
+{
+  "repository": "cristern/Voxtr-Backend",
+  "revision": "419f70e80b69ae524edb066e367093b1b8455a9a",
+  "files": {
+    "base64url.ts": {
+      "gitBlob": "f6fa21c4c416291cd9626aa10f7b4ea2afee81bf",
+      "sha256": "b8068a6b4802e4ed762f34699dfa59587c8471e46b53d5847466332e1404dc4b"
+    },
+    "canonicalMessage.ts": {
+      "gitBlob": "beab459336319669508f3c6547f001a2d9ef6b41",
+      "sha256": "57a9c4611175aa60a6f77a46f3bc327640875239828bf255624c67f6d9771f86"
+    },
+    "p256.ts": {
+      "gitBlob": "54f65c0befa57d05fe9cc41303612ec547d773ca",
+      "sha256": "efd16548950a07ae615b065b4c6ed4d19eed61edb467fe7113163d611c97a47e"
+    }
+  }
+}

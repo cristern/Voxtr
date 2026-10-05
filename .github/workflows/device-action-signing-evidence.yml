@@ -1,0 +1,41 @@
+name: Device action Swift signing evidence
+on:
+  push:
+    branches: [codex/athlete-device-action-swift-deno-fixtures]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  swift-signs-deno-verifies:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Execute Apple CryptoKit signing and unchanged production Deno verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/device-action-evidence
+          export FIXTURE_IOS_REVISION=$(git rev-parse HEAD)
+          git rev-parse HEAD > build/device-action-evidence/ios-revision.txt
+          sw_vers > build/device-action-evidence/mac-version.txt
+          xcrun swift --version > build/device-action-evidence/swift-version.txt
+          python3 Scripts/DeviceActions/check_pin.py
+          xcrun swift Scripts/DeviceActions/sign.swift build/device-action-evidence/swift-fixtures.json \
+            | tee build/device-action-evidence/swift-signing.log
+          export DENO_INSTALL="$RUNNER_TEMP/device-action-deno"
+          curl -fsSL https://deno.land/install.sh | sh -s v2.9.6
+          "$DENO_INSTALL/bin/deno" --version > build/device-action-evidence/deno-version.txt
+          "$DENO_INSTALL/bin/deno" run --no-config --allow-read Scripts/DeviceActions/verify.ts \
+            build/device-action-evidence/swift-fixtures.json \
+            | tee build/device-action-evidence/deno-verification.log
+          cp Tests/Fixtures/DeviceActions/backend-pin.json build/device-action-evidence/
+          shasum -a 256 build/device-action-evidence/swift-fixtures.json \
+            > build/device-action-evidence/fixture-sha256.txt
+      - name: Preserve actual execution evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: device-action-signing-evidence
+          path: build/device-action-evidence/
+          if-no-files-found: error
