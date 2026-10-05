@@ -919,6 +919,14 @@ workflows:
         - pattern: codex/athlete-device-action-swift-deno-fixtures
           include: true
           source: true
+        # Athlete Connection V1 device-authorization session contract
+        # (§3.3, §8 step 4): this branch additionally generates and
+        # verifies a SECOND, genuine-random-key production-direction
+        # fixture (see sign_production_direction.swift's own header) —
+        # the evidence gate §2.2 explicitly leaves open.
+        - pattern: claude/athlete-device-authorization-session-client
+          include: true
+          source: true
       cancel_previous_builds: true
     scripts:
       - name: Sign all four device actions using actual Mac CryptoKit
@@ -932,6 +940,9 @@ workflows:
           python3 Scripts/DeviceActions/check_pin.py
           xcrun swift Scripts/DeviceActions/sign.swift build/device-action-evidence/swift-fixtures.json \
             | tee build/device-action-evidence/swift-signing.log
+          xcrun swift Scripts/DeviceActions/sign_production_direction.swift \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/swift-signing-production-direction.log
       - name: Verify with unchanged production Deno modules from backend number 12
         script: |
           set -euo pipefail
@@ -944,5 +955,13 @@ workflows:
           cp Tests/Fixtures/DeviceActions/backend-pin.json build/device-action-evidence/
           shasum -a 256 build/device-action-evidence/swift-fixtures.json \
             > build/device-action-evidence/fixture-sha256.txt
+          # Same unchanged verifier, second fixture — the
+          # genuine-random-key production-direction evidence (see the
+          # signing step above).
+          "$DENO_INSTALL/bin/deno" run --no-config --allow-read Scripts/DeviceActions/verify.ts \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/deno-verification-production-direction.log
+          shasum -a 256 build/device-action-evidence/swift-fixtures-production-direction.json \
+            > build/device-action-evidence/fixture-production-direction-sha256.txt
     artifacts:
       - build/device-action-evidence/**
