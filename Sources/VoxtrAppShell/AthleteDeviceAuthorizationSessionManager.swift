@@ -59,6 +59,14 @@ public final class AthleteDeviceAuthorizationSessionManager {
         case gatewayConfigurationMissing
         case network
         case malformedResponse
+        /// `clearStoredSession()` ran while THIS exact operation was
+        /// still suspended on a network await (R6, ChatGPT review
+        /// 6024820299) — mirrors `ParentAuthenticationService
+        /// .sessionGeneration`'s own established guard exactly. The
+        /// operation's result is discarded rather than persisted or
+        /// returned as if it succeeded; never retried automatically by
+        /// this type itself.
+        case sessionCleared
     }
 
     /// Bounded — a lost-response/ambiguous network failure during
@@ -94,8 +102,25 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// result rather than starting its own redundant network round
     /// trip. Keyed by `deviceGrantId` rather than assuming a singleton,
     /// even though exactly one grant is active per installation in
-    /// practice.
-    private var inFlightTasks: [UUID: Task<String, Error>] = [:]
+    /// practice. Each registration carries its own `token` (see
+    /// `nextInFlightToken`) so a stale registration's own cleanup can
+    /// never remove a NEWER registration `clearStoredSession()` put in
+    /// its place for the same grant (R6, ChatGPT review 6024820299).
+    private var inFlightTasks: [UUID: (token: Int, task: Task<String, Error>)] = [:]
+    private var nextInFlightToken = 0
+
+    /// Bumped by every `clearStoredSession()` call — mirrors
+    /// `ParentAuthenticationService.sessionGeneration`'s own
+    /// established guard exactly (R6, ChatGPT review 6024820299).
+    /// `resolveActiveSession` (via `attemptRenew`/`attemptIssue`)
+    /// captures this value before its own network awaits and refuses
+    /// to persist or return a successful result if it changed while
+    /// suspended — the actor's own reentrancy means an explicit clear
+    /// (e.g. Athlete sign-out) CAN interleave with an operation
+    /// already in flight across an `await` point, and without this
+    /// guard that operation could silently resurrect a session the
+    /// caller just explicitly cleared.
+    private var sessionGeneration = 0
 
     public init(
         service: AthleteDeviceAuthorizationSessionService,
@@ -112,15 +137,27 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// reissuing first, entirely automatically. Concurrent calls for
     /// the same grant share one attempt and its one result.
     public func ensureActiveSession(deviceGrantId: UUID) async throws -> String {
-        if let existingTask = inFlightTasks[deviceGrantId] {
-            return try await existingTask.value
+        if let existing = inFlightTasks[deviceGrantId] {
+            return try await existing.task.value
         }
+        nextInFlightToken += 1
+        let myToken = nextInFlightToken
         let task = Task { [weak self] in
             guard let self else { throw SessionFailure.network }
             return try await self.resolveActiveSession(deviceGrantId: deviceGrantId)
         }
-        inFlightTasks[deviceGrantId] = task
-        defer { inFlightTasks[deviceGrantId] = nil }
+        inFlightTasks[deviceGrantId] = (token: myToken, task: task)
+        defer {
+            // Only remove OUR OWN registration. clearStoredSession()
+            // may already have evicted this entry and let a newer
+            // task be registered in its place for the same grant
+            // (R6, ChatGPT review 6024820299) — blindly nil-ing the
+            // slot here could wrongly drop that newer registration
+            // instead of our own already-stale one.
+            if inFlightTasks[deviceGrantId]?.token == myToken {
+                inFlightTasks[deviceGrantId] = nil
+            }
+        }
         return try await task.value
     }
 
@@ -132,10 +169,34 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// expired; `ensureActiveSession` itself already handles every
     /// ordinary expiry transition.
     public func clearStoredSession() {
+        // Bumped unconditionally, even when nothing is currently
+        // stored — an in-flight FIRST-TIME session_issue has no
+        // session stored yet either (that's exactly what it's
+        // suspended trying to write), so gating the bump on "a
+        // session existed" would miss precisely that race (mirrors
+        // `ParentAuthenticationService.signOut()`'s own identical
+        // reasoning).
+        sessionGeneration += 1
         store.clearSession()
+        // Evict every in-flight registration, for every grant — the
+        // store holds at most one session for this installation
+        // regardless of which grant requested it, so a clear
+        // invalidates whatever is in flight entirely. A caller after
+        // this point must get a genuinely fresh attempt, never join
+        // an operation already known (by its own captured
+        // generation) to be invalidated (R6, ChatGPT review
+        // 6024820299). The already-running tasks themselves are not
+        // cancelled; each independently refuses to persist/return a
+        // successful result once it reaches its own generation check.
+        inFlightTasks.removeAll()
     }
 
     private func resolveActiveSession(deviceGrantId: UUID) async throws -> String {
+        // Captured once, at this true operation start, before any
+        // network await below — mirrors `ParentAuthenticationService
+        // .completeSignIn`'s own identical capture point exactly (R6,
+        // ChatGPT review 6024820299).
+        let generationAtStart = sessionGeneration
         let now = clock.now()
         if let stored = store.loadSession(), stored.deviceGrantId == deviceGrantId {
             // Review round 4 (PR #116, ChatGPT review 6020919614): a
@@ -166,7 +227,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
                 // (see `slidingWindowRenewalLeadTime`'s own doc
                 // comment for the confirmed backend check this
                 // satisfies).
-                if let renewed = try await attemptRenew(deviceGrantId: deviceGrantId, stored: stored) {
+                if let renewed = try await attemptRenew(deviceGrantId: deviceGrantId, stored: stored, generationAtStart: generationAtStart) {
                     return renewed
                 }
                 // Cleanly rejected (not a transient network issue —
@@ -180,20 +241,30 @@ public final class AthleteDeviceAuthorizationSessionManager {
             // with the SAME key is still fully automatic (§3.5) and
             // handles both cases identically.
         }
-        return try await attemptIssue(deviceGrantId: deviceGrantId)
+        return try await attemptIssue(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart)
     }
 
     /// Returns the (unchanged) bearer token on a successful renewal,
     /// or `nil` if renewal was cleanly rejected so the caller falls
     /// through to a fresh `session_issue` — never `nil` for a
     /// transient network failure, which is retried here first.
-    private func attemptRenew(deviceGrantId: UUID, stored: AthleteDeviceAuthorizationSessionRecord) async throws -> String? {
+    private func attemptRenew(deviceGrantId: UUID, stored: AthleteDeviceAuthorizationSessionRecord, generationAtStart: Int) async throws -> String? {
         var lastFailure: SessionFailure = .network
         for _ in 0..<Self.maxAttemptsPerCall {
             do {
                 let outcome = try await service.renewSession(deviceGrantId: deviceGrantId, sessionToken: stored.sessionToken)
                 switch outcome {
                 case .renewed(let expiresAt, let absoluteExpiresAt):
+                    // R6 (ChatGPT review 6024820299): `clearStoredSession()`
+                    // ran while this call was suspended above — the
+                    // backend really did renew, but writing that back
+                    // now would resurrect a session the caller just
+                    // explicitly cleared. Discard it, same reasoning
+                    // as `ParentAuthenticationService
+                    // .refreshSessionIfPossible`'s own identical guard.
+                    guard generationAtStart == sessionGeneration else {
+                        throw SessionFailure.sessionCleared
+                    }
                     let updated = AthleteDeviceAuthorizationSessionRecord(
                         deviceGrantId: deviceGrantId,
                         sessionToken: stored.sessionToken,
@@ -223,13 +294,19 @@ public final class AthleteDeviceAuthorizationSessionManager {
         throw lastFailure
     }
 
-    private func attemptIssue(deviceGrantId: UUID) async throws -> String {
+    private func attemptIssue(deviceGrantId: UUID, generationAtStart: Int) async throws -> String {
         var lastFailure: SessionFailure = .network
         for _ in 0..<Self.maxAttemptsPerCall {
             do {
                 let outcome = try await service.issueSession(deviceGrantId: deviceGrantId)
                 switch outcome {
                 case .issued(let sessionToken, let expiresAt, let absoluteExpiresAt):
+                    // R6 (ChatGPT review 6024820299): same guard as
+                    // attemptRenew's own identical case — see its
+                    // comment for the full reasoning.
+                    guard generationAtStart == sessionGeneration else {
+                        throw SessionFailure.sessionCleared
+                    }
                     let record = AthleteDeviceAuthorizationSessionRecord(
                         deviceGrantId: deviceGrantId,
                         sessionToken: sessionToken,

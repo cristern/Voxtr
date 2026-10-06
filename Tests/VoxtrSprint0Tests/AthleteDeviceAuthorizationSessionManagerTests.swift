@@ -30,6 +30,21 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
     private var stubsByPath: [String: [StubOutcome]] = [:]
     private(set) var sentRequests: [URLRequest] = []
 
+    /// R6 (ChatGPT review 6024820299) deterministic-suspension support:
+    /// marks the NEXT call to `send(_:)` for `path` as one that must
+    /// park (via `withCheckedContinuation`) AFTER reserving its own
+    /// stubbed response but BEFORE returning it — so a test can call
+    /// `clearStoredSession()` (or start a second, independent
+    /// operation) while that call is provably suspended mid-flight,
+    /// then resume it deterministically. One-shot per call to this
+    /// method; a later call for the same path arms exactly one more
+    /// suspension. The stub is popped BEFORE the suspension check so a
+    /// second, un-suspended caller for the same path (e.g. a fresh
+    /// post-clear attempt) can never steal the parked call's own
+    /// reserved response.
+    private var suspendOnNextCallByPath: [String: Bool] = [:]
+    private var suspendedContinuationsByPath: [String: CheckedContinuation<Void, Never>] = [:]
+
     func enqueue(path: String, statusCode: Int, json: [String: Any?]) {
         let cleaned = json.compactMapValues { $0 }
         let body = try! JSONSerialization.data(withJSONObject: cleaned)
@@ -40,6 +55,24 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
         stubsByPath[path, default: []].append(.failure)
     }
 
+    func suspendNextResponse(path: String) {
+        suspendOnNextCallByPath[path] = true
+    }
+
+    /// Polls (cooperative `Task.yield()`, never a real timer) until
+    /// `send(_:)` has actually reserved its stub and parked on the
+    /// suspension gate for `path` — deterministic: it only returns
+    /// once that specific state is true, however many yields it takes.
+    func waitUntilSuspended(path: String) async {
+        while suspendedContinuationsByPath[path] == nil {
+            await Task.yield()
+        }
+    }
+
+    func resumeSuspendedResponse(path: String) {
+        suspendedContinuationsByPath.removeValue(forKey: path)?.resume()
+    }
+
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         sentRequests.append(request)
         let path = request.url!.lastPathComponent
@@ -48,6 +81,12 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
         }
         let stub = stubs.removeFirst()
         stubsByPath[path] = stubs
+        if suspendOnNextCallByPath[path] == true {
+            suspendOnNextCallByPath[path] = false
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                suspendedContinuationsByPath[path] = continuation
+            }
+        }
         switch stub {
         case .failure:
             throw SimulatedNetworkFailure()
@@ -409,6 +448,111 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(fixture.store.clearCallCount == 1)
         #expect(fixture.store.stored == nil, "the stale, reinstall-surviving session must be discarded, never handed back as if it were still this installation's own")
         #expect(fixture.transport.sentRequests.isEmpty)
+    }
+
+    // MARK: - Explicit clear racing an in-flight operation (R6, ChatGPT review 6024820299)
+    //
+    // clearStoredSession() only cleared the store, with no generation
+    // tracking and no invalidation of inFlightTasks. A deterministic
+    // sequence — start issue/renew, suspend the transport before the
+    // successful submit response returns, call clearStoredSession(),
+    // resume the response — let attemptRenew/attemptIssue
+    // unconditionally persist and return the pre-clear result,
+    // resurrecting the session the caller just explicitly cleared; a
+    // subsequent caller could also join that same doomed task. Fixed
+    // with a sessionGeneration counter (mirroring
+    // ParentAuthenticationService's own established guard) checked
+    // right before persisting, plus eviction of inFlightTasks on
+    // clear so a new caller never joins a pre-clear operation.
+
+    @Test("clearStoredSession() mid-flight: a renewal already past its backend submit cannot resurrect the session afterward")
+    func clearDuringSuspendedRenewalNeverResurrectsSession() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "token-to-renew",
+            expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+        enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let resultToken = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit")
+
+        // The caller explicitly clears while the renewal is still
+        // suspended, having already been told by the backend (not yet
+        // delivered locally) that it succeeded.
+        fixture.manager.clearStoredSession()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) {
+            try await resultToken
+        }
+        #expect(fixture.store.stored == nil, "the backend's successful renewal must never be written back after an explicit clear")
+        #expect(fixture.store.saveCallCount == 0)
+    }
+
+    @Test("clearStoredSession() mid-flight: a coalesced waiter and the original caller BOTH receive the failure, never a stale successful token")
+    func clearDuringSuspendedRenewalFailsAllCoalescedWaiters() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "token-to-renew",
+            expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+        enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let first = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit")
+        // Joins the SAME in-flight attempt — registered while still
+        // suspended, before the clear below.
+        async let second = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        // Give the second call's own synchronous join-check a
+        // scheduling turn before the clear below, so it is guaranteed
+        // to have already registered itself as a waiter on the SAME
+        // in-flight task (matching `concurrentCallsForSameGrantCoalesce`'s
+        // own established back-to-back `async let` pattern above,
+        // belt-and-braces here since this test's correctness depends
+        // on that ordering more directly).
+        await Task.yield()
+
+        fixture.manager.clearStoredSession()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await first }
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await second }
+        #expect(fixture.transport.sentRequests.count == 2, "the second caller coalesced onto the first's attempt — never its own independent round trip")
+        #expect(fixture.store.saveCallCount == 0)
+    }
+
+    @Test("A new ensureActiveSession() call after clearStoredSession() never joins the doomed pre-clear attempt — it runs its own fresh, independent, successful round trip, and the resumed pre-clear attempt cannot overwrite it")
+    func newAttemptAfterClearNeverJoinsDoomedPreClearOperation() async throws {
+        // No stored session — the pre-clear attempt is a fresh session_issue.
+        let fixture = makeFixture()
+        enqueueIssueSuccess(fixture.transport, sessionToken: "doomed-pre-clear-token", expiresAt: "2026-10-12T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit")
+
+        fixture.manager.clearStoredSession()
+
+        // A genuinely NEW attempt for the SAME grant, with its own
+        // fresh challenge+submit queued separately below, must not be
+        // blocked on or coalesced with the still-suspended pre-clear
+        // attempt — it runs to completion entirely on its own.
+        enqueueIssueSuccess(fixture.transport, sessionToken: "fresh-post-clear-token", expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-11T00:00:00Z")
+        let postClearToken = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+
+        #expect(postClearToken == "fresh-post-clear-token")
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+
+        // The resumed, doomed pre-clear attempt must never overwrite
+        // the fresh post-clear session once it finally completes.
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+        #expect(fixture.transport.sentRequests.count == 4, "two fully independent challenge+submit round trips — the post-clear attempt was never coalesced with the pre-clear one")
     }
 
     // MARK: - Grant revoked / unavailable
