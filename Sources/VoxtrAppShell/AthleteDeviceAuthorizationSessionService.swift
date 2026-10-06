@@ -52,6 +52,21 @@ public final class AthleteDeviceAuthorizationSessionService {
         self.signingKeyStore = signingKeyStore
     }
 
+    /// Review round 4 (PR #116, ChatGPT review 6020919614): lets a
+    /// caller check, BEFORE trusting or renewing a cached session
+    /// record, whether THIS installation can still produce the signing
+    /// key that record is bound to — mirrors
+    /// `AthleteDeviceAuthorizationService`'s own identically-named
+    /// method exactly (same `loadExistingSigningKey()` contract: never
+    /// generates a replacement). Session Keychain material can survive
+    /// an app reinstall even though the signing key's own installation
+    /// marker did not (§3.4 point 3) — `AthleteDeviceAuthorizationSessionManager`
+    /// calls this before ever returning or renewing a cached token, not
+    /// only once a network call happens to need to sign something.
+    public func currentInstallationHasExistingSigningKey() -> Bool {
+        (try? signingKeyStore.loadExistingSigningKey()) != nil
+    }
+
     // MARK: - session_issue
 
     /// Performs the full issue dance: `device-session-challenge` (no

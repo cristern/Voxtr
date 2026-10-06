@@ -71,6 +71,20 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// of looping forever.
     static let maxAttemptsPerCall = 3
 
+    /// Review round 4 (PR #116, ChatGPT review 6020919614): `session_renew`
+    /// is only ever backend-legal while `now < session.expires_at` —
+    /// confirmed directly against `authz.device_session_issue_challenge`
+    /// and `authz.device_session_submit`
+    /// (`20261004060000_authz_device_session_v1.sql`), both of which
+    /// reject with `session_invalid`/`not_available` once the sliding
+    /// window has already lapsed. A sliding window that only "slides"
+    /// when actually used must therefore renew BEFORE that deadline,
+    /// not after it — this lead time is this policy's own bounded,
+    /// deterministic trigger for doing so, never a redefinition of the
+    /// accepted 7-day/90-day numbers themselves (§3 of the canonical
+    /// contract).
+    static let slidingWindowRenewalLeadTime: TimeInterval = 24 * 60 * 60
+
     private let service: AthleteDeviceAuthorizationSessionService
     private let store: AthleteDeviceAuthorizationSessionStoring
     private let clock: AthleteDeviceAuthorizationSessionClock
@@ -124,20 +138,47 @@ public final class AthleteDeviceAuthorizationSessionManager {
     private func resolveActiveSession(deviceGrantId: UUID) async throws -> String {
         let now = clock.now()
         if let stored = store.loadSession(), stored.deviceGrantId == deviceGrantId {
-            if now < stored.expiresAt {
-                // Sliding window still open — no network call needed.
-                return stored.sessionToken
+            // Review round 4 (PR #116, ChatGPT review 6020919614): a
+            // cached session's mere presence is never proof of current
+            // authorization on its own (§3.4 point 2) — including of
+            // THIS installation's own identity. Session Keychain
+            // material can survive an app reinstall even though the
+            // signing key's own installation marker did not (§3.4
+            // point 3): a reinstall is a NEW installation requiring
+            // full re-pairing, checked here — before ever returning or
+            // renewing a cached token — not only once a network call
+            // happens to need to sign something.
+            guard service.currentInstallationHasExistingSigningKey() else {
+                store.clearSession()
+                throw SessionFailure.installationKeyUnavailable
             }
-            if now < stored.absoluteExpiresAt {
+            if now < stored.expiresAt {
+                if now < stored.expiresAt.addingTimeInterval(-Self.slidingWindowRenewalLeadTime) {
+                    // Comfortably within the sliding window — no
+                    // network call needed; this IS the policy's own
+                    // sliding-window definition (see this type's own
+                    // top-level doc comment).
+                    return stored.sessionToken
+                }
+                // Within the renewal lead time of the sliding-window
+                // deadline, but not past it yet — the ONLY window in
+                // which the backend will ever accept `session_renew`
+                // (see `slidingWindowRenewalLeadTime`'s own doc
+                // comment for the confirmed backend check this
+                // satisfies).
                 if let renewed = try await attemptRenew(deviceGrantId: deviceGrantId, stored: stored) {
                     return renewed
                 }
-                // Renewal was cleanly rejected (not a transient network
-                // issue — those are already retried inside
-                // attemptRenew) — fall through to a fresh chain, the
-                // "renewal no longer possible but the grant/key may
-                // still be fine" path §3.5 describes.
+                // Cleanly rejected (not a transient network issue —
+                // those are already retried inside attemptRenew) —
+                // fall through to a fresh chain.
             }
+            // now >= stored.expiresAt: the sliding window has already
+            // lapsed (with or without the absolute cap also reached).
+            // Renewal is no longer backend-legal at all past this
+            // point — never attempted here. A fresh `session_issue`
+            // with the SAME key is still fully automatic (§3.5) and
+            // handles both cases identically.
         }
         return try await attemptIssue(deviceGrantId: deviceGrantId)
     }

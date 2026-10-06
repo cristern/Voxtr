@@ -156,6 +156,23 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         #expect(transport.sentRequests.isEmpty)
     }
 
+    // MARK: - Installation-key availability check (R5, PR #116, ChatGPT review 6020919614)
+
+    @Test("currentInstallationHasExistingSigningKey() reports true/false exactly as loadExistingSigningKey() would succeed/throw, without ever generating a replacement — mirrors AthleteDeviceAuthorizationService's own identically-named method")
+    func currentInstallationHasExistingSigningKeyMirrorsLoadExisting() {
+        let availableKeyStore = FakeSessionSigningKeyStore()
+        let (availableService, _, _) = makeService(signingKeyStore: availableKeyStore)
+        #expect(availableService.currentInstallationHasExistingSigningKey() == true)
+        #expect(availableKeyStore.loadExistingCallCount == 1)
+        #expect(availableKeyStore.loadOrCreateCallCount == 0)
+
+        let missingKeyStore = FakeSessionSigningKeyStore()
+        missingKeyStore.throwOnLoadExisting = true
+        let (missingService, _, _) = makeService(signingKeyStore: missingKeyStore)
+        #expect(missingService.currentInstallationHasExistingSigningKey() == false)
+        #expect(missingKeyStore.loadOrCreateCallCount == 0, "a missing key must never be silently replaced just by checking availability")
+    }
+
     // MARK: - session_issue
 
     @Test("issueSession() sends action=session_issue with no session_token, signs the challenge with loadExistingSigningKey(), and maps .issued")

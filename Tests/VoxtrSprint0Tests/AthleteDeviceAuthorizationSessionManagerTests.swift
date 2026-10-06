@@ -242,29 +242,40 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(transport.sentRequests.isEmpty)
     }
 
-    // MARK: - Sliding window lapsed, absolute cap not yet reached: renew
+    // MARK: - Within the renewal lead time, sliding window NOT YET lapsed: renew
+    //
+    // R4 (PR #116, ChatGPT review 6020919614): confirmed directly
+    // against `authz.device_session_issue_challenge`/
+    // `authz.device_session_submit`
+    // (`20261004060000_authz_device_session_v1.sql`) that the real
+    // backend only ever accepts `session_renew` while
+    // `now < session.expires_at` — rejecting with
+    // `session_invalid`/`not_available` once the sliding window has
+    // already lapsed. These tests exercise renewal in the ONLY window
+    // where that is possible: before `expiresAt`, within
+    // `slidingWindowRenewalLeadTime` of it.
 
-    @Test("ensureActiveSession() renews (fresh signature) when the sliding window has lapsed but the absolute cap has not, keeping the SAME token and persisting the rotated expiry")
-    func renewsWhenSlidingWindowLapsedButAbsoluteCapNotReached() async throws {
-        let fixture = makeFixture(now: Self.date("2026-10-13T00:00:00Z"))
+    @Test("ensureActiveSession() renews (fresh signature) proactively, within the renewal lead time but BEFORE the sliding window lapses, keeping the SAME token and persisting the rotated expiry")
+    func renewsProactivelyWithinLeadTimeBeforeSlidingWindowLapses() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
         fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
             deviceGrantId: Self.deviceGrantId, sessionToken: "token-to-renew",
             expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
         )
-        enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
 
         let token = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
 
         #expect(token == "token-to-renew", "session_renew never rotates the bearer token itself")
         #expect(fixture.store.stored?.sessionToken == "token-to-renew")
-        #expect(fixture.store.stored?.expiresAt == Self.date("2026-10-20T00:00:00Z"))
+        #expect(fixture.store.stored?.expiresAt == Self.date("2026-10-19T00:00:00Z"))
         let submitBody = try JSONSerialization.jsonObject(with: fixture.transport.sentRequests[1].httpBody!) as? [String: Any]
         #expect(submitBody?["session_token"] as? String == "token-to-renew")
     }
 
-    @Test("ensureActiveSession() falls through to a fresh session_issue (same key, no re-pairing) when renewal is cleanly rejected")
+    @Test("ensureActiveSession() falls through to a fresh session_issue (same key, no re-pairing) when renewal (attempted BEFORE expiresAt) is cleanly rejected")
     func fallsThroughToFreshIssueWhenRenewalCleanlyRejected() async throws {
-        let fixture = makeFixture(now: Self.date("2026-10-13T00:00:00Z"))
+        let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
         fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
             deviceGrantId: Self.deviceGrantId, sessionToken: "stale-token",
             expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
@@ -278,6 +289,31 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
 
         #expect(token == "freshly-issued-token")
         #expect(fixture.signingKeyStore.loadOrCreateCallCount == 0, "a fresh chain still uses the SAME existing key — never mints a new one")
+    }
+
+    // MARK: - Sliding window ALREADY lapsed, absolute cap not yet reached: issue, never renew
+
+    @Test("ensureActiveSession() issues a fresh chain rather than attempting renewal once the sliding window has already lapsed — the real backend always rejects a post-expiry renewal attempt (R4)")
+    func issuesFreshChainRatherThanAttemptingRenewalOnceSlidingWindowHasLapsed() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-13T00:00:00Z"))
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "token-past-sliding-window",
+            expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+        // ONLY an issue-success stub — if the manager mistakenly
+        // attempted session_renew first (as it did before this fix),
+        // it would consume this stub's "issued" challenge response but
+        // then fail to parse the submit response as a renewal, since
+        // no renew-shaped stub exists at all here.
+        enqueueIssueSuccess(fixture.transport, sessionToken: "new-chain-token", expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-11T00:00:00Z")
+
+        let token = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+
+        #expect(token == "new-chain-token")
+        #expect(fixture.signingKeyStore.loadOrCreateCallCount == 0)
+        // Exactly one challenge+submit round trip — renewal was never
+        // attempted once the sliding window had already lapsed.
+        #expect(fixture.transport.sentRequests.count == 2)
     }
 
     // MARK: - Absolute cap reached: automatic reissue, no Parent re-pairing
@@ -302,7 +338,7 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
 
     // MARK: - Boundary (CLAUDE.md §8: exact, deterministic, clock-injected)
 
-    @Test("At the exact expiresAt instant, the sliding window is treated as lapsed (now < expiresAt is false), not still open")
+    @Test("At the exact expiresAt instant, the sliding window is treated as lapsed (now < expiresAt is false) — a fresh session_issue, never a renewal attempt, since renewal is no longer backend-legal at that exact instant either")
     func exactExpiresAtBoundaryIsTreatedAsLapsed() async throws {
         let boundary = Self.date("2026-10-12T00:00:00Z")
         let fixture = makeFixture(now: boundary)
@@ -310,16 +346,34 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
             deviceGrantId: Self.deviceGrantId, sessionToken: "boundary-token",
             expiresAt: boundary, absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
         )
+        enqueueIssueSuccess(fixture.transport, sessionToken: "new-token-after-boundary", expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+
+        let token = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+
+        #expect(token == "new-token-after-boundary")
+        #expect(!fixture.transport.sentRequests.isEmpty, "exactly-at-expiry must trigger a fresh network round trip, never be treated as still valid")
+    }
+
+    @Test("At the exact renewal-lead-time boundary (expiresAt minus slidingWindowRenewalLeadTime), renewal is triggered, not the no-network fast path")
+    func exactLeadTimeBoundaryTriggersRenewalNotFastPath() async throws {
+        let expiresAt = Self.date("2026-10-12T00:00:00Z")
+        let boundary = expiresAt.addingTimeInterval(-AthleteDeviceAuthorizationSessionManager.slidingWindowRenewalLeadTime)
+        let fixture = makeFixture(now: boundary)
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "lead-time-boundary-token",
+            expiresAt: expiresAt, absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
         enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
 
-        _ = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        let token = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
 
-        #expect(!fixture.transport.sentRequests.isEmpty, "exactly-at-expiry must trigger a fresh network round trip, never be treated as still valid")
+        #expect(token == "lead-time-boundary-token", "session_renew never rotates the bearer token itself")
+        #expect(!fixture.transport.sentRequests.isEmpty, "exactly at the lead-time boundary must trigger renewal, never be treated as comfortably within the window")
     }
 
     // MARK: - Reinstall / missing installation key
 
-    @Test("ensureActiveSession() throws .installationKeyUnavailable and clears any stored session when the installation key is missing (reinstall) — never minting a replacement")
+    @Test("ensureActiveSession() throws .installationKeyUnavailable and clears any stored session when the installation key is missing (reinstall) — never minting a replacement, and never even attempting a network call")
     func clearsStoredSessionAndThrowsOnMissingInstallationKey() async throws {
         let fixture = makeFixture()
         fixture.signingKeyStore.throwOnLoadExisting = true
@@ -327,23 +381,34 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
             deviceGrantId: Self.deviceGrantId, sessionToken: "orphaned-token",
             expiresAt: Self.date("2026-10-01T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
         )
-        // Sliding window already lapsed (expiresAt in the past relative
-        // to referenceNow) but the absolute cap has not — this must
-        // attempt a renew; the challenge step itself succeeds (it never
-        // touches the signing key), so the failure is hit only once
-        // signing is attempted, right before device-session-submit.
-        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
-            "outcome": "issued",
-            "challenge_id": UUID().uuidString,
-            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
-            "expires_at": "2026-10-05T00:01:00Z",
-        ])
+        // R5 (PR #116, ChatGPT review 6020919614): the installation-key
+        // check now happens LOCALLY, before any network attempt, for
+        // ANY stored session regardless of its expiry state — no
+        // challenge/submit stub is needed or consumed here at all.
         await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.installationKeyUnavailable) {
             try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
         }
         #expect(fixture.store.clearCallCount == 1)
         #expect(fixture.store.stored == nil)
         #expect(fixture.signingKeyStore.loadOrCreateCallCount == 0)
+        #expect(fixture.transport.sentRequests.isEmpty, "the signing-key check is purely local — a lost/orphaned key must never cost a network round trip")
+    }
+
+    @Test("ensureActiveSession() throws .installationKeyUnavailable for an UNEXPIRED cached session too (R4/R5, ChatGPT review 6020919614) — a reinstalled app's surviving Keychain session is never trusted just because its sliding window still looks open")
+    func installationKeyCheckAppliesEvenWhileSlidingWindowIsComfortablyOpen() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-06T00:00:00Z"))
+        fixture.signingKeyStore.throwOnLoadExisting = true
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "surviving-reinstall-token",
+            expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.installationKeyUnavailable) {
+            try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        }
+        #expect(fixture.store.clearCallCount == 1)
+        #expect(fixture.store.stored == nil, "the stale, reinstall-surviving session must be discarded, never handed back as if it were still this installation's own")
+        #expect(fixture.transport.sentRequests.isEmpty)
     }
 
     // MARK: - Grant revoked / unavailable
@@ -442,18 +507,20 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
     // `SecItemAdd` cannot resolve a default access group and fails with
     // `errSecMissingEntitlement` (-34018).
     //
-    // STATUS (PR #116 R3, still open): switching that command line to
-    // ad hoc signing (`CODE_SIGN_IDENTITY=-`) was NOT sufficient —
-    // Codemagic build #228 confirmed the ad hoc signature itself
-    // succeeds ("Sign to Run Locally"), but this test still fails with
-    // the same `errSecMissingEntitlement` (-34018). The real minimum
-    // repair is still being diagnosed; see the "Diagnose
-    // VoxtrSprint0Tests signing/entitlements" step added in
-    // `codemagic.yaml`'s `pr-validation`/`package-tests` workflows,
-    // which inspects the actual built bundle's embedded entitlements
-    // rather than guessing again. Keep this test ENABLED — do not
-    // disable or swallow this failure; it must either pass for real or
-    // keep surfacing the genuine gap.
+    // STATUS (PR #116 R3, resolved): switching that command line to ad
+    // hoc signing (`CODE_SIGN_IDENTITY=-`) was NOT sufficient on its
+    // own — Codemagic build #228 confirmed the ad hoc signature itself
+    // succeeds ("Sign to Run Locally"), but this test still failed with
+    // the same `errSecMissingEntitlement` (-34018). The actual fix was
+    // giving `VoxtrSprint0Tests` a real `TEST_HOST`/`BUNDLE_LOADER`
+    // (set in `project.pbxproj`, scoped to that target) pointing at
+    // AthleteApp, plus a genuine `PBXTargetDependency` so Xcode builds
+    // it first — a bare `.xctest` bundle, ad hoc signed or not, has no
+    // resolvable keychain-access-group entitlement on its own. Build
+    // #239/#240 confirmed this test genuinely passes hosted this way.
+    // Keep this test ENABLED — do not disable or swallow a future
+    // failure here; it must either pass for real or keep surfacing a
+    // genuine gap.
     @Test("KeychainAthleteDeviceAuthorizationSessionStore save/load/clear round-trips correctly and atomically replaces an existing record")
     func keychainStoreRoundTrips() throws {
         let store = KeychainAthleteDeviceAuthorizationSessionStore(
