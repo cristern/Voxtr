@@ -435,18 +435,25 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
     // This test (the first real-Keychain round trip of its family ever
     // actually wired into and executed by the native `VoxtrSprint0Tests`
     // target) surfaced that the target's `xcodebuild test` invocation in
-    // `codemagic.yaml` passes `CODE_SIGNING_ALLOWED=NO` on the command
-    // line, which overrides anything set in `project.pbxproj`. An
-    // entirely unsigned process has no application-identifier/keychain-
-    // access-group entitlement, so `SecItemAdd` cannot resolve a default
-    // access group and fails with `errSecMissingEntitlement` (-34018).
-    // Fix: the "Run VoxtrSprint0Tests" step's `xcodebuild test` command
-    // line now signs ad hoc (`CODE_SIGN_IDENTITY=-`) instead of disabling
-    // signing — scoped to that one test-execution step only (command-
-    // line build settings override `project.pbxproj`, so no project file
-    // change was needed); the AthleteApp/ParentApp build-only steps
-    // remain unsigned since they never touch Keychain. See
-    // `codemagic.yaml`'s `pr-validation`/`package-tests` workflows.
+    // `codemagic.yaml` originally passed `CODE_SIGNING_ALLOWED=NO` on
+    // the command line, which overrides anything set in
+    // `project.pbxproj`. An entirely unsigned process has no
+    // application-identifier/keychain-access-group entitlement, so
+    // `SecItemAdd` cannot resolve a default access group and fails with
+    // `errSecMissingEntitlement` (-34018).
+    //
+    // STATUS (PR #116 R3, still open): switching that command line to
+    // ad hoc signing (`CODE_SIGN_IDENTITY=-`) was NOT sufficient —
+    // Codemagic build #228 confirmed the ad hoc signature itself
+    // succeeds ("Sign to Run Locally"), but this test still fails with
+    // the same `errSecMissingEntitlement` (-34018). The real minimum
+    // repair is still being diagnosed; see the "Diagnose
+    // VoxtrSprint0Tests signing/entitlements" step added in
+    // `codemagic.yaml`'s `pr-validation`/`package-tests` workflows,
+    // which inspects the actual built bundle's embedded entitlements
+    // rather than guessing again. Keep this test ENABLED — do not
+    // disable or swallow this failure; it must either pass for real or
+    // keep surfacing the genuine gap.
     @Test("KeychainAthleteDeviceAuthorizationSessionStore save/load/clear round-trips correctly and atomically replaces an existing record")
     func keychainStoreRoundTrips() throws {
         let store = KeychainAthleteDeviceAuthorizationSessionStore(
