@@ -367,6 +367,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				6774161298B1C5C9A0F4AD11 /* PBXTargetDependency */,
 			);
 			name = VoxtrSprint0Tests;
 			packageProductDependencies = (
@@ -389,6 +390,24 @@
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		EEBD6708E4EC05E40DD4F974 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 58BB600684DA1681D944C39C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 711A94247F64BEEBA7E79FC7;
+			remoteInfo = AthleteApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		6774161298B1C5C9A0F4AD11 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 711A94247F64BEEBA7E79FC7 /* AthleteApp */;
+			targetProxy = EEBD6708E4EC05E40DD4F974 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		58BB600684DA1681D944C39C /* Project object */ = {
