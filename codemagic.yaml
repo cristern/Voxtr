@@ -23,6 +23,7 @@ workflows:
       vars:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
         XCODE_SCHEME: "VoxtrTests"
+        ATHLETE_SCHEME: "AthleteApp"
         RESULT_BUNDLE: "build/reports/VoxtrSprint0Tests.xcresult"
         JUNIT_OUTPUT: "build/reports/junit.xml"
     triggering:
@@ -96,12 +97,52 @@ workflows:
           fi
           set -e
 
-      - name: Diagnose VoxtrSprint0Tests signing/entitlements (fixed derived-data path, real evidence; read-only, never fails the build)
+      - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
+        script: |
+          set -e
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          mkdir -p build/reports
+          # Build #232 artifacts (PR #116 R3) established via the actual
+          # .xctestrun that VoxtrSprint0Tests, with no TEST_HOST, runs
+          # inside the standalone iPhoneSimulator-platform `xctest`
+          # agent — not any application. That agent, like the ad-hoc-
+          # signed .xctest bundle itself, carries no keychain-access-
+          # group entitlement at all, so no amount of signing the
+          # *bundle* can fix real Keychain access (already tried and
+          # confirmed insufficient). The fix is an application-hosted
+          # execution path: build AthleteApp here as the TEST_HOST, ad
+          # hoc signed exactly like the test bundle, reusing its own
+          # already-existing entitlements configuration
+          # (AthleteApp/AthleteApp.entitlements) — no new team
+          # identifier invented, Apple's own xctest binary untouched.
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/athlete-app-test-host-build.log
+          ATHLETE_APP_BUNDLE=$(find "$DIAG_DD/Build/Products" -iname "AthleteApp.app" | head -n1)
+          if [ -z "$ATHLETE_APP_BUNDLE" ]; then
+            echo "FAILING BUILD: AthleteApp.app not found under $DIAG_DD/Build/Products after building it as the Keychain test host for VoxtrSprint0Tests — see athlete-app-test-host-build.log."
+            exit 1
+          fi
+          TEST_HOST_PATH="$ATHLETE_APP_BUNDLE/AthleteApp"
+          if [ ! -f "$TEST_HOST_PATH" ]; then
+            echo "FAILING BUILD: resolved AthleteApp.app but its executable is missing at $TEST_HOST_PATH"
+            exit 1
+          fi
+          echo "Resolved TEST_HOST_PATH=$TEST_HOST_PATH"
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" >> "$CM_ENV"
+
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (AthleteApp test host, fixed derived-data path, real evidence; read-only, never fails the build)
         script: |
           set +e
           DIAG_DD="$(pwd)/build/DiagDerivedData"
-          rm -rf "$DIAG_DD"
-          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing + AthleteApp TEST_HOST applied) =="
           xcodebuild -showBuildSettings \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -110,9 +151,11 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             > build/reports/signing-diagnostic-build-settings.log 2>&1
           echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
-          echo "== Building VoxtrSprint0Tests for testing, same fixed derived-data path the real test step below now also uses =="
+          echo "== Building VoxtrSprint0Tests for testing, hosted inside AthleteApp at $TEST_HOST_PATH, same fixed derived-data path the real test step below now also uses =="
           xcodebuild build-for-testing \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -121,6 +164,8 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             > build/reports/build-for-testing-diagnostic.log 2>&1
           BUILD_FOR_TESTING_EXIT=$?
           echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
@@ -165,12 +210,15 @@ workflows:
               codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
             done < build/reports/signing-diagnostic-valid-bundles.txt
           fi
-          echo "== Also inspecting a CANDIDATE 'xctest' harness binary's code signature — NOT proven to be the exact process that executes the tests below; cross-reference against the .xctestrun dump above and the actual process list in xcodebuild-test.log to establish the true executing host =="
-          XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
-          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN (candidate only)" | tee -a build/reports/signing-diagnostic-entitlements.log
-          if [ -x "$XCTEST_BIN" ]; then
-            echo "--- entitlements (candidate binary, unverified as actual host): $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          echo "== Also inspecting the resolved TEST_HOST executable directly — the ACTUAL host this run declares via TEST_HOST/BUNDLE_LOADER, cross-checked against the .xctestrun TestHostPath dump above, not a disconnected xcrun guess =="
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -f "$TEST_HOST_PATH" ]; then
+            echo "--- entitlements: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- codesign -dvvv: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -dvvv "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          else
+            echo "TEST_HOST_PATH does not exist as a file: $TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
           fi
           exit 0
 
@@ -178,23 +226,22 @@ workflows:
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
-          # R3 status (PR #116 review thread): ad hoc signing
-          # (CODE_SIGN_IDENTITY=-) was ATTEMPTED here to give the test
-          # process a keychain-access-group entitlement, since
-          # CODE_SIGNING_ALLOWED=NO left it entirely unsigned. Codemagic
-          # build #228 confirmed the ad hoc signature itself succeeds
-          # ("Sign to Run Locally"), but
-          # AthleteDeviceAuthorizationSessionManagerTests
-          # .keychainStoreRoundTrips() STILL fails with
-          # errSecMissingEntitlement (-34018) — ad hoc signing alone is
-          # necessary but not sufficient; this comment does not claim
-          # the failure is fixed. -derivedDataPath now matches the
-          # diagnostic step above exactly, so that step inspects the
-          # literal artifact this step executes (and reuses its
-          # already-compiled products, avoiding a duplicate full
-          # compile) rather than a same-settings-different-location
-          # guess. See build/reports/signing-diagnostic-*.{log,txt} for
-          # the real minimum repair evidence instead of guessing again.
+          # R3 status (PR #116 review thread): ad hoc signing the
+          # *bundle* (CODE_SIGN_IDENTITY=-) was tried first and
+          # confirmed insufficient — build #232 artifacts showed via
+          # the actual .xctestrun that this target, with no TEST_HOST,
+          # runs inside the standalone iPhoneSimulator-platform
+          # `xctest` agent, which itself carries no keychain-access-
+          # group entitlement. TEST_HOST/BUNDLE_LOADER now point at
+          # AthleteApp, built as a dedicated test host in the step
+          # above (same fixed derived-data path, same ad hoc signing,
+          # reusing AthleteApp's own existing entitlements — no new
+          # team identifier, Apple's xctest binary untouched). This
+          # hosts the ENTIRE VoxtrSprint0Tests target inside
+          # AthleteApp's process for this invocation, not only the
+          # Keychain test — a materially different execution
+          # environment for every test here, disclosed and watched via
+          # this exact CI run's actual results.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -205,6 +252,8 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             2>&1 | tee build/reports/xcodebuild-test.log
 
       - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
@@ -411,12 +460,52 @@ workflows:
           echo "Auto-detected simulator UDID: $SIMULATOR_UDID"
           echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$CM_ENV"
 
-      - name: Diagnose VoxtrSprint0Tests signing/entitlements (fixed derived-data path, real evidence; read-only, never fails the build)
+      - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
+        script: |
+          set -e
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          mkdir -p build/reports
+          # Build #232 artifacts (PR #116 R3) established via the actual
+          # .xctestrun that VoxtrSprint0Tests, with no TEST_HOST, runs
+          # inside the standalone iPhoneSimulator-platform `xctest`
+          # agent — not any application. That agent, like the ad-hoc-
+          # signed .xctest bundle itself, carries no keychain-access-
+          # group entitlement at all, so no amount of signing the
+          # *bundle* can fix real Keychain access (already tried and
+          # confirmed insufficient). The fix is an application-hosted
+          # execution path: build AthleteApp here as the TEST_HOST, ad
+          # hoc signed exactly like the test bundle, reusing its own
+          # already-existing entitlements configuration
+          # (AthleteApp/AthleteApp.entitlements) — no new team
+          # identifier invented, Apple's own xctest binary untouched.
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/athlete-app-test-host-build.log
+          ATHLETE_APP_BUNDLE=$(find "$DIAG_DD/Build/Products" -iname "AthleteApp.app" | head -n1)
+          if [ -z "$ATHLETE_APP_BUNDLE" ]; then
+            echo "FAILING BUILD: AthleteApp.app not found under $DIAG_DD/Build/Products after building it as the Keychain test host for VoxtrSprint0Tests — see athlete-app-test-host-build.log."
+            exit 1
+          fi
+          TEST_HOST_PATH="$ATHLETE_APP_BUNDLE/AthleteApp"
+          if [ ! -f "$TEST_HOST_PATH" ]; then
+            echo "FAILING BUILD: resolved AthleteApp.app but its executable is missing at $TEST_HOST_PATH"
+            exit 1
+          fi
+          echo "Resolved TEST_HOST_PATH=$TEST_HOST_PATH"
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" >> "$CM_ENV"
+
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (AthleteApp test host, fixed derived-data path, real evidence; read-only, never fails the build)
         script: |
           set +e
           DIAG_DD="$(pwd)/build/DiagDerivedData"
-          rm -rf "$DIAG_DD"
-          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing + AthleteApp TEST_HOST applied) =="
           xcodebuild -showBuildSettings \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -425,9 +514,11 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             > build/reports/signing-diagnostic-build-settings.log 2>&1
           echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
-          echo "== Building VoxtrSprint0Tests for testing, same fixed derived-data path the real test step below now also uses =="
+          echo "== Building VoxtrSprint0Tests for testing, hosted inside AthleteApp at $TEST_HOST_PATH, same fixed derived-data path the real test step below now also uses =="
           xcodebuild build-for-testing \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -436,6 +527,8 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             > build/reports/build-for-testing-diagnostic.log 2>&1
           BUILD_FOR_TESTING_EXIT=$?
           echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
@@ -480,12 +573,15 @@ workflows:
               codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
             done < build/reports/signing-diagnostic-valid-bundles.txt
           fi
-          echo "== Also inspecting a CANDIDATE 'xctest' harness binary's code signature — NOT proven to be the exact process that executes the tests below; cross-reference against the .xctestrun dump above and the actual process list in xcodebuild-test.log to establish the true executing host =="
-          XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
-          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN (candidate only)" | tee -a build/reports/signing-diagnostic-entitlements.log
-          if [ -x "$XCTEST_BIN" ]; then
-            echo "--- entitlements (candidate binary, unverified as actual host): $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          echo "== Also inspecting the resolved TEST_HOST executable directly — the ACTUAL host this run declares via TEST_HOST/BUNDLE_LOADER, cross-checked against the .xctestrun TestHostPath dump above, not a disconnected xcrun guess =="
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -f "$TEST_HOST_PATH" ]; then
+            echo "--- entitlements: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- codesign -dvvv: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -dvvv "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          else
+            echo "TEST_HOST_PATH does not exist as a file: $TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
           fi
           exit 0
 
@@ -493,23 +589,22 @@ workflows:
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
-          # R3 status (PR #116 review thread): ad hoc signing
-          # (CODE_SIGN_IDENTITY=-) was ATTEMPTED here to give the test
-          # process a keychain-access-group entitlement, since
-          # CODE_SIGNING_ALLOWED=NO left it entirely unsigned. Codemagic
-          # build #228 confirmed the ad hoc signature itself succeeds
-          # ("Sign to Run Locally"), but
-          # AthleteDeviceAuthorizationSessionManagerTests
-          # .keychainStoreRoundTrips() STILL fails with
-          # errSecMissingEntitlement (-34018) — ad hoc signing alone is
-          # necessary but not sufficient; this comment does not claim
-          # the failure is fixed. -derivedDataPath now matches the
-          # diagnostic step above exactly, so that step inspects the
-          # literal artifact this step executes (and reuses its
-          # already-compiled products, avoiding a duplicate full
-          # compile) rather than a same-settings-different-location
-          # guess. See build/reports/signing-diagnostic-*.{log,txt} for
-          # the real minimum repair evidence instead of guessing again.
+          # R3 status (PR #116 review thread): ad hoc signing the
+          # *bundle* (CODE_SIGN_IDENTITY=-) was tried first and
+          # confirmed insufficient — build #232 artifacts showed via
+          # the actual .xctestrun that this target, with no TEST_HOST,
+          # runs inside the standalone iPhoneSimulator-platform
+          # `xctest` agent, which itself carries no keychain-access-
+          # group entitlement. TEST_HOST/BUNDLE_LOADER now point at
+          # AthleteApp, built as a dedicated test host in the step
+          # above (same fixed derived-data path, same ad hoc signing,
+          # reusing AthleteApp's own existing entitlements — no new
+          # team identifier, Apple's xctest binary untouched). This
+          # hosts the ENTIRE VoxtrSprint0Tests target inside
+          # AthleteApp's process for this invocation, not only the
+          # Keychain test — a materially different execution
+          # environment for every test here, disclosed and watched via
+          # this exact CI run's actual results.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
@@ -520,6 +615,8 @@ workflows:
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST="$TEST_HOST_PATH" \
+            BUNDLE_LOADER="$TEST_HOST_PATH" \
             2>&1 | tee build/reports/xcodebuild-test.log
 
       - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
