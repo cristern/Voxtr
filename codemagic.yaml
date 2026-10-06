@@ -99,7 +99,7 @@ workflows:
 
       - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
         script: |
-          set -e
+          set -eo pipefail
           DIAG_DD="$(pwd)/build/DiagDerivedData"
           rm -rf "$DIAG_DD"
           mkdir -p build/reports
@@ -462,7 +462,7 @@ workflows:
 
       - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
         script: |
-          set -e
+          set -eo pipefail
           DIAG_DD="$(pwd)/build/DiagDerivedData"
           rm -rf "$DIAG_DD"
           mkdir -p build/reports
