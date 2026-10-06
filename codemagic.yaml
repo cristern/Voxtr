@@ -313,7 +313,12 @@ workflows:
           # @Test function — -skip-testing exited 0 and the nonzero-count
           # check above passed while the test ran anyway. Counts alone
           # cannot catch a wrong selector; check test IDENTITY too.
-          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); names = [tc.get('name', '') for tc in root.iter('testcase')]; print(sum(1 for n in names if 'keychainStoreRoundTrips' in n))")
+          # Build #239 (ChatGPT review 6016636238) showed this identity
+          # check itself read the wrong JUnit field: xcresult_to_junit.py's
+          # "name" attribute is the human-readable @Test display title, not
+          # the method identity — "classname" carries the actual
+          # "Suite/method()" identifier and is what must be matched.
+          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Main suite occurrences of keychainStoreRoundTrips: $MAIN_KEYCHAIN_OCCURRENCES"
           if [ "$MAIN_KEYCHAIN_OCCURRENCES" -ne 0 ]; then
             echo "FAILING BUILD: the main suite still executed keychainStoreRoundTrips — the -skip-testing selector did not actually exclude it, so this invocation is not the previously-working unhosted environment it claims to be."
@@ -332,7 +337,7 @@ workflows:
             echo "FAILING BUILD: zero tests were executed for the isolated Keychain test — it must actually run, not be silently skipped or misfiltered."
             exit 1
           fi
-          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); names = [tc.get('name', '') for tc in root.iter('testcase')]; print(sum(1 for n in names if 'keychainStoreRoundTrips' in n))")
+          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
           if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
             echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
@@ -743,7 +748,12 @@ workflows:
           # @Test function — -skip-testing exited 0 and the nonzero-count
           # check above passed while the test ran anyway. Counts alone
           # cannot catch a wrong selector; check test IDENTITY too.
-          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); names = [tc.get('name', '') for tc in root.iter('testcase')]; print(sum(1 for n in names if 'keychainStoreRoundTrips' in n))")
+          # Build #239 (ChatGPT review 6016636238) showed this identity
+          # check itself read the wrong JUnit field: xcresult_to_junit.py's
+          # "name" attribute is the human-readable @Test display title, not
+          # the method identity — "classname" carries the actual
+          # "Suite/method()" identifier and is what must be matched.
+          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Main suite occurrences of keychainStoreRoundTrips: $MAIN_KEYCHAIN_OCCURRENCES"
           if [ "$MAIN_KEYCHAIN_OCCURRENCES" -ne 0 ]; then
             echo "FAILING BUILD: the main suite still executed keychainStoreRoundTrips — the -skip-testing selector did not actually exclude it, so this invocation is not the previously-working unhosted environment it claims to be."
@@ -762,7 +772,7 @@ workflows:
             echo "FAILING BUILD: zero tests were executed for the isolated Keychain test — it must actually run, not be silently skipped or misfiltered."
             exit 1
           fi
-          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); names = [tc.get('name', '') for tc in root.iter('testcase')]; print(sum(1 for n in names if 'keychainStoreRoundTrips' in n))")
+          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
           if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
             echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
