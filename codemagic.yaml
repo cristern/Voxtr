@@ -125,19 +125,37 @@ workflows:
           BUILD_FOR_TESTING_EXIT=$?
           echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
           echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
-          find "$DIAG_DD" -iname "*.xctestrun" > build/reports/signing-diagnostic-found-xctestrun.txt 2>&1
+          find "$DIAG_DD" -iname "*.xctestrun" \
+            > build/reports/signing-diagnostic-found-xctestrun.txt \
+            2> build/reports/signing-diagnostic-found-xctestrun.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
           cat build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "-- find stderr (errors only — NOT candidate paths) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.stderr
           : > build/reports/signing-diagnostic-xctestrun-dump.log
           while IFS= read -r runfile; do
+            [ -f "$runfile" ] || { echo "SKIPPING non-existent path from find output: $runfile" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log; continue; }
             echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
             /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
           done < build/reports/signing-diagnostic-found-xctestrun.txt
           echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
-          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) > build/reports/signing-diagnostic-found-bundles.txt 2>&1
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) \
+            > build/reports/signing-diagnostic-found-bundles.txt \
+            2> build/reports/signing-diagnostic-found-bundles.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
           cat build/reports/signing-diagnostic-found-bundles.txt
+          echo "-- find stderr (errors only — NOT candidate paths; e.g. Products dir missing) --"
+          cat build/reports/signing-diagnostic-found-bundles.stderr
+          # Only lines that are real, existing paths count as "found" — find's own
+          # stderr (e.g. "No such file or directory") goes to a SEPARATE file above
+          # specifically so it can never be mistaken for a discovered bundle path.
+          : > build/reports/signing-diagnostic-valid-bundles.txt
+          while IFS= read -r bundle; do
+            [ -e "$bundle" ] && echo "$bundle" >> build/reports/signing-diagnostic-valid-bundles.txt
+          done < build/reports/signing-diagnostic-found-bundles.txt
           : > build/reports/signing-diagnostic-entitlements.log
-          if [ ! -s build/reports/signing-diagnostic-found-bundles.txt ]; then
-            echo "INCOMPLETE COLLECTION: no .xctest/.app bundles found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log for why)." \
+          if [ ! -s build/reports/signing-diagnostic-valid-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no real .xctest/.app bundle path found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log and signing-diagnostic-found-bundles.stderr for why). This is NOT entitlement evidence — it means collection itself did not find anything to inspect." \
               | tee build/reports/signing-diagnostic-entitlements.log
           else
             while IFS= read -r bundle; do
@@ -145,13 +163,13 @@ workflows:
               codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
               echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
               codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-            done < build/reports/signing-diagnostic-found-bundles.txt
+            done < build/reports/signing-diagnostic-valid-bundles.txt
           fi
-          echo "== Also inspecting the live 'xctest' harness binary's own code signature — the test log shows execution via an xctest process, not an inferred XCTRunner.app =="
+          echo "== Also inspecting a CANDIDATE 'xctest' harness binary's code signature — NOT proven to be the exact process that executes the tests below; cross-reference against the .xctestrun dump above and the actual process list in xcodebuild-test.log to establish the true executing host =="
           XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
-          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN" | tee -a build/reports/signing-diagnostic-entitlements.log
+          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN (candidate only)" | tee -a build/reports/signing-diagnostic-entitlements.log
           if [ -x "$XCTEST_BIN" ]; then
-            echo "--- entitlements: $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- entitlements (candidate binary, unverified as actual host): $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
             codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
           fi
           exit 0
@@ -216,8 +234,11 @@ workflows:
       - build/reports/signing-diagnostic-build-settings.log
       - build/reports/build-for-testing-diagnostic.log
       - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-found-xctestrun.stderr
       - build/reports/signing-diagnostic-xctestrun-dump.log
       - build/reports/signing-diagnostic-found-bundles.txt
+      - build/reports/signing-diagnostic-found-bundles.stderr
+      - build/reports/signing-diagnostic-valid-bundles.txt
       - build/reports/signing-diagnostic-entitlements.log
     publishing:
       email:
@@ -419,19 +440,37 @@ workflows:
           BUILD_FOR_TESTING_EXIT=$?
           echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
           echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
-          find "$DIAG_DD" -iname "*.xctestrun" > build/reports/signing-diagnostic-found-xctestrun.txt 2>&1
+          find "$DIAG_DD" -iname "*.xctestrun" \
+            > build/reports/signing-diagnostic-found-xctestrun.txt \
+            2> build/reports/signing-diagnostic-found-xctestrun.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
           cat build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "-- find stderr (errors only — NOT candidate paths) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.stderr
           : > build/reports/signing-diagnostic-xctestrun-dump.log
           while IFS= read -r runfile; do
+            [ -f "$runfile" ] || { echo "SKIPPING non-existent path from find output: $runfile" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log; continue; }
             echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
             /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
           done < build/reports/signing-diagnostic-found-xctestrun.txt
           echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
-          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) > build/reports/signing-diagnostic-found-bundles.txt 2>&1
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) \
+            > build/reports/signing-diagnostic-found-bundles.txt \
+            2> build/reports/signing-diagnostic-found-bundles.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
           cat build/reports/signing-diagnostic-found-bundles.txt
+          echo "-- find stderr (errors only — NOT candidate paths; e.g. Products dir missing) --"
+          cat build/reports/signing-diagnostic-found-bundles.stderr
+          # Only lines that are real, existing paths count as "found" — find's own
+          # stderr (e.g. "No such file or directory") goes to a SEPARATE file above
+          # specifically so it can never be mistaken for a discovered bundle path.
+          : > build/reports/signing-diagnostic-valid-bundles.txt
+          while IFS= read -r bundle; do
+            [ -e "$bundle" ] && echo "$bundle" >> build/reports/signing-diagnostic-valid-bundles.txt
+          done < build/reports/signing-diagnostic-found-bundles.txt
           : > build/reports/signing-diagnostic-entitlements.log
-          if [ ! -s build/reports/signing-diagnostic-found-bundles.txt ]; then
-            echo "INCOMPLETE COLLECTION: no .xctest/.app bundles found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log for why)." \
+          if [ ! -s build/reports/signing-diagnostic-valid-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no real .xctest/.app bundle path found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log and signing-diagnostic-found-bundles.stderr for why). This is NOT entitlement evidence — it means collection itself did not find anything to inspect." \
               | tee build/reports/signing-diagnostic-entitlements.log
           else
             while IFS= read -r bundle; do
@@ -439,13 +478,13 @@ workflows:
               codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
               echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
               codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-            done < build/reports/signing-diagnostic-found-bundles.txt
+            done < build/reports/signing-diagnostic-valid-bundles.txt
           fi
-          echo "== Also inspecting the live 'xctest' harness binary's own code signature — the test log shows execution via an xctest process, not an inferred XCTRunner.app =="
+          echo "== Also inspecting a CANDIDATE 'xctest' harness binary's code signature — NOT proven to be the exact process that executes the tests below; cross-reference against the .xctestrun dump above and the actual process list in xcodebuild-test.log to establish the true executing host =="
           XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
-          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN" | tee -a build/reports/signing-diagnostic-entitlements.log
+          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN (candidate only)" | tee -a build/reports/signing-diagnostic-entitlements.log
           if [ -x "$XCTEST_BIN" ]; then
-            echo "--- entitlements: $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- entitlements (candidate binary, unverified as actual host): $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
             codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
           fi
           exit 0
@@ -522,8 +561,11 @@ workflows:
       - build/reports/signing-diagnostic-build-settings.log
       - build/reports/build-for-testing-diagnostic.log
       - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-found-xctestrun.stderr
       - build/reports/signing-diagnostic-xctestrun-dump.log
       - build/reports/signing-diagnostic-found-bundles.txt
+      - build/reports/signing-diagnostic-found-bundles.stderr
+      - build/reports/signing-diagnostic-valid-bundles.txt
       - build/reports/signing-diagnostic-entitlements.log
     publishing:
       email:
