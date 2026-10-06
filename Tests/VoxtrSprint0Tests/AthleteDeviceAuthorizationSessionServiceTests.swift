@@ -173,6 +173,47 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         #expect(missingKeyStore.loadOrCreateCallCount == 0, "a missing key must never be silently replaced just by checking availability")
     }
 
+    // MARK: - Mid-call invalidation hook (R6 follow-up, ChatGPT review 6025279987)
+    //
+    // Both issueSession()/renewSession() each contain TWO separate
+    // network awaits (challenge, then sign+submit). A caller-level
+    // guard checked only before/after the whole call cannot stop the
+    // SUBMIT specifically — which has a real server-side effect — from
+    // being sent if the caller's own invalidation happens while this
+    // call is suspended between the two. checkNotCancelled is called
+    // right after the challenge succeeds, before signing/submitting,
+    // so a caller can reject the operation at that exact point.
+
+    @Test("issueSession()'s checkNotCancelled runs after a successful challenge and before signing/submitting — if it throws, no submit is ever sent and no signing is attempted")
+    func issueSessionChecksNotCancelledBeforeSubmitting() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        struct CancelledForTest: Error, Equatable {}
+
+        await #expect(throws: CancelledForTest()) {
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId) {
+                throw CancelledForTest()
+            }
+        }
+        #expect(transport.sentRequests.count == 1, "only the challenge was sent — checkNotCancelled's throw must happen before any submit request")
+        #expect(signingKeyStore.loadExistingCallCount == 0, "signing must never happen once checkNotCancelled rejects the operation")
+    }
+
+    @Test("renewSession()'s checkNotCancelled runs after a successful challenge and before signing/submitting — if it throws, no submit is ever sent and no signing is attempted")
+    func renewSessionChecksNotCancelledBeforeSubmitting() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        struct CancelledForTest: Error, Equatable {}
+
+        await #expect(throws: CancelledForTest()) {
+            _ = try await service.renewSession(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken) {
+                throw CancelledForTest()
+            }
+        }
+        #expect(transport.sentRequests.count == 1, "only the challenge was sent — checkNotCancelled's throw must happen before any submit request")
+        #expect(signingKeyStore.loadExistingCallCount == 0, "signing must never happen once checkNotCancelled rejects the operation")
+    }
+
     // MARK: - session_issue
 
     @Test("issueSession() sends action=session_issue with no session_token, signs the challenge with loadExistingSigningKey(), and maps .issued")

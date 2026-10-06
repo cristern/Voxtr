@@ -109,6 +109,15 @@ public final class AthleteDeviceAuthorizationSessionManager {
     private var inFlightTasks: [UUID: (token: Int, task: Task<String, Error>)] = [:]
     private var nextInFlightToken = 0
 
+    /// Test-only observability seam (reachable only via `@testable
+    /// import`, never read by any production code): bumped every time
+    /// `ensureActiveSession()` JOINS an already-registered in-flight
+    /// task, so deterministic tests can build a real join barrier
+    /// instead of trusting `Task.yield()` scheduling order (R6
+    /// follow-up, ChatGPT review 6025279987: "five yields still do not
+    /// establish a join barrier").
+    var joinCountForTesting = 0
+
     /// Bumped by every `clearStoredSession()` call — mirrors
     /// `ParentAuthenticationService.sessionGeneration`'s own
     /// established guard exactly (R6, ChatGPT review 6024820299).
@@ -138,6 +147,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// the same grant share one attempt and its one result.
     public func ensureActiveSession(deviceGrantId: UUID) async throws -> String {
         if let existing = inFlightTasks[deviceGrantId] {
+            joinCountForTesting += 1
             return try await existing.task.value
         }
         nextInFlightToken += 1
@@ -202,6 +212,16 @@ public final class AthleteDeviceAuthorizationSessionManager {
     }
 
     private func resolveActiveSession(deviceGrantId: UUID, generationAtStart: Int) async throws -> String {
+        // R6 follow-up (ChatGPT review 6025279987): checked HERE,
+        // before touching the store or the service at all. The Task
+        // this method runs in is not guaranteed to start executing
+        // immediately after ensureActiveSession() registers it — if
+        // clearStoredSession() runs in that gap, this guard stops a
+        // now-stale operation from reading/clearing cached state (the
+        // fast-path return below, or the signing-key-check branch's
+        // own store.clearSession()) or starting service work under a
+        // generation that no longer applies.
+        try checkNotCleared(generationAtStart: generationAtStart)
         let now = clock.now()
         if let stored = store.loadSession(), stored.deviceGrantId == deviceGrantId {
             // Review round 4 (PR #116, ChatGPT review 6020919614): a
@@ -276,7 +296,15 @@ public final class AthleteDeviceAuthorizationSessionManager {
         for _ in 0..<Self.maxAttemptsPerCall {
             let outcome: AthleteDeviceAuthorizationSessionRenewOutcome
             do {
-                outcome = try await service.renewSession(deviceGrantId: deviceGrantId, sessionToken: stored.sessionToken)
+                outcome = try await service.renewSession(deviceGrantId: deviceGrantId, sessionToken: stored.sessionToken) {
+                    // R6 follow-up (ChatGPT review 6025279987): called by
+                    // the service between its own two network awaits —
+                    // after the challenge succeeds, before signing/
+                    // submitting — so a stale operation's SUBMIT (a real
+                    // server-side effect) is never sent in the first
+                    // place, not merely discarded once it returns.
+                    try checkNotCleared(generationAtStart: generationAtStart)
+                }
             } catch let error as AthleteDeviceAuthorizationSessionError {
                 try checkNotCleared(generationAtStart: generationAtStart)
                 switch error {
@@ -315,7 +343,11 @@ public final class AthleteDeviceAuthorizationSessionManager {
         for _ in 0..<Self.maxAttemptsPerCall {
             let outcome: AthleteDeviceAuthorizationSessionIssueOutcome
             do {
-                outcome = try await service.issueSession(deviceGrantId: deviceGrantId)
+                outcome = try await service.issueSession(deviceGrantId: deviceGrantId) {
+                    // R6 follow-up (ChatGPT review 6025279987): same
+                    // reasoning as attemptRenew's own identical closure.
+                    try checkNotCleared(generationAtStart: generationAtStart)
+                }
             } catch let error as AthleteDeviceAuthorizationSessionError {
                 try checkNotCleared(generationAtStart: generationAtStart)
                 switch error {

@@ -233,18 +233,16 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         ISO8601DateFormatter().date(from: iso)!
     }
 
-    /// R6 follow-up (ChatGPT review 6025069937): a single `Task.yield()`
-    /// gives the ONLY other ready job (here, a just-created `async let`
-    /// coalescing waiter) a scheduling turn, but is not a hard
-    /// language-level guarantee that it ran all the way to its own next
-    /// suspension point. Several yields is the established, pragmatic
-    /// pattern for this — not a formal barrier, but any genuine failure
-    /// to coalesce is still fail-loud here: the waiter would instead
-    /// start its own independent network round trip, for which no stub
-    /// is queued, producing a clearly-wrong `NoStubConfigured` failure
-    /// rather than a silently-passing wrong result.
-    private func yieldSeveralTimes(_ count: Int = 5) async {
-        for _ in 0..<count {
+    /// R6 follow-up (ChatGPT review 6025279987: "five yields still do
+    /// not establish a join barrier") — a REAL deterministic barrier,
+    /// built on `joinCountForTesting` (an internal, `@testable`-only
+    /// observability seam on the manager itself, bumped exactly when
+    /// `ensureActiveSession()` joins an already-registered in-flight
+    /// task) rather than trusting `Task.yield()` scheduling order.
+    /// Polling never returns until a join has ACTUALLY been recorded
+    /// past `countBefore` — proof, not a probabilistic guess.
+    private func waitForJoin(_ manager: AthleteDeviceAuthorizationSessionManager, afterCount countBefore: Int) async {
+        while manager.joinCountForTesting <= countBefore {
             await Task.yield()
         }
     }
@@ -534,11 +532,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         await fixture.transport.waitUntilSuspended(path: "device-session-submit")
         // Joins the SAME in-flight attempt — registered while still
         // suspended, before the clear below.
+        let joinCountBeforeSecond = fixture.manager.joinCountForTesting
         async let second = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
-        // Give the second call's own synchronous join-check a chance
-        // to run before the clear below, so it has already registered
-        // itself as a waiter on the SAME in-flight task.
-        await yieldSeveralTimes()
+        // Real barrier (R6 follow-up, ChatGPT review 6025279987): waits
+        // until second's own join has ACTUALLY been recorded, not a
+        // guessed number of scheduling turns.
+        await waitForJoin(fixture.manager, afterCount: joinCountBeforeSecond)
 
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
@@ -638,35 +637,67 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(fixture.transport.sentRequests.count == 1, "a stale network error must not be retried with a fresh challenge")
     }
 
-    @Test("A stale pre-clear renewal's clean rejection must not fall through to a fresh session_issue — that fallback has a REAL server-side effect (revoking the grant's current active session) a merely-discarded local result cannot undo")
+    @Test("A stale pre-clear renewal's clean rejection (session_invalid at the challenge step) must not fall through to a fresh session_issue — that fallback has a REAL server-side effect (revoking the grant's current active session) a merely-discarded local result cannot undo")
     func staleRejectedRenewalNeverFallsThroughToFreshIssue() async throws {
+        // R6 follow-up test correction (ChatGPT review 6025279987):
+        // "session_invalid" is only a valid CHALLENGE-step outcome —
+        // mapSubmitOutcome rejects it as malformed if it ever appeared
+        // on the submit step instead (it never does on the real wire).
+        // The clean-rejection path this test exercises belongs entirely
+        // to the challenge step, matching
+        // fallsThroughToFreshIssueWhenRenewalCleanlyRejected's own
+        // already-correct pattern above.
         let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
         fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
             deviceGrantId: Self.deviceGrantId, sessionToken: "stale-token",
             expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
         )
-        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
-            "outcome": "issued",
-            "challenge_id": UUID().uuidString,
-            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
-            "expires_at": "2026-10-11T12:01:00Z",
-        ])
-        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": "session_invalid"])
-        fixture.transport.suspendNextResponse(path: "device-session-submit")
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "session_invalid"])
+        fixture.transport.suspendNextResponse(path: "device-session-challenge")
 
         async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
-        await fixture.transport.waitUntilSuspended(path: "device-session-submit")
+        await fixture.transport.waitUntilSuspended(path: "device-session-challenge")
 
         fixture.manager.clearStoredSession()
-        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+        fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
 
         await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
-        // Exactly one challenge + one submit — no fallback session_issue
-        // was ever attempted for this stale, cleanly-rejected renewal.
-        #expect(fixture.transport.sentRequests.count == 2)
+        // Exactly one challenge — session_invalid at the challenge
+        // step never reaches submit, and no fallback session_issue was
+        // ever attempted for this stale, cleanly-rejected renewal.
+        #expect(fixture.transport.sentRequests.count == 1)
     }
 
-    @Test("An older same-grant task's deferred cleanup never clobbers a NEWER task's registration, and a THIRD caller correctly coalesces onto that newer task while the older one is still suspended")
+    @Test("A stale pre-clear issue's successful CHALLENGE, suspended before its own submit, must never submit once resumed after a post-clear issue already completed — invalidation is checked between challenge and submit, not only after the whole service call returns")
+    func staleIssueNeverSubmitsAfterChallengeSuspendedThroughAClear() async throws {
+        let fixture = makeFixture()
+        // Challenge AND submit both succeed if ever sent — the submit
+        // must simply never be sent.
+        enqueueIssueSuccess(fixture.transport, sessionToken: "doomed-pre-clear-token", expiresAt: "2026-10-12T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-challenge")
+
+        async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-challenge")
+
+        fixture.manager.clearStoredSession()
+
+        enqueueIssueSuccess(fixture.transport, sessionToken: "fresh-post-clear-token", expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-11T00:00:00Z")
+        let postClearToken = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        #expect(postClearToken == "fresh-post-clear-token")
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+
+        fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+
+        // The stale operation's challenge succeeded (consuming its own
+        // stub), but it must never have gone on to submit. If it had,
+        // this would be 4 (its own challenge+submit, plus the
+        // post-clear pair) instead of 3.
+        #expect(fixture.transport.sentRequests.count == 3, "the stale operation's own submit must never be sent once invalidated between challenge and submit")
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token", "the stale operation's submit, had it wrongly been sent, would have revoked this server-side session even though its own local result is discarded")
+    }
+
+    @Test("An older same-grant task's deferred cleanup never clobbers a NEWER task's registration — a caller that joins strictly AFTER the older task's cleanup has already run still correctly coalesces onto the newer, still-suspended task")
     func olderTaskCleanupNeverClobbersNewerRegistrationAndThirdCallerCoalescesOntoIt() async throws {
         // No stored session — the stale pre-clear attempt is a fresh session_issue.
         let fixture = makeFixture()
@@ -684,20 +715,27 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         async let b = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
         await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 2)
 
-        // A THIRD caller for the SAME grant, while B (the newer task)
-        // is still registered and suspended — must coalesce onto B,
-        // never create its own independent attempt.
-        async let c = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
-        await yieldSeveralTimes()
-
-        // Release A — the OLDEST suspended call — first.
+        // R6 follow-up test correction (ChatGPT review 6025279987):
+        // release A — the OLDEST suspended call — and let its failure,
+        // AND its own deferred cleanup, run to completion BEFORE
+        // creating any further caller. This proves the next caller's
+        // coalescing is observed strictly AFTER that cleanup ran, not
+        // merely before it.
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
         await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await a }
-        // B's registration must have survived A's deferred cleanup —
-        // nothing has persisted yet (B has not resumed).
-        #expect(fixture.store.stored == nil)
+        #expect(fixture.store.stored == nil, "B has not yet resumed/persisted")
 
-        // Now release B.
+        // A THIRD caller for the SAME grant, created only NOW —
+        // strictly AFTER A's own deferred cleanup has already run —
+        // while B (the newer task) is STILL suspended. If A's cleanup
+        // had wrongly cleared B's registration, this caller would
+        // instead start its own independent attempt, for which no
+        // further stub is queued.
+        let joinCountBeforeC = fixture.manager.joinCountForTesting
+        async let c = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await waitForJoin(fixture.manager, afterCount: joinCountBeforeC)
+        #expect(fixture.transport.sentRequests.count == 3, "C must have coalesced onto B without sending its own challenge")
+
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
         let (tokenB, tokenC) = try await (b, c)
 

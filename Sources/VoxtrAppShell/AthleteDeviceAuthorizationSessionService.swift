@@ -78,7 +78,20 @@ public final class AthleteDeviceAuthorizationSessionService {
     /// transaction. The caller decides WHEN to call this (no stored
     /// session, a rejected renewal, or the absolute cap reached) — this
     /// method itself has no policy of its own.
-    public func issueSession(deviceGrantId: UUID) async throws -> AthleteDeviceAuthorizationSessionIssueOutcome {
+    /// `checkNotCancelled` (R6 follow-up, ChatGPT review 6025279987):
+    /// called right after the challenge succeeds, BEFORE signing or
+    /// submitting — `requestChallenge` and `submit` below are TWO
+    /// separate network awaits inside this one call, and a caller-level
+    /// guard checked only before/after the whole call cannot stop a
+    /// stale operation's own SUBMIT (which has a real server-side
+    /// effect: `session_issue` revokes the grant's current active
+    /// session) from being sent if invalidation happens while this
+    /// call is suspended between the two. Defaults to a no-op so every
+    /// other caller is unaffected.
+    public func issueSession(
+        deviceGrantId: UUID,
+        checkNotCancelled: () throws -> Void = {}
+    ) async throws -> AthleteDeviceAuthorizationSessionIssueOutcome {
         let challengeOutcome = try await requestChallenge(deviceGrantId: deviceGrantId, action: .sessionIssue, sessionToken: nil)
         switch challengeOutcome {
         case .challengeNotAvailable:
@@ -90,6 +103,7 @@ public final class AthleteDeviceAuthorizationSessionService {
             // rather than treated as a crash-worthy impossible case.
             return .grantNotAvailable
         case .issued(let challengeId, let nonce, _):
+            try checkNotCancelled()
             let message = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
                 action: .sessionIssue, deviceGrantId: deviceGrantId, challengeId: challengeId, nonce: nonce
             )
@@ -115,7 +129,11 @@ public final class AthleteDeviceAuthorizationSessionService {
     /// (clamped server-side to `absolute_expires_at`) — never mints a
     /// new token. Requires a fresh signature every call (§3.4 point 2:
     /// "never bearer-token possession alone").
-    public func renewSession(deviceGrantId: UUID, sessionToken: String) async throws -> AthleteDeviceAuthorizationSessionRenewOutcome {
+    public func renewSession(
+        deviceGrantId: UUID,
+        sessionToken: String,
+        checkNotCancelled: () throws -> Void = {}
+    ) async throws -> AthleteDeviceAuthorizationSessionRenewOutcome {
         let challengeOutcome = try await requestChallenge(deviceGrantId: deviceGrantId, action: .sessionRenew, sessionToken: sessionToken)
         switch challengeOutcome {
         case .challengeNotAvailable:
@@ -123,6 +141,7 @@ public final class AthleteDeviceAuthorizationSessionService {
         case .sessionInvalid:
             return .sessionInvalid
         case .issued(let challengeId, let nonce, _):
+            try checkNotCancelled()
             let message = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
                 action: .sessionRenew, deviceGrantId: deviceGrantId, challengeId: challengeId, nonce: nonce
             )
