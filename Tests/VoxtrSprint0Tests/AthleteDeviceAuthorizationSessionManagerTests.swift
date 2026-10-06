@@ -247,6 +247,26 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         }
     }
 
+    /// Compile fix (ChatGPT review 6025997463, build 245):
+    /// `#expect(throws:)`'s own trailing closure cannot capture an
+    /// `async let` binding at all — the Swift compiler rejects it
+    /// outright ("capturing 'async let' variables is not supported"),
+    /// which is what made every `async let`-based test below fail to
+    /// COMPILE, not merely fail to pass. The suspiciously-fast CI
+    /// failures across four prior pushes were this one compile
+    /// diagnostic, never a real assertion or a deeper race. Every call
+    /// site below instead `try await`s its async-let binding directly
+    /// in its own `do`/`catch`, with no enclosing closure at all, and
+    /// hands the already-materialized thrown `Error` to this ordinary
+    /// (non-closure-capturing) helper.
+    private func expectSessionCleared(_ error: Error) {
+        guard let failure = error as? AthleteDeviceAuthorizationSessionManager.SessionFailure else {
+            Issue.record("Expected SessionFailure.sessionCleared, got \(error)")
+            return
+        }
+        #expect(failure == .sessionCleared, "Expected .sessionCleared, got \(failure)")
+    }
+
     // MARK: - No stored session (first use after claim)
 
     @Test("ensureActiveSession() issues a brand-new session, using the existing installation key, when nothing is stored yet")
@@ -511,8 +531,11 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
 
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) {
-            try await resultToken
+        do {
+            _ = try await resultToken
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
         }
         #expect(fixture.store.stored == nil, "the backend's successful renewal must never be written back after an explicit clear")
         #expect(fixture.store.saveCallCount == 0)
@@ -542,8 +565,18 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
 
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await first }
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await second }
+        do {
+            _ = try await first
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
+        do {
+            _ = try await second
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
         #expect(fixture.transport.sentRequests.count == 2, "the second caller coalesced onto the first's attempt — never its own independent round trip")
         #expect(fixture.store.saveCallCount == 0)
     }
@@ -571,7 +604,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
 
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        do {
+            _ = try await preClearResult
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
 
         // The resumed, doomed pre-clear attempt must never overwrite
         // the fresh post-clear session once it finally completes.
@@ -613,7 +651,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
 
         fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        do {
+            _ = try await preClearResult
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
 
         // The resumed, stale grantNotAvailable outcome must never have
         // cleared the newer post-clear session — it must survive intact.
@@ -633,7 +676,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
 
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        do {
+            _ = try await preClearResult
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
         #expect(fixture.transport.sentRequests.count == 1, "a stale network error must not be retried with a fresh challenge")
     }
 
@@ -661,7 +709,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
 
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        do {
+            _ = try await preClearResult
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
         // Exactly one challenge — session_invalid at the challenge
         // step never reaches submit, and no fallback session_issue was
         // ever attempted for this stale, cleanly-rejected renewal.
@@ -703,7 +756,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
 
         fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        do {
+            _ = try await preClearResult
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
 
         // The stale operation's challenge succeeded (consuming its own
         // stub), but it must never have gone on to submit. If it had,
@@ -738,7 +796,12 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         // coalescing is observed strictly AFTER that cleanup ran, not
         // merely before it.
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
-        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await a }
+        do {
+            _ = try await a
+            Issue.record("Expected SessionFailure.sessionCleared to be thrown, but the operation succeeded")
+        } catch {
+            expectSessionCleared(error)
+        }
         #expect(fixture.store.stored == nil, "B has not yet resumed/persisted")
 
         // A THIRD caller for the SAME grant, created only NOW —
