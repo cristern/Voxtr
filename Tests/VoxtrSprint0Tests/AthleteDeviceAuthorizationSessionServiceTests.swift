@@ -148,10 +148,10 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         let (service, transport, _) = makeService(anonKey: "")
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.gatewayConfigurationMissing) {
-            try await service.issueSession(deviceGrantId: Self.deviceGrantId)
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId)
         }
         await #expect(throws: AthleteDeviceAuthorizationSessionError.gatewayConfigurationMissing) {
-            try await service.renewSession(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+            _ = try await service.renewSession(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
         }
         #expect(transport.sentRequests.isEmpty)
     }
@@ -225,7 +225,7 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         enqueueIssuedChallenge(transport)
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.signingKeyUnavailable) {
-            try await service.issueSession(deviceGrantId: Self.deviceGrantId)
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId)
         }
         #expect(transport.sentRequests.count == 1, "the challenge request happens before signing, but no submit request should follow")
     }
@@ -242,7 +242,7 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         ])
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.malformedResponse) {
-            try await service.issueSession(deviceGrantId: Self.deviceGrantId)
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId)
         }
     }
 
@@ -321,7 +321,7 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         enqueueIssuedChallenge(transport)
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.signingKeyUnavailable) {
-            try await service.renewSession(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+            _ = try await service.renewSession(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
         }
         #expect(transport.sentRequests.count == 1)
     }
@@ -334,7 +334,7 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         transport.enqueue(path: "device-session-challenge", statusCode: 500, json: [:])
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.network) {
-            try await service.issueSession(deviceGrantId: Self.deviceGrantId)
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId)
         }
     }
 
@@ -344,7 +344,7 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "something_new"])
 
         await #expect(throws: AthleteDeviceAuthorizationSessionError.malformedResponse) {
-            try await service.issueSession(deviceGrantId: Self.deviceGrantId)
+            _ = try await service.issueSession(deviceGrantId: Self.deviceGrantId)
         }
     }
 }
