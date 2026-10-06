@@ -96,48 +96,64 @@ workflows:
           fi
           set -e
 
-      - name: Diagnose VoxtrSprint0Tests signing/entitlements (effective build settings + embedded entitlements; read-only, never fails the build)
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (fixed derived-data path, real evidence; read-only, never fails the build)
         script: |
           set +e
-          echo "== Effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
           xcodebuild -showBuildSettings \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
-            2>&1 | grep -iE "CODE_SIGN|TEST_HOST|ENTITLEMENT|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|BUILT_PRODUCTS_DIR" \
-            | tee build/reports/signing-diagnostic-build-settings.log
-          BUILT_PRODUCTS_DIR=$(xcodebuild -showBuildSettings \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -destination "id=$SIMULATOR_UDID" \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=YES \
-            CODE_SIGNING_ALLOWED=YES \
-            2>/dev/null | awk -F'= ' '/ BUILT_PRODUCTS_DIR /{print $2; exit}')
-          echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR"
-          echo "== Building VoxtrSprint0Tests for testing (materializes the actual signed .xctest / any generated XCTRunner.app) =="
+            > build/reports/signing-diagnostic-build-settings.log 2>&1
+          echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
+          echo "== Building VoxtrSprint0Tests for testing, same fixed derived-data path the real test step below now also uses =="
           xcodebuild build-for-testing \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
             > build/reports/build-for-testing-diagnostic.log 2>&1
-          echo "== Bundles found under BUILT_PRODUCTS_DIR =="
-          find "$BUILT_PRODUCTS_DIR" -maxdepth 2 \( -iname "*.xctest" -o -iname "*Runner.app" -o -iname "*.app" \) 2>/dev/null \
-            | tee build/reports/signing-diagnostic-found-bundles.txt
-          echo "== Embedded entitlements + signing identity for each found bundle =="
+          BUILD_FOR_TESTING_EXIT=$?
+          echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
+          echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
+          find "$DIAG_DD" -iname "*.xctestrun" > build/reports/signing-diagnostic-found-xctestrun.txt 2>&1
+          cat build/reports/signing-diagnostic-found-xctestrun.txt
+          : > build/reports/signing-diagnostic-xctestrun-dump.log
+          while IFS= read -r runfile; do
+            echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+            /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+          done < build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) > build/reports/signing-diagnostic-found-bundles.txt 2>&1
+          cat build/reports/signing-diagnostic-found-bundles.txt
           : > build/reports/signing-diagnostic-entitlements.log
-          while IFS= read -r bundle; do
-            echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-            echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-          done < build/reports/signing-diagnostic-found-bundles.txt
+          if [ ! -s build/reports/signing-diagnostic-found-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no .xctest/.app bundles found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log for why)." \
+              | tee build/reports/signing-diagnostic-entitlements.log
+          else
+            while IFS= read -r bundle; do
+              echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+              echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            done < build/reports/signing-diagnostic-found-bundles.txt
+          fi
+          echo "== Also inspecting the live 'xctest' harness binary's own code signature — the test log shows execution via an xctest process, not an inferred XCTRunner.app =="
+          XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
+          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -x "$XCTEST_BIN" ]; then
+            echo "--- entitlements: $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          fi
           exit 0
 
       - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty — see script header for why)
@@ -154,14 +170,18 @@ workflows:
           # .keychainStoreRoundTrips() STILL fails with
           # errSecMissingEntitlement (-34018) — ad hoc signing alone is
           # necessary but not sufficient; this comment does not claim
-          # the failure is fixed. The diagnostic step above (effective
-          # build settings + embedded entitlements for the actual built
-          # .xctest/Runner bundle) exists to find the real minimum
-          # repair from evidence instead of guessing again.
+          # the failure is fixed. -derivedDataPath now matches the
+          # diagnostic step above exactly, so that step inspects the
+          # literal artifact this step executes (and reuses its
+          # already-compiled products, avoiding a duplicate full
+          # compile) rather than a same-settings-different-location
+          # guess. See build/reports/signing-diagnostic-*.{log,txt} for
+          # the real minimum repair evidence instead of guessing again.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             CODE_SIGN_IDENTITY=- \
@@ -195,6 +215,8 @@ workflows:
       - build/reports/destinations.txt
       - build/reports/signing-diagnostic-build-settings.log
       - build/reports/build-for-testing-diagnostic.log
+      - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-xctestrun-dump.log
       - build/reports/signing-diagnostic-found-bundles.txt
       - build/reports/signing-diagnostic-entitlements.log
     publishing:
@@ -368,48 +390,64 @@ workflows:
           echo "Auto-detected simulator UDID: $SIMULATOR_UDID"
           echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$CM_ENV"
 
-      - name: Diagnose VoxtrSprint0Tests signing/entitlements (effective build settings + embedded entitlements; read-only, never fails the build)
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (fixed derived-data path, real evidence; read-only, never fails the build)
         script: |
           set +e
-          echo "== Effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing applied) =="
           xcodebuild -showBuildSettings \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
-            2>&1 | grep -iE "CODE_SIGN|TEST_HOST|ENTITLEMENT|PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|BUILT_PRODUCTS_DIR" \
-            | tee build/reports/signing-diagnostic-build-settings.log
-          BUILT_PRODUCTS_DIR=$(xcodebuild -showBuildSettings \
-            -project "$XCODE_PROJECT" \
-            -scheme "$XCODE_SCHEME" \
-            -destination "id=$SIMULATOR_UDID" \
-            CODE_SIGN_IDENTITY=- \
-            CODE_SIGNING_REQUIRED=YES \
-            CODE_SIGNING_ALLOWED=YES \
-            2>/dev/null | awk -F'= ' '/ BUILT_PRODUCTS_DIR /{print $2; exit}')
-          echo "BUILT_PRODUCTS_DIR=$BUILT_PRODUCTS_DIR"
-          echo "== Building VoxtrSprint0Tests for testing (materializes the actual signed .xctest / any generated XCTRunner.app) =="
+            > build/reports/signing-diagnostic-build-settings.log 2>&1
+          echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
+          echo "== Building VoxtrSprint0Tests for testing, same fixed derived-data path the real test step below now also uses =="
           xcodebuild build-for-testing \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
             > build/reports/build-for-testing-diagnostic.log 2>&1
-          echo "== Bundles found under BUILT_PRODUCTS_DIR =="
-          find "$BUILT_PRODUCTS_DIR" -maxdepth 2 \( -iname "*.xctest" -o -iname "*Runner.app" -o -iname "*.app" \) 2>/dev/null \
-            | tee build/reports/signing-diagnostic-found-bundles.txt
-          echo "== Embedded entitlements + signing identity for each found bundle =="
+          BUILD_FOR_TESTING_EXIT=$?
+          echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
+          echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
+          find "$DIAG_DD" -iname "*.xctestrun" > build/reports/signing-diagnostic-found-xctestrun.txt 2>&1
+          cat build/reports/signing-diagnostic-found-xctestrun.txt
+          : > build/reports/signing-diagnostic-xctestrun-dump.log
+          while IFS= read -r runfile; do
+            echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+            /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+          done < build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) > build/reports/signing-diagnostic-found-bundles.txt 2>&1
+          cat build/reports/signing-diagnostic-found-bundles.txt
           : > build/reports/signing-diagnostic-entitlements.log
-          while IFS= read -r bundle; do
-            echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-            echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
-            codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
-          done < build/reports/signing-diagnostic-found-bundles.txt
+          if [ ! -s build/reports/signing-diagnostic-found-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no .xctest/.app bundles found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log for why)." \
+              | tee build/reports/signing-diagnostic-entitlements.log
+          else
+            while IFS= read -r bundle; do
+              echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+              echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            done < build/reports/signing-diagnostic-found-bundles.txt
+          fi
+          echo "== Also inspecting the live 'xctest' harness binary's own code signature — the test log shows execution via an xctest process, not an inferred XCTRunner.app =="
+          XCTEST_BIN=$(xcrun --sdk iphonesimulator --find xctest 2>&1)
+          echo "xcrun --sdk iphonesimulator --find xctest => $XCTEST_BIN" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -x "$XCTEST_BIN" ]; then
+            echo "--- entitlements: $XCTEST_BIN ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$XCTEST_BIN" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          fi
           exit 0
 
       - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty)
@@ -426,14 +464,18 @@ workflows:
           # .keychainStoreRoundTrips() STILL fails with
           # errSecMissingEntitlement (-34018) — ad hoc signing alone is
           # necessary but not sufficient; this comment does not claim
-          # the failure is fixed. The diagnostic step above (effective
-          # build settings + embedded entitlements for the actual built
-          # .xctest/Runner bundle) exists to find the real minimum
-          # repair from evidence instead of guessing again.
+          # the failure is fixed. -derivedDataPath now matches the
+          # diagnostic step above exactly, so that step inspects the
+          # literal artifact this step executes (and reuses its
+          # already-compiled products, avoiding a duplicate full
+          # compile) rather than a same-settings-different-location
+          # guess. See build/reports/signing-diagnostic-*.{log,txt} for
+          # the real minimum repair evidence instead of guessing again.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             CODE_SIGN_IDENTITY=- \
@@ -479,6 +521,8 @@ workflows:
       - build/reports/xcodebuild-test.log
       - build/reports/signing-diagnostic-build-settings.log
       - build/reports/build-for-testing-diagnostic.log
+      - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-xctestrun-dump.log
       - build/reports/signing-diagnostic-found-bundles.txt
       - build/reports/signing-diagnostic-entitlements.log
     publishing:
