@@ -100,13 +100,25 @@ workflows:
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
+          # Ad hoc signing (CODE_SIGN_IDENTITY=-), not CODE_SIGNING_ALLOWED=NO:
+          # an entirely unsigned process has no application-identifier/
+          # keychain-access-group entitlement, so any real Security-
+          # framework Keychain call (e.g.
+          # KeychainAthleteDeviceAuthorizationSessionStore's own round-trip
+          # test) fails with errSecMissingEntitlement (-34018) regardless of
+          # production code correctness. Ad hoc signing needs no team/
+          # certificate/provisioning profile and is scoped to this one
+          # test-execution step only — the AthleteApp/ParentApp build-only
+          # steps below are unaffected and remain CODE_SIGNING_ALLOWED=NO.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
             2>&1 | tee build/reports/xcodebuild-test.log
 
       - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
@@ -308,13 +320,25 @@ workflows:
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
+          # Ad hoc signing (CODE_SIGN_IDENTITY=-), not CODE_SIGNING_ALLOWED=NO:
+          # an entirely unsigned process has no application-identifier/
+          # keychain-access-group entitlement, so any real Security-
+          # framework Keychain call (e.g.
+          # KeychainAthleteDeviceAuthorizationSessionStore's own round-trip
+          # test) fails with errSecMissingEntitlement (-34018) regardless of
+          # production code correctness. Ad hoc signing needs no team/
+          # certificate/provisioning profile and is scoped to this one
+          # test-execution step only — the AthleteApp/ParentApp build-only
+          # steps below are unaffected and remain CODE_SIGNING_ALLOWED=NO.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
             2>&1 | tee build/reports/xcodebuild-test.log
 
       - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
