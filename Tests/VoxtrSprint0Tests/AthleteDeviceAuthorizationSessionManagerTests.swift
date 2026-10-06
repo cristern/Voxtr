@@ -30,20 +30,27 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
     private var stubsByPath: [String: [StubOutcome]] = [:]
     private(set) var sentRequests: [URLRequest] = []
 
-    /// R6 (ChatGPT review 6024820299) deterministic-suspension support:
-    /// marks the NEXT call to `send(_:)` for `path` as one that must
-    /// park (via `withCheckedContinuation`) AFTER reserving its own
-    /// stubbed response but BEFORE returning it — so a test can call
-    /// `clearStoredSession()` (or start a second, independent
-    /// operation) while that call is provably suspended mid-flight,
-    /// then resume it deterministically. One-shot per call to this
-    /// method; a later call for the same path arms exactly one more
-    /// suspension. The stub is popped BEFORE the suspension check so a
-    /// second, un-suspended caller for the same path (e.g. a fresh
-    /// post-clear attempt) can never steal the parked call's own
-    /// reserved response.
-    private var suspendOnNextCallByPath: [String: Bool] = [:]
-    private var suspendedContinuationsByPath: [String: CheckedContinuation<Void, Never>] = [:]
+    /// R6 (ChatGPT review 6024820299/6025069937) deterministic-
+    /// suspension support, pure polling (`Task.yield()`), deliberately
+    /// NEVER `withCheckedContinuation` — no continuation-contract risk
+    /// (double-resume, never-resumed leaks) to get wrong blind. Each
+    /// armed suspension gets its own monotonic SLOT number (the
+    /// current `activeSuspensionCountByPath[path]` at the moment it
+    /// parks); `resumeSuspendedResponse` releases slots strictly in
+    /// FIFO order by bumping `releaseCountByPath`, so multiple
+    /// concurrent suspensions on the SAME path can be resumed one at a
+    /// time, oldest first — needed to exercise an older, still-
+    /// suspended task's deferred cleanup while a NEWER same-grant task
+    /// is also suspended. `suspendNextResponse` arms exactly one more
+    /// suspension per call (callable multiple times for multiple
+    /// concurrent suspensions on the same path). The stub is popped
+    /// BEFORE the suspension check so a later, un-suspended caller for
+    /// the same path (e.g. a fresh post-clear attempt, once all armed
+    /// suspensions are already consumed) can never steal an
+    /// already-parked call's own reserved response.
+    private var pendingSuspensionCountByPath: [String: Int] = [:]
+    private var activeSuspensionCountByPath: [String: Int] = [:]
+    private var releaseCountByPath: [String: Int] = [:]
 
     func enqueue(path: String, statusCode: Int, json: [String: Any?]) {
         let cleaned = json.compactMapValues { $0 }
@@ -56,21 +63,25 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
     }
 
     func suspendNextResponse(path: String) {
-        suspendOnNextCallByPath[path] = true
+        pendingSuspensionCountByPath[path, default: 0] += 1
     }
 
-    /// Polls (cooperative `Task.yield()`, never a real timer) until
-    /// `send(_:)` has actually reserved its stub and parked on the
-    /// suspension gate for `path` — deterministic: it only returns
-    /// once that specific state is true, however many yields it takes.
-    func waitUntilSuspended(path: String) async {
-        while suspendedContinuationsByPath[path] == nil {
+    /// Polls (cooperative `Task.yield()`, never a real timer) until at
+    /// least `count` calls to `send(_:)` for `path` have reserved their
+    /// own stub and parked — deterministic: it only returns once that
+    /// specific state is true, however many yields it takes.
+    func waitUntilSuspended(path: String, count: Int = 1) async {
+        while (activeSuspensionCountByPath[path] ?? 0) < count {
             await Task.yield()
         }
     }
 
+    /// Releases the OLDEST still-parked call for `path` (FIFO). A call
+    /// resumes once `releaseCountByPath[path]` exceeds its own slot
+    /// number, so releasing in order here always frees slot 0, then 1,
+    /// then 2, regardless of how many are concurrently parked.
     func resumeSuspendedResponse(path: String) {
-        suspendedContinuationsByPath.removeValue(forKey: path)?.resume()
+        releaseCountByPath[path, default: 0] += 1
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -81,10 +92,12 @@ private final class FakeManagerTransport: ParentAuthenticationTransport, @unchec
         }
         let stub = stubs.removeFirst()
         stubsByPath[path] = stubs
-        if suspendOnNextCallByPath[path] == true {
-            suspendOnNextCallByPath[path] = false
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                suspendedContinuationsByPath[path] = continuation
+        if let pending = pendingSuspensionCountByPath[path], pending > 0 {
+            pendingSuspensionCountByPath[path] = pending - 1
+            let mySlot = activeSuspensionCountByPath[path] ?? 0
+            activeSuspensionCountByPath[path] = mySlot + 1
+            while (releaseCountByPath[path] ?? 0) <= mySlot {
+                await Task.yield()
             }
         }
         switch stub {
@@ -218,6 +231,22 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
 
     private static func date(_ iso: String) -> Date {
         ISO8601DateFormatter().date(from: iso)!
+    }
+
+    /// R6 follow-up (ChatGPT review 6025069937): a single `Task.yield()`
+    /// gives the ONLY other ready job (here, a just-created `async let`
+    /// coalescing waiter) a scheduling turn, but is not a hard
+    /// language-level guarantee that it ran all the way to its own next
+    /// suspension point. Several yields is the established, pragmatic
+    /// pattern for this — not a formal barrier, but any genuine failure
+    /// to coalesce is still fail-loud here: the waiter would instead
+    /// start its own independent network round trip, for which no stub
+    /// is queued, producing a clearly-wrong `NoStubConfigured` failure
+    /// rather than a silently-passing wrong result.
+    private func yieldSeveralTimes(_ count: Int = 5) async {
+        for _ in 0..<count {
+            await Task.yield()
+        }
     }
 
     // MARK: - No stored session (first use after claim)
@@ -506,14 +535,10 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         // Joins the SAME in-flight attempt — registered while still
         // suspended, before the clear below.
         async let second = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
-        // Give the second call's own synchronous join-check a
-        // scheduling turn before the clear below, so it is guaranteed
-        // to have already registered itself as a waiter on the SAME
-        // in-flight task (matching `concurrentCallsForSameGrantCoalesce`'s
-        // own established back-to-back `async let` pattern above,
-        // belt-and-braces here since this test's correctness depends
-        // on that ordering more directly).
-        await Task.yield()
+        // Give the second call's own synchronous join-check a chance
+        // to run before the clear below, so it has already registered
+        // itself as a waiter on the SAME in-flight task.
+        await yieldSeveralTimes()
 
         fixture.manager.clearStoredSession()
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
@@ -553,6 +578,133 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         // the fresh post-clear session once it finally completes.
         #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
         #expect(fixture.transport.sentRequests.count == 4, "two fully independent challenge+submit round trips — the post-clear attempt was never coalesced with the pre-clear one")
+    }
+
+    // MARK: - R6 follow-up (ChatGPT review 6025069937): invalidation
+    // checked after EVERY resumed outcome/error, not only before the
+    // final persist
+    //
+    // The generation guard above was originally checked only in the
+    // `.issued`/`.renewed` success branches. A stale pre-clear
+    // operation resuming with ANY other outcome (a clean rejection, an
+    // error) would still run that branch's own side effect
+    // (`store.clearSession()`, deleting a genuinely newer post-clear
+    // session) or start a further network attempt (a `.network`
+    // retry, or falling through from a rejected renewal to a fresh
+    // `session_issue` — which has a REAL server-side effect, revoking
+    // the grant's current active session, regardless of whether the
+    // stale operation's own eventual local result is later discarded).
+    // Fixed by checking invalidation immediately after every resumed
+    // result, before any of that call's own branches run.
+
+    @Test("A stale pre-clear issue's challenge resuming with grantNotAvailable must not clear a newer post-clear session")
+    func staleGrantNotAvailableNeverClearsNewerPostClearSession() async throws {
+        let fixture = makeFixture()
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "challenge_not_available"])
+        fixture.transport.suspendNextResponse(path: "device-session-challenge")
+
+        async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-challenge")
+
+        fixture.manager.clearStoredSession()
+
+        enqueueIssueSuccess(fixture.transport, sessionToken: "fresh-post-clear-token", expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-11T00:00:00Z")
+        let postClearToken = try await fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        #expect(postClearToken == "fresh-post-clear-token")
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+
+        fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+
+        // The resumed, stale grantNotAvailable outcome must never have
+        // cleared the newer post-clear session — it must survive intact.
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+        #expect(fixture.store.clearCallCount == 1, "exactly the ORIGINAL clearStoredSession() call — the stale grantNotAvailable branch's own store.clearSession() must never run")
+    }
+
+    @Test("A stale pre-clear operation's network error must not be retried — it throws sessionCleared immediately instead")
+    func staleNetworkErrorNeverRetries() async throws {
+        let fixture = makeFixture()
+        fixture.transport.enqueueFailure(path: "device-session-challenge")
+        fixture.transport.suspendNextResponse(path: "device-session-challenge")
+
+        async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-challenge")
+
+        fixture.manager.clearStoredSession()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-challenge")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        #expect(fixture.transport.sentRequests.count == 1, "a stale network error must not be retried with a fresh challenge")
+    }
+
+    @Test("A stale pre-clear renewal's clean rejection must not fall through to a fresh session_issue — that fallback has a REAL server-side effect (revoking the grant's current active session) a merely-discarded local result cannot undo")
+    func staleRejectedRenewalNeverFallsThroughToFreshIssue() async throws {
+        let fixture = makeFixture(now: Self.date("2026-10-11T12:00:00Z"))
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "stale-token",
+            expiresAt: Self.date("2026-10-12T00:00:00Z"), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
+            "outcome": "issued",
+            "challenge_id": UUID().uuidString,
+            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
+            "expires_at": "2026-10-11T12:01:00Z",
+        ])
+        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": "session_invalid"])
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit")
+
+        fixture.manager.clearStoredSession()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await preClearResult }
+        // Exactly one challenge + one submit — no fallback session_issue
+        // was ever attempted for this stale, cleanly-rejected renewal.
+        #expect(fixture.transport.sentRequests.count == 2)
+    }
+
+    @Test("An older same-grant task's deferred cleanup never clobbers a NEWER task's registration, and a THIRD caller correctly coalesces onto that newer task while the older one is still suspended")
+    func olderTaskCleanupNeverClobbersNewerRegistrationAndThirdCallerCoalescesOntoIt() async throws {
+        // No stored session — the stale pre-clear attempt is a fresh session_issue.
+        let fixture = makeFixture()
+        enqueueIssueSuccess(fixture.transport, sessionToken: "doomed-pre-clear-token", expiresAt: "2026-10-12T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let a = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 1)
+
+        fixture.manager.clearStoredSession()
+
+        enqueueIssueSuccess(fixture.transport, sessionToken: "fresh-post-clear-token", expiresAt: "2026-10-20T00:00:00Z", absoluteExpiresAt: "2027-01-11T00:00:00Z")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        async let b = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 2)
+
+        // A THIRD caller for the SAME grant, while B (the newer task)
+        // is still registered and suspended — must coalesce onto B,
+        // never create its own independent attempt.
+        async let c = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
+        await yieldSeveralTimes()
+
+        // Release A — the OLDEST suspended call — first.
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) { try await a }
+        // B's registration must have survived A's deferred cleanup —
+        // nothing has persisted yet (B has not resumed).
+        #expect(fixture.store.stored == nil)
+
+        // Now release B.
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+        let (tokenB, tokenC) = try await (b, c)
+
+        #expect(tokenB == "fresh-post-clear-token")
+        #expect(tokenC == "fresh-post-clear-token")
+        #expect(fixture.store.stored?.sessionToken == "fresh-post-clear-token")
+        #expect(fixture.transport.sentRequests.count == 4, "A's challenge+submit, B's challenge+submit — C coalesced onto B, never its own independent round trip")
     }
 
     // MARK: - Grant revoked / unavailable
