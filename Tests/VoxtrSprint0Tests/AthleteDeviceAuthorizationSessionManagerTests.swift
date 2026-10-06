@@ -670,10 +670,26 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
 
     @Test("A stale pre-clear issue's successful CHALLENGE, suspended before its own submit, must never submit once resumed after a post-clear issue already completed — invalidation is checked between challenge and submit, not only after the whole service call returns")
     func staleIssueNeverSubmitsAfterChallengeSuspendedThroughAClear() async throws {
+        // Test correction (ChatGPT review 6025489857): only the old
+        // operation's own CHALLENGE stub is queued here — never its
+        // submit stub too. The old operation is suspended at the
+        // challenge step and never reaches submit until (if the guard
+        // were broken) after the post-clear issue below has already
+        // run its own challenge+submit pair; an old submit stub sitting
+        // unconsumed in the queue would be wrongly popped (FIFO, by
+        // path) by the POST-CLEAR issue's own submit call instead,
+        // making this test fail on stub cross-contamination rather than
+        // on the actual invariant under test. No stub at all for the
+        // old submit means: if it is ever wrongly attempted, it fails
+        // loudly with NoStubConfigured (still caught by the assertions
+        // below) rather than silently stealing the wrong response.
         let fixture = makeFixture()
-        // Challenge AND submit both succeed if ever sent — the submit
-        // must simply never be sent.
-        enqueueIssueSuccess(fixture.transport, sessionToken: "doomed-pre-clear-token", expiresAt: "2026-10-12T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
+            "outcome": "issued",
+            "challenge_id": UUID().uuidString,
+            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
+            "expires_at": "2026-10-05T00:01:00Z",
+        ])
         fixture.transport.suspendNextResponse(path: "device-session-challenge")
 
         async let preClearResult = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
