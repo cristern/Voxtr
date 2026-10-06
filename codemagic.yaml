@@ -265,7 +265,7 @@ workflows:
             -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            -skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips() \
+            '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -284,7 +284,7 @@ workflows:
             -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            -only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips() \
+            '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -697,7 +697,7 @@ workflows:
             -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            -skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips() \
+            '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -716,7 +716,7 @@ workflows:
             -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            -only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips() \
+            '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
