@@ -19,6 +19,27 @@ import VoxtrParentAuthentication
 // `ParentAuthenticationServiceTests.swift`'s own "Keychain round trip"
 // precedent.
 
+/// `@MainActor`-isolated (ChatGPT review 6035314336, build 246): this
+/// fake's mutable dictionaries were previously synchronized by nothing
+/// but `@unchecked Sendable` itself — a bare assertion, not real
+/// synchronization. `send(_:)` is `async` and, being on an unisolated
+/// type, could genuinely resume on a different thread than the one
+/// that called it; the test struct above is itself `@MainActor` and
+/// calls `suspendNextResponse`/`resumeSuspendedResponse`/reads
+/// `sentRequests` synchronously from its own test bodies while a
+/// suspended `send(_:)` call is still parked mid-flight — true
+/// concurrent mutable-dictionary access from two different threads,
+/// a real data race (confirmed by build 246's crash stack: an
+/// NSInvalidArgumentException inside `Dictionary` lookup from
+/// `waitUntilSuspended`, not a production SwiftData/CloudKit defect —
+/// the crashing frame is this fake's own lookup). Pinning the whole
+/// type to `@MainActor` makes every one of its methods run on the
+/// same actor as the test body that drives it, so no two accesses to
+/// its state can ever overlap; `@unchecked Sendable` is kept only to
+/// satisfy `ParentAuthenticationTransport: Sendable`'s conformance
+/// requirement, now backed by genuine actor isolation rather than a
+/// bare assertion.
+@MainActor
 private final class FakeManagerTransport: ParentAuthenticationTransport, @unchecked Sendable {
     private enum StubOutcome {
         case response(Int, Data)
