@@ -831,10 +831,21 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         // had wrongly cleared B's registration, this caller would
         // instead start its own independent attempt, for which no
         // further stub is queued.
+        //
+        // Test correction (ChatGPT review 6037955977): the mid-test
+        // count here is 4, not 3 — A has already sent its own
+        // challenge+submit (2) and B has already sent its own
+        // challenge+submit (2, recorded in sentRequests BEFORE send()
+        // parks at the suspension gate) by this point; C has not yet
+        // sent anything of its own. Captured immediately before C and
+        // asserted unchanged after the join barrier, so a regression
+        // that made C send its own request would be caught either way.
+        let sentRequestsCountBeforeC = fixture.transport.sentRequests.count
         let joinCountBeforeC = fixture.manager.joinCountForTesting
         async let c = fixture.manager.ensureActiveSession(deviceGrantId: Self.deviceGrantId)
         await waitForJoin(fixture.manager, afterCount: joinCountBeforeC)
-        #expect(fixture.transport.sentRequests.count == 3, "C must have coalesced onto B without sending its own challenge")
+        #expect(sentRequestsCountBeforeC == 4, "A's challenge+submit, B's challenge+submit were already sent before C was ever created")
+        #expect(fixture.transport.sentRequests.count == sentRequestsCountBeforeC, "C must have coalesced onto B without sending its own challenge")
 
         fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
         let (tokenB, tokenC) = try await (b, c)
