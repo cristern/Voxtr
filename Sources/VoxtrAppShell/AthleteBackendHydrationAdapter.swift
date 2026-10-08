@@ -288,7 +288,7 @@ public final class AthleteBackendHydrationAdapter {
 /// non-throwing results — every one of these is a definite business
 /// outcome, never a transient failure the caller must distinguish from
 /// a real error.
-public enum AthleteBackendHydrationOutcome: Equatable {
+public enum AthleteBackendHydrationOutcome: Equatable, Sendable {
     /// `AthleteIdentityHydrationService.hydrate(_:)` succeeded this
     /// call AND the backend confirms the grant's hydration lifecycle is
     /// complete.

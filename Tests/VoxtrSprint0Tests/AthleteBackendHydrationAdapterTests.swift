@@ -343,10 +343,11 @@ struct AthleteBackendHydrationAdapterTests {
     }
 
     private func enqueueHydrationAck(
-        _ transport: FakeAdapterTransport, wireOutcome: String, challengeOnConsumed: (() -> Void)? = nil
+        _ transport: FakeAdapterTransport, wireOutcome: String,
+        challengeOnConsumed: (() -> Void)? = nil, submitOnConsumed: (() -> Void)? = nil
     ) {
         enqueueIssuedChallenge(transport, onConsumed: challengeOnConsumed)
-        transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome])
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome], onConsumed: submitOnConsumed)
     }
 
     // MARK: - Full success path, exact 11-field mapping (issue #111 acceptance matrix)
@@ -631,6 +632,31 @@ struct AthleteBackendHydrationAdapterTests {
         // committed real rows — NEVER rolled back just because the
         // later ack attempt detected staleness (this adapter's own
         // "never destructive" doc comment).
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws .sessionInvalidatedOrCancelled when the session is cleared right as the hydration_ack SUBMIT response itself arrives — a 'late' ack confirmation the backend genuinely committed, but this caller must not report as success once staleness is detected after the fact")
+    func clearAsAckSubmitResponseArrivesIsNeverReportedAsSuccess() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "acked", submitOnConsumed: {
+            fixture.sessionManager.clearStoredSession()
+        })
+
+        await #expect(throws: AthleteBackendHydrationError.sessionInvalidatedOrCancelled) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        // session-issue (2) + hydration-get (2) + hydration-ack (2) — the
+        // ack SUBMIT itself was sent and the backend's own response says
+        // "acked" (ackHydration() returns normally; it has no idea the
+        // generation changed), but the adapter's OWN post-return check
+        // catches the staleness before ever reporting success.
+        #expect(fixture.transport.sentRequests.count == 6)
+        // The local upsert from the successful GET above already
+        // committed real rows — never rolled back.
         #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
     }
@@ -1241,6 +1267,62 @@ struct AthleteBackendHydrationAdapterTests {
         // the ACK challenge itself must never be sent once this
         // adapter's own post-acquisition check observes the
         // cancellation.
+        #expect(fixture.transport.sentRequests.count == 6)
+        // The local upsert from the successful GET above already
+        // committed — never rolled back.
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws the MANAGER's own SessionFailure.sessionCleared (never this adapter's own .sessionInvalidatedOrCancelled) when clearStoredSession() runs while the ACK-side ensureActiveSession() is genuinely suspended mid-RENEWAL — the manager's own checkNotCleared guard fires INSIDE attemptRenew, before ever persisting the renewed session or returning to this adapter at all")
+    func clearDuringGenuineAckRenewalSuspensionThrowsManagerOwnSessionCleared() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        // Same forced-renewal setup as `cancelledDuringGenuineAckRenewalSuspensionStopsBeforeAckChallenge`
+        // above — only the final action (clear vs. cancel) differs.
+        fixture.clock.currentTime = ISO8601DateFormatter().date(from: "2026-10-07T12:00:00Z")!
+        enqueueIssuedChallenge(fixture.transport)
+        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: [
+            "outcome": "renewed",
+            "expires_at": "2026-10-15T00:00:00Z",
+            "absolute_expires_at": Self.sessionAbsoluteExpiresAt,
+        ])
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        let task = Task {
+            try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 1)
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit") // session-issue's own submit proceeds
+
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 2)
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit") // hydration-get's own submit proceeds
+
+        // The renewal's own submit is NOW genuinely parked — clear
+        // (rather than cancel) right here, before releasing it. Unlike
+        // cancellation, the MANAGER's own `checkNotCleared` guard (R6,
+        // PR #116) DOES observe this: `attemptRenew` checks it
+        // immediately after the submit resolves, BEFORE ever switching
+        // on the outcome or persisting — so the renewed session is
+        // never written to storage, and the thrown failure is the
+        // manager's OWN `SessionFailure.sessionCleared`, surfacing
+        // straight out of `ensureActiveSession()` before this adapter's
+        // own post-acquisition `checkSessionStillValid` is ever reached.
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 3)
+        fixture.sessionManager.clearStoredSession()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared) {
+            _ = try await task.value
+        }
+
+        // session-issue (2) + hydration-get (2) + the renewal's own
+        // challenge+submit (2) = 6 — the renewal's network round trip
+        // still happened in full; only its RESULT is discarded.
         #expect(fixture.transport.sentRequests.count == 6)
         // The local upsert from the successful GET above already
         // committed — never rolled back.
