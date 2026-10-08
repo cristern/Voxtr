@@ -28,10 +28,24 @@ import VoxtrAthleteDomain
 // SwiftData persistence and require the Xcode/macOS SwiftData runtime —
 // written but not executed in this sandbox.
 
+/// `@MainActor`-isolated (matching `AthleteDeviceAuthorizationSessionManagerTests
+/// .FakeManagerTransport`'s own established fix exactly — build 246's
+/// crash there was a real data race from a bare `@unchecked Sendable`
+/// mutable dictionary read/written across actor boundaries while a
+/// suspended `send(_:)` call was parked mid-flight; pinning to
+/// `@MainActor` makes every access run on the same actor as the test
+/// body driving it).
+@MainActor
 private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchecked Sendable {
-    struct Stub {
-        let statusCode: Int
-        let body: Data
+    private enum StubOutcome {
+        case response(statusCode: Int, body: Data)
+        case failure
+    }
+    struct SimulatedNetworkFailure: Error {}
+    struct NoStubConfigured: Error {}
+
+    private struct Stub {
+        let outcome: StubOutcome
         /// R1 (ChatGPT review 6056376095): fires synchronously the
         /// moment THIS specific stub is consumed, before `send(_:)`
         /// returns it — deterministically simulates "something else
@@ -48,12 +62,49 @@ private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchec
     private var stubsByPath: [String: [Stub]] = [:]
     private(set) var sentRequests: [URLRequest] = []
 
-    struct NoStubConfigured: Error {}
+    /// R1 follow-up (ChatGPT review 6056790695): a REAL suspend/resume
+    /// barrier for the one window `onConsumed` genuinely cannot reach —
+    /// proving the adapter's post-acquisition check is what stops a
+    /// stale/cancelled attempt even when `ensureActiveSession()`'s own
+    /// renewal is suspended on an actual (not synchronously-simulated)
+    /// network await when the clear/cancel happens. Mirrors
+    /// `AthleteDeviceAuthorizationSessionManagerTests.FakeManagerTransport`'s
+    /// own identical mechanism (pure `Task.yield()` polling, never
+    /// `withCheckedContinuation` — no continuation-contract risk to get
+    /// wrong blind).
+    private var pendingSuspensionCountByPath: [String: Int] = [:]
+    private var activeSuspensionCountByPath: [String: Int] = [:]
+    private var releaseCountByPath: [String: Int] = [:]
 
     func enqueue(path: String, statusCode: Int, json: [String: Any?], onConsumed: (() -> Void)? = nil) {
         let cleaned = json.compactMapValues { $0 }
         let body = try! JSONSerialization.data(withJSONObject: cleaned)
-        stubsByPath[path, default: []].append(Stub(statusCode: statusCode, body: body, onConsumed: onConsumed))
+        stubsByPath[path, default: []].append(Stub(outcome: .response(statusCode: statusCode, body: body), onConsumed: onConsumed))
+    }
+
+    /// Simulates a genuine transport-level failure (connection dropped,
+    /// response never arrived) — distinct from a clean non-200 HTTP
+    /// status: this makes `transport.send(_:)` itself THROW, exactly
+    /// like `FakeManagerTransport.enqueueFailure` does.
+    func enqueueFailure(path: String, onConsumed: (() -> Void)? = nil) {
+        stubsByPath[path, default: []].append(Stub(outcome: .failure, onConsumed: onConsumed))
+    }
+
+    func suspendNextResponse(path: String) {
+        pendingSuspensionCountByPath[path, default: 0] += 1
+    }
+
+    /// Polls until at least `count` calls to `send(_:)` for `path` have
+    /// reserved their own stub and parked.
+    func waitUntilSuspended(path: String, count: Int = 1) async {
+        while (activeSuspensionCountByPath[path] ?? 0) < count {
+            await Task.yield()
+        }
+    }
+
+    /// Releases the OLDEST still-parked call for `path` (FIFO).
+    func resumeSuspendedResponse(path: String) {
+        releaseCountByPath[path, default: 0] += 1
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -64,14 +115,27 @@ private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchec
         }
         let stub = stubs.removeFirst()
         stubsByPath[path] = stubs
+        if let pending = pendingSuspensionCountByPath[path], pending > 0 {
+            pendingSuspensionCountByPath[path] = pending - 1
+            let mySlot = activeSuspensionCountByPath[path] ?? 0
+            activeSuspensionCountByPath[path] = mySlot + 1
+            while (releaseCountByPath[path] ?? 0) <= mySlot {
+                await Task.yield()
+            }
+        }
         stub.onConsumed?()
-        let response = HTTPURLResponse(
-            url: request.url!,
-            statusCode: stub.statusCode,
-            httpVersion: nil,
-            headerFields: ["Content-Type": "application/json"]
-        )!
-        return (stub.body, response)
+        switch stub.outcome {
+        case .failure:
+            throw SimulatedNetworkFailure()
+        case .response(let statusCode, let body):
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: statusCode,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (body, response)
+        }
     }
 }
 
@@ -139,6 +203,7 @@ struct AthleteBackendHydrationAdapterTests {
         let adapter: AthleteBackendHydrationAdapter
         let transport: FakeAdapterTransport
         let signingKeyStore: FakeAdapterSigningKeyStore
+        let clock: FakeAdapterClock
         let sessionManager: AthleteDeviceAuthorizationSessionManager
         let parentWorkspaceRepository: ParentWorkspaceRepository
         let athleteRepository: AthleteRepository
@@ -181,6 +246,7 @@ struct AthleteBackendHydrationAdapterTests {
             adapter: adapter,
             transport: transport,
             signingKeyStore: signingKeyStore,
+            clock: clock,
             sessionManager: sessionManager,
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
@@ -1048,9 +1114,15 @@ struct AthleteBackendHydrationAdapterTests {
         }
         #expect(ackSignedMessages().count == 1, "the first attempt's own ACK challenge was signed exactly once before its submit failed")
 
-        // Retry: since the ack never confirmably committed, the
-        // backend's permanent marker is STILL nil, so it replays the
-        // SAME hydrated payload rather than reporting already_completed.
+        // Retry: this test's OWN fixture chooses to have the backend
+        // report the ack as NEVER having committed (it replays the SAME
+        // hydrated payload rather than already_completed) — but a lost
+        // response genuinely does NOT tell the client which of the two
+        // real outcomes happened (ChatGPT review 6056790695: "lack of a
+        // confirmed response does not imply the permanent marker is
+        // nil"). The OTHER real outcome — the ack DID commit, response
+        // merely lost — is covered separately by
+        // `retryAfterGenuineAckTransportFailureWhereAckDidCommit` below.
         enqueueHydrationGetSuccess(fixture.transport)
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
@@ -1064,6 +1136,115 @@ struct AthleteBackendHydrationAdapterTests {
         // Re-running hydrate(_:) against the identical payload is a
         // pure no-op — no duplicate rows.
         #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == parentCountAfterFirst)
+    }
+
+    @Test("A retry after a genuine ACK transport-level failure where the ack HAD actually committed server-side (retry GET reports already_completed) accepts that as success without re-hydrating or re-acking")
+    func retryAfterGenuineAckTransportFailureWhereAckDidCommit() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+        // The ACK challenge succeeds, but its SUBMIT fails at the
+        // transport level — this is the OTHER real possibility a lost
+        // response leaves open: the backend actually committed the ack
+        // before the response was lost. The client has no way to tell
+        // the two apart from this failure alone; only a subsequent GET
+        // reveals which actually happened.
+        enqueueIssuedChallenge(fixture.transport)
+        fixture.transport.enqueueFailure(path: "device-session-submit")
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionError.network) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        let parentCountAfterFirst = try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count
+        let athleteCountAfterFirst = try fixture.athleteRepository.fetchAllAthletes().count
+        #expect(parentCountAfterFirst == 1)
+
+        // Retry: the ack actually DID commit server-side — the
+        // permanent marker now reads 'acked'.
+        enqueueHydrationGetTerminal(fixture.transport, wireOutcome: "already_completed")
+
+        let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        #expect(secondOutcome == .alreadyCompleted)
+
+        // No second local hydration, no second ack attempt — the
+        // existing rows from the first attempt's own successful GET are
+        // untouched, never duplicated or re-activated.
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == parentCountAfterFirst)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountAfterFirst)
+    }
+
+    // MARK: - R1 follow-up (ChatGPT review 6056790695): a REAL suspend/
+    // resume barrier for cancellation during ACK-side session
+    // RENEWAL — the one window a synchronous onConsumed hook cannot
+    // reach, since ensureActiveSession()'s own renewal genuinely
+    // suspends on a live network await here (forced via advancing the
+    // injected clock into the sliding-window renewal lead time), not a
+    // synchronously-simulated one.
+
+    @Test("hydrate(deviceGrantId:) throws CancellationError and never sends the ACK challenge if cancelled while the ACK-side ensureActiveSession() is genuinely suspended mid-RENEWAL (forced via clock advance) — the manager's own renewal completes regardless (it only guards against clearStoredSession(), never caller cancellation), so this adapter's own post-acquisition check is what actually stops it")
+    func cancelledDuringGenuineAckRenewalSuspensionStopsBeforeAckChallenge() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        // Advance "now" into the sliding-window renewal lead time
+        // (Self.sessionExpiresAt is 2026-10-08; the lead time is 24h) —
+        // so the ACK-side ensureActiveSession() call below cannot take
+        // its cached-token fast path and must genuinely renew.
+        fixture.clock.currentTime = ISO8601DateFormatter().date(from: "2026-10-07T12:00:00Z")!
+        enqueueIssuedChallenge(fixture.transport)
+        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: [
+            "outcome": "renewed",
+            "expires_at": "2026-10-15T00:00:00Z",
+            "absolute_expires_at": Self.sessionAbsoluteExpiresAt,
+        ])
+        // THREE calls will post to "device-session-submit" in this one
+        // attempt (session-issue's own, hydration-get's own, and the
+        // renewal's own) — pre-arm a suspension for EACH, so the
+        // FIFO slot mechanism (`waitUntilSuspended`/`resumeSuspendedResponse`,
+        // identical to `AthleteDeviceAuthorizationSessionManagerTests
+        // .FakeManagerTransport`'s own established pattern) lets this
+        // test release the first two immediately and genuinely park
+        // the renewal's own submit specifically, rather than racing to
+        // guess when it alone has been reached.
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+        fixture.transport.suspendNextResponse(path: "device-session-submit")
+
+        let task = Task {
+            try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 1)
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit") // session-issue's own submit proceeds
+
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 2)
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit") // hydration-get's own submit proceeds
+
+        // The renewal's own submit is NOW genuinely parked, mid-await,
+        // inside ensureActiveSession()'s own unstructured Task — cancel
+        // THIS caller's task right here, before releasing it.
+        await fixture.transport.waitUntilSuspended(path: "device-session-submit", count: 3)
+        task.cancel()
+        fixture.transport.resumeSuspendedResponse(path: "device-session-submit") // the renewal itself still completes — it never observed the cancellation
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await task.value
+        }
+
+        // session-issue (2) + hydration-get (2) + the renewal's own
+        // challenge+submit (2) = 6 — the renewal itself completes (the
+        // manager's own generation guard never fired, since nothing
+        // cleared the session; only cancellation happened, which the
+        // manager does not check) and genuinely renews the session, but
+        // the ACK challenge itself must never be sent once this
+        // adapter's own post-acquisition check observes the
+        // cancellation.
+        #expect(fixture.transport.sentRequests.count == 6)
+        // The local upsert from the successful GET above already
+        // committed — never rolled back.
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
     }
 
     @Test("hydrate(deviceGrantId:) resumes a genuinely partially-saved local graph (parent/workspace/owner already persisted from an earlier interrupted attempt) and completes the remaining steps without duplicating what already exists")
