@@ -316,6 +316,21 @@ public final class CompositionRoot {
         )
         container.register(AthleteIdentityHydrationService.self) { athleteIdentityHydrationService }
 
+        // Athlete Connection V1 backend hydration adapter (§4, §5, §8
+        // step 5, issue #111): registration only, same posture as
+        // every other Athlete Connection V1 service above — no network
+        // call or local hydration happens here. Reuses the SAME
+        // session manager/service registered above and the SAME
+        // identity hydration service just registered; never duplicates
+        // either. Not wired into any UI/navigation by this task — see
+        // this type's own doc comment.
+        let athleteBackendHydrationAdapter = AthleteBackendHydrationAdapter(
+            sessionManager: athleteDeviceAuthorizationSessionManager,
+            sessionService: athleteDeviceAuthorizationSessionService,
+            identityHydrationService: athleteIdentityHydrationService
+        )
+        container.register(AthleteBackendHydrationAdapter.self) { athleteBackendHydrationAdapter }
+
         let athleteConnectionLifecycleService = AthleteConnectionLifecycleService(
             participantShareCoordinator: participantShareCoordinator,
             identityHydrationService: athleteIdentityHydrationService,

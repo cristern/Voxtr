@@ -13,15 +13,17 @@ import Foundation
 ///
 /// SCOPE: this file and its siblings (`AthleteDeviceAuthorizationSessionService.swift`,
 /// `AthleteDeviceAuthorizationSessionStore.swift`,
-/// `AthleteDeviceAuthorizationSessionManager.swift`) implement ONLY
-/// `session_issue`/`session_renew` end to end (§8 step 4 of the
-/// contract). `hydration_get`/`hydration_ack` share the same wire
-/// family (challenge issuance, canonical message shape, the
-/// `device-session-submit` transaction) but their own orchestration —
-/// the domain hydration adapter — is a separate, later task; this file's
-/// action enum and canonical-message builder cover all four actions
-/// because the version-line lookup table itself is one shared contract
-/// artifact (§3.3), not because this slice calls the other two.
+/// `AthleteDeviceAuthorizationSessionManager.swift`) originally
+/// implemented only `session_issue`/`session_renew` end to end (§8 step
+/// 4 of the contract). `hydration_get`/`hydration_ack` (§8 step 5,
+/// issue #111) share the exact same wire family — challenge issuance,
+/// canonical message shape, the `device-session-submit` transaction —
+/// so `AthleteDeviceAuthorizationSessionService` now implements all
+/// four actions in one place; only the domain hydration ORCHESTRATION
+/// (mapping a successful `hydration_get` into
+/// `AthleteConnectionInvitationCloudRecordPayload` and feeding
+/// `AthleteIdentityHydrationService.hydrate(_:)`, ack-gated on that
+/// succeeding) lives in its own separate type, `AthleteBackendHydrationAdapter`.
 enum AthleteDeviceAuthorizationSessionAction: String, Sendable, Equatable, CaseIterable {
     case sessionIssue = "session_issue"
     case sessionRenew = "session_renew"
@@ -123,6 +125,79 @@ public enum AthleteDeviceAuthorizationSessionRenewOutcome: Equatable {
     case sessionInvalid
     case grantNotAvailable
     case notAvailable
+}
+
+/// Athlete Connection V1 hydration lifecycle (§4, §8 step 5, issue
+/// #111). Exactly the 11 §2.4 bootstrap fields, wire-decoded here as
+/// plain `UUID`/`String` — deliberately NOT yet
+/// `AthleteConnectionInvitationCloudRecordPayload` (that mapping, and
+/// any date/timezone/stage parsing, is `AthleteBackendHydrationAdapter`'s
+/// own job, reusing `AthleteIdentityHydrationService.hydrate(_:)`
+/// unchanged — this type's only job is proving the wire response
+/// actually carried all 11 fields).
+public struct AthleteDeviceAuthorizationHydrationFields: Equatable, Sendable {
+    public let workspaceId: UUID
+    public let intendedParticipantId: UUID
+    public let intendedAthleteId: UUID
+    public let parentId: UUID
+    public let parentGivenName: String
+    public let workspaceDisplayName: String
+    public let ownerParticipantId: UUID
+    public let athleteGivenName: String
+    public let athleteBirthDateISO: String
+    public let athleteTimeZoneId: String
+    public let athleteDevelopmentStage: String
+}
+
+/// `device-session-submit`'s outcome for `hydration_get`. Confirmed
+/// against `authz.device_session_submit`'s own source
+/// (`20261005000000_authz_hydration_v1.sql`): the permanent
+/// `hydration_outcome` marker is checked FIRST inside the hydration
+/// branch, so `.hydrated` is reachable only while that marker is still
+/// `NULL` — `.alreadyCompleted`/`.deadlinePassed`/`.grantRevoked` are
+/// never returned alongside a payload.
+public enum AthleteDeviceAuthorizationHydrationGetOutcome: Equatable {
+    case hydrated(AthleteDeviceAuthorizationHydrationFields)
+    /// The presented `session_token` is missing/expired/revoked —
+    /// decided at the challenge-issue step, same as `session_renew`
+    /// (`hydration_get` is session-bound).
+    case sessionInvalid
+    case grantNotAvailable
+    /// The generic `device-session-submit` security fold — including
+    /// "nothing uploaded yet" (no `hydration_snapshots` row exists),
+    /// a legitimate transient state, folded the same as every other
+    /// non-security-sensitive "nothing to report yet" case elsewhere
+    /// in this schema (migration's own §"WHY...NOT FOLDED" note).
+    case notAvailable
+    /// The permanent marker is `'acked'` — a previous `hydration_ack`
+    /// already completed (possibly from an earlier, lost-response
+    /// attempt this exact device made). Never represented as a newly
+    /// delivered payload.
+    case alreadyCompleted
+    /// The permanent marker is `'expired'`, or the grant's own D2
+    /// `recovery_deadline` has now passed — the fixed 24-hour deadline
+    /// from grant creation, never a clock re-derived from upload/get.
+    case deadlinePassed
+    /// The permanent marker is `'revoked'`.
+    case grantRevoked
+}
+
+/// `device-session-submit`'s outcome for `hydration_ack`. Mirrors
+/// `AthleteDeviceAuthorizationHydrationGetOutcome`'s terminal-state
+/// cases exactly — same permanent-marker vocabulary, same reasoning.
+public enum AthleteDeviceAuthorizationHydrationAckOutcome: Equatable {
+    case acked
+    case sessionInvalid
+    case grantNotAvailable
+    case notAvailable
+    /// A second `ack` against an already-tombstoned grant (§4.4) —
+    /// idempotent success, never a failure: either THIS device's own
+    /// earlier attempt's response was lost, or another resumed attempt
+    /// already completed it. `AthleteBackendHydrationAdapter` treats
+    /// this identically to `.acked`.
+    case alreadyCompleted
+    case deadlinePassed
+    case grantRevoked
 }
 
 /// Every way a call into `AthleteDeviceAuthorizationSessionService` can
