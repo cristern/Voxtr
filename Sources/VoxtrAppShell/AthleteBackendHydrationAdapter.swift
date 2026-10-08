@@ -75,27 +75,63 @@ public final class AthleteBackendHydrationAdapter {
     /// retries this exact method with no special-cased resume logic of
     /// its own needed.
     ///
-    /// SESSION-STALENESS/CANCELLATION (R1, ChatGPT review 6056376095):
-    /// `sessionManager.currentSessionGeneration` is captured once, right
-    /// after the FIRST `ensureActiveSession()` call succeeds, and
-    /// rechecked (together with cooperative task cancellation) after
-    /// EVERY subsequent await — inside `getHydration`/`ackHydration`'s
-    /// own challenge→submit seam (via `checkNotCancelled`) AND again
-    /// right after each of those calls returns — before touching local
-    /// persistence, starting the ACK-side session acquisition, or
-    /// reporting success. `clearStoredSession()` only ever runs for a
-    /// CONFIRMED reason (explicit sign-out, or this manager's own
-    /// reaction to `.grantUnavailable`/`.installationKeyUnavailable`),
-    /// so detecting it here stops a GET response that arrived AFTER
-    /// such a clear from ever being persisted as if it were still
-    /// current, and stops a now-stale attempt from reporting success
-    /// after a late-arriving ACK confirmation. Never destructive: any
-    /// local upsert this call already committed before detecting
-    /// staleness/cancellation stays — safely resumable, same as any
-    /// other interrupted attempt.
+    /// SESSION-STALENESS/CANCELLATION (R1, ChatGPT review 6056376095,
+    /// follow-up 6056631618): `sessionManager.currentSessionGeneration`
+    /// is captured once, at ENTRY — before even the FIRST
+    /// `ensureActiveSession()` call — and rechecked (together with
+    /// cooperative task cancellation) at every single subsequent
+    /// checkpoint: right after each `ensureActiveSession()` call
+    /// returns (before starting the GET/ACK challenge it unlocks),
+    /// inside `getHydration`/`ackHydration`'s own challenge→submit seam
+    /// (via `checkNotCancelled`), and right after each of those calls
+    /// returns, before touching local persistence or reporting success.
+    /// Capturing at ENTRY (never after that first call returns) matters
+    /// because `ensureActiveSession()` spawns its own unstructured
+    /// `Task` that does not observe this caller's cancellation and
+    /// completes/persists regardless — capturing only afterward could
+    /// silently absorb a clear that happened in the scheduling gap
+    /// between that Task finishing and this method actually resuming.
+    /// `clearStoredSession()` only ever runs for a CONFIRMED reason
+    /// (explicit sign-out, or this manager's own reaction to
+    /// `.grantUnavailable`/`.installationKeyUnavailable`), so detecting
+    /// it here stops a GET response that arrived AFTER such a clear
+    /// from ever being persisted as if it were still current, and stops
+    /// a now-stale attempt from reporting success after a late-arriving
+    /// ACK confirmation. Never destructive: any local upsert this call
+    /// already committed before detecting staleness/cancellation stays
+    /// — safely resumable, same as any other interrupted attempt. This
+    /// type cannot stop `ensureActiveSession()`'s own shared, possibly-
+    /// coalesced network work once started (other callers may depend on
+    /// it), only refuse to build on its result afterward.
     public func hydrate(deviceGrantId: UUID) async throws -> AthleteBackendHydrationOutcome {
-        let getSessionToken = try await sessionManager.ensureActiveSession(deviceGrantId: deviceGrantId)
+        // Captured BEFORE the first ensureActiveSession() call, never
+        // after (R1 follow-up, ChatGPT review 6056631618): capturing it
+        // only once ensureActiveSession() has already returned would
+        // silently absorb a clear that happens in the gap between that
+        // call's own internal work finishing and this method actually
+        // resuming — a real TOCTOU window, since Swift schedules an
+        // awaiting caller's resumption independently of when the
+        // awaited unstructured Task itself completes. Capturing at
+        // entry means ANY clear anywhere during this whole attempt is
+        // visible, never retroactively masked.
         let capturedGeneration = sessionManager.currentSessionGeneration
+        // Checked at ENTRY too: `ensureActiveSession()` spawns its own
+        // unstructured Task (R1 follow-up) that does NOT observe THIS
+        // caller's own cancellation — an already-cancelled caller must
+        // never even start that network work. Not reachable AFTER
+        // ensureActiveSession returns without wrongly papering over the
+        // gap this entry check exists to close.
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
+
+        let getSessionToken = try await sessionManager.ensureActiveSession(deviceGrantId: deviceGrantId)
+        // Checked again immediately after this returns, BEFORE ever
+        // starting the GET challenge — closes the window where
+        // cancellation/a clear happened while ensureActiveSession's own
+        // (uncancellable-by-us) network work was in flight; we cannot
+        // stop that shared work (other callers may depend on it — see
+        // `AthleteDeviceAuthorizationSessionManager`'s own coalescing
+        // doc comment), but we can refuse to build on its result.
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
 
         let getOutcome = try await sessionService.getHydration(
             deviceGrantId: deviceGrantId, sessionToken: getSessionToken
@@ -152,6 +188,11 @@ public final class AthleteBackendHydrationAdapter {
         try checkSessionStillValid(capturedGeneration: capturedGeneration)
 
         let ackSessionToken = try await sessionManager.ensureActiveSession(deviceGrantId: deviceGrantId)
+        // Same reasoning as the GET-side check right after its own
+        // ensureActiveSession() above — never start the ACK challenge
+        // on the strength of a session acquisition that staleness/
+        // cancellation already overtook.
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
         let ackOutcome = try await sessionService.ackHydration(
             deviceGrantId: deviceGrantId, sessionToken: ackSessionToken
         ) {
@@ -202,7 +243,7 @@ public final class AthleteBackendHydrationAdapter {
     /// have rejected had it reached its own validation. No PII in the
     /// thrown error — only the field name.
     private func validateFieldValues(_ fields: AthleteDeviceAuthorizationHydrationFields) throws {
-        guard LocalDate(isoString: fields.athleteBirthDateISO) != nil else {
+        guard Self.isValidCanonicalBirthDateString(fields.athleteBirthDateISO) else {
             throw AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteBirthDateISO")
         }
         guard DevelopmentStage(rawValue: fields.athleteDevelopmentStage) != nil else {
@@ -211,6 +252,35 @@ public final class AthleteBackendHydrationAdapter {
         guard TimeZoneId(rawValue: fields.athleteTimeZoneId).timeZone != nil else {
             throw AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteTimeZoneId")
         }
+    }
+
+    /// `LocalDate.init?(isoString:)` (R2 follow-up, ChatGPT review
+    /// 6056631618) only splits on `-` and parses three integers — it
+    /// has no calendar validity check at all, so `2012-02-30` and
+    /// `2012-13-01` both parse "successfully," and no canonical-format
+    /// check, so non-zero-padded strings like `2012-4-10` parse too.
+    /// Checked here instead, without changing the shared `LocalDate`
+    /// type or `AthleteIdentityHydrationService`:
+    /// 1. round-trips through `LocalDate.isoString` to reject anything
+    ///    not already in exact canonical `YYYY-MM-DD` form;
+    /// 2. validates the (year, month, day) is a REAL Gregorian
+    ///    calendar day (correct days-per-month, real leap years),
+    ///    computed explicitly here — never via `Foundation.Calendar`,
+    ///    which silently normalizes/rolls over invalid components
+    ///    (e.g. Feb 30 -> Mar 2) rather than rejecting them.
+    /// Never normalizes or fabricates a corrected date — a value this
+    /// rejects is rejected outright, exactly as `AthleteIdentityHydrationService
+    /// .hydrate(_:)` itself would reject it were its own validation
+    /// ever reached.
+    private static func isValidCanonicalBirthDateString(_ raw: String) -> Bool {
+        guard let parsed = LocalDate(isoString: raw), parsed.isoString == raw else { return false }
+        guard (1...12).contains(parsed.month) else { return false }
+        let daysInMonth = [31, isGregorianLeapYear(parsed.year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        return (1...daysInMonth[parsed.month - 1]).contains(parsed.day)
+    }
+
+    private static func isGregorianLeapYear(_ year: Int) -> Bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
     }
 }
 
