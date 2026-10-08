@@ -141,6 +141,18 @@ public final class AthleteDeviceAuthorizationSessionManager {
         self.clock = clock
     }
 
+    /// Read-only exposure of `sessionGeneration` (R1, ChatGPT review
+    /// 6056376095 on issue #111): lets a caller that performs its OWN
+    /// further work AFTER `ensureActiveSession()` returns — persisting
+    /// data fetched with the token, then making a SEPARATE later
+    /// network call (`AthleteBackendHydrationAdapter`'s get→hydrate→ack
+    /// sequence is exactly this) — detect whether `clearStoredSession()`
+    /// ran since, the same way this manager's own internal
+    /// `checkNotCleared` already does for its own issue/renew awaits.
+    /// Never mutable from outside; `clearStoredSession()` remains the
+    /// only way to advance it.
+    public var currentSessionGeneration: Int { sessionGeneration }
+
     /// Returns a bearer token this installation can present RIGHT NOW
     /// for `deviceGrantId` — renewing or (only when genuinely needed)
     /// reissuing first, entirely automatically. Concurrent calls for

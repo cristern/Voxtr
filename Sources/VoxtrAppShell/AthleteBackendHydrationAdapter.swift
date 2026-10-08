@@ -1,5 +1,6 @@
 import Foundation
 import VoxtrCore
+import VoxtrCoreContracts
 
 /// Athlete Connection V1 hydration lifecycle (§4, §5, §8 step 5, issue
 /// #111) — the domain-neutral adapter §5 calls for: translates a
@@ -73,9 +74,35 @@ public final class AthleteBackendHydrationAdapter {
     /// NO NEW PERSISTED ORCHESTRATION STATE doc comment) — a caller
     /// retries this exact method with no special-cased resume logic of
     /// its own needed.
+    ///
+    /// SESSION-STALENESS/CANCELLATION (R1, ChatGPT review 6056376095):
+    /// `sessionManager.currentSessionGeneration` is captured once, right
+    /// after the FIRST `ensureActiveSession()` call succeeds, and
+    /// rechecked (together with cooperative task cancellation) after
+    /// EVERY subsequent await — inside `getHydration`/`ackHydration`'s
+    /// own challenge→submit seam (via `checkNotCancelled`) AND again
+    /// right after each of those calls returns — before touching local
+    /// persistence, starting the ACK-side session acquisition, or
+    /// reporting success. `clearStoredSession()` only ever runs for a
+    /// CONFIRMED reason (explicit sign-out, or this manager's own
+    /// reaction to `.grantUnavailable`/`.installationKeyUnavailable`),
+    /// so detecting it here stops a GET response that arrived AFTER
+    /// such a clear from ever being persisted as if it were still
+    /// current, and stops a now-stale attempt from reporting success
+    /// after a late-arriving ACK confirmation. Never destructive: any
+    /// local upsert this call already committed before detecting
+    /// staleness/cancellation stays — safely resumable, same as any
+    /// other interrupted attempt.
     public func hydrate(deviceGrantId: UUID) async throws -> AthleteBackendHydrationOutcome {
         let getSessionToken = try await sessionManager.ensureActiveSession(deviceGrantId: deviceGrantId)
-        let getOutcome = try await sessionService.getHydration(deviceGrantId: deviceGrantId, sessionToken: getSessionToken)
+        let capturedGeneration = sessionManager.currentSessionGeneration
+
+        let getOutcome = try await sessionService.getHydration(
+            deviceGrantId: deviceGrantId, sessionToken: getSessionToken
+        ) {
+            try self.checkSessionStillValid(capturedGeneration: capturedGeneration)
+        }
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
 
         let fields: AthleteDeviceAuthorizationHydrationFields
         switch getOutcome {
@@ -90,6 +117,18 @@ public final class AthleteBackendHydrationAdapter {
         case .hydrated(let hydratedFields):
             fields = hydratedFields
         }
+
+        // VALUE validation (R2, ChatGPT review 6056376095), BEFORE any
+        // local upsert: `AthleteIdentityHydrationService.hydrate(_:)`
+        // itself only parses/validates `athleteBirthDateISO`/
+        // `athleteDevelopmentStage` when creating a BRAND NEW athlete
+        // profile — a pre-existing, same-workspace athlete profile
+        // short-circuits before ever reaching that validation, and
+        // `athleteTimeZoneId` is never validated there at all. A
+        // malformed value must never be accepted just because the
+        // local graph already happens to have a matching profile from
+        // an earlier attempt.
+        try validateFieldValues(fields)
 
         let payload = AthleteConnectionInvitationCloudRecordPayload(
             workspaceId: fields.workspaceId,
@@ -110,9 +149,16 @@ public final class AthleteBackendHydrationAdapter {
         // `AthleteIdentityHydrationService.hydrate(_:)` itself throws
         // it (§4.3; CLAUDE.md's own "never flatten errors" convention).
         try identityHydrationService.hydrate(payload)
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
 
         let ackSessionToken = try await sessionManager.ensureActiveSession(deviceGrantId: deviceGrantId)
-        let ackOutcome = try await sessionService.ackHydration(deviceGrantId: deviceGrantId, sessionToken: ackSessionToken)
+        let ackOutcome = try await sessionService.ackHydration(
+            deviceGrantId: deviceGrantId, sessionToken: ackSessionToken
+        ) {
+            try self.checkSessionStillValid(capturedGeneration: capturedGeneration)
+        }
+        try checkSessionStillValid(capturedGeneration: capturedGeneration)
+
         switch ackOutcome {
         case .acked, .alreadyCompleted:
             // `.alreadyCompleted` here means a DIFFERENT, earlier
@@ -130,6 +176,40 @@ public final class AthleteBackendHydrationAdapter {
             // fresh proof" rule); it never re-fabricates or duplicates
             // local rows.
             throw AthleteBackendHydrationError.ackNotConfirmed(ackOutcome)
+        }
+    }
+
+    /// Throws `CancellationError` if this `Task` was cancelled, or
+    /// `.sessionInvalidatedOrCancelled` if `sessionManager`'s own
+    /// generation has moved past `capturedGeneration` — i.e.
+    /// `clearStoredSession()` ran since this attempt started. Never
+    /// starts a new session on cancellation's behalf; the caller simply
+    /// stops.
+    private func checkSessionStillValid(capturedGeneration: Int) throws {
+        try Task.checkCancellation()
+        guard capturedGeneration == sessionManager.currentSessionGeneration else {
+            throw AthleteBackendHydrationError.sessionInvalidatedOrCancelled
+        }
+    }
+
+    /// Validates the three fields `AthleteIdentityHydrationService
+    /// .hydrate(_:)` can leave unvalidated for a pre-existing athlete
+    /// profile (see this method's own call site doc comment). Uses the
+    /// exact canonical parsers/types those local upsert steps
+    /// themselves use for a NEW profile (`LocalDate(isoString:)`,
+    /// `DevelopmentStage(rawValue:)`, `TimeZoneId.timeZone`), so a value
+    /// this rejects is genuinely one `hydrate(_:)` itself would also
+    /// have rejected had it reached its own validation. No PII in the
+    /// thrown error — only the field name.
+    private func validateFieldValues(_ fields: AthleteDeviceAuthorizationHydrationFields) throws {
+        guard LocalDate(isoString: fields.athleteBirthDateISO) != nil else {
+            throw AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteBirthDateISO")
+        }
+        guard DevelopmentStage(rawValue: fields.athleteDevelopmentStage) != nil else {
+            throw AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteDevelopmentStage")
+        }
+        guard TimeZoneId(rawValue: fields.athleteTimeZoneId).timeZone != nil else {
+            throw AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteTimeZoneId")
         }
     }
 }
@@ -173,4 +253,29 @@ public enum AthleteBackendHydrationError: Error, Equatable {
     /// fresh ack with fresh proof and never re-fabricates or
     /// duplicates local rows.
     case ackNotConfirmed(AthleteDeviceAuthorizationHydrationAckOutcome)
+    /// This attempt's `Task` was cancelled, or `sessionManager
+    /// .clearStoredSession()` ran (explicit sign-out, or the manager's
+    /// own reaction to a grant/key failure) since this attempt
+    /// started — detected after an await, before touching local
+    /// persistence, starting further session/network work, or
+    /// reporting success (R1, ChatGPT review 6056376095). Whatever
+    /// already persisted locally before this was detected is NOT
+    /// rolled back — it is safely resumable, same as any other
+    /// interrupted attempt (see this type's own NO NEW PERSISTED
+    /// ORCHESTRATION STATE doc comment). Never represented as a
+    /// completed hydration.
+    case sessionInvalidatedOrCancelled
+    /// `getHydration` returned a `.hydrated` payload whose
+    /// `athleteBirthDateISO`/`athleteDevelopmentStage`/`athleteTimeZoneId`
+    /// value failed validation against the exact canonical parser
+    /// `AthleteIdentityHydrationService.hydrate(_:)` itself would use
+    /// (R2, ChatGPT review 6056376095) — checked here BEFORE any local
+    /// upsert, because that service only runs its own validation when
+    /// creating a brand-new athlete profile; a pre-existing, same-
+    /// workspace profile would otherwise short-circuit past it. Never
+    /// acked: the backend's recoverable snapshot survives for a
+    /// genuine retry with a non-malformed payload. `field` names only
+    /// which of the three failed — never the value itself (no PII in
+    /// this error).
+    case malformedHydrationPayload(field: String)
 }

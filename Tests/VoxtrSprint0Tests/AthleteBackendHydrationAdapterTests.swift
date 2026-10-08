@@ -32,6 +32,17 @@ private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchec
     struct Stub {
         let statusCode: Int
         let body: Data
+        /// R1 (ChatGPT review 6056376095): fires synchronously the
+        /// moment THIS specific stub is consumed, before `send(_:)`
+        /// returns it — deterministically simulates "something else
+        /// (an explicit sign-out, or the session manager's own
+        /// clear-on-failure) happened while this exact network call was
+        /// in flight," without needing a real suspend/resume barrier:
+        /// from the caller's side, an awaited call whose result reflects
+        /// a state change that occurred before it returned is
+        /// indistinguishable from one where that change happened mid-
+        /// flight for real.
+        let onConsumed: (() -> Void)?
     }
 
     private var stubsByPath: [String: [Stub]] = [:]
@@ -39,10 +50,10 @@ private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchec
 
     struct NoStubConfigured: Error {}
 
-    func enqueue(path: String, statusCode: Int, json: [String: Any?]) {
+    func enqueue(path: String, statusCode: Int, json: [String: Any?], onConsumed: (() -> Void)? = nil) {
         let cleaned = json.compactMapValues { $0 }
         let body = try! JSONSerialization.data(withJSONObject: cleaned)
-        stubsByPath[path, default: []].append(Stub(statusCode: statusCode, body: body))
+        stubsByPath[path, default: []].append(Stub(statusCode: statusCode, body: body, onConsumed: onConsumed))
     }
 
     func send(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -53,6 +64,7 @@ private final class FakeAdapterTransport: ParentAuthenticationTransport, @unchec
         }
         let stub = stubs.removeFirst()
         stubsByPath[path] = stubs
+        stub.onConsumed?()
         let response = HTTPURLResponse(
             url: request.url!,
             statusCode: stub.statusCode,
@@ -119,6 +131,7 @@ struct AthleteBackendHydrationAdapterTests {
         let container: ModelContainer
         let adapter: AthleteBackendHydrationAdapter
         let transport: FakeAdapterTransport
+        let sessionManager: AthleteDeviceAuthorizationSessionManager
         let parentWorkspaceRepository: ParentWorkspaceRepository
         let athleteRepository: AthleteRepository
         let athleteAccessGrantRepository: AthleteAccessGrantRepository
@@ -159,19 +172,20 @@ struct AthleteBackendHydrationAdapterTests {
             container: container,
             adapter: adapter,
             transport: transport,
+            sessionManager: sessionManager,
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
             athleteAccessGrantRepository: athleteAccessGrantRepository
         )
     }
 
-    private func enqueueIssuedChallenge(_ transport: FakeAdapterTransport) {
+    private func enqueueIssuedChallenge(_ transport: FakeAdapterTransport, onConsumed: (() -> Void)? = nil) {
         transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
             "outcome": "issued",
             "challenge_id": UUID().uuidString,
             "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
             "expires_at": "2026-10-01T00:01:00Z",
-        ])
+        ], onConsumed: onConsumed)
     }
 
     /// Enqueues the challenge+submit pair for the adapter's FIRST
@@ -203,8 +217,13 @@ struct AthleteBackendHydrationAdapterTests {
         athleteDevelopmentStage: "parentLed"
     )
 
-    private func enqueueHydrationGetSuccess(_ transport: FakeAdapterTransport, fields: AthleteDeviceAuthorizationHydrationFields = Self.wellFormedHydrationFields) {
-        enqueueIssuedChallenge(transport)
+    private func enqueueHydrationGetSuccess(
+        _ transport: FakeAdapterTransport,
+        fields: AthleteDeviceAuthorizationHydrationFields = Self.wellFormedHydrationFields,
+        challengeOnConsumed: (() -> Void)? = nil,
+        submitOnConsumed: (() -> Void)? = nil
+    ) {
+        enqueueIssuedChallenge(transport, onConsumed: challengeOnConsumed)
         transport.enqueue(path: "device-session-submit", statusCode: 200, json: [
             "outcome": "hydrated",
             "workspace_id": fields.workspaceId.uuidString,
@@ -218,7 +237,7 @@ struct AthleteBackendHydrationAdapterTests {
             "athlete_birth_date_iso": fields.athleteBirthDateISO,
             "athlete_time_zone_id": fields.athleteTimeZoneId,
             "athlete_development_stage": fields.athleteDevelopmentStage,
-        ])
+        ], onConsumed: submitOnConsumed)
     }
 
     private func enqueueHydrationGetTerminal(_ transport: FakeAdapterTransport, wireOutcome: String) {
@@ -226,8 +245,10 @@ struct AthleteBackendHydrationAdapterTests {
         transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome])
     }
 
-    private func enqueueHydrationAck(_ transport: FakeAdapterTransport, wireOutcome: String) {
-        enqueueIssuedChallenge(transport)
+    private func enqueueHydrationAck(
+        _ transport: FakeAdapterTransport, wireOutcome: String, challengeOnConsumed: (() -> Void)? = nil
+    ) {
+        enqueueIssuedChallenge(transport, onConsumed: challengeOnConsumed)
         transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome])
     }
 
@@ -259,14 +280,30 @@ struct AthleteBackendHydrationAdapterTests {
 
         let participants = try fixture.parentWorkspaceRepository.fetchAllParticipants()
         #expect(participants.count == 2)
-        #expect(participants.contains { $0.id == fields.ownerParticipantId && $0.role == .workspaceOwner && $0.workspaceId == fields.workspaceId })
-        #expect(participants.contains { $0.id == fields.intendedParticipantId && $0.role == .athlete && $0.linkedAthleteId == fields.intendedAthleteId })
+        let ownerParticipant = participants.first { $0.id == fields.ownerParticipantId }
+        #expect(ownerParticipant?.role == .workspaceOwner)
+        #expect(ownerParticipant?.workspaceId == fields.workspaceId)
+        // The owner is hydrated directly as .active (AthleteIdentityHydrationService
+        // .hydrateOwnerParticipant's own behavior) — never left .invited.
+        #expect(ownerParticipant?.state == .active)
+        let athleteParticipant = participants.first { $0.id == fields.intendedParticipantId }
+        #expect(athleteParticipant?.role == .athlete)
+        #expect(athleteParticipant?.linkedAthleteId == fields.intendedAthleteId)
+        #expect(athleteParticipant?.workspaceId == fields.workspaceId)
+        // R3 (ChatGPT review 6056376095): the intended athlete participant
+        // must still be .invited — this adapter NEVER activates membership
+        // itself (§2.4, §5; this type's own "NEVER activates" doc comment).
+        #expect(athleteParticipant?.state == .invited)
 
         let athletes = try fixture.athleteRepository.fetchAllAthletes()
         #expect(athletes.count == 1)
         #expect(athletes.first?.id == fields.intendedAthleteId)
         #expect(athletes.first?.workspaceId == fields.workspaceId)
         #expect(athletes.first?.givenName == fields.athleteGivenName)
+        // R3: all 11 fields, not just the 8 already asserted above.
+        #expect(athletes.first?.birthDate.isoString == fields.athleteBirthDateISO)
+        #expect(athletes.first?.timeZoneId.rawValue == fields.athleteTimeZoneId)
+        #expect(athletes.first?.developmentStage.rawValue == fields.athleteDevelopmentStage)
 
         let grants = try fixture.athleteAccessGrantRepository.fetchAllGrants()
         #expect(grants.count == 1)
@@ -417,5 +454,392 @@ struct AthleteBackendHydrationAdapterTests {
         #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == participantCountAfterFirst)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountAfterFirst)
         #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().count == grantCountAfterFirst)
+    }
+
+    // MARK: - R1 (ChatGPT review 6056376095): session staleness/cancellation across awaits
+    //
+    // Each test below uses a stub's `onConsumed` hook to call
+    // `sessionManager.clearStoredSession()` the moment a SPECIFIC
+    // network call is answered — deterministically simulating "a sign-
+    // out (or the manager's own clear-on-failure) happened while this
+    // exact call was in flight" without a real suspend/resume barrier
+    // (see `FakeAdapterTransport.Stub.onConsumed`'s own doc comment for
+    // why this is equivalent from the production code's point of view).
+    //
+    // "ACK session acquisition" (clear while `ensureActiveSession`
+    // itself is mid-network-call) is deliberately NOT re-tested here:
+    // that exact window is `AthleteDeviceAuthorizationSessionManager`'s
+    // own `checkNotCleared` guard, already covered by
+    // `AthleteDeviceAuthorizationSessionManagerTests.swift`'s own R6
+    // regression suite — this adapter adds nothing new to re-verify
+    // there.
+
+    @Test("hydrate(deviceGrantId:) throws .sessionInvalidatedOrCancelled and never sends the hydration_get submit when the session is cleared right after the GET challenge resolves")
+    func clearDuringGetChallengeSeamStopsBeforeSubmit() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport, challengeOnConsumed: {
+            fixture.sessionManager.clearStoredSession()
+        })
+
+        await #expect(throws: AthleteBackendHydrationError.sessionInvalidatedOrCancelled) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        // session-issue (2) + hydration-get CHALLENGE only (1) — its
+        // submit must never be sent once checkNotCancelled sees the
+        // generation has moved.
+        #expect(fixture.transport.sentRequests.count == 3)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws .sessionInvalidatedOrCancelled and never persists when the session is cleared during the hydration_get submit's own network call")
+    func clearDuringGetSubmitStopsBeforePersistence() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport, submitOnConsumed: {
+            fixture.sessionManager.clearStoredSession()
+        })
+
+        await #expect(throws: AthleteBackendHydrationError.sessionInvalidatedOrCancelled) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        // getHydration() itself returns normally (it has no idea the
+        // generation changed) — the adapter's OWN post-return check
+        // catches it, before ever calling identityHydrationService
+        // .hydrate(_:). session-issue (2) + hydration-get (2) only.
+        #expect(fixture.transport.sentRequests.count == 4)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().isEmpty)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws .sessionInvalidatedOrCancelled and never sends the hydration_ack submit when the session is cleared right after the ACK challenge resolves — local rows already committed by GET stay")
+    func clearDuringAckChallengeSeamStopsBeforeSubmitButKeepsLocalRows() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "acked", challengeOnConsumed: {
+            fixture.sessionManager.clearStoredSession()
+        })
+
+        await #expect(throws: AthleteBackendHydrationError.sessionInvalidatedOrCancelled) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        // session-issue (2) + hydration-get (2) + hydration-ack
+        // CHALLENGE only (1) — its submit must never be sent.
+        #expect(fixture.transport.sentRequests.count == 5)
+        // The local upsert from the successful GET above already
+        // committed real rows — NEVER rolled back just because the
+        // later ack attempt detected staleness (this adapter's own
+        // "never destructive" doc comment).
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws CancellationError and never sends the hydration_get submit if this Task is already cancelled when the GET challenge resolves")
+    func cancelledTaskStopsBeforeGetSubmit() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
+
+        let task = Task {
+            try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+        task.cancel()
+
+        await #expect(throws: CancellationError.self) {
+            _ = try await task.value
+        }
+
+        // session-issue (2) + hydration-get CHALLENGE only (1) — the
+        // cancellation must be observed before the GET submit is ever
+        // sent, and never "handled" by starting a fresh session.
+        #expect(fixture.transport.sentRequests.count == 3)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+    }
+
+    // MARK: - R2 (ChatGPT review 6056376095): malformed field VALUES are rejected before any local upsert
+
+    @Test("hydrate(deviceGrantId:) throws .malformedHydrationPayload(field: \"athleteBirthDateISO\") and persists nothing when the GET response's birth date does not parse as a LocalDate, on a completely fresh device")
+    func malformedBirthDateOnFreshDeviceIsRejectedBeforeUpsert() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        let malformed = AthleteDeviceAuthorizationHydrationFields(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            intendedParticipantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            intendedAthleteId: Self.wellFormedHydrationFields.intendedAthleteId,
+            parentId: Self.wellFormedHydrationFields.parentId,
+            parentGivenName: Self.wellFormedHydrationFields.parentGivenName,
+            workspaceDisplayName: Self.wellFormedHydrationFields.workspaceDisplayName,
+            ownerParticipantId: Self.wellFormedHydrationFields.ownerParticipantId,
+            athleteGivenName: Self.wellFormedHydrationFields.athleteGivenName,
+            athleteBirthDateISO: "not-a-date",
+            athleteTimeZoneId: Self.wellFormedHydrationFields.athleteTimeZoneId,
+            athleteDevelopmentStage: Self.wellFormedHydrationFields.athleteDevelopmentStage
+        )
+        enqueueHydrationGetSuccess(fixture.transport, fields: malformed)
+
+        await #expect(throws: AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteBirthDateISO")) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4, "no ack request must ever be sent for a malformed payload")
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().isEmpty)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws .malformedHydrationPayload(field: \"athleteDevelopmentStage\") and persists nothing when the GET response's development stage matches no known case, on a completely fresh device")
+    func malformedDevelopmentStageOnFreshDeviceIsRejectedBeforeUpsert() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        let malformed = AthleteDeviceAuthorizationHydrationFields(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            intendedParticipantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            intendedAthleteId: Self.wellFormedHydrationFields.intendedAthleteId,
+            parentId: Self.wellFormedHydrationFields.parentId,
+            parentGivenName: Self.wellFormedHydrationFields.parentGivenName,
+            workspaceDisplayName: Self.wellFormedHydrationFields.workspaceDisplayName,
+            ownerParticipantId: Self.wellFormedHydrationFields.ownerParticipantId,
+            athleteGivenName: Self.wellFormedHydrationFields.athleteGivenName,
+            athleteBirthDateISO: Self.wellFormedHydrationFields.athleteBirthDateISO,
+            athleteTimeZoneId: Self.wellFormedHydrationFields.athleteTimeZoneId,
+            athleteDevelopmentStage: "not-a-real-stage"
+        )
+        enqueueHydrationGetSuccess(fixture.transport, fields: malformed)
+
+        await #expect(throws: AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteDevelopmentStage")) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().isEmpty)
+    }
+
+    @Test("hydrate(deviceGrantId:) throws .malformedHydrationPayload(field: \"athleteTimeZoneId\") and persists nothing when the GET response's timezone identifier is unrecognized, on a completely fresh device")
+    func malformedTimeZoneOnFreshDeviceIsRejectedBeforeUpsert() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        let malformed = AthleteDeviceAuthorizationHydrationFields(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            intendedParticipantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            intendedAthleteId: Self.wellFormedHydrationFields.intendedAthleteId,
+            parentId: Self.wellFormedHydrationFields.parentId,
+            parentGivenName: Self.wellFormedHydrationFields.parentGivenName,
+            workspaceDisplayName: Self.wellFormedHydrationFields.workspaceDisplayName,
+            ownerParticipantId: Self.wellFormedHydrationFields.ownerParticipantId,
+            athleteGivenName: Self.wellFormedHydrationFields.athleteGivenName,
+            athleteBirthDateISO: Self.wellFormedHydrationFields.athleteBirthDateISO,
+            athleteTimeZoneId: "Not/A_Real_Zone",
+            athleteDevelopmentStage: Self.wellFormedHydrationFields.athleteDevelopmentStage
+        )
+        enqueueHydrationGetSuccess(fixture.transport, fields: malformed)
+
+        await #expect(throws: AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteTimeZoneId")) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().isEmpty)
+    }
+
+    @Test("hydrate(deviceGrantId:) rejects a malformed birth date even when a PRE-EXISTING, same-workspace athlete profile already exists locally — AthleteIdentityHydrationService's own early-return for an existing profile must never let this bypass validation")
+    func malformedBirthDateIsRejectedEvenWithPreExistingMatchingAthleteProfile() async throws {
+        let fixture = try makeFixture()
+
+        // A real, pre-existing AthleteProfile matching the SAME id and
+        // workspaceId the incoming (malformed) payload names —
+        // `AthleteIdentityHydrationService.hydrateAthleteProfile` would
+        // find this and return early WITHOUT ever parsing birthDate/
+        // developmentStage, which is exactly the gap R2 describes.
+        let existingAthlete = AthleteProfile(
+            id: AthleteId(rawValue: Self.wellFormedHydrationFields.intendedAthleteId),
+            workspaceId: WorkspaceId(rawValue: Self.wellFormedHydrationFields.workspaceId),
+            givenName: "Jonas",
+            birthDate: LocalDate(year: 2012, month: 4, day: 10),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            developmentStage: .parentLed
+        )
+        fixture.container.mainContext.insert(existingAthlete)
+        try fixture.container.mainContext.save()
+
+        enqueueSessionIssueSuccess(fixture.transport)
+        let malformed = AthleteDeviceAuthorizationHydrationFields(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            intendedParticipantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            intendedAthleteId: Self.wellFormedHydrationFields.intendedAthleteId,
+            parentId: Self.wellFormedHydrationFields.parentId,
+            parentGivenName: Self.wellFormedHydrationFields.parentGivenName,
+            workspaceDisplayName: Self.wellFormedHydrationFields.workspaceDisplayName,
+            ownerParticipantId: Self.wellFormedHydrationFields.ownerParticipantId,
+            athleteGivenName: Self.wellFormedHydrationFields.athleteGivenName,
+            athleteBirthDateISO: "invalid",
+            athleteTimeZoneId: Self.wellFormedHydrationFields.athleteTimeZoneId,
+            athleteDevelopmentStage: Self.wellFormedHydrationFields.athleteDevelopmentStage
+        )
+        enqueueHydrationGetSuccess(fixture.transport, fields: malformed)
+
+        await #expect(throws: AthleteBackendHydrationError.malformedHydrationPayload(field: "athleteBirthDateISO")) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4, "no ack request must ever be sent for a malformed payload")
+        // No NEW rows beyond the one pre-existing athlete — never
+        // acked, never let through by the existing-profile short-circuit.
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+    }
+
+    // MARK: - R3 (ChatGPT review 6056376095): remaining named conflicts, transport failure, lost-ACK retry
+
+    @Test("hydrate(deviceGrantId:) propagates AthleteIdentityHydrationService's own ownerParticipantConflict, never attempting an ack")
+    func ownerParticipantConflictStopsChainBeforeAck() async throws {
+        let fixture = try makeFixture()
+
+        // A pre-existing .workspaceOwner participant for a COMPLETELY
+        // different workspace/id than the incoming payload names —
+        // parent/workspace tables stay empty, so steps 1-2 succeed by
+        // CREATING fresh rows for the new payload; step 3
+        // (hydrateOwnerParticipant) then finds this mismatched owner.
+        let unrelatedOwner = WorkspaceParticipant(
+            workspaceId: WorkspaceId(rawValue: UUID()),
+            accountId: .pending,
+            role: .workspaceOwner,
+            state: .active
+        )
+        fixture.container.mainContext.insert(unrelatedOwner)
+        try fixture.container.mainContext.save()
+
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        do {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+            Issue.record("Expected hydrate(deviceGrantId:) to throw")
+        } catch let error as AthleteIdentityHydrationError {
+            guard case .ownerParticipantConflict = error else {
+                Issue.record("Expected .ownerParticipantConflict, got \(error)")
+                return
+            }
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4, "no ack request must ever be sent once local hydration itself fails")
+    }
+
+    @Test("hydrate(deviceGrantId:) propagates AthleteIdentityHydrationService's own athleteParticipantConflict, never attempting an ack")
+    func athleteParticipantConflictStopsChainBeforeAck() async throws {
+        let fixture = try makeFixture()
+
+        // A pre-existing participant with the SAME id as the incoming
+        // payload's intendedParticipantId, but the WRONG role (never
+        // .athlete) — parent/workspace/owner all stay fresh/empty so
+        // steps 1-3 succeed; step 5 (hydrateAthleteParticipant) then
+        // finds this identity-mismatched row.
+        let wrongRoleParticipant = WorkspaceParticipant(
+            id: Self.wellFormedHydrationFields.intendedParticipantId,
+            workspaceId: WorkspaceId(rawValue: UUID()),
+            accountId: .pending,
+            role: .guardianEditor,
+            state: .active
+        )
+        fixture.container.mainContext.insert(wrongRoleParticipant)
+        try fixture.container.mainContext.save()
+
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        do {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+            Issue.record("Expected hydrate(deviceGrantId:) to throw")
+        } catch let error as AthleteIdentityHydrationError {
+            guard case .athleteParticipantConflict = error else {
+                Issue.record("Expected .athleteParticipantConflict, got \(error)")
+                return
+            }
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4)
+    }
+
+    @Test("hydrate(deviceGrantId:) propagates AthleteIdentityHydrationService's own athleteProfileConflict, never attempting an ack")
+    func athleteProfileConflictStopsChainBeforeAck() async throws {
+        let fixture = try makeFixture()
+
+        // A pre-existing AthleteProfile with the SAME id as the
+        // incoming payload's intendedAthleteId, but a DIFFERENT
+        // workspaceId — steps 1-3 succeed fresh; step 4
+        // (hydrateAthleteProfile) then finds this workspace mismatch.
+        let mismatchedAthlete = AthleteProfile(
+            id: AthleteId(rawValue: Self.wellFormedHydrationFields.intendedAthleteId),
+            workspaceId: WorkspaceId(rawValue: UUID()),
+            givenName: "SomeoneElse",
+            birthDate: LocalDate(year: 2010, month: 1, day: 1),
+            timeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            developmentStage: .parentLed
+        )
+        fixture.container.mainContext.insert(mismatchedAthlete)
+        try fixture.container.mainContext.save()
+
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        do {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+            Issue.record("Expected hydrate(deviceGrantId:) to throw")
+        } catch let error as AthleteIdentityHydrationError {
+            guard case .athleteProfileConflict = error else {
+                Issue.record("Expected .athleteProfileConflict, got \(error)")
+                return
+            }
+        }
+
+        #expect(fixture.transport.sentRequests.count == 4)
+    }
+
+    @Test("hydrate(deviceGrantId:) propagates a transport-level network failure from hydration_get untouched, persisting nothing and never attempting an ack")
+    func transportFailureDuringGetPropagatesWithNoAck() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 500, json: [:])
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionError.network) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        #expect(fixture.transport.sentRequests.count == 3, "session-issue (2) + the failed hydration-get challenge (1) only")
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().isEmpty)
+    }
+
+    @Test("A retry after an ACK that never actually committed server-side (same hydrated payload replayed) re-runs hydrate(_:) as a safe no-op and then acks successfully — no duplicate rows")
+    func retryAfterAckNeverCommittedReplaysSamePayloadIdempotently() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "not_available")
+
+        await #expect(throws: AthleteBackendHydrationError.ackNotConfirmed(.notAvailable)) {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        }
+
+        let parentCountAfterFirst = try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count
+        let athleteCountAfterFirst = try fixture.athleteRepository.fetchAllAthletes().count
+        #expect(parentCountAfterFirst == 1)
+        #expect(athleteCountAfterFirst == 1)
+
+        // Retry: the backend's permanent marker is STILL nil (the ack
+        // never actually committed), so it replays the SAME hydrated
+        // payload rather than reporting already_completed.
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
+
+        let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        #expect(secondOutcome == .hydratedAndAcked)
+
+        // Re-running hydrate(_:) against the identical payload is a
+        // pure no-op — no duplicate rows.
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == parentCountAfterFirst)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountAfterFirst)
     }
 }
