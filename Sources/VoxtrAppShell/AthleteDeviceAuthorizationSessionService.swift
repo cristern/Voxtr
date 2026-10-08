@@ -120,10 +120,10 @@ public final class AthleteDeviceAuthorizationSessionService {
             switch submitOutcome {
             case .issued(let sessionToken, let expiresAt, let absoluteExpiresAt):
                 return .issued(sessionToken: sessionToken, expiresAt: expiresAt, absoluteExpiresAt: absoluteExpiresAt)
-            case .renewed:
-                throw AthleteDeviceAuthorizationSessionError.malformedResponse
             case .notAvailable:
                 return .notAvailable
+            case .renewed, .hydrated, .acked, .alreadyCompleted, .deadlinePassed, .grantRevoked:
+                throw AthleteDeviceAuthorizationSessionError.malformedResponse
             }
         }
     }
@@ -158,10 +158,10 @@ public final class AthleteDeviceAuthorizationSessionService {
             switch submitOutcome {
             case .renewed(let expiresAt, let absoluteExpiresAt):
                 return .renewed(expiresAt: expiresAt, absoluteExpiresAt: absoluteExpiresAt)
-            case .issued:
-                throw AthleteDeviceAuthorizationSessionError.malformedResponse
             case .notAvailable:
                 return .notAvailable
+            case .issued, .hydrated, .acked, .alreadyCompleted, .deadlinePassed, .grantRevoked:
+                throw AthleteDeviceAuthorizationSessionError.malformedResponse
             }
         }
     }
