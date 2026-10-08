@@ -90,6 +90,24 @@ public final class AthleteIdentityHydrationService {
         self.athleteAccessGrantRepository = athleteAccessGrantRepository
     }
 
+    /// Test-only fault injection seam (R3, issue #111, ChatGPT review
+    /// 6056790695/6056950649/6057405952; Product Owner approval
+    /// confirmed directly by the user on PR #117): lets a deterministic
+    /// test force a genuine save failure at the access-grant
+    /// persistence boundary — the LAST of `hydrate(_:)`'s upsert steps
+    /// — to prove `AthleteBackendHydrationAdapter` never attempts an
+    /// ack after a real `persistenceFailed` error, and that disarming
+    /// the fault and retrying resumes cleanly without duplicating any
+    /// already-committed identity. `internal`, reachable only via
+    /// `@testable import`; `nil` for every real caller, including every
+    /// production call site, so behavior outside tests is completely
+    /// unchanged. Thrown here flows through this service's OWN
+    /// existing generic `catch` in `hydrate(_:)` below, becoming a real
+    /// `.persistenceFailed` — never a separate, specially-wrapped error
+    /// case. This simulates an injected boundary failure for test
+    /// evidence only, never a physical disk failure.
+    var accessGrantPersistenceFaultForTesting: (() throws -> Void)?
+
     /// Runs all five upsert steps in the order `FamilyRestorationService`'s
     /// own consistency rules are structured around: family-level facts
     /// first (parent, workspace, owner participant), then the specific
@@ -216,6 +234,7 @@ public final class AthleteIdentityHydrationService {
         guard !alreadyGranted else {
             return
         }
+        try accessGrantPersistenceFaultForTesting?()
         _ = try athleteAccessGrantRepository.createFullAccessGrant(
             workspaceId: WorkspaceId(rawValue: projection.workspaceId),
             participantId: projection.ownerParticipantId,

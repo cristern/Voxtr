@@ -205,6 +205,7 @@ struct AthleteBackendHydrationAdapterTests {
         let signingKeyStore: FakeAdapterSigningKeyStore
         let clock: FakeAdapterClock
         let sessionManager: AthleteDeviceAuthorizationSessionManager
+        let identityHydrationService: AthleteIdentityHydrationService
         let parentWorkspaceRepository: ParentWorkspaceRepository
         let athleteRepository: AthleteRepository
         let athleteAccessGrantRepository: AthleteAccessGrantRepository
@@ -248,6 +249,7 @@ struct AthleteBackendHydrationAdapterTests {
             signingKeyStore: signingKeyStore,
             clock: clock,
             sessionManager: sessionManager,
+            identityHydrationService: identityHydrationService,
             parentWorkspaceRepository: parentWorkspaceRepository,
             athleteRepository: athleteRepository,
             athleteAccessGrantRepository: athleteAccessGrantRepository
@@ -1198,6 +1200,76 @@ struct AthleteBackendHydrationAdapterTests {
         // untouched, never duplicated or re-activated.
         #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == parentCountAfterFirst)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == athleteCountAfterFirst)
+    }
+
+    // MARK: - R3 follow-up (ChatGPT review 6056790695/6056950649/6057405952,
+    // Product Owner approval confirmed directly by the user on PR #117):
+    // a genuine SwiftData persistence failure injected through
+    // AthleteIdentityHydrationService's own internal, @testable-only,
+    // defaulted-nil fault seam at the access-grant persistence boundary
+    // — never a change to its public constructor/hydrate(_:) signature,
+    // normal upsert/conflict behavior, or any repository's access level.
+
+    @Test("A genuine SwiftData persistence failure injected at the access-grant boundary (the LAST of hydrate(_:)'s upsert steps) throws AthleteIdentityHydrationError.persistenceFailed, is never acked, and retains every earlier step's already-committed rows; disarming the fault and retrying resumes to .hydratedAndAcked without duplicating any identity")
+    func persistenceFailureAtAccessGrantBoundaryThrowsWithNoAckThenRetryCompletesWithoutDuplicates() async throws {
+        let fixture = try makeFixture()
+        enqueueSessionIssueSuccess(fixture.transport)
+        enqueueHydrationGetSuccess(fixture.transport)
+
+        struct InjectedPersistenceFailure: Error {}
+        fixture.identityHydrationService.accessGrantPersistenceFaultForTesting = {
+            throw InjectedPersistenceFailure()
+        }
+
+        do {
+            _ = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+            Issue.record("Expected hydrate(deviceGrantId:) to throw")
+        } catch let error as AthleteIdentityHydrationError {
+            guard case .persistenceFailed = error else {
+                Issue.record("Expected .persistenceFailed, got \(error)")
+                return
+            }
+        }
+
+        // No ack was ever attempted — session-issue (2) + hydration-get
+        // (2) only; identityHydrationService.hydrate(_:) throwing stops
+        // the adapter before it ever reaches the ACK-side ensureActiveSession().
+        #expect(fixture.transport.sentRequests.count == 4, "no ack request must ever be sent once local hydration itself fails")
+        // Every earlier upsert step (parent, workspace, owner
+        // participant, athlete profile, athlete participant) already
+        // committed real rows before the injected failure at the LAST
+        // step — never rolled back (this service's own NOT ATOMIC
+        // ACROSS ALL [FIVE/SIX] ENTITIES doc comment).
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == 2)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
+        // The step that genuinely failed — never created.
+        #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().isEmpty)
+
+        // Disarm the fault and retry: the cached session token is still
+        // valid (within the sliding window), so only a fresh
+        // hydration_get + hydration_ack are sent; the five already-
+        // committed steps are reused untouched (find-by-ID-or-create),
+        // and only the access grant — the step that actually failed —
+        // is created fresh.
+        fixture.identityHydrationService.accessGrantPersistenceFaultForTesting = nil
+        enqueueHydrationGetSuccess(fixture.transport)
+        enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
+
+        let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
+        #expect(secondOutcome == .hydratedAndAcked)
+
+        // 4 (first attempt) + hydration-get (2) + hydration-ack (2) = 8
+        // — no further session-issue, since the cached token is reused.
+        #expect(fixture.transport.sentRequests.count == 8)
+        // No duplicate identities anywhere — every earlier step's row
+        // count is unchanged, and the access grant now exists exactly once.
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count == 1)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
+        #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == 2)
+        #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
+        #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().count == 1)
     }
 
     // MARK: - R1 follow-up (ChatGPT review 6056790695): a REAL suspend/
