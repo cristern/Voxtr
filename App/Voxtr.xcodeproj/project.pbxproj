@@ -71,6 +71,7 @@
 		34CB317C838A46D255259DF2 /* AthleteConnectionOwnerHandoffServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */; };
 		752B9CC192C9F44AECB39CA8 /* AthleteDeviceAuthorizationSessionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */; };
 		06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */; };
+		F7C0D3C9998E85200FE0A898 /* AthleteBackendHydrationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */; };
 		F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
@@ -154,6 +155,7 @@
 		C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteConnectionOwnerHandoffServiceTests.swift; sourceTree = "<group>"; };
 		90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionServiceTests.swift; sourceTree = "<group>"; };
 		E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionManagerTests.swift; sourceTree = "<group>"; };
+		FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteBackendHydrationAdapterTests.swift; sourceTree = "<group>"; };
 		B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -297,6 +299,7 @@
 				C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */,
 				90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */,
 				E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */,
+				FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */,
 				B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
@@ -550,6 +553,7 @@
 				752B9CC192C9F44AECB39CA8 /* AthleteDeviceAuthorizationSessionServiceTests.swift in Sources */,
 				06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */,
 				F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */,
+				F7C0D3C9998E85200FE0A898 /* AthleteBackendHydrationAdapterTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

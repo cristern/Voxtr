@@ -384,6 +384,265 @@ struct AthleteDeviceAuthorizationSessionServiceTests {
         #expect(transport.sentRequests.count == 1)
     }
 
+    // MARK: - hydration_get/hydration_ack (§4, §8 step 5, issue #111)
+
+    private static let wellFormedHydrationFields = AthleteDeviceAuthorizationHydrationFields(
+        workspaceId: UUID(uuidString: "55555555-5555-5555-5555-555555555555")!,
+        intendedParticipantId: UUID(uuidString: "66666666-6666-6666-6666-666666666666")!,
+        intendedAthleteId: UUID(uuidString: "77777777-7777-7777-7777-777777777777")!,
+        parentId: UUID(uuidString: "88888888-8888-8888-8888-888888888888")!,
+        parentGivenName: "Kari",
+        workspaceDisplayName: "Kari's family",
+        ownerParticipantId: UUID(uuidString: "99999999-9999-9999-9999-999999999999")!,
+        athleteGivenName: "Jonas",
+        athleteBirthDateISO: "2012-04-10",
+        athleteTimeZoneId: "Europe/Oslo",
+        athleteDevelopmentStage: "parentLed"
+    )
+
+    private func enqueueHydratedSubmit(_ transport: FakeDeviceSessionTransport, fields: AthleteDeviceAuthorizationHydrationFields = Self.wellFormedHydrationFields) {
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: [
+            "outcome": "hydrated",
+            "workspace_id": fields.workspaceId.uuidString,
+            "intended_participant_id": fields.intendedParticipantId.uuidString,
+            "intended_athlete_id": fields.intendedAthleteId.uuidString,
+            "parent_id": fields.parentId.uuidString,
+            "parent_given_name": fields.parentGivenName,
+            "workspace_display_name": fields.workspaceDisplayName,
+            "owner_participant_id": fields.ownerParticipantId.uuidString,
+            "athlete_given_name": fields.athleteGivenName,
+            "athlete_birth_date_iso": fields.athleteBirthDateISO,
+            "athlete_time_zone_id": fields.athleteTimeZoneId,
+            "athlete_development_stage": fields.athleteDevelopmentStage,
+        ])
+    }
+
+    @Test("getHydration() sends action=hydration_get with the presented session_token, signs with loadExistingSigningKey(), and maps .hydrated with all 11 fields exactly")
+    func getHydrationSendsCorrectActionAndMapsAllElevenFields() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        enqueueHydratedSubmit(transport)
+
+        let outcome = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == .hydrated(Self.wellFormedHydrationFields))
+
+        let challengeBody = try requestBodyJSON(transport.sentRequests[0])
+        #expect(challengeBody["action"] as? String == "hydration_get")
+        #expect(challengeBody["session_token"] as? String == Self.existingSessionToken)
+
+        let submitBody = try requestBodyJSON(transport.sentRequests[1])
+        #expect(submitBody["action"] as? String == "hydration_get")
+        #expect(submitBody["session_token"] as? String == Self.existingSessionToken)
+
+        let expectedMessage = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
+            action: .hydrationGet, deviceGrantId: Self.deviceGrantId, challengeId: Self.challengeId, nonce: Self.wellFormedNonce
+        )
+        #expect(signingKeyStore.signedMessages == [expectedMessage])
+        #expect(signingKeyStore.loadExistingCallCount == 1)
+        #expect(signingKeyStore.loadOrCreateCallCount == 0, "hydration must never mint a new installation key")
+    }
+
+    @Test("getHydration() maps session_invalid at the challenge step to .sessionInvalid, signing nothing")
+    func getHydrationMapsSessionInvalid() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "session_invalid"])
+
+        let outcome = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == .sessionInvalid)
+        #expect(signingKeyStore.signedMessages.isEmpty)
+    }
+
+    @Test("getHydration() maps challenge_not_available to .grantNotAvailable")
+    func getHydrationMapsChallengeNotAvailable() async throws {
+        let (service, transport, _) = makeService()
+        transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "challenge_not_available"])
+
+        let outcome = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == .grantNotAvailable)
+    }
+
+    private func assertGetHydrationMapsSubmitOutcome(wireOutcome: String, expected: AthleteDeviceAuthorizationHydrationGetOutcome) async throws {
+        let (service, transport, _) = makeService()
+        enqueueIssuedChallenge(transport)
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome])
+
+        let outcome = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == expected)
+    }
+
+    @Test("getHydration() maps the submit-side not_available fold to .notAvailable")
+    func getHydrationMapsSubmitNotAvailable() async throws {
+        try await assertGetHydrationMapsSubmitOutcome(wireOutcome: "not_available", expected: .notAvailable)
+    }
+
+    @Test("getHydration() maps the permanent-marker 'acked' outcome to .alreadyCompleted, never a newly delivered payload")
+    func getHydrationMapsAlreadyCompleted() async throws {
+        try await assertGetHydrationMapsSubmitOutcome(wireOutcome: "already_completed", expected: .alreadyCompleted)
+    }
+
+    @Test("getHydration() maps the permanent-marker 'expired' outcome to .deadlinePassed")
+    func getHydrationMapsDeadlinePassed() async throws {
+        try await assertGetHydrationMapsSubmitOutcome(wireOutcome: "deadline_passed", expected: .deadlinePassed)
+    }
+
+    @Test("getHydration() maps the permanent-marker 'revoked' outcome to .grantRevoked")
+    func getHydrationMapsGrantRevoked() async throws {
+        try await assertGetHydrationMapsSubmitOutcome(wireOutcome: "grant_revoked", expected: .grantRevoked)
+    }
+
+    private static let allElevenHydrationWireKeys = [
+        "workspace_id", "intended_participant_id", "intended_athlete_id", "parent_id",
+        "parent_given_name", "workspace_display_name", "owner_participant_id",
+        "athlete_given_name", "athlete_birth_date_iso", "athlete_time_zone_id", "athlete_development_stage",
+    ]
+
+    private func assertGetHydrationRejectsResponseMissing(_ missingKey: String) async throws {
+        let (service, transport, _) = makeService()
+        enqueueIssuedChallenge(transport)
+        var json: [String: Any?] = [
+            "outcome": "hydrated",
+            "workspace_id": Self.wellFormedHydrationFields.workspaceId.uuidString,
+            "intended_participant_id": Self.wellFormedHydrationFields.intendedParticipantId.uuidString,
+            "intended_athlete_id": Self.wellFormedHydrationFields.intendedAthleteId.uuidString,
+            "parent_id": Self.wellFormedHydrationFields.parentId.uuidString,
+            "parent_given_name": Self.wellFormedHydrationFields.parentGivenName,
+            "workspace_display_name": Self.wellFormedHydrationFields.workspaceDisplayName,
+            "owner_participant_id": Self.wellFormedHydrationFields.ownerParticipantId.uuidString,
+            "athlete_given_name": Self.wellFormedHydrationFields.athleteGivenName,
+            "athlete_birth_date_iso": Self.wellFormedHydrationFields.athleteBirthDateISO,
+            "athlete_time_zone_id": Self.wellFormedHydrationFields.athleteTimeZoneId,
+            "athlete_development_stage": Self.wellFormedHydrationFields.athleteDevelopmentStage,
+        ]
+        #expect(json[missingKey] != nil, "test setup bug: '\(missingKey)' is not one of the 11 keys this fixture populates")
+        json[missingKey] = nil
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: json)
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionError.malformedResponse) {
+            _ = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+        }
+    }
+
+    @Test("getHydration() throws .malformedResponse when a 'hydrated' response is missing any one of the 11 required fields — every key exercised explicitly")
+    func getHydrationRejectsHydratedResponseMissingAnyField() async throws {
+        for key in Self.allElevenHydrationWireKeys {
+            try await assertGetHydrationRejectsResponseMissing(key)
+        }
+    }
+
+    @Test("getHydration()'s checkNotCancelled runs after a successful challenge and before signing/submitting")
+    func getHydrationChecksNotCancelledBeforeSubmitting() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        struct CancelledForTest: Error, Equatable {}
+
+        await #expect(throws: CancelledForTest()) {
+            _ = try await service.getHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken) {
+                throw CancelledForTest()
+            }
+        }
+        #expect(transport.sentRequests.count == 1, "only the challenge was sent")
+        #expect(signingKeyStore.loadExistingCallCount == 0, "signing must never happen once checkNotCancelled rejects the operation")
+    }
+
+    @Test("ackHydration() sends action=hydration_ack with the presented session_token, signs with loadExistingSigningKey(), and maps .acked")
+    func ackHydrationSendsCorrectActionAndMapsAcked() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": "acked"])
+
+        let outcome = try await service.ackHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == .acked)
+
+        let challengeBody = try requestBodyJSON(transport.sentRequests[0])
+        #expect(challengeBody["action"] as? String == "hydration_ack")
+        #expect(challengeBody["session_token"] as? String == Self.existingSessionToken)
+
+        let submitBody = try requestBodyJSON(transport.sentRequests[1])
+        #expect(submitBody["action"] as? String == "hydration_ack")
+
+        let expectedMessage = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
+            action: .hydrationAck, deviceGrantId: Self.deviceGrantId, challengeId: Self.challengeId, nonce: Self.wellFormedNonce
+        )
+        #expect(signingKeyStore.signedMessages == [expectedMessage])
+        #expect(signingKeyStore.loadOrCreateCallCount == 0)
+    }
+
+    private func assertAckHydrationMapsSubmitOutcome(
+        wireOutcome: String, expected: AthleteDeviceAuthorizationHydrationAckOutcome
+    ) async throws {
+        let (service, transport, _) = makeService()
+        enqueueIssuedChallenge(transport)
+        transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": wireOutcome])
+
+        let outcome = try await service.ackHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == expected)
+    }
+
+    @Test("ackHydration() maps submit-side not_available")
+    func ackHydrationMapsSubmitNotAvailable() async throws {
+        try await assertAckHydrationMapsSubmitOutcome(wireOutcome: "not_available", expected: .notAvailable)
+    }
+
+    @Test("ackHydration() maps submit-side already_completed")
+    func ackHydrationMapsAlreadyCompleted() async throws {
+        try await assertAckHydrationMapsSubmitOutcome(wireOutcome: "already_completed", expected: .alreadyCompleted)
+    }
+
+    @Test("ackHydration() maps submit-side deadline_passed")
+    func ackHydrationMapsDeadlinePassed() async throws {
+        try await assertAckHydrationMapsSubmitOutcome(wireOutcome: "deadline_passed", expected: .deadlinePassed)
+    }
+
+    @Test("ackHydration() maps submit-side grant_revoked")
+    func ackHydrationMapsGrantRevoked() async throws {
+        try await assertAckHydrationMapsSubmitOutcome(wireOutcome: "grant_revoked", expected: .grantRevoked)
+    }
+
+    @Test("ackHydration() maps session_invalid/challenge_not_available at the challenge step, signing nothing")
+    func ackHydrationMapsChallengeStepOutcomes() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "session_invalid"])
+
+        let outcome = try await service.ackHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+
+        #expect(outcome == .sessionInvalid)
+        #expect(signingKeyStore.signedMessages.isEmpty)
+    }
+
+    @Test("ackHydration() throws .signingKeyUnavailable and sends no submit request when loadExistingSigningKey() fails")
+    func ackHydrationThrowsWhenKeyUnavailable() async throws {
+        let signingKeyStore = FakeSessionSigningKeyStore()
+        signingKeyStore.throwOnLoadExisting = true
+        let (service, transport, _) = makeService(signingKeyStore: signingKeyStore)
+        enqueueIssuedChallenge(transport)
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionError.signingKeyUnavailable) {
+            _ = try await service.ackHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken)
+        }
+        #expect(transport.sentRequests.count == 1)
+    }
+
+    @Test("ackHydration()'s checkNotCancelled runs after a successful challenge and before signing/submitting")
+    func ackHydrationChecksNotCancelledBeforeSubmitting() async throws {
+        let (service, transport, signingKeyStore) = makeService()
+        enqueueIssuedChallenge(transport)
+        struct CancelledForTest: Error, Equatable {}
+
+        await #expect(throws: CancelledForTest()) {
+            _ = try await service.ackHydration(deviceGrantId: Self.deviceGrantId, sessionToken: Self.existingSessionToken) {
+                throw CancelledForTest()
+            }
+        }
+        #expect(transport.sentRequests.count == 1, "only the challenge was sent")
+        #expect(signingKeyStore.loadExistingCallCount == 0, "signing must never happen once checkNotCancelled rejects the operation")
+    }
+
     // MARK: - Network/HTTP status folding
 
     @Test("A non-200 HTTP status on either endpoint throws .network")

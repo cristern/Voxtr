@@ -2,12 +2,17 @@ import Foundation
 import VoxtrParentAuthentication
 
 /// Athlete Connection V1 device-authorization session contract (§3,
-/// §8 step 4): the client for `device-session-challenge`/
-/// `device-session-submit`, scoped to `session_issue`/`session_renew`
-/// only — `hydration_get`/`hydration_ack` orchestration (the domain
-/// hydration adapter) is a separate, later task and out of scope here
-/// (see `AthleteDeviceAuthorizationSessionModels.swift`'s own doc
-/// comment).
+/// §8 steps 4-5): the client for `device-session-challenge`/
+/// `device-session-submit`, covering all four actions —
+/// `session_issue`/`session_renew` (§8 step 4) and `hydration_get`/
+/// `hydration_ack` (§8 step 5, issue #111). The hydration ORCHESTRATION
+/// (mapping a successful `hydration_get` into the legacy CloudKit
+/// payload shape and feeding `AthleteIdentityHydrationService
+/// .hydrate(_:)`, ack-gated on that succeeding) lives in its own
+/// separate type, `AthleteBackendHydrationAdapter` — this service
+/// itself stays a pure wire client, same as its `session_issue`/
+/// `session_renew` methods (see `AthleteDeviceAuthorizationSessionModels.swift`'s
+/// own doc comment).
 ///
 /// REUSES `VoxtrParentAuthentication`'s plain HTTP primitives and
 /// `AthleteDeviceAuthorizationGatewayConfiguration`'s exact Supabase
@@ -161,6 +166,91 @@ public final class AthleteDeviceAuthorizationSessionService {
         }
     }
 
+    // MARK: - hydration_get
+
+    /// Session-bound, exactly like `renewSession`: requires a valid,
+    /// still-presented `sessionToken` AND a fresh signature over this
+    /// call's own challenge — never bearer-token possession alone
+    /// (§3.4 point 2). Returns the raw wire fields on `.hydrated`;
+    /// mapping them into `AthleteConnectionInvitationCloudRecordPayload`
+    /// and feeding `AthleteIdentityHydrationService.hydrate(_:)` is
+    /// `AthleteBackendHydrationAdapter`'s own job, not this method's.
+    public func getHydration(
+        deviceGrantId: UUID,
+        sessionToken: String,
+        checkNotCancelled: () throws -> Void = {}
+    ) async throws -> AthleteDeviceAuthorizationHydrationGetOutcome {
+        let challengeOutcome = try await requestChallenge(deviceGrantId: deviceGrantId, action: .hydrationGet, sessionToken: sessionToken)
+        switch challengeOutcome {
+        case .challengeNotAvailable:
+            return .grantNotAvailable
+        case .sessionInvalid:
+            return .sessionInvalid
+        case .issued(let challengeId, let nonce, _):
+            try checkNotCancelled()
+            let message = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
+                action: .hydrationGet, deviceGrantId: deviceGrantId, challengeId: challengeId, nonce: nonce
+            )
+            let signature = try sign(message)
+            let submitOutcome = try await submit(
+                deviceGrantId: deviceGrantId, action: .hydrationGet, challengeId: challengeId,
+                signature: signature, sessionToken: sessionToken
+            )
+            switch submitOutcome {
+            case .hydrated(let fields): return .hydrated(fields)
+            case .notAvailable: return .notAvailable
+            case .alreadyCompleted: return .alreadyCompleted
+            case .deadlinePassed: return .deadlinePassed
+            case .grantRevoked: return .grantRevoked
+            case .issued, .renewed, .acked:
+                throw AthleteDeviceAuthorizationSessionError.malformedResponse
+            }
+        }
+    }
+
+    // MARK: - hydration_ack
+
+    /// Same session-bound shape as `getHydration` — a fresh signature
+    /// every call, never a repeat of the proof that obtained the
+    /// payload. The caller (`AthleteBackendHydrationAdapter`) must only
+    /// ever call this AFTER `AthleteIdentityHydrationService.hydrate(_:)`
+    /// has already returned successfully for the payload this exact
+    /// session's `getHydration` call produced (§4.3: "`hydration-ack`
+    /// is called only after `hydrate(...)` completes successfully end
+    /// to end").
+    public func ackHydration(
+        deviceGrantId: UUID,
+        sessionToken: String,
+        checkNotCancelled: () throws -> Void = {}
+    ) async throws -> AthleteDeviceAuthorizationHydrationAckOutcome {
+        let challengeOutcome = try await requestChallenge(deviceGrantId: deviceGrantId, action: .hydrationAck, sessionToken: sessionToken)
+        switch challengeOutcome {
+        case .challengeNotAvailable:
+            return .grantNotAvailable
+        case .sessionInvalid:
+            return .sessionInvalid
+        case .issued(let challengeId, let nonce, _):
+            try checkNotCancelled()
+            let message = AthleteDeviceAuthorizationSessionCanonicalMessage.bytes(
+                action: .hydrationAck, deviceGrantId: deviceGrantId, challengeId: challengeId, nonce: nonce
+            )
+            let signature = try sign(message)
+            let submitOutcome = try await submit(
+                deviceGrantId: deviceGrantId, action: .hydrationAck, challengeId: challengeId,
+                signature: signature, sessionToken: sessionToken
+            )
+            switch submitOutcome {
+            case .acked: return .acked
+            case .notAvailable: return .notAvailable
+            case .alreadyCompleted: return .alreadyCompleted
+            case .deadlinePassed: return .deadlinePassed
+            case .grantRevoked: return .grantRevoked
+            case .issued, .renewed, .hydrated:
+                throw AthleteDeviceAuthorizationSessionError.malformedResponse
+            }
+        }
+    }
+
     private func sign(_ message: Data) throws -> Data {
         let signingKey: AthleteDeviceSigningKey
         do {
@@ -217,15 +307,19 @@ public final class AthleteDeviceAuthorizationSessionService {
         return try Self.mapSubmitOutcome(decoded)
     }
 
-    /// Internal-only shape covering both `session_issue`'s `issued` and
-    /// `session_renew`'s `renewed` wire outcomes before the caller
-    /// above narrows to its own action-specific public outcome type —
-    /// `issueSession`/`renewSession` each throw `.malformedResponse` if
-    /// the OTHER action's shape comes back, which should never happen
+    /// Internal-only shape covering every action's wire outcomes before
+    /// the caller above narrows to its own action-specific public
+    /// outcome type — each public method throws `.malformedResponse` if
+    /// another action's shape comes back, which should never happen
     /// since each only ever submits its own `action` value.
     private enum SubmitOutcome {
         case issued(sessionToken: String, expiresAt: Date, absoluteExpiresAt: Date)
         case renewed(expiresAt: Date, absoluteExpiresAt: Date)
+        case hydrated(AthleteDeviceAuthorizationHydrationFields)
+        case acked
+        case alreadyCompleted
+        case deadlinePassed
+        case grantRevoked
         case notAvailable
     }
 
@@ -268,6 +362,39 @@ public final class AthleteDeviceAuthorizationSessionService {
                 throw AthleteDeviceAuthorizationSessionError.malformedResponse
             }
             return .renewed(expiresAt: expiresAt, absoluteExpiresAt: absoluteExpiresAt)
+        case "hydrated":
+            guard
+                let workspaceIdRaw = body.workspaceId, let workspaceId = UUID(uuidString: workspaceIdRaw),
+                let intendedParticipantIdRaw = body.intendedParticipantId, let intendedParticipantId = UUID(uuidString: intendedParticipantIdRaw),
+                let intendedAthleteIdRaw = body.intendedAthleteId, let intendedAthleteId = UUID(uuidString: intendedAthleteIdRaw),
+                let parentIdRaw = body.parentId, let parentId = UUID(uuidString: parentIdRaw),
+                let parentGivenName = body.parentGivenName, !parentGivenName.isEmpty,
+                let workspaceDisplayName = body.workspaceDisplayName, !workspaceDisplayName.isEmpty,
+                let ownerParticipantIdRaw = body.ownerParticipantId, let ownerParticipantId = UUID(uuidString: ownerParticipantIdRaw),
+                let athleteGivenName = body.athleteGivenName, !athleteGivenName.isEmpty,
+                let athleteBirthDateISO = body.athleteBirthDateIso,
+                let athleteTimeZoneId = body.athleteTimeZoneId,
+                let athleteDevelopmentStage = body.athleteDevelopmentStage
+            else {
+                throw AthleteDeviceAuthorizationSessionError.malformedResponse
+            }
+            return .hydrated(AthleteDeviceAuthorizationHydrationFields(
+                workspaceId: workspaceId,
+                intendedParticipantId: intendedParticipantId,
+                intendedAthleteId: intendedAthleteId,
+                parentId: parentId,
+                parentGivenName: parentGivenName,
+                workspaceDisplayName: workspaceDisplayName,
+                ownerParticipantId: ownerParticipantId,
+                athleteGivenName: athleteGivenName,
+                athleteBirthDateISO: athleteBirthDateISO,
+                athleteTimeZoneId: athleteTimeZoneId,
+                athleteDevelopmentStage: athleteDevelopmentStage
+            ))
+        case "acked": return .acked
+        case "already_completed": return .alreadyCompleted
+        case "deadline_passed": return .deadlinePassed
+        case "grant_revoked": return .grantRevoked
         case "not_available": return .notAvailable
         default:
             throw AthleteDeviceAuthorizationSessionError.malformedResponse
@@ -378,4 +505,29 @@ private struct DeviceSessionSubmitResponseBody: Decodable {
     let sessionToken: String?
     let expiresAt: String?
     let absoluteExpiresAt: String?
+    // Hydration fields (§4, issue #111) — present only when outcome ==
+    // "hydrated". Wire keys have NO "hydration_" prefix (unlike the SQL
+    // RETURNS TABLE columns/bridge's own internal naming) — confirmed
+    // directly against `device-session-submit/index.ts`'s own
+    // `jsonResponse` call for the "hydrated" branch.
+    let workspaceId: String?
+    let intendedParticipantId: String?
+    let intendedAthleteId: String?
+    let parentId: String?
+    let parentGivenName: String?
+    let workspaceDisplayName: String?
+    let ownerParticipantId: String?
+    let athleteGivenName: String?
+    /// Named to match `.convertFromSnakeCase`'s ACTUAL transform, not
+    /// `AthleteConnectionInvitationCloudRecordPayload.athleteBirthDateISO`'s
+    /// all-caps convention: that strategy title-cases each component
+    /// after an underscore via `String.capitalized`, so the wire key
+    /// `athlete_birth_date_iso` decodes to `athleteBirthDateIso`
+    /// (capital I, lowercase "so") — never `athleteBirthDateISO`.
+    /// Naming this property anything else would silently decode to
+    /// `nil` every time. `mapSubmitOutcome` below bridges to the
+    /// all-caps public field name explicitly.
+    let athleteBirthDateIso: String?
+    let athleteTimeZoneId: String?
+    let athleteDevelopmentStage: String?
 }
