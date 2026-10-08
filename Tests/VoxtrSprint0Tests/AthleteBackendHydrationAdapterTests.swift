@@ -1204,13 +1204,14 @@ struct AthleteBackendHydrationAdapterTests {
 
     // MARK: - R3 follow-up (ChatGPT review 6056790695/6056950649/6057405952,
     // Product Owner approval confirmed directly by the user on PR #117):
-    // a genuine SwiftData persistence failure injected through
+    // an injected persistence-boundary failure, mapped through the real
+    // AthleteIdentityHydrationError.persistenceFailed error path, via
     // AthleteIdentityHydrationService's own internal, @testable-only,
     // defaulted-nil fault seam at the access-grant persistence boundary
     // — never a change to its public constructor/hydrate(_:) signature,
     // normal upsert/conflict behavior, or any repository's access level.
 
-    @Test("A genuine SwiftData persistence failure injected at the access-grant boundary (the LAST of hydrate(_:)'s upsert steps) throws AthleteIdentityHydrationError.persistenceFailed, is never acked, and retains every earlier step's already-committed rows; disarming the fault and retrying resumes to .hydratedAndAcked without duplicating any identity")
+    @Test("An injected persistence-boundary failure at the access-grant step (the LAST of hydrate(_:)'s upsert steps), mapped through the real AthleteIdentityHydrationError.persistenceFailed error path, is never acked and retains every earlier step's already-committed rows; disarming the fault and retrying resumes to .hydratedAndAcked without duplicating any identity")
     func persistenceFailureAtAccessGrantBoundaryThrowsWithNoAckThenRetryCompletesWithoutDuplicates() async throws {
         let fixture = try makeFixture()
         enqueueSessionIssueSuccess(fixture.transport)
@@ -1244,7 +1245,7 @@ struct AthleteBackendHydrationAdapterTests {
         #expect(try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count == 1)
         #expect(try fixture.parentWorkspaceRepository.fetchAllParticipants().count == 2)
         #expect(try fixture.athleteRepository.fetchAllAthletes().count == 1)
-        // The step that genuinely failed — never created.
+        // The step whose fault was injected — never created.
         #expect(try fixture.athleteAccessGrantRepository.fetchAllGrants().isEmpty)
 
         // Disarm the fault and retry: the cached session token is still
