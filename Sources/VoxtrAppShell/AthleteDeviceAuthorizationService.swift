@@ -201,7 +201,13 @@ public final class AthleteDeviceAuthorizationService {
     // _shared/base64url.ts's own encode/decode exactly, including its
     // own strict charset check BEFORE attempting to decode)
 
-    static func base64UrlEncode(_ data: Data) -> String {
+    /// `nonisolated`: a pure `Data` → `String` transformation with no
+    /// actor state, called from `AthleteDeviceAuthorizationSessionCanonicalMessage
+    /// .bytes(...)` (a nonisolated enum, `AthleteDeviceAuthorizationSessionModels.swift`)
+    /// — without this, that call is a compile error ("call to main
+    /// actor-isolated static method... in a synchronous nonisolated
+    /// context"). Byte output is unchanged; this only loosens isolation.
+    nonisolated static func base64UrlEncode(_ data: Data) -> String {
         data.base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
@@ -214,7 +220,11 @@ public final class AthleteDeviceAuthorizationService {
     /// rather than relying on a lenient underlying decoder's own
     /// behavior. Returns `nil` for anything that doesn't strictly match,
     /// never partially decodes.
-    static func base64UrlDecode(_ string: String) -> Data? {
+    ///
+    /// `nonisolated` for the same reason as `base64UrlEncode` above —
+    /// kept symmetric with it, even though no nonisolated caller exists
+    /// yet, since both are equally pure and actor-state-free.
+    nonisolated static func base64UrlDecode(_ string: String) -> Data? {
         guard !string.isEmpty, string.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
             return nil
         }

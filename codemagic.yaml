@@ -23,8 +23,11 @@ workflows:
       vars:
         XCODE_PROJECT: "App/Voxtr.xcodeproj"
         XCODE_SCHEME: "VoxtrTests"
+        ATHLETE_SCHEME: "AthleteApp"
         RESULT_BUNDLE: "build/reports/VoxtrSprint0Tests.xcresult"
         JUNIT_OUTPUT: "build/reports/junit.xml"
+        KEYCHAIN_RESULT_BUNDLE: "build/reports/VoxtrSprint0TestsKeychain.xcresult"
+        KEYCHAIN_JUNIT_OUTPUT: "build/reports/junit-keychain.xml"
     triggering:
       events:
         - push
@@ -96,20 +99,198 @@ workflows:
           fi
           set -e
 
-      - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty — see script header for why)
+      - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
+        script: |
+          set -eo pipefail
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          mkdir -p build/reports
+          # Build #232 artifacts (PR #116 R3) established via the actual
+          # .xctestrun that VoxtrSprint0Tests, with no TEST_HOST, runs
+          # inside the standalone iPhoneSimulator-platform `xctest`
+          # agent — not any application. The ad-hoc-signed .xctest
+          # bundle's own entitlements dump empty, so signing the
+          # *bundle* alone cannot fix real Keychain access (already
+          # tried and confirmed insufficient); the agent's own
+          # entitlements were never directly inspected, so this does
+          # not claim they are proven absent too. The attempted fix is
+          # an application-hosted execution path: build AthleteApp
+          # here as the TEST_HOST, ad hoc signed exactly like the test
+          # bundle, reusing its own already-existing entitlements
+          # configuration (AthleteApp/AthleteApp.entitlements) — no new
+          # team identifier invented, Apple's own xctest binary
+          # untouched. TEST_HOST/BUNDLE_LOADER are set on the
+          # VoxtrSprint0Tests target in project.pbxproj (not as a
+          # global xcodebuild override here — build #234 showed that
+          # leaks into every SwiftPM dependency target's link command
+          # and breaks their relocatable (-r) link step). Build #234
+          # also found AthleteApp's own ad-hoc-signed entitlements dump
+          # as an empty dict — this build step alone does not prove
+          # AthleteApp is actually Keychain-capable; the diagnostic step
+          # below inspects its real codesign output, and the real test
+          # result is the only real evidence either way.
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/athlete-app-test-host-build.log
+          ATHLETE_APP_BUNDLE=$(find "$DIAG_DD/Build/Products" -iname "AthleteApp.app" | head -n1)
+          if [ -z "$ATHLETE_APP_BUNDLE" ]; then
+            echo "FAILING BUILD: AthleteApp.app not found under $DIAG_DD/Build/Products after building it as the Keychain test host for VoxtrSprint0Tests — see athlete-app-test-host-build.log."
+            exit 1
+          fi
+          TEST_HOST_PATH="$ATHLETE_APP_BUNDLE/AthleteApp"
+          if [ ! -f "$TEST_HOST_PATH" ]; then
+            echo "FAILING BUILD: resolved AthleteApp.app but its executable is missing at $TEST_HOST_PATH"
+            exit 1
+          fi
+          echo "Resolved TEST_HOST_PATH=$TEST_HOST_PATH"
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" >> "$CM_ENV"
+
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (AthleteApp test host, fixed derived-data path, real evidence; read-only, never fails the build)
+        script: |
+          set +e
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing + AthleteApp TEST_HOST applied) =="
+          xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            > build/reports/signing-diagnostic-build-settings.log 2>&1
+          echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
+          echo "== Building VoxtrSprint0Tests for testing, hosted inside AthleteApp at $TEST_HOST_PATH, same fixed derived-data path the real test step below now also uses =="
+          xcodebuild build-for-testing \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            > build/reports/build-for-testing-diagnostic.log 2>&1
+          BUILD_FOR_TESTING_EXIT=$?
+          echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
+          echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
+          find "$DIAG_DD" -iname "*.xctestrun" \
+            > build/reports/signing-diagnostic-found-xctestrun.txt \
+            2> build/reports/signing-diagnostic-found-xctestrun.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "-- find stderr (errors only — NOT candidate paths) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.stderr
+          : > build/reports/signing-diagnostic-xctestrun-dump.log
+          while IFS= read -r runfile; do
+            [ -f "$runfile" ] || { echo "SKIPPING non-existent path from find output: $runfile" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log; continue; }
+            echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+            /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+          done < build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) \
+            > build/reports/signing-diagnostic-found-bundles.txt \
+            2> build/reports/signing-diagnostic-found-bundles.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
+          cat build/reports/signing-diagnostic-found-bundles.txt
+          echo "-- find stderr (errors only — NOT candidate paths; e.g. Products dir missing) --"
+          cat build/reports/signing-diagnostic-found-bundles.stderr
+          # Only lines that are real, existing paths count as "found" — find's own
+          # stderr (e.g. "No such file or directory") goes to a SEPARATE file above
+          # specifically so it can never be mistaken for a discovered bundle path.
+          : > build/reports/signing-diagnostic-valid-bundles.txt
+          while IFS= read -r bundle; do
+            [ -e "$bundle" ] && echo "$bundle" >> build/reports/signing-diagnostic-valid-bundles.txt
+          done < build/reports/signing-diagnostic-found-bundles.txt
+          : > build/reports/signing-diagnostic-entitlements.log
+          if [ ! -s build/reports/signing-diagnostic-valid-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no real .xctest/.app bundle path found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log and signing-diagnostic-found-bundles.stderr for why). This is NOT entitlement evidence — it means collection itself did not find anything to inspect." \
+              | tee build/reports/signing-diagnostic-entitlements.log
+          else
+            while IFS= read -r bundle; do
+              echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+              echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            done < build/reports/signing-diagnostic-valid-bundles.txt
+          fi
+          echo "== Also inspecting the resolved TEST_HOST executable directly — the ACTUAL host this run declares via TEST_HOST/BUNDLE_LOADER, cross-checked against the .xctestrun TestHostPath dump above, not a disconnected xcrun guess =="
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -f "$TEST_HOST_PATH" ]; then
+            echo "--- entitlements: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- codesign -dvvv: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -dvvv "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          else
+            echo "TEST_HOST_PATH does not exist as a file: $TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          fi
+          exit 0
+
+      - name: Run VoxtrSprint0Tests main suite (previously-working standalone environment — excludes the real-Keychain round-trip test, isolated in a separate hosted step below)
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
+          # R3 status (PR #116 review thread): build #236 confirmed
+          # TEST_HOST=AthleteApp (set in project.pbxproj) makes the real
+          # Keychain round-trip test
+          # (AthleteDeviceAuthorizationSessionManagerTests
+          # .keychainStoreRoundTrips) genuinely pass — the original
+          # errSecMissingEntitlement (-34018) symptom is fixed by
+          # application-hosted execution. But hosting the ENTIRE
+          # 903-test suite inside AthleteApp's process changes its
+          # persistence/CloudKit environment: build #236's actual log
+          # showed repeated harness restarts and hundreds of
+          # SwiftData/CloudKit model-container failures
+          # (NSCocoaErrorDomain 134060, "CloudKit integration requires
+          # that all attributes be optional...") — a regression from
+          # running every domain/persistence test inside one shared app
+          # process with AthleteApp's own production CloudKit-backed
+          # SwiftData container, not anything to do with Keychain access.
+          # Not a reason to touch any production model or CloudKit
+          # configuration. This step restores the previously-working
+          # standalone (no TEST_HOST) execution for every test except
+          # the one that actually needs a Keychain-capable host,
+          # explicitly clearing TEST_HOST/BUNDLE_LOADER back to empty on
+          # the command line for this one invocation only — the isolated
+          # Keychain step below keeps project.pbxproj's default.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
+            '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST= \
+            BUNDLE_LOADER= \
             2>&1 | tee build/reports/xcodebuild-test.log
 
-      - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
+      - name: Run the real Keychain round-trip test hosted inside AthleteApp (isolated — build #236 confirmed this exact test passes genuinely; running it alongside the full suite in the same app process caused the unrelated SwiftData/CloudKit regression above)
+        script: |
+          set -o pipefail
+          rm -rf "$KEYCHAIN_RESULT_BUNDLE"
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
+            -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
+            -parallel-testing-enabled NO \
+            '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/xcodebuild-test-keychain.log
+
+      - name: Convert both .xcresults to JUnit and hard-fail if either ran zero tests (xcresult_to_junit.py itself hard-fails the build if any test in either bundle actually failed)
         script: |
           set -e
           python3 Scripts/xcresult_to_junit.py \
@@ -118,21 +299,70 @@ workflows:
           # Belt-and-braces: even if the script above somehow exits 0
           # without a file (it shouldn't), refuse to call this a pass.
           if [ ! -f "$JUNIT_OUTPUT" ]; then
-            echo "FAILING BUILD: no JUnit report was produced — refusing to report success on missing results."
+            echo "FAILING BUILD: no JUnit report was produced for the main suite — refusing to report success on missing results."
             exit 1
           fi
-          TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
-          echo "Executed test count: $TEST_COUNT"
-          if [ "$TEST_COUNT" -eq 0 ]; then
-            echo "FAILING BUILD: zero tests were executed."
+          MAIN_TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Main suite executed test count: $MAIN_TEST_COUNT"
+          if [ "$MAIN_TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed in the main suite."
             exit 1
           fi
+          # Build #237 (PR #116 R3) showed a bare XCTest-style selector
+          # (no trailing "()") silently failed to exclude a Swift Testing
+          # @Test function — -skip-testing exited 0 and the nonzero-count
+          # check above passed while the test ran anyway. Counts alone
+          # cannot catch a wrong selector; check test IDENTITY too.
+          # Build #239 (ChatGPT review 6016636238) showed this identity
+          # check itself read the wrong JUnit field: xcresult_to_junit.py's
+          # "name" attribute is the human-readable @Test display title, not
+          # the method identity — "classname" carries the actual
+          # "Suite/method()" identifier and is what must be matched.
+          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
+          echo "Main suite occurrences of keychainStoreRoundTrips: $MAIN_KEYCHAIN_OCCURRENCES"
+          if [ "$MAIN_KEYCHAIN_OCCURRENCES" -ne 0 ]; then
+            echo "FAILING BUILD: the main suite still executed keychainStoreRoundTrips — the -skip-testing selector did not actually exclude it, so this invocation is not the previously-working unhosted environment it claims to be."
+            exit 1
+          fi
+          python3 Scripts/xcresult_to_junit.py \
+            --xcresult "$KEYCHAIN_RESULT_BUNDLE" \
+            --junit-output "$KEYCHAIN_JUNIT_OUTPUT"
+          if [ ! -f "$KEYCHAIN_JUNIT_OUTPUT" ]; then
+            echo "FAILING BUILD: no JUnit report was produced for the isolated Keychain test — refusing to report success on missing results."
+            exit 1
+          fi
+          KEYCHAIN_TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Isolated Keychain test executed test count: $KEYCHAIN_TEST_COUNT"
+          if [ "$KEYCHAIN_TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed for the isolated Keychain test — it must actually run, not be silently skipped or misfiltered."
+            exit 1
+          fi
+          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
+          echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
+          if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
+            echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
+            exit 1
+          fi
+          TOTAL_TEST_COUNT=$((MAIN_TEST_COUNT + KEYCHAIN_TEST_COUNT))
+          echo "Combined executed test count: $TOTAL_TEST_COUNT (main suite: $MAIN_TEST_COUNT, isolated Keychain: $KEYCHAIN_TEST_COUNT)"
     artifacts:
       - build/reports/VoxtrSprint0Tests.xcresult
+      - build/reports/VoxtrSprint0TestsKeychain.xcresult
+      - build/reports/junit-keychain.xml
+      - build/reports/xcodebuild-test-keychain.log
       - build/reports/junit.xml
       - build/reports/discovered-tests.json
       - build/reports/xcodebuild-test.log
       - build/reports/destinations.txt
+      - build/reports/signing-diagnostic-build-settings.log
+      - build/reports/build-for-testing-diagnostic.log
+      - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-found-xctestrun.stderr
+      - build/reports/signing-diagnostic-xctestrun-dump.log
+      - build/reports/signing-diagnostic-found-bundles.txt
+      - build/reports/signing-diagnostic-found-bundles.stderr
+      - build/reports/signing-diagnostic-valid-bundles.txt
+      - build/reports/signing-diagnostic-entitlements.log
     publishing:
       email:
         recipients:
@@ -251,6 +481,8 @@ workflows:
         PARENT_SCHEME: "ParentApp"
         RESULT_BUNDLE: "build/reports/VoxtrSprint0Tests.xcresult"
         JUNIT_OUTPUT: "build/reports/junit.xml"
+        KEYCHAIN_RESULT_BUNDLE: "build/reports/VoxtrSprint0TestsKeychain.xcresult"
+        KEYCHAIN_JUNIT_OUTPUT: "build/reports/junit-keychain.xml"
     triggering:
       events:
         - pull_request
@@ -304,35 +536,250 @@ workflows:
           echo "Auto-detected simulator UDID: $SIMULATOR_UDID"
           echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$CM_ENV"
 
-      - name: Run VoxtrSprint0Tests and produce a real .xcresult (no xcpretty)
+      - name: Build AthleteApp as a Keychain-capable test host for VoxtrSprint0Tests (plain app build, ad hoc signed, same fixed derived-data path — NOT the standalone compile-check build elsewhere in this workflow)
+        script: |
+          set -eo pipefail
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          rm -rf "$DIAG_DD"
+          mkdir -p build/reports
+          # Build #232 artifacts (PR #116 R3) established via the actual
+          # .xctestrun that VoxtrSprint0Tests, with no TEST_HOST, runs
+          # inside the standalone iPhoneSimulator-platform `xctest`
+          # agent — not any application. The ad-hoc-signed .xctest
+          # bundle's own entitlements dump empty, so signing the
+          # *bundle* alone cannot fix real Keychain access (already
+          # tried and confirmed insufficient); the agent's own
+          # entitlements were never directly inspected, so this does
+          # not claim they are proven absent too. The attempted fix is
+          # an application-hosted execution path: build AthleteApp
+          # here as the TEST_HOST, ad hoc signed exactly like the test
+          # bundle, reusing its own already-existing entitlements
+          # configuration (AthleteApp/AthleteApp.entitlements) — no new
+          # team identifier invented, Apple's own xctest binary
+          # untouched. TEST_HOST/BUNDLE_LOADER are set on the
+          # VoxtrSprint0Tests target in project.pbxproj (not as a
+          # global xcodebuild override here — build #234 showed that
+          # leaks into every SwiftPM dependency target's link command
+          # and breaks their relocatable (-r) link step). Build #234
+          # also found AthleteApp's own ad-hoc-signed entitlements dump
+          # as an empty dict — this build step alone does not prove
+          # AthleteApp is actually Keychain-capable; the diagnostic step
+          # below inspects its real codesign output, and the real test
+          # result is the only real evidence either way.
+          xcodebuild build \
+            -project "$XCODE_PROJECT" \
+            -scheme "$ATHLETE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/athlete-app-test-host-build.log
+          ATHLETE_APP_BUNDLE=$(find "$DIAG_DD/Build/Products" -iname "AthleteApp.app" | head -n1)
+          if [ -z "$ATHLETE_APP_BUNDLE" ]; then
+            echo "FAILING BUILD: AthleteApp.app not found under $DIAG_DD/Build/Products after building it as the Keychain test host for VoxtrSprint0Tests — see athlete-app-test-host-build.log."
+            exit 1
+          fi
+          TEST_HOST_PATH="$ATHLETE_APP_BUNDLE/AthleteApp"
+          if [ ! -f "$TEST_HOST_PATH" ]; then
+            echo "FAILING BUILD: resolved AthleteApp.app but its executable is missing at $TEST_HOST_PATH"
+            exit 1
+          fi
+          echo "Resolved TEST_HOST_PATH=$TEST_HOST_PATH"
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" >> "$CM_ENV"
+
+      - name: Diagnose VoxtrSprint0Tests signing/entitlements (AthleteApp test host, fixed derived-data path, real evidence; read-only, never fails the build)
+        script: |
+          set +e
+          DIAG_DD="$(pwd)/build/DiagDerivedData"
+          echo "== FULL (unfiltered) effective build settings for VoxtrTests scheme (ad hoc signing + AthleteApp TEST_HOST applied) =="
+          xcodebuild -showBuildSettings \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            > build/reports/signing-diagnostic-build-settings.log 2>&1
+          echo "xcodebuild -showBuildSettings exit code: $?" | tee -a build/reports/signing-diagnostic-build-settings.log
+          echo "== Building VoxtrSprint0Tests for testing, hosted inside AthleteApp at $TEST_HOST_PATH, same fixed derived-data path the real test step below now also uses =="
+          xcodebuild build-for-testing \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$DIAG_DD" \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            > build/reports/build-for-testing-diagnostic.log 2>&1
+          BUILD_FOR_TESTING_EXIT=$?
+          echo "xcodebuild build-for-testing exit code: $BUILD_FOR_TESTING_EXIT" | tee -a build/reports/build-for-testing-diagnostic.log
+          echo "== Locating .xctestrun files — the definitive declaration of the actual test host/runner, not an inferred one =="
+          find "$DIAG_DD" -iname "*.xctestrun" \
+            > build/reports/signing-diagnostic-found-xctestrun.txt \
+            2> build/reports/signing-diagnostic-found-xctestrun.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "-- find stderr (errors only — NOT candidate paths) --"
+          cat build/reports/signing-diagnostic-found-xctestrun.stderr
+          : > build/reports/signing-diagnostic-xctestrun-dump.log
+          while IFS= read -r runfile; do
+            [ -f "$runfile" ] || { echo "SKIPPING non-existent path from find output: $runfile" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log; continue; }
+            echo "--- $runfile ---" | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+            /usr/libexec/PlistBuddy -c "Print" "$runfile" 2>&1 | tee -a build/reports/signing-diagnostic-xctestrun-dump.log
+          done < build/reports/signing-diagnostic-found-xctestrun.txt
+          echo "== Enumerating every .xctest/.app bundle under the fixed derived-data Products directory =="
+          find "$DIAG_DD/Build/Products" \( -iname "*.xctest" -o -iname "*.app" \) \
+            > build/reports/signing-diagnostic-found-bundles.txt \
+            2> build/reports/signing-diagnostic-found-bundles.stderr
+          echo "-- find stdout (candidate paths, one per line) --"
+          cat build/reports/signing-diagnostic-found-bundles.txt
+          echo "-- find stderr (errors only — NOT candidate paths; e.g. Products dir missing) --"
+          cat build/reports/signing-diagnostic-found-bundles.stderr
+          # Only lines that are real, existing paths count as "found" — find's own
+          # stderr (e.g. "No such file or directory") goes to a SEPARATE file above
+          # specifically so it can never be mistaken for a discovered bundle path.
+          : > build/reports/signing-diagnostic-valid-bundles.txt
+          while IFS= read -r bundle; do
+            [ -e "$bundle" ] && echo "$bundle" >> build/reports/signing-diagnostic-valid-bundles.txt
+          done < build/reports/signing-diagnostic-found-bundles.txt
+          : > build/reports/signing-diagnostic-entitlements.log
+          if [ ! -s build/reports/signing-diagnostic-valid-bundles.txt ]; then
+            echo "INCOMPLETE COLLECTION: no real .xctest/.app bundle path found under $DIAG_DD/Build/Products (build-for-testing exit was $BUILD_FOR_TESTING_EXIT — see build-for-testing-diagnostic.log and signing-diagnostic-found-bundles.stderr for why). This is NOT entitlement evidence — it means collection itself did not find anything to inspect." \
+              | tee build/reports/signing-diagnostic-entitlements.log
+          else
+            while IFS= read -r bundle; do
+              echo "--- entitlements: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -d --entitlements :- "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+              echo "--- codesign -dvvv: $bundle ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+              codesign -dvvv "$bundle" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            done < build/reports/signing-diagnostic-valid-bundles.txt
+          fi
+          echo "== Also inspecting the resolved TEST_HOST executable directly — the ACTUAL host this run declares via TEST_HOST/BUNDLE_LOADER, cross-checked against the .xctestrun TestHostPath dump above, not a disconnected xcrun guess =="
+          echo "TEST_HOST_PATH=$TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          if [ -f "$TEST_HOST_PATH" ]; then
+            echo "--- entitlements: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -d --entitlements :- "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+            echo "--- codesign -dvvv: $TEST_HOST_PATH ---" | tee -a build/reports/signing-diagnostic-entitlements.log
+            codesign -dvvv "$TEST_HOST_PATH" 2>&1 | tee -a build/reports/signing-diagnostic-entitlements.log
+          else
+            echo "TEST_HOST_PATH does not exist as a file: $TEST_HOST_PATH" | tee -a build/reports/signing-diagnostic-entitlements.log
+          fi
+          exit 0
+
+      - name: Run VoxtrSprint0Tests main suite (previously-working standalone environment — excludes the real-Keychain round-trip test, isolated in a separate hosted step below)
         script: |
           set -o pipefail
           rm -rf "$RESULT_BUNDLE"
+          # R3 status (PR #116 review thread): build #236 confirmed
+          # TEST_HOST=AthleteApp (set in project.pbxproj) makes the real
+          # Keychain round-trip test
+          # (AthleteDeviceAuthorizationSessionManagerTests
+          # .keychainStoreRoundTrips) genuinely pass — the original
+          # errSecMissingEntitlement (-34018) symptom is fixed by
+          # application-hosted execution. But hosting the ENTIRE
+          # 903-test suite inside AthleteApp's process changes its
+          # persistence/CloudKit environment: build #236's actual log
+          # showed repeated harness restarts and hundreds of
+          # SwiftData/CloudKit model-container failures
+          # (NSCocoaErrorDomain 134060, "CloudKit integration requires
+          # that all attributes be optional...") — a regression from
+          # running every domain/persistence test inside one shared app
+          # process with AthleteApp's own production CloudKit-backed
+          # SwiftData container, not anything to do with Keychain access.
+          # Not a reason to touch any production model or CloudKit
+          # configuration. This step restores the previously-working
+          # standalone (no TEST_HOST) execution for every test except
+          # the one that actually needs a Keychain-capable host,
+          # explicitly clearing TEST_HOST/BUNDLE_LOADER back to empty on
+          # the command line for this one invocation only — the isolated
+          # Keychain step below keeps project.pbxproj's default.
           xcodebuild test \
             -project "$XCODE_PROJECT" \
             -scheme "$XCODE_SCHEME" \
             -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
-            CODE_SIGNING_ALLOWED=NO \
+            '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            TEST_HOST= \
+            BUNDLE_LOADER= \
             2>&1 | tee build/reports/xcodebuild-test.log
 
-      - name: Convert .xcresult to JUnit and hard-fail if zero tests ran
+      - name: Run the real Keychain round-trip test hosted inside AthleteApp (isolated — build #236 confirmed this exact test passes genuinely; running it alongside the full suite in the same app process caused the unrelated SwiftData/CloudKit regression above)
+        script: |
+          set -o pipefail
+          rm -rf "$KEYCHAIN_RESULT_BUNDLE"
+          xcodebuild test \
+            -project "$XCODE_PROJECT" \
+            -scheme "$XCODE_SCHEME" \
+            -destination "id=$SIMULATOR_UDID" \
+            -derivedDataPath "$(pwd)/build/DiagDerivedData" \
+            -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
+            -parallel-testing-enabled NO \
+            '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            CODE_SIGN_IDENTITY=- \
+            CODE_SIGNING_REQUIRED=YES \
+            CODE_SIGNING_ALLOWED=YES \
+            2>&1 | tee build/reports/xcodebuild-test-keychain.log
+
+      - name: Convert both .xcresults to JUnit and hard-fail if either ran zero tests (xcresult_to_junit.py itself hard-fails the build if any test in either bundle actually failed)
         script: |
           set -e
           python3 Scripts/xcresult_to_junit.py \
             --xcresult "$RESULT_BUNDLE" \
             --junit-output "$JUNIT_OUTPUT"
           if [ ! -f "$JUNIT_OUTPUT" ]; then
-            echo "FAILING BUILD: no JUnit report was produced — refusing to report success on missing results."
+            echo "FAILING BUILD: no JUnit report was produced for the main suite — refusing to report success on missing results."
             exit 1
           fi
-          TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
-          echo "Executed test count: $TEST_COUNT"
-          if [ "$TEST_COUNT" -eq 0 ]; then
-            echo "FAILING BUILD: zero tests were executed."
+          MAIN_TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Main suite executed test count: $MAIN_TEST_COUNT"
+          if [ "$MAIN_TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed in the main suite."
             exit 1
           fi
+          # Build #237 (PR #116 R3) showed a bare XCTest-style selector
+          # (no trailing "()") silently failed to exclude a Swift Testing
+          # @Test function — -skip-testing exited 0 and the nonzero-count
+          # check above passed while the test ran anyway. Counts alone
+          # cannot catch a wrong selector; check test IDENTITY too.
+          # Build #239 (ChatGPT review 6016636238) showed this identity
+          # check itself read the wrong JUnit field: xcresult_to_junit.py's
+          # "name" attribute is the human-readable @Test display title, not
+          # the method identity — "classname" carries the actual
+          # "Suite/method()" identifier and is what must be matched.
+          MAIN_KEYCHAIN_OCCURRENCES=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
+          echo "Main suite occurrences of keychainStoreRoundTrips: $MAIN_KEYCHAIN_OCCURRENCES"
+          if [ "$MAIN_KEYCHAIN_OCCURRENCES" -ne 0 ]; then
+            echo "FAILING BUILD: the main suite still executed keychainStoreRoundTrips — the -skip-testing selector did not actually exclude it, so this invocation is not the previously-working unhosted environment it claims to be."
+            exit 1
+          fi
+          python3 Scripts/xcresult_to_junit.py \
+            --xcresult "$KEYCHAIN_RESULT_BUNDLE" \
+            --junit-output "$KEYCHAIN_JUNIT_OUTPUT"
+          if [ ! -f "$KEYCHAIN_JUNIT_OUTPUT" ]; then
+            echo "FAILING BUILD: no JUnit report was produced for the isolated Keychain test — refusing to report success on missing results."
+            exit 1
+          fi
+          KEYCHAIN_TEST_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; print(ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot().get('tests','0'))")
+          echo "Isolated Keychain test executed test count: $KEYCHAIN_TEST_COUNT"
+          if [ "$KEYCHAIN_TEST_COUNT" -eq 0 ]; then
+            echo "FAILING BUILD: zero tests were executed for the isolated Keychain test — it must actually run, not be silently skipped or misfiltered."
+            exit 1
+          fi
+          KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
+          echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
+          if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
+            echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
+            exit 1
+          fi
+          TOTAL_TEST_COUNT=$((MAIN_TEST_COUNT + KEYCHAIN_TEST_COUNT))
+          echo "Combined executed test count: $TOTAL_TEST_COUNT (main suite: $MAIN_TEST_COUNT, isolated Keychain: $KEYCHAIN_TEST_COUNT)"
 
       - name: Build AthleteApp for the simulator (only reached if tests passed)
         script: |
@@ -351,8 +798,20 @@ workflows:
             CODE_SIGNING_ALLOWED=NO
     artifacts:
       - build/reports/VoxtrSprint0Tests.xcresult
+      - build/reports/VoxtrSprint0TestsKeychain.xcresult
       - build/reports/junit.xml
+      - build/reports/junit-keychain.xml
       - build/reports/xcodebuild-test.log
+      - build/reports/xcodebuild-test-keychain.log
+      - build/reports/signing-diagnostic-build-settings.log
+      - build/reports/build-for-testing-diagnostic.log
+      - build/reports/signing-diagnostic-found-xctestrun.txt
+      - build/reports/signing-diagnostic-found-xctestrun.stderr
+      - build/reports/signing-diagnostic-xctestrun-dump.log
+      - build/reports/signing-diagnostic-found-bundles.txt
+      - build/reports/signing-diagnostic-found-bundles.stderr
+      - build/reports/signing-diagnostic-valid-bundles.txt
+      - build/reports/signing-diagnostic-entitlements.log
     publishing:
       email:
         recipients:
@@ -919,6 +1378,14 @@ workflows:
         - pattern: codex/athlete-device-action-swift-deno-fixtures
           include: true
           source: true
+        # Athlete Connection V1 device-authorization session contract
+        # (§3.3, §8 step 4): this branch additionally generates and
+        # verifies a SECOND, genuine-random-key production-direction
+        # fixture (see sign_production_direction.swift's own header) —
+        # the evidence gate §2.2 explicitly leaves open.
+        - pattern: claude/athlete-device-authorization-session-client
+          include: true
+          source: true
       cancel_previous_builds: true
     scripts:
       - name: Sign all four device actions using actual Mac CryptoKit
@@ -932,6 +1399,9 @@ workflows:
           python3 Scripts/DeviceActions/check_pin.py
           xcrun swift Scripts/DeviceActions/sign.swift build/device-action-evidence/swift-fixtures.json \
             | tee build/device-action-evidence/swift-signing.log
+          xcrun swift Scripts/DeviceActions/sign_production_direction.swift \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/swift-signing-production-direction.log
       - name: Verify with unchanged production Deno modules from backend number 12
         script: |
           set -euo pipefail
@@ -944,5 +1414,13 @@ workflows:
           cp Tests/Fixtures/DeviceActions/backend-pin.json build/device-action-evidence/
           shasum -a 256 build/device-action-evidence/swift-fixtures.json \
             > build/device-action-evidence/fixture-sha256.txt
+          # Same unchanged verifier, second fixture — the
+          # genuine-random-key production-direction evidence (see the
+          # signing step above).
+          "$DENO_INSTALL/bin/deno" run --no-config --allow-read Scripts/DeviceActions/verify.ts \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/deno-verification-production-direction.log
+          shasum -a 256 build/device-action-evidence/swift-fixtures-production-direction.json \
+            > build/device-action-evidence/fixture-production-direction-sha256.txt
     artifacts:
       - build/device-action-evidence/**

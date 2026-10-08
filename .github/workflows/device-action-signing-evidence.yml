@@ -1,7 +1,16 @@
 name: Device action Swift signing evidence
 on:
   push:
-    branches: [codex/athlete-device-action-swift-deno-fixtures]
+    branches:
+      - codex/athlete-device-action-swift-deno-fixtures
+      # Athlete Connection V1 device-authorization session contract
+      # (§3.3, §8 step 4): this branch additionally generates and
+      # verifies a SECOND, genuine-random-key production-direction
+      # fixture (see sign_production_direction.swift's own header) —
+      # the evidence gate §2.2 explicitly leaves open ("Swift
+      # CryptoKit signs ... Unproven by any cross-implementation
+      # fixture or device run that exists today").
+      - claude/athlete-device-authorization-session-client
   workflow_dispatch:
 permissions:
   contents: read
@@ -32,6 +41,20 @@ jobs:
           cp Tests/Fixtures/DeviceActions/backend-pin.json build/device-action-evidence/
           shasum -a 256 build/device-action-evidence/swift-fixtures.json \
             > build/device-action-evidence/fixture-sha256.txt
+          # Athlete Connection V1 device-authorization session contract
+          # (§3.3, §8 step 4): a SECOND fixture, signed with a
+          # genuinely fresh, random production-direction key (never a
+          # fixed test scalar — see sign_production_direction.swift's
+          # own header), verified by the SAME unmodified Deno verifier.
+          # Closes the evidence gate §2.2 explicitly leaves open.
+          xcrun swift Scripts/DeviceActions/sign_production_direction.swift \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/swift-signing-production-direction.log
+          "$DENO_INSTALL/bin/deno" run --no-config --allow-read Scripts/DeviceActions/verify.ts \
+            build/device-action-evidence/swift-fixtures-production-direction.json \
+            | tee build/device-action-evidence/deno-verification-production-direction.log
+          shasum -a 256 build/device-action-evidence/swift-fixtures-production-direction.json \
+            > build/device-action-evidence/fixture-production-direction-sha256.txt
       - name: Preserve actual execution evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

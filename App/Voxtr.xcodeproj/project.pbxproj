@@ -69,6 +69,9 @@
 		91EF3F6C28CBBCB3F9D0A703 /* AthleteConnectionLifecycleServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83B895A2CFB1AF1260D1F6A5 /* AthleteConnectionLifecycleServiceTests.swift */; };
 		639E328E351F02A15ED1FB69 /* AthleteRuntimeSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A328277E90BEB1D6B08A62 /* AthleteRuntimeSessionTests.swift */; };
 		34CB317C838A46D255259DF2 /* AthleteConnectionOwnerHandoffServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */; };
+		752B9CC192C9F44AECB39CA8 /* AthleteDeviceAuthorizationSessionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */; };
+		06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */; };
+		F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
 		8BC3E5463B1C845D450B8E7C /* VoxtrCoreContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 5C8CDD4516BA969E81DD10A3 /* VoxtrCoreContracts */; };
 		3187B3981D47B81AB651AF5E /* VoxtrCoreReferenceData in Frameworks */ = {isa = PBXBuildFile; productRef = 598B70BAF0A7BC9D43863F2F /* VoxtrCoreReferenceData */; };
@@ -149,6 +152,9 @@
 		83B895A2CFB1AF1260D1F6A5 /* AthleteConnectionLifecycleServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteConnectionLifecycleServiceTests.swift; sourceTree = "<group>"; };
 		74A328277E90BEB1D6B08A62 /* AthleteRuntimeSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteRuntimeSessionTests.swift; sourceTree = "<group>"; };
 		C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteConnectionOwnerHandoffServiceTests.swift; sourceTree = "<group>"; };
+		90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionServiceTests.swift; sourceTree = "<group>"; };
+		E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionManagerTests.swift; sourceTree = "<group>"; };
+		B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -289,6 +295,9 @@
 				83B895A2CFB1AF1260D1F6A5 /* AthleteConnectionLifecycleServiceTests.swift */,
 				74A328277E90BEB1D6B08A62 /* AthleteRuntimeSessionTests.swift */,
 				C218FEE0B4E01DC30F070D1B /* AthleteConnectionOwnerHandoffServiceTests.swift */,
+				90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */,
+				E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */,
+				B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */,
 			);
 			name = VoxtrSprint0Tests;
 			path = ../Tests/VoxtrSprint0Tests;
@@ -358,6 +367,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				6774161298B1C5C9A0F4AD11 /* PBXTargetDependency */,
 			);
 			name = VoxtrSprint0Tests;
 			packageProductDependencies = (
@@ -380,6 +390,24 @@
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		EEBD6708E4EC05E40DD4F974 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 58BB600684DA1681D944C39C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 711A94247F64BEEBA7E79FC7;
+			remoteInfo = AthleteApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		6774161298B1C5C9A0F4AD11 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 711A94247F64BEEBA7E79FC7 /* AthleteApp */;
+			targetProxy = EEBD6708E4EC05E40DD4F974 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		58BB600684DA1681D944C39C /* Project object */ = {
@@ -519,6 +547,9 @@
 				91EF3F6C28CBBCB3F9D0A703 /* AthleteConnectionLifecycleServiceTests.swift in Sources */,
 				639E328E351F02A15ED1FB69 /* AthleteRuntimeSessionTests.swift in Sources */,
 				34CB317C838A46D255259DF2 /* AthleteConnectionOwnerHandoffServiceTests.swift in Sources */,
+				752B9CC192C9F44AECB39CA8 /* AthleteDeviceAuthorizationSessionServiceTests.swift in Sources */,
+				06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */,
+				F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -684,6 +715,8 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AthleteApp.app/AthleteApp";
+				BUNDLE_LOADER = "$(TEST_HOST)";
 			};
 			name = Debug;
 		};
@@ -703,6 +736,8 @@
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/AthleteApp.app/AthleteApp";
+				BUNDLE_LOADER = "$(TEST_HOST)";
 			};
 			name = Release;
 		};

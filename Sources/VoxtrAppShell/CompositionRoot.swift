@@ -177,6 +177,29 @@ public final class CompositionRoot {
         )
         container.register(AthleteDeviceAuthorizationService.self) { athleteDeviceAuthorizationService }
 
+        // Athlete Connection V1 device-authorization session contract
+        // (§3, §8 step 4): registration only, same as every other
+        // Slice D/backend-device-authorization service above — no
+        // network call happens here, and nothing here issues or
+        // renews a session. Reuses the SAME `parentAuthenticationConfiguration`/
+        // `athleteDeviceAuthorizationGatewayConfiguration` the claim-
+        // proof service above was just given — this is that service's
+        // SIBLING for `device-session-challenge`/`device-session-submit`,
+        // never a replacement of its connection-request/claim-proof
+        // responsibilities (see `AthleteDeviceAuthorizationSessionService`'s
+        // own doc comment). Scoped to `session_issue`/`session_renew`
+        // only; the domain hydration adapter that will eventually call
+        // `hydration_get`/`hydration_ack` is a separate, later task.
+        let athleteDeviceAuthorizationSessionService = AthleteDeviceAuthorizationSessionService(
+            configuration: parentAuthenticationConfiguration,
+            gatewayConfiguration: athleteDeviceAuthorizationGatewayConfiguration
+        )
+        container.register(AthleteDeviceAuthorizationSessionService.self) { athleteDeviceAuthorizationSessionService }
+        let athleteDeviceAuthorizationSessionManager = AthleteDeviceAuthorizationSessionManager(
+            service: athleteDeviceAuthorizationSessionService
+        )
+        container.register(AthleteDeviceAuthorizationSessionManager.self) { athleteDeviceAuthorizationSessionManager }
+
         let modelContainer = try persistence.makeModelContainer()
 
         // Sport / Activity Identity domain foundation, Part 1/2:
