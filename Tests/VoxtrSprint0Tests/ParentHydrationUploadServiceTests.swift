@@ -31,6 +31,12 @@ private final class NoOpSessionStore: ParentSessionStoring, @unchecked Sendable 
     func deleteToken() {}
 }
 
+// `.serialized`: matches `AthleteDeviceAuthorizationInvitationCoordinatorTests.swift` and
+// `ParentAuthenticationServiceTests.swift` — each test builds its own in-memory
+// `ModelContainer` via `InMemoryPersistenceController`, and concurrent construction of
+// multiple SwiftData containers from parallel test execution is a known source of
+// nondeterministic failures/hangs, not just a data race on shared fixture state.
+@Suite(.serialized)
 @MainActor
 struct ParentHydrationUploadServiceTests {
 
