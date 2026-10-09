@@ -987,7 +987,7 @@ struct ParentAuthenticationServiceTests {
         sessionStore.currentToken = "new-token"
 
         // The suspended call's 401 response for "old-token" now arrives.
-        gatedTransport.release()
+        await gatedTransport.release()
         await #expect(throws: ParentAuthenticationError.sessionInvalid) {
             try await call.value
         }
