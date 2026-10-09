@@ -169,16 +169,38 @@ struct ParentHydrationUploadServiceTests {
 
     // MARK: - Workspace isolation (the actual fix this task's brief asked for)
 
-    @Test("resolveProjection() for workspace A never resolves workspace B's owner/Parent — WORKSPACE-SCOPED, unlike AthleteConnectionOwnerHandoffService's own bare first-match lookups")
+    /// Every family created via `createParentAndWorkspace`/`createFamily`
+    /// starts with `accountId: .pending` on BOTH the `ParentProfile` and
+    /// its owner `WorkspaceParticipant` (see `ParentWorkspaceRepository`'s
+    /// own doc comment: "CloudKit account resolution doesn't exist yet") —
+    /// a single, non-unique sentinel shared by every local family until a
+    /// real SIWA/CloudKit account is linked. `resolveProjection`'s
+    /// accountId-based Parent lookup (the same relationship
+    /// `FamilyMembership.derive(...)` already treats as canonical) is
+    /// only MEANINGFULLY scoped once accounts are actually distinct —
+    /// this helper simulates that post-linking state directly, rather
+    /// than inventing a new, not-yet-real identity mechanism.
+    private static func linkDistinctAccount(_ accountId: AccountId, parent: ParentProfile, ownerParticipant: WorkspaceParticipant, container: ModelContainer) throws {
+        parent.accountId = accountId.rawValue
+        ownerParticipant.accountId = accountId.rawValue
+        try container.mainContext.save()
+    }
+
+    @Test("resolveProjection() for workspace A never resolves workspace B's owner/Parent — WORKSPACE-SCOPED, unlike AthleteConnectionOwnerHandoffService's own bare first-match lookups — once each family has its own DISTINCT linked account")
     func resolveProjectionIsScopedToTheExactWorkspaceNeverASiblingOne() throws {
         let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
         let container = try controller.makeModelContainer()
 
         // TWO independent families/workspaces in the SAME local store —
         // the exact shape a bare `allParticipants.first(where: role ==
-        // .workspaceOwner)` / `parents.first` would get wrong.
+        // .workspaceOwner)` / `parents.first` would get wrong. Each is
+        // given its OWN distinct linked account (see `linkDistinctAccount`
+        // doc comment) — the realistic post-SIWA-linking state this
+        // isolation guarantee is actually meant to hold for.
         let familyA = try Self.makeFixture(container: container, parentGivenName: "Kari", athleteGivenName: "Jonas")
         let familyB = try Self.makeFixture(container: container, parentGivenName: "Per", athleteGivenName: "Nora")
+        try Self.linkDistinctAccount(AccountId(rawValue: "account-a"), parent: familyA.parent, ownerParticipant: familyA.ownerParticipant, container: container)
+        try Self.linkDistinctAccount(AccountId(rawValue: "account-b"), parent: familyB.parent, ownerParticipant: familyB.ownerParticipant, container: container)
 
         let payloadForA = try familyA.service.resolveProjection(
             workspaceId: familyA.workspace.workspaceId,
@@ -208,6 +230,60 @@ struct ParentHydrationUploadServiceTests {
                 workspaceId: familyB.workspace.workspaceId,
                 intendedParticipantId: familyA.athleteParticipant.id,
                 intendedAthleteId: familyA.athlete.athleteId
+            )
+        }
+    }
+
+    @Test("resolveProjection() fails closed — never guesses — when two local ParentProfiles genuinely share the same accountId (the real pre-SIWA-linking default): review finding, do not remove this rejection to make isolation 'pass'")
+    func resolveProjectionFailsClosedWhenTwoParentProfilesGenuinelyShareTheSameAccountId() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+
+        // Deliberately NOT calling `linkDistinctAccount` here — both
+        // families are left at their real default (`accountId: .pending`,
+        // shared, non-unique). This is the actual current-day local state
+        // for any two families before CloudKit account linking exists;
+        // resolving "the" Parent for workspace A by accountId alone is
+        // genuinely ambiguous in this state, and must be rejected rather
+        // than silently picking family A's own profile because it happens
+        // to be `.first`.
+        let familyA = try Self.makeFixture(container: container, parentGivenName: "Kari", athleteGivenName: "Jonas")
+        _ = try Self.makeFixture(container: container, parentGivenName: "Per", athleteGivenName: "Nora")
+
+        #expect(throws: ParentHydrationProjectionError.self) {
+            try familyA.service.resolveProjection(
+                workspaceId: familyA.workspace.workspaceId,
+                intendedParticipantId: familyA.athleteParticipant.id,
+                intendedAthleteId: familyA.athlete.athleteId
+            )
+        }
+    }
+
+    @Test("resolveProjection() rejects an intended participant in workspace A that links to an AthleteProfile actually belonging to workspace B — never uploads the wrong workspace's athlete fields")
+    func resolveProjectionRejectsAthleteProfileWorkspaceMismatchAcrossWorkspaces() throws {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+
+        let familyA = try Self.makeFixture(container: container, parentGivenName: "Kari", athleteGivenName: "Jonas")
+        let familyB = try Self.makeFixture(container: container, parentGivenName: "Per", athleteGivenName: "Nora")
+
+        // `createInvitedAthleteParticipant` performs no cross-check
+        // between `workspaceId` and `linkedAthleteId` — nothing stops a
+        // caller from constructing exactly this inconsistent combination.
+        // A participant scoped to workspace A, but linked to workspace
+        // B's own athlete profile.
+        let parentWorkspaceRepository = familyA.parentWorkspaceRepository
+        let crossLinkedParticipant = try parentWorkspaceRepository.createInvitedAthleteParticipant(
+            workspaceId: familyA.workspace.workspaceId,
+            linkedAthleteId: familyB.athlete.athleteId,
+            invitedBy: ActorId(rawValue: familyA.ownerParticipant.id)
+        )
+
+        #expect(throws: ParentHydrationProjectionError.self) {
+            try familyA.service.resolveProjection(
+                workspaceId: familyA.workspace.workspaceId,
+                intendedParticipantId: crossLinkedParticipant.id,
+                intendedAthleteId: familyB.athlete.athleteId
             )
         }
     }

@@ -421,7 +421,7 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     private func hydrationUploadedView(outcome: HydrationUploadOutcome) -> some View {
         VStack(spacing: 16) {
             switch outcome {
-            case .staged, .uploaded, .uploadRejected:
+            case .staged, .uploaded:
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(.green)
@@ -430,13 +430,37 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
                 Text("Ask \(athleteDisplayName) to finish connecting on their device.")
                     .foregroundStyle(VoxtrColor.textSecondary)
                     .multilineTextAlignment(.center)
-            case .alreadyCompleted:
+            case .uploadRejected:
+                // Review round: the backend rejects ANY retry against an
+                // already-associated upload outright, before comparing
+                // payload bytes (see `HydrationUploadOutcome`'s own doc
+                // comment) — this attempt's own details were never
+                // verified or delivered, even though a PRIOR attempt for
+                // this same invitation likely already succeeded. Kept
+                // distinct from `.staged`/`.uploaded`'s "Connection
+                // details sent" copy, which would falsely claim THIS
+                // attempt's bytes were accepted.
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(.green)
-                Text("Already connected")
+                Text("Connection details already recorded")
                     .font(VoxtrTypography.cardTitle)
-                Text("\(athleteDisplayName) has already finished connecting using these details.")
+                Text("A connection attempt for this invitation was already received. These details weren't sent again.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .alreadyCompleted:
+                // Review round: the backend's permanent `acked` marker
+                // proves hydration completed at some point — never that
+                // the device is CURRENTLY authorized or connected (a
+                // later-revoked grant can still produce this outcome).
+                // Copy deliberately avoids any present-tense "connected"
+                // claim.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.green)
+                Text("Already received")
+                    .font(VoxtrTypography.cardTitle)
+                Text("\(athleteDisplayName)'s device already used these connection details to finish this step.")
                     .foregroundStyle(VoxtrColor.textSecondary)
                     .multilineTextAlignment(.center)
             case .deadlinePassed:

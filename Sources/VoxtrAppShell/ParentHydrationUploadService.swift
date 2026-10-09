@@ -158,6 +158,18 @@ public final class ParentHydrationUploadService {
         } catch {
             throw ParentHydrationProjectionError.athleteProfileLookupFailed(error)
         }
+        // `createInvitedAthleteParticipant` permits an intended participant
+        // to link to ANY existing `AthleteId`, with no check that the
+        // linked athlete actually belongs to this participant's own
+        // workspace. Without this guard, a participant in workspace A
+        // linked (whether by data error or a future caller bug) to an
+        // athlete profile that actually belongs to workspace B would pass
+        // every check above and upload B's profile fields under A's
+        // invitation — the backend validates the invitation's opaque IDs,
+        // not this local graph relationship, so this must be caught here.
+        guard athlete.workspaceId == workspaceId.rawValue else {
+            throw ParentHydrationProjectionError.athleteProfileWorkspaceMismatch
+        }
 
         return AthleteConnectionInvitationCloudRecordPayload(
             workspaceId: workspaceId.rawValue,
@@ -228,4 +240,8 @@ public enum ParentHydrationProjectionError: Error {
     case workspaceNotFound
     case athleteProfileLookupFailed(Error)
     case athleteProfileNotFound
+    /// The linked athlete's own `workspaceId` does not match the
+    /// workspace this resolution was scoped to — see this case's call
+    /// site for why this cannot be left to the backend alone.
+    case athleteProfileWorkspaceMismatch
 }

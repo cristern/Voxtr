@@ -617,6 +617,93 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         #expect(fixture.transport.sentPaths == ["connection-request-decide", "hydration-upload", "hydration-upload"])
     }
 
+    @Test("stop() clears pendingOperation — a reauthentication-completion callback queued before stop() must never resurrect a stale upload the Parent already walked away from (review round)")
+    func stopClearsPendingOperationSoAQueuedReauthenticationRetryCannotResurrectAStaleUpload() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+
+        #expect(fixture.coordinator.state == .authenticationRequired(.reauthenticationRequired))
+        #expect(fixture.transport.sentPaths == ["connection-request-decide", "hydration-upload"])
+
+        // The Parent dismisses the WHOLE screen (e.g. taps "Done" on the
+        // outer toolbar) before a queued `onReauthenticated` callback —
+        // fired independently by the nested reauthentication sheet — ever
+        // runs. `stop()` is exactly the View's own `.onDisappear`/
+        // dismissal hook.
+        fixture.coordinator.stop()
+        let stateAfterStop = fixture.coordinator.state
+
+        // No stub is enqueued for a second hydration-upload call. Before
+        // this fix, `retryAfterReauthentication()` would still resume the
+        // stale `.uploadHydration` pending operation and attempt a real
+        // network call for a request the Parent already walked away
+        // from; after the fix, `pendingOperation` was cleared by `stop()`
+        // and this call is a complete no-op.
+        await fixture.coordinator.retryAfterReauthentication()
+
+        #expect(fixture.coordinator.state == stateAfterStop, "retryAfterReauthentication() after stop() must be a complete no-op")
+        #expect(fixture.transport.sentPaths == ["connection-request-decide", "hydration-upload"], "stop() must have cleared pendingOperation — no second hydration-upload call")
+    }
+
+    @Test("start() clears any stale pendingOperation left by a prior failed upload on this SAME coordinator instance — a brand-new operation must never resume an unrelated stale one (review round)")
+    func startClearsStalePendingOperationFromAPriorUpload() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 401, json: ["error": "reauthentication_required"])
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+        #expect(fixture.coordinator.state == .authenticationRequired(.reauthenticationRequired))
+
+        // A brand-new start() on the SAME coordinator instance — never
+        // happens from this exact View today (a fresh coordinator is
+        // created per presentation), but the coordinator's own API must
+        // not rely on that for correctness.
+        fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
+            "outcome": "created",
+            "invitation_id": UUID().uuidString,
+            "expires_at": "2026-10-01T00:15:00Z",
+        ])
+        fixture.transport.enqueue(path: "connection-request-list", statusCode: 200, json: ["outcome": "ok", "requests": [] as [Any]])
+        await fixture.coordinator.start(forAthlete: fixture.athleteId, workspaceId: fixture.workspaceId, invitedBy: fixture.invitedBy)
+        guard case .awaitingRequests(let newInvitation, _) = fixture.coordinator.state else {
+            Issue.record("expected .awaitingRequests after the new start(), got \(fixture.coordinator.state)")
+            return
+        }
+
+        // Counting "hydration-upload" occurrences specifically, rather
+        // than asserting `sentPaths` is unchanged outright — the new
+        // invitation's own background poll task (spawned by `start()`)
+        // may legitimately call `connection-request-list` at some
+        // unpredictable point relative to this `await`, which is
+        // unrelated to what this test actually guards against.
+        let hydrationUploadCallsBeforeRetry = fixture.transport.sentPaths.filter { $0 == "hydration-upload" }.count
+        #expect(hydrationUploadCallsBeforeRetry == 1)
+
+        await fixture.coordinator.retryAfterReauthentication()
+
+        #expect(fixture.coordinator.state == .awaitingRequests(invitation: newInvitation, requests: []), "the stale upload's pendingOperation must never resurface under the new invitation")
+        let hydrationUploadCallsAfterRetry = fixture.transport.sentPaths.filter { $0 == "hydration-upload" }.count
+        #expect(hydrationUploadCallsAfterRetry == hydrationUploadCallsBeforeRetry, "no further hydration-upload calls — start() must have cleared the stale pendingOperation")
+    }
+
     @Test("A late hydration-upload response arriving after stop() must never overwrite state — cancellation at the upload boundary, same guarantee decide()/polling already have")
     func stopDuringUploadDiscardsLateHydrationUploadResponse() async throws {
         let fixture = try Self.makeFixture()

@@ -170,6 +170,12 @@ public final class AthleteDeviceAuthorizationInvitationCoordinator {
         stopPolling()
         generation += 1
         let myGeneration = generation
+        // Cleared synchronously, before any `await` below — a stale
+        // pending operation from a PRIOR invitation/decision/upload on
+        // this same coordinator instance must never be resumable once a
+        // brand-new operation has begun (same rationale as `stop()`'s
+        // own clear).
+        pendingOperation = nil
         state = .preparing
 
         let invitation: AthleteDeviceAuthorizationInvitation
@@ -257,9 +263,22 @@ public final class AthleteDeviceAuthorizationInvitationCoordinator {
     /// via `.onDisappear`/dismissal) is responsible for calling this
     /// when the screen goes away, so no orphaned poll loop keeps running
     /// after the Parent has dismissed the QR screen.
+    ///
+    /// Also clears `pendingOperation` (review round: a dismissed/stopped
+    /// flow must never be resumable). Without this, a reauthentication
+    /// callback already queued before `stop()` ran (`onReauthenticated`
+    /// → `Task { await coordinator.retryAfterReauthentication() }`) could
+    /// still fire AFTER the Parent dismissed this entire screen, mint a
+    /// fresh generation (nothing else bumps it once `stop()` has run),
+    /// and resurrect — as a real, uncancelled network upload — an
+    /// approval the Parent already walked away from. Since a fresh
+    /// coordinator is created on every new presentation (see this type's
+    /// own call site), there is no legitimate case where a pending
+    /// operation needs to survive a `stop()` on the SAME instance.
     public func stop() {
         stopPolling()
         generation += 1
+        pendingOperation = nil
     }
 
     private func stopPolling() {

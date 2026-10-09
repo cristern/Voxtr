@@ -949,6 +949,57 @@ struct ParentAuthenticationServiceTests {
         }
     }
 
+    @Test("uploadHydration() receiving a delayed session_invalid for an OLD token must never delete a DIFFERENT, freshly-authenticated token already stored by the time the response arrives (review round)")
+    func uploadHydrationDelayedRejectionNeverErasesAFreshlyAuthenticatedToken() async throws {
+        let sessionStore = FakeParentSessionStore()
+        sessionStore.currentToken = "old-token"
+        let rejectionBody = try! JSONSerialization.data(withJSONObject: ["error": "session_invalid"] as [String: Any])
+        let gatedTransport = SuspendableFakeTransport(gatedPath: "hydration-upload", statusCode: 401, body: rejectionBody)
+        let service = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: gatedTransport,
+            sessionStore: sessionStore
+        )
+
+        let call = Task {
+            try await service.uploadHydration(
+                connectionRequestId: Self.connectionRequestId,
+                workspaceId: Self.workspaceId,
+                intendedParticipantId: Self.participantId,
+                intendedAthleteId: Self.athleteId,
+                parentId: Self.parentId,
+                parentGivenName: "Kari",
+                workspaceDisplayName: "Hansen Family",
+                ownerParticipantId: Self.ownerParticipantId,
+                athleteGivenName: "Jonas",
+                athleteBirthDateIso: "2012-04-10",
+                athleteTimeZoneId: "Europe/Oslo",
+                athleteDevelopmentStage: "parentLed"
+            )
+        }
+        // This call's own network request is now suspended in flight,
+        // having already captured "old-token" into its request header.
+        await gatedTransport.waitUntilStarted()
+
+        // Independently of this call, the Parent signs out and completes
+        // a brand-new SIWA handshake while the above is still suspended —
+        // a genuinely DIFFERENT, valid token is now stored.
+        sessionStore.currentToken = "new-token"
+
+        // The suspended call's 401 response for "old-token" now arrives.
+        gatedTransport.release()
+        await #expect(throws: ParentAuthenticationError.sessionInvalid) {
+            try await call.value
+        }
+
+        // The currently-stored "new-token" must survive — deleting it
+        // here would sign the Parent back out of a session they only
+        // just established, over a rejection that was never about that
+        // token at all.
+        #expect(sessionStore.currentToken == "new-token")
+        #expect(sessionStore.deleteCallCount == 0)
+    }
+
     @Test("uploadHydration() with no stored session throws .notSignedIn locally, without sending any network request")
     func uploadHydrationWithNoSessionThrowsNotSignedInWithoutNetworkCall() async {
         let (service, transport, _) = makeService()

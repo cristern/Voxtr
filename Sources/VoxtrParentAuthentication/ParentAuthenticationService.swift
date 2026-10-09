@@ -470,17 +470,28 @@ public final class ParentAuthenticationService {
 
         if response.statusCode == 401 {
             let decoded = try? decode(ErrorResponseBody.self, from: data)
+            // Only clear the stored token if it is STILL the exact token
+            // this call started with. This call's own `token` was
+            // captured before the network `await` above; if the Parent
+            // signed out and completed a brand-new SIWA handshake while
+            // this call was suspended, a DIFFERENT, valid token may now
+            // be stored — deleting it here would destroy a session that
+            // has nothing to do with this stale rejection, incorrectly
+            // signing the Parent out of a session they only just
+            // established (review finding: a delayed 401 for an old
+            // token must never erase a freshly-authenticated one).
+            let tokenStillCurrent = sessionStore.loadToken() == token
             switch decoded?.error {
             case "session_invalid":
-                sessionStore.deleteToken()
+                if tokenStillCurrent { sessionStore.deleteToken() }
                 throw ParentAuthenticationError.sessionInvalid
             case "session_expired":
-                sessionStore.deleteToken()
+                if tokenStillCurrent { sessionStore.deleteToken() }
                 throw ParentAuthenticationError.sessionExpired
             case "reauthentication_required":
                 throw ParentAuthenticationError.reauthenticationRequired
             default:
-                sessionStore.deleteToken()
+                if tokenStillCurrent { sessionStore.deleteToken() }
                 throw ParentAuthenticationError.sessionInvalid
             }
         }
