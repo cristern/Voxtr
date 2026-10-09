@@ -147,6 +147,24 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
 
     private static let baseURL = URL(string: "https://parent-auth.invalid/functions/v1")!
 
+    /// A safely future ISO 8601 timestamp for "not yet expired" invitation
+    /// fixtures, computed relative to the real clock at test-run time —
+    /// never a fixed calendar date. CI diagnosis (ChatGPT review,
+    /// comment 6082720625) found that this file's fixtures previously
+    /// hard-coded `"2026-10-01T00:15:00Z"`, which drifted into the past
+    /// as real time advanced past that date: production's own
+    /// `beginPolling`/`invitation.expiresAt < Date()` check then ended
+    /// polling locally before ever reaching the network, leaving
+    /// `stopCancelsPollingSoALateResponseIsDiscarded`'s own
+    /// `await gate.waitUntilEntered()` unbounded — the actual cause of
+    /// the CI timeout. The deliberately-expired fixture in
+    /// `pollingEndsWhenInvitationExpiresWithoutAnyFurtherNetworkCall`
+    /// (a fixed past date, `"2000-01-01T00:00:00Z"`) is intentionally
+    /// NOT this helper — it must stay expired.
+    private static func futureExpiresAtISO8601() -> String {
+        ISO8601DateFormatter().string(from: Date().addingTimeInterval(900))
+    }
+
     private struct Fixture {
         let container: ModelContainer
         let coordinator: AthleteDeviceAuthorizationInvitationCoordinator
@@ -272,7 +290,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
             "outcome": "created",
             "invitation_id": invitationId.uuidString,
-            "expires_at": "2026-10-01T00:15:00Z",
+            "expires_at": Self.futureExpiresAtISO8601(),
         ])
         fixture.transport.enqueue(path: "connection-request-list", statusCode: 200, json: [
             "outcome": "ok",
@@ -318,7 +336,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
             "outcome": "created",
             "invitation_id": invitationId.uuidString,
-            "expires_at": "2026-10-01T00:15:00Z",
+            "expires_at": Self.futureExpiresAtISO8601(),
         ])
 
         await fixture.coordinator.retryAfterReauthentication()
@@ -400,7 +418,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
             "outcome": "created",
             "invitation_id": invitationId.uuidString,
-            "expires_at": "2026-10-01T00:15:00Z",
+            "expires_at": Self.futureExpiresAtISO8601(),
         ])
         fixture.transport.enqueue(path: "connection-request-list", statusCode: 401, json: ["error": "reauthentication_required"])
 
@@ -679,7 +697,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
             "outcome": "created",
             "invitation_id": UUID().uuidString,
-            "expires_at": "2026-10-01T00:15:00Z",
+            "expires_at": Self.futureExpiresAtISO8601(),
         ])
         fixture.transport.enqueue(path: "connection-request-list", statusCode: 200, json: ["outcome": "ok", "requests": [] as [Any]])
         await fixture.coordinator.start(forAthlete: fixture.athleteId, workspaceId: fixture.workspaceId, invitedBy: fixture.invitedBy)
@@ -869,7 +887,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         fixture.transport.enqueue(path: "connection-invitation-create", statusCode: 200, json: [
             "outcome": "created",
             "invitation_id": UUID().uuidString,
-            "expires_at": "2026-10-01T00:15:00Z",
+            "expires_at": Self.futureExpiresAtISO8601(),
         ])
         let gatedTransport = GatedTransport(gate: gate, gatedPath: "connection-request-list", fallback: fixture.transport)
         let sessionStore = FakeSessionStore()
@@ -930,7 +948,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             gate: gate,
             gatedPath: "connection-invitation-create",
             fallback: fixture.transport,
-            gatedResponseJSON: ["outcome": "created", "invitation_id": UUID().uuidString, "expires_at": "2026-10-01T00:15:00Z"]
+            gatedResponseJSON: ["outcome": "created", "invitation_id": UUID().uuidString, "expires_at": Self.futureExpiresAtISO8601()]
         )
         let sessionStore = FakeSessionStore()
         sessionStore.currentToken = "live-session-token"
