@@ -52,7 +52,8 @@ public struct RootView: View {
                 athleteConnectionOwnerHandoffService: root.container.resolve(AthleteConnectionOwnerHandoffService.self),
                 parentAuthenticationService: root.container.resolve(ParentAuthenticationService.self),
                 enrollableWorkspaces: makeEnrollableWorkspaces(),
-                athleteDeviceAuthorizationInvitationService: root.container.resolve(AthleteDeviceAuthorizationInvitationService.self)
+                athleteDeviceAuthorizationInvitationService: root.container.resolve(AthleteDeviceAuthorizationInvitationService.self),
+                parentHydrationUploadService: root.container.resolve(ParentHydrationUploadService.self)
             )
         case .inconsistentGraph(let reason):
             InconsistentFamilyView(reason: reason)

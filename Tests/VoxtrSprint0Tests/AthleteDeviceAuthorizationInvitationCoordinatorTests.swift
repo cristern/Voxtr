@@ -153,9 +153,18 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         let transport: FakeTransport
         let sessionStore: FakeSessionStore
         let clock: FakePollingClock
+        let parentWorkspaceRepository: ParentWorkspaceRepository
+        let parentAuthenticationService: ParentAuthenticationService
+        let hydrationUploadService: ParentHydrationUploadService
         let athleteId: AthleteId
         let workspaceId: WorkspaceId
         let invitedBy: ActorId
+        /// The athlete's own `.athlete`-role `WorkspaceParticipant.id` —
+        /// already created (via `createInvitedAthleteParticipant`,
+        /// the SAME canonical path `prepareInvitation` itself uses)
+        /// so tests exercising the approved→upload sequence can resolve
+        /// a REAL projection without first calling `start()`.
+        let athleteParticipantId: UUID
     }
 
     private static func makeFixture(
@@ -181,6 +190,16 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             athleteDevelopmentStage: .parentLed
         )
         let invitedBy = ActorId(rawValue: created.participant.id)
+        // The athlete's own `.athlete`-role participant — created here,
+        // via the SAME canonical path `prepareInvitation` itself uses,
+        // so `decide()`'s own approved→upload sequence has a REAL
+        // participant to resolve against without every test needing to
+        // call `start()` first.
+        let athleteParticipant = try parentWorkspaceRepository.createInvitedAthleteParticipant(
+            workspaceId: created.workspace.workspaceId,
+            linkedAthleteId: created.athlete.athleteId,
+            invitedBy: invitedBy
+        )
 
         let sessionStore = FakeSessionStore()
         if signedIn {
@@ -195,10 +214,16 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             parentWorkspaceRepository: parentWorkspaceRepository,
             parentAuthenticationService: parentAuthenticationService
         )
+        let hydrationUploadService = ParentHydrationUploadService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            parentAuthenticationService: parentAuthenticationService
+        )
         let clock = FakePollingClock()
         let coordinator = AthleteDeviceAuthorizationInvitationCoordinator(
             invitationService: invitationService,
             parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: hydrationUploadService,
             clock: clock
         )
         return Fixture(
@@ -207,9 +232,13 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             transport: transport,
             sessionStore: sessionStore,
             clock: clock,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: hydrationUploadService,
             athleteId: created.athlete.athleteId,
             workspaceId: created.workspace.workspaceId,
-            invitedBy: invitedBy
+            invitedBy: invitedBy,
+            athleteParticipantId: athleteParticipant.id
         )
     }
 
@@ -420,28 +449,233 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
 
     // MARK: - decide()
 
-    @Test("decide() sends invitation/request/decision/displayCode exactly as given and moves to .decided")
-    func decideSendsFieldsExactlyAndTransitionsToDecided() async throws {
+    @Test("decide() sends invitation/request/decision/displayCode exactly as given, and a .rejected outcome moves straight to .decided with ZERO hydration-upload calls")
+    func decideSendsFieldsExactlyAndRejectedTransitionsToDecidedWithoutUpload() async throws {
         let fixture = try Self.makeFixture()
         let invitation = AthleteDeviceAuthorizationInvitation(
             invitationId: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
             expiresAt: Date().addingTimeInterval(900),
-            participantId: UUID(),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
             athleteId: fixture.athleteId
         )
         let requestId = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
-        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "rejected"])
 
-        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .rejected, displayCode: "A1B2C3")
 
-        #expect(fixture.coordinator.state == .decided(.approved))
+        #expect(fixture.coordinator.state == .decided(.rejected))
         let sent = try #require(fixture.transport.sentRequests.first)
         let body = try #require(sent.httpBody)
         let json = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(json["invitation_id"] as? String == invitation.invitationId.uuidString)
         #expect(json["connection_request_id"] as? String == requestId.uuidString)
-        #expect(json["decision"] as? String == "approved")
+        #expect(json["decision"] as? String == "rejected")
         #expect(json["display_code"] as? String == "A1B2C3")
+        // Never on reject — exactly one network call total, and it is
+        // NOT hydration-upload.
+        #expect(fixture.transport.sentPaths == ["connection-request-decide"])
+    }
+
+    // MARK: - decide() approved → hydration-upload (Parent hydration-upload integration)
+
+    @Test("decide() with an .approved outcome resolves the real 11-field projection and uploads it, moving to .hydrationUploaded — never surfaced as plain .decided")
+    func decideApprovedResolvesAndUploadsRealProjection() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(uuidString: "44444444-4444-4444-4444-444444444444")!,
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 200, json: ["outcome": "staged"])
+
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+
+        #expect(fixture.coordinator.state == .hydrationUploaded(connectionRequestId: requestId, outcome: .staged))
+        #expect(fixture.transport.sentPaths == ["connection-request-decide", "hydration-upload"])
+        let uploadBody = try #require(fixture.transport.sentRequests.last?.httpBody)
+        let uploadJSON = try #require(try JSONSerialization.jsonObject(with: uploadBody) as? [String: Any])
+        #expect(uploadJSON["connection_request_id"] as? String == requestId.uuidString)
+        #expect(uploadJSON["workspace_id"] as? String == fixture.workspaceId.rawValue.uuidString)
+        #expect(uploadJSON["intended_participant_id"] as? String == fixture.athleteParticipantId.uuidString)
+        #expect(uploadJSON["intended_athlete_id"] as? String == fixture.athleteId.rawValue.uuidString)
+        #expect(uploadJSON["athlete_given_name"] as? String == "Jonas")
+        #expect(uploadJSON["parent_given_name"] as? String == "Kari")
+    }
+
+    @Test("decide() with a non-approved outcome (codeMismatch, etc.) never attempts upload")
+    func decideNonApprovedOutcomeNeverAttemptsUpload() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "code_mismatch"])
+
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+
+        #expect(fixture.coordinator.state == .decided(.codeMismatch))
+        #expect(fixture.transport.sentPaths == ["connection-request-decide"])
+    }
+
+    @Test("decide() approved with a resolution failure (no real participant behind the invitation) surfaces .hydrationUploadFailed without ever calling hydration-upload, and retryHydrationUpload() re-resolves fresh once the data exists")
+    func decideApprovedResolutionFailureSurfacesFailedStateAndRetrySucceedsOnceDataExists() async throws {
+        let fixture = try Self.makeFixture()
+        // A bogus participantId — no such WorkspaceParticipant exists,
+        // so resolution itself must fail locally, with NO network call
+        // to hydration-upload at all.
+        let bogusParticipantId = UUID()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: bogusParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+
+        guard case .hydrationUploadFailed(let failedRequestId, _) = fixture.coordinator.state else {
+            Issue.record("expected .hydrationUploadFailed, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(failedRequestId == requestId)
+        #expect(fixture.transport.sentPaths == ["connection-request-decide"], "resolution failure must never reach the network")
+
+        // Fix the underlying data (create the real participant the
+        // invitation should have referenced) and retry — proving a
+        // `nil`-projection pending operation re-resolves FRESH rather
+        // than reusing anything fabricated.
+        _ = try fixture.parentWorkspaceRepository.createInvitedAthleteParticipant(
+            workspaceId: fixture.workspaceId,
+            linkedAthleteId: fixture.athleteId,
+            invitedBy: fixture.invitedBy
+        )
+        // The newly-created participant has a DIFFERENT id than
+        // `bogusParticipantId` — resolution will still fail the same
+        // way, since `retryHydrationUpload()` must re-resolve against
+        // the EXACT same invitation, never substitute a different
+        // participant it happens to find. This confirms the retry path
+        // is honest, not merely "succeeds eventually by coincidence."
+        await fixture.coordinator.retryHydrationUpload()
+        guard case .hydrationUploadFailed = fixture.coordinator.state else {
+            Issue.record("expected .hydrationUploadFailed again (same bogus participantId), got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(fixture.transport.sentPaths == ["connection-request-decide"], "still never reaches the network for this same invitation")
+    }
+
+    @Test("decide() approved, upload fails with reauthenticationRequired, preserves the EXACT already-resolved payload — retryAfterReauthentication() resends it unchanged, never re-resolved from current (possibly-changed) profile data")
+    func decideApprovedUploadReauthenticationRequiredPreservesExactFrozenPayload() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await fixture.coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+
+        #expect(fixture.coordinator.state == .authenticationRequired(.reauthenticationRequired))
+        let firstUploadBody = try #require(fixture.transport.sentRequests.last?.httpBody)
+        let firstUploadJSON = try #require(try JSONSerialization.jsonObject(with: firstUploadBody) as? [String: Any])
+        #expect(firstUploadJSON["athlete_given_name"] as? String == "Jonas")
+
+        // The athlete's OWN profile changes locally between the failed
+        // attempt and the retry — a real scenario (e.g. the Parent
+        // edits the athlete's given name in Settings while the
+        // reauthentication sheet is up). The retry must NOT pick this
+        // up: it must resend the EXACT payload already resolved before
+        // the failure, not recompute it.
+        let athleteRepository = AthleteRepository(modelContext: fixture.container.mainContext)
+        let athleteToRename = try #require(try athleteRepository.fetchAthlete(byId: fixture.athleteId))
+        athleteToRename.givenName = "Renamed"
+        try fixture.container.mainContext.save()
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 200, json: ["outcome": "staged"])
+
+        await fixture.coordinator.retryAfterReauthentication()
+
+        #expect(fixture.coordinator.state == .hydrationUploaded(connectionRequestId: requestId, outcome: .staged))
+        let retryUploadBody = try #require(fixture.transport.sentRequests.last?.httpBody)
+        let retryUploadJSON = try #require(try JSONSerialization.jsonObject(with: retryUploadBody) as? [String: Any])
+        #expect(retryUploadJSON["athlete_given_name"] as? String == "Jonas", "must resend the ORIGINAL resolved value, never the changed one")
+        #expect(fixture.transport.sentPaths == ["connection-request-decide", "hydration-upload", "hydration-upload"])
+    }
+
+    @Test("A late hydration-upload response arriving after stop() must never overwrite state — cancellation at the upload boundary, same guarantee decide()/polling already have")
+    func stopDuringUploadDiscardsLateHydrationUploadResponse() async throws {
+        let fixture = try Self.makeFixture()
+        let invitation = AthleteDeviceAuthorizationInvitation(
+            invitationId: UUID(),
+            expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
+            athleteId: fixture.athleteId
+        )
+        let requestId = UUID()
+        let gate = SuspensionGate()
+        fixture.transport.enqueue(path: "connection-request-decide", statusCode: 200, json: ["outcome": "approved"])
+        let gatedTransport = GatedTransport(
+            gate: gate,
+            gatedPath: "hydration-upload",
+            fallback: fixture.transport,
+            gatedResponseJSON: ["outcome": "staged"]
+        )
+        let sessionStore = FakeSessionStore()
+        sessionStore.currentToken = "live-session-token"
+        let parentAuthenticationService = ParentAuthenticationService(
+            configuration: ParentAuthenticationConfiguration(baseURL: Self.baseURL),
+            transport: gatedTransport,
+            sessionStore: sessionStore
+        )
+        let repository = ParentWorkspaceRepository(modelContext: fixture.container.mainContext)
+        let invitationService = AthleteDeviceAuthorizationInvitationService(
+            parentWorkspaceRepository: repository,
+            parentAuthenticationService: parentAuthenticationService
+        )
+        let coordinator = AthleteDeviceAuthorizationInvitationCoordinator(
+            invitationService: invitationService,
+            parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: ParentHydrationUploadService(
+                parentWorkspaceRepository: repository,
+                athleteRepository: AthleteRepository(modelContext: fixture.container.mainContext),
+                parentAuthenticationService: parentAuthenticationService
+            ),
+            clock: fixture.clock
+        )
+
+        let decision = Task {
+            await coordinator.decide(invitation: invitation, requestId: requestId, decision: .approved, displayCode: "A1B2C3")
+        }
+        // Resolution (pure, synchronous) has already completed and the
+        // upload's own network call is now gated in flight.
+        await gate.waitUntilEntered()
+        #expect(coordinator.state == .uploadingHydration(connectionRequestId: requestId))
+
+        coordinator.stop()
+        let stateAfterStop = coordinator.state
+
+        await gate.release()
+        await decision.value
+
+        // The stale upload response — reporting success — must never
+        // overwrite the state `stop()` already settled on.
+        #expect(coordinator.state == stateAfterStop)
     }
 
     @Test("decide() failing with an authentication requirement preserves the EXACT invitation/request/decision/displayCode, and retryAfterReauthentication() resends them unchanged")
@@ -450,6 +684,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         let invitation = AthleteDeviceAuthorizationInvitation(
             invitationId: UUID(uuidString: "66666666-6666-6666-6666-666666666666")!,
             expiresAt: Date().addingTimeInterval(900),
+            workspaceId: fixture.workspaceId,
             participantId: UUID(),
             athleteId: fixture.athleteId
         )
@@ -473,13 +708,14 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         #expect(json["display_code"] as? String == "Z9Y8X7")
     }
 
-    @Test("decide() is single-flight: a second overlapping call is ignored while the first is still suspended on its own network await")
+    @Test("decide() is single-flight across the WHOLE decide-then-upload sequence: a second overlapping call is ignored while the first is still suspended on its own network await")
     func decideIsSingleFlightAndIgnoresAnOverlappingCall() async throws {
         let fixture = try Self.makeFixture()
         let invitation = AthleteDeviceAuthorizationInvitation(
             invitationId: UUID(),
             expiresAt: Date().addingTimeInterval(900),
-            participantId: UUID(),
+            workspaceId: fixture.workspaceId,
+            participantId: fixture.athleteParticipantId,
             athleteId: fixture.athleteId
         )
         let requestId = UUID()
@@ -490,6 +726,7 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             fallback: fixture.transport,
             gatedResponseJSON: ["outcome": "approved"]
         )
+        fixture.transport.enqueue(path: "hydration-upload", statusCode: 200, json: ["outcome": "staged"])
         let sessionStore = FakeSessionStore()
         sessionStore.currentToken = "live-session-token"
         let parentAuthenticationService = ParentAuthenticationService(
@@ -497,13 +734,20 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             transport: gatedTransport,
             sessionStore: sessionStore
         )
+        let repository = ParentWorkspaceRepository(modelContext: fixture.container.mainContext)
         let invitationService = AthleteDeviceAuthorizationInvitationService(
-            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: fixture.container.mainContext),
+            parentWorkspaceRepository: repository,
+            parentAuthenticationService: parentAuthenticationService
+        )
+        let hydrationUploadService = ParentHydrationUploadService(
+            parentWorkspaceRepository: repository,
+            athleteRepository: AthleteRepository(modelContext: fixture.container.mainContext),
             parentAuthenticationService: parentAuthenticationService
         )
         let coordinator = AthleteDeviceAuthorizationInvitationCoordinator(
             invitationService: invitationService,
             parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: hydrationUploadService,
             clock: fixture.clock
         )
 
@@ -520,8 +764,13 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         await gate.release()
         await firstDecision.value
 
+        // `isDecisionPending` stays true across the ENTIRE decide→upload
+        // sequence (the upload is awaited inline inside `decide()`), not
+        // just around the decision call itself — proven here because the
+        // sequence only fully settles once `hydration-upload` has ALSO
+        // completed, after the gate released.
         #expect(coordinator.isDecisionPending == false)
-        #expect(coordinator.state == .decided(.approved))
+        #expect(coordinator.state == .hydrationUploaded(connectionRequestId: requestId, outcome: .staged))
     }
 
     // MARK: - Coordinator-owned cancellation / generations (review round 2, Fix 3)
@@ -543,13 +792,19 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             transport: gatedTransport,
             sessionStore: sessionStore
         )
+        let repository = ParentWorkspaceRepository(modelContext: fixture.container.mainContext)
         let invitationService = AthleteDeviceAuthorizationInvitationService(
-            parentWorkspaceRepository: ParentWorkspaceRepository(modelContext: fixture.container.mainContext),
+            parentWorkspaceRepository: repository,
             parentAuthenticationService: parentAuthenticationService
         )
         let coordinator = AthleteDeviceAuthorizationInvitationCoordinator(
             invitationService: invitationService,
             parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: ParentHydrationUploadService(
+                parentWorkspaceRepository: repository,
+                athleteRepository: AthleteRepository(modelContext: fixture.container.mainContext),
+                parentAuthenticationService: parentAuthenticationService
+            ),
             clock: fixture.clock
         )
 
@@ -605,6 +860,11 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         let coordinator = AthleteDeviceAuthorizationInvitationCoordinator(
             invitationService: invitationService,
             parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: ParentHydrationUploadService(
+                parentWorkspaceRepository: repository,
+                athleteRepository: AthleteRepository(modelContext: fixture.container.mainContext),
+                parentAuthenticationService: parentAuthenticationService
+            ),
             clock: fixture.clock
         )
 

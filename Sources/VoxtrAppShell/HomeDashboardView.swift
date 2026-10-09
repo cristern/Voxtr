@@ -215,6 +215,9 @@ public struct HomeDashboardView: View {
     /// Athlete Connection V1 (backend device authorization): same
     /// rationale as `parentAuthenticationService` above.
     private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    /// Parent hydration-upload integration: same rationale as
+    /// `parentAuthenticationService` above.
+    private let parentHydrationUploadService: ParentHydrationUploadService
     @State private var isManagingAthletes: Bool = false
 
     public init(
@@ -240,7 +243,8 @@ public struct HomeDashboardView: View {
         workspaceId: WorkspaceId,
         parentAuthenticationService: ParentAuthenticationService,
         enrollableWorkspaces: [EnrollableWorkspace],
-        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.athleteDisplayName = athleteDisplayName
@@ -265,6 +269,7 @@ public struct HomeDashboardView: View {
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentHydrationUploadService = parentHydrationUploadService
     }
 
     public var body: some View {
@@ -342,7 +347,8 @@ public struct HomeDashboardView: View {
                     ),
                     parentAuthenticationService: parentAuthenticationService,
                     enrollableWorkspaces: enrollableWorkspaces,
-                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                    parentHydrationUploadService: parentHydrationUploadService
                 )
             }
         }

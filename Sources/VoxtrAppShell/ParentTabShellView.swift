@@ -92,6 +92,9 @@ public struct ParentTabShellView: View {
     /// `RootView`, threaded to both `AthleteFamilyManagementView`
     /// construction sites this shell owns.
     public let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    /// Parent hydration-upload integration: same threading rationale as
+    /// `athleteDeviceAuthorizationInvitationService` immediately above.
+    public let parentHydrationUploadService: ParentHydrationUploadService
 
     public init(
         family: RestoredFamily,
@@ -114,7 +117,8 @@ public struct ParentTabShellView: View {
         athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService,
         parentAuthenticationService: ParentAuthenticationService,
         enrollableWorkspaces: [EnrollableWorkspace],
-        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         self.family = family
         self.planningService = planningService
@@ -137,6 +141,7 @@ public struct ParentTabShellView: View {
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentHydrationUploadService = parentHydrationUploadService
     }
 
     public var body: some View {
@@ -167,7 +172,8 @@ public struct ParentTabShellView: View {
                 athleteConnectionOwnerHandoffService: athleteConnectionOwnerHandoffService,
                 parentAuthenticationService: parentAuthenticationService,
                 enrollableWorkspaces: enrollableWorkspaces,
-                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                parentHydrationUploadService: parentHydrationUploadService
             )
             .tabItem { Label("Home", systemImage: "house") }
             .accessibilityIdentifier("parentTabs.home")
@@ -278,7 +284,8 @@ public struct ParentTabShellView: View {
                     ),
                     parentAuthenticationService: parentAuthenticationService,
                     enrollableWorkspaces: enrollableWorkspaces,
-                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                    parentHydrationUploadService: parentHydrationUploadService
                 )
             }
             .tabItem { Label("Profile", systemImage: "person.crop.circle") }

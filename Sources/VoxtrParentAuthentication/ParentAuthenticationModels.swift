@@ -180,3 +180,63 @@ public enum ConnectionRequestDecisionOutcome: Equatable, Sendable {
     case invitationConsumed
     case invitationAlreadyHasApprovedRequest
 }
+
+/// Parent hydration upload (runtime contract §4.2, merged backend
+/// `authz.hydration_upload` — see `cristern/Voxtr-Backend`
+/// `20261005000000_authz_hydration_v1.sql`'s own authoritative outcome
+/// list). SENSITIVE operation, same session-handling shape as
+/// `createConnectionInvitation`/`decideConnectionRequest` — the three
+/// session-related outcomes (`session_invalid`/`session_expired`/
+/// `reauthentication_required`) are thrown `ParentAuthenticationError`
+/// cases instead, never collapsed into this type, matching every other
+/// outcome enum in this file.
+///
+/// Every outcome is its own distinct, named case — never collapsed to a
+/// generic "failed"/"succeeded" — because each means something
+/// genuinely different for retry/idempotency (see the backend's own
+/// migration comment above `authz.hydration_upload` for the exact
+/// semantics of each):
+/// - `.staged`: no device grant exists yet; this exact payload is held,
+///   keyed by `connection_request_id`, governed by the invitation's own
+///   expiry until the Athlete claims it. Resending the IDENTICAL
+///   payload again is itself idempotent and returns `.staged` again.
+/// - `.uploaded`: a device grant already exists and this upload is now
+///   directly associated with it.
+/// - `.uploadRejected`: a retry against an ALREADY-associated upload —
+///   this is the backend's own asymmetry versus `.staged`'s retry
+///   idempotency (associated retries are rejected outright, without
+///   even comparing payload bytes) — in practice this means a PRIOR
+///   attempt already genuinely succeeded, even if this exact caller
+///   never saw that attempt's own response.
+/// - `.alreadyCompleted` / `.deadlinePassed` / `.grantRevoked`: the
+///   grant's own PERMANENT `hydration_outcome` marker already answers
+///   this grant's hydration lifecycle — checked first, before any
+///   payload comparison — so none of these three ever depends on what
+///   payload this call happened to send.
+/// - `.payloadMismatch`: the already-staged/associated row (or the
+///   invitation's own canonical identity) has DIFFERENT bytes than this
+///   call just sent — a genuine identity/payload inconsistency, never
+///   silently resolved. A caller must never recompute a changed payload
+///   on retry; the original, immutable, resolved-at-approval-time
+///   payload must always be resent unchanged.
+/// - `.requestNotFound` / `.invitationNotFound` / `.ownerBindingNotActive`:
+///   defensive/isolation outcomes — the target connection request,
+///   its invitation, or the owner binding backing it, could not be
+///   resolved as this Parent's own.
+/// - `.notYetApproved`: the request is not (or no longer) approved —
+///   this plan's own caller only ever uploads after an actual approval
+///   success, so this should not occur in the ordinary flow; surfaced
+///   explicitly rather than silently retried forever.
+public enum HydrationUploadOutcome: Equatable, Sendable {
+    case staged
+    case uploaded
+    case uploadRejected
+    case alreadyCompleted
+    case deadlinePassed
+    case grantRevoked
+    case payloadMismatch
+    case requestNotFound
+    case invitationNotFound
+    case ownerBindingNotActive
+    case notYetApproved
+}

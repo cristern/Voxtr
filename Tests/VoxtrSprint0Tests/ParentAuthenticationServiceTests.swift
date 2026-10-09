@@ -811,6 +811,167 @@ struct ParentAuthenticationServiceTests {
         }
     }
 
+    // MARK: - Parent hydration-upload integration: uploadHydration()
+
+    private static let connectionRequestId = UUID(uuidString: "88888888-8888-8888-8888-888888888888")!
+    private static let parentId = UUID(uuidString: "99999999-9999-9999-9999-999999999999")!
+    private static let ownerParticipantId = UUID(uuidString: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")!
+
+    @Test("uploadHydration() sends connection_request_id and all 11 fields, flat and exactly as given, via POST to hydration-upload with the session header")
+    func uploadHydrationSendsAllFieldsExactly() async throws {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "hydration-upload", statusCode: 200, json: ["outcome": "staged"])
+
+        let outcome = try await service.uploadHydration(
+            connectionRequestId: Self.connectionRequestId,
+            workspaceId: Self.workspaceId,
+            intendedParticipantId: Self.participantId,
+            intendedAthleteId: Self.athleteId,
+            parentId: Self.parentId,
+            parentGivenName: "Kari",
+            workspaceDisplayName: "Hansen Family",
+            ownerParticipantId: Self.ownerParticipantId,
+            athleteGivenName: "Jonas",
+            athleteBirthDateIso: "2012-04-10",
+            athleteTimeZoneId: "Europe/Oslo",
+            athleteDevelopmentStage: "parentLed"
+        )
+
+        #expect(outcome == .staged)
+        let sent = try #require(transport.sentRequests.first)
+        #expect(sent.value(forHTTPHeaderField: "X-Voxtr-Parent-Session") == "live-session-token")
+        let body = try requestBodyJSON(sent)
+        #expect(body.count == 12)
+        #expect(body["connection_request_id"] as? String == Self.connectionRequestId.uuidString)
+        #expect(body["workspace_id"] as? String == Self.workspaceId.uuidString)
+        #expect(body["intended_participant_id"] as? String == Self.participantId.uuidString)
+        #expect(body["intended_athlete_id"] as? String == Self.athleteId.uuidString)
+        #expect(body["parent_id"] as? String == Self.parentId.uuidString)
+        #expect(body["parent_given_name"] as? String == "Kari")
+        #expect(body["workspace_display_name"] as? String == "Hansen Family")
+        #expect(body["owner_participant_id"] as? String == Self.ownerParticipantId.uuidString)
+        #expect(body["athlete_given_name"] as? String == "Jonas")
+        #expect(body["athlete_birth_date_iso"] as? String == "2012-04-10")
+        #expect(body["athlete_time_zone_id"] as? String == "Europe/Oslo")
+        #expect(body["athlete_development_stage"] as? String == "parentLed")
+    }
+
+    @Test("uploadHydration() maps every documented backend outcome from authz.hydration_upload")
+    func uploadHydrationMapsAllBusinessOutcomes() async throws {
+        let cases: [(wire: String, expected: HydrationUploadOutcome)] = [
+            ("staged", .staged),
+            ("uploaded", .uploaded),
+            ("upload_rejected", .uploadRejected),
+            ("already_completed", .alreadyCompleted),
+            ("deadline_passed", .deadlinePassed),
+            ("grant_revoked", .grantRevoked),
+            ("payload_mismatch", .payloadMismatch),
+            ("request_not_found", .requestNotFound),
+            ("invitation_not_found", .invitationNotFound),
+            ("owner_binding_not_active", .ownerBindingNotActive),
+            ("not_yet_approved", .notYetApproved),
+        ]
+
+        for testCase in cases {
+            let (service, transport, sessionStore) = makeService()
+            sessionStore.currentToken = "live-session-token"
+            transport.enqueue(path: "hydration-upload", statusCode: 200, json: ["outcome": testCase.wire])
+
+            let outcome = try await service.uploadHydration(
+                connectionRequestId: Self.connectionRequestId,
+                workspaceId: Self.workspaceId,
+                intendedParticipantId: Self.participantId,
+                intendedAthleteId: Self.athleteId,
+                parentId: Self.parentId,
+                parentGivenName: "Kari",
+                workspaceDisplayName: "Hansen Family",
+                ownerParticipantId: Self.ownerParticipantId,
+                athleteGivenName: "Jonas",
+                athleteBirthDateIso: "2012-04-10",
+                athleteTimeZoneId: "Europe/Oslo",
+                athleteDevelopmentStage: "parentLed"
+            )
+
+            #expect(outcome == testCase.expected, "wire outcome: \(testCase.wire)")
+        }
+    }
+
+    @Test("uploadHydration() maps reauthentication_required WITHOUT clearing the stored token — a SENSITIVE operation, same shape as createConnectionInvitation/decideConnectionRequest")
+    func uploadHydrationReauthenticationRequiredLeavesTokenInPlace() async {
+        let (service, transport, sessionStore) = makeService()
+        sessionStore.currentToken = "live-session-token"
+        transport.enqueue(path: "hydration-upload", statusCode: 401, json: ["error": "reauthentication_required"])
+
+        await #expect(throws: ParentAuthenticationError.reauthenticationRequired) {
+            try await service.uploadHydration(
+                connectionRequestId: Self.connectionRequestId,
+                workspaceId: Self.workspaceId,
+                intendedParticipantId: Self.participantId,
+                intendedAthleteId: Self.athleteId,
+                parentId: Self.parentId,
+                parentGivenName: "Kari",
+                workspaceDisplayName: "Hansen Family",
+                ownerParticipantId: Self.ownerParticipantId,
+                athleteGivenName: "Jonas",
+                athleteBirthDateIso: "2012-04-10",
+                athleteTimeZoneId: "Europe/Oslo",
+                athleteDevelopmentStage: "parentLed"
+            )
+        }
+        #expect(sessionStore.currentToken == "live-session-token")
+    }
+
+    @Test("uploadHydration() maps session_invalid and session_expired, clearing the stored token for each")
+    func uploadHydrationMapsSessionInvalidAndExpired() async {
+        for (wire, expected) in [("session_invalid", ParentAuthenticationError.sessionInvalid), ("session_expired", ParentAuthenticationError.sessionExpired)] {
+            let (service, transport, sessionStore) = makeService()
+            sessionStore.currentToken = "live-session-token"
+            transport.enqueue(path: "hydration-upload", statusCode: 401, json: ["error": wire])
+
+            await #expect(throws: expected) {
+                try await service.uploadHydration(
+                    connectionRequestId: Self.connectionRequestId,
+                    workspaceId: Self.workspaceId,
+                    intendedParticipantId: Self.participantId,
+                    intendedAthleteId: Self.athleteId,
+                    parentId: Self.parentId,
+                    parentGivenName: "Kari",
+                    workspaceDisplayName: "Hansen Family",
+                    ownerParticipantId: Self.ownerParticipantId,
+                    athleteGivenName: "Jonas",
+                    athleteBirthDateIso: "2012-04-10",
+                    athleteTimeZoneId: "Europe/Oslo",
+                    athleteDevelopmentStage: "parentLed"
+                )
+            }
+            #expect(sessionStore.currentToken == nil, "wire error: \(wire)")
+        }
+    }
+
+    @Test("uploadHydration() with no stored session throws .notSignedIn locally, without sending any network request")
+    func uploadHydrationWithNoSessionThrowsNotSignedInWithoutNetworkCall() async {
+        let (service, transport, _) = makeService()
+
+        await #expect(throws: ParentAuthenticationError.notSignedIn) {
+            try await service.uploadHydration(
+                connectionRequestId: Self.connectionRequestId,
+                workspaceId: Self.workspaceId,
+                intendedParticipantId: Self.participantId,
+                intendedAthleteId: Self.athleteId,
+                parentId: Self.parentId,
+                parentGivenName: "Kari",
+                workspaceDisplayName: "Hansen Family",
+                ownerParticipantId: Self.ownerParticipantId,
+                athleteGivenName: "Jonas",
+                athleteBirthDateIso: "2012-04-10",
+                athleteTimeZoneId: "Europe/Oslo",
+                athleteDevelopmentStage: "parentLed"
+            )
+        }
+        #expect(transport.sentRequests.isEmpty)
+    }
+
     private static func date(_ iso: String) -> Date {
         ISO8601DateFormatter().date(from: iso)!
     }

@@ -194,6 +194,9 @@ public struct FamilyHomeContentView: View {
     /// Athlete Connection V1 (backend device authorization): same
     /// threading rationale as `parentAuthenticationService` above.
     private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    /// Parent hydration-upload integration: same threading rationale as
+    /// `athleteDeviceAuthorizationInvitationService` immediately above.
+    private let parentHydrationUploadService: ParentHydrationUploadService
 
     public init(
         family: RestoredFamily,
@@ -214,7 +217,8 @@ public struct FamilyHomeContentView: View {
         sportRepository: SportRepository,
         parentAuthenticationService: ParentAuthenticationService,
         enrollableWorkspaces: [EnrollableWorkspace],
-        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         self.family = family
         self.planningService = planningService
@@ -235,6 +239,7 @@ public struct FamilyHomeContentView: View {
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentHydrationUploadService = parentHydrationUploadService
         _viewModel = State(initialValue: FamilyHomeViewModel(
             activeAthletes: family.activeAthletes,
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
@@ -958,7 +963,8 @@ public struct FamilyHomeContentView: View {
             workspaceId: WorkspaceId(rawValue: family.workspace.id),
             parentAuthenticationService: parentAuthenticationService,
             enrollableWorkspaces: enrollableWorkspaces,
-            athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+            athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+            parentHydrationUploadService: parentHydrationUploadService
         )
     }
 

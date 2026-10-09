@@ -95,6 +95,7 @@ public final class AthleteDeviceAuthorizationInvitationService {
             return AthleteDeviceAuthorizationInvitation(
                 invitationId: invitationId,
                 expiresAt: expiresAt,
+                workspaceId: workspaceId,
                 participantId: participant.id,
                 athleteId: athleteId
             )
@@ -107,15 +108,32 @@ public final class AthleteDeviceAuthorizationInvitationService {
 /// The minimum the ParentApp UI needs to display the QR code and drive
 /// the request-listing/decision poll that follows — deliberately not
 /// richer.
+///
+/// `workspaceId` (Parent hydration-upload integration): carried
+/// end to end so that a later approved decision can resolve the exact
+/// 11-field hydration projection scoped to THIS workspace — see
+/// `ParentHydrationUploadService.resolveProjection(workspaceId:
+/// intendedParticipantId:intendedAthleteId:)`, which requires it
+/// explicitly rather than inferring it from a "sole workspace"
+/// assumption.
 public struct AthleteDeviceAuthorizationInvitation: Equatable {
     public let invitationId: UUID
     public let expiresAt: Date
+    public let workspaceId: WorkspaceId
     /// The intended athlete's own `WorkspaceParticipant.id` — carried
     /// here only for the caller's own display/bookkeeping; never
     /// resent to the backend by anything other than
     /// `prepareInvitation` itself.
     public let participantId: UUID
     public let athleteId: AthleteId
+
+    public init(invitationId: UUID, expiresAt: Date, workspaceId: WorkspaceId, participantId: UUID, athleteId: AthleteId) {
+        self.invitationId = invitationId
+        self.expiresAt = expiresAt
+        self.workspaceId = workspaceId
+        self.participantId = participantId
+        self.athleteId = athleteId
+    }
 }
 
 /// Explicit, differentiated failure semantics — never flattened to a
