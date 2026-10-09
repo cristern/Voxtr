@@ -317,7 +317,22 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             return
         }
         #expect(requests.map(\.id) == [requestId])
-        #expect(fixture.transport.sentPaths == ["connection-invitation-create", "connection-request-list"])
+        // Count-based, not exact-array equality: `FakePollingClock.sleep(for:)`
+        // never actually delays (it only increments a counter), so the
+        // background poll loop has no real inter-tick throttling. By the
+        // time `waitUntil`'s own real-sleep-based yields above let the
+        // scheduler run, the loop may already be on a SECOND (or later)
+        // tick — `FakeTransport.send` records `sentPaths` before checking
+        // whether a stub exists for that call, so an unconfigured extra
+        // tick still appends "connection-request-list" even though it then
+        // throws `NoStubConfigured`, which the coordinator's own generic
+        // catch swallows as a transient hiccup. An exact-array check here
+        // is therefore genuinely racy — matching this file's own
+        // established convention elsewhere (e.g.
+        // `pollingAuthFailureResumesSameInvitationAfterReauthentication`'s
+        // own `.filter { ... }.count` check) rather than a one-off fix.
+        #expect(fixture.transport.sentPaths.filter { $0 == "connection-invitation-create" }.count == 1)
+        #expect(fixture.transport.sentPaths.contains("connection-request-list"))
     }
 
     @Test("start() with no stored session throws .notSignedIn locally, sends no network request, and surfaces .authenticationRequired(.notSignedIn) while preserving the exact athlete/workspace/invitedBy for retry")
