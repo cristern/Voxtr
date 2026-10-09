@@ -435,6 +435,13 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             "invitation_id": invitationId.uuidString,
             "expires_at": Self.futureExpiresAtISO8601(),
         ])
+        // `listConnectionRequests` is an ORDINARY operation (see
+        // `ParentAuthenticationServiceTests.listConnectionRequestsUnrecognized401FailsClosed`):
+        // it never surfaces `.reauthenticationRequired` — any unrecognized 401,
+        // including this literal "reauthentication_required" error body, fails
+        // closed as `.sessionInvalid`. That's the already-accepted contract;
+        // this test exercises the SAME-invitation recovery path, not the specific
+        // auth-requirement classification, so it asserts the real outcome.
         fixture.transport.enqueue(path: "connection-request-list", statusCode: 401, json: ["error": "reauthentication_required"])
 
         await fixture.coordinator.start(forAthlete: fixture.athleteId, workspaceId: fixture.workspaceId, invitedBy: fixture.invitedBy)
@@ -443,8 +450,8 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
             return false
         }
 
-        guard case .authenticationRequired(.reauthenticationRequired) = fixture.coordinator.state else {
-            Issue.record("expected .authenticationRequired(.reauthenticationRequired), got \(fixture.coordinator.state)")
+        guard case .authenticationRequired(.sessionInvalid) = fixture.coordinator.state else {
+            Issue.record("expected .authenticationRequired(.sessionInvalid), got \(fixture.coordinator.state)")
             return
         }
         #expect(fixture.transport.sentPaths == ["connection-invitation-create", "connection-request-list"])
