@@ -37,6 +37,12 @@ public struct AthleteRootView: View {
     /// additive, alongside the existing CKShare scan flow, never a
     /// replacement of it.
     @State private var isPresentingDeviceAuthorizationScanner = false
+    /// Athlete hydration/activation integration slice (§5.2): launch +
+    /// foreground real online-validation trigger for the backend path's
+    /// own restoration flow — never the CKShare path, which has no
+    /// persisted restoration mechanism at all (see `AthleteRuntimeSession`'s
+    /// own doc comment) and is untouched by this round.
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(root: CompositionRoot, makeScannerView: @escaping AthleteConnectionScannerBuilder) {
         self.root = root
@@ -49,6 +55,18 @@ public struct AthleteRootView: View {
                 AthleteRuntimeSession.shared.configure(
                     lifecycleService: root.container.resolve(AthleteConnectionLifecycleService.self)
                 )
+                root.container.resolve(AthleteBackendConnectionCoordinator.self).restoreOnLaunchOrForeground()
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                // Foreground re-entry (background/inactive -> active)
+                // re-runs the SAME restoration flow as launch — §5.2's
+                // own "on every launch AND foreground" requirement.
+                // Never triggered by the initial launch transition
+                // itself (already covered by `.task` above), avoiding a
+                // redundant duplicate attempt on cold start.
+                if newPhase == .active {
+                    root.container.resolve(AthleteBackendConnectionCoordinator.self).restoreOnLaunchOrForeground()
+                }
             }
             .sheet(isPresented: $isPresentingScanner) {
                 AthleteConnectionScanView(transport: root.cloudKitTransport, makeScannerView: makeScannerView)
@@ -56,6 +74,7 @@ public struct AthleteRootView: View {
             .sheet(isPresented: $isPresentingDeviceAuthorizationScanner) {
                 AthleteDeviceAuthorizationScanView(
                     service: root.container.resolve(AthleteDeviceAuthorizationService.self),
+                    connectionCoordinator: root.container.resolve(AthleteBackendConnectionCoordinator.self),
                     makeScannerView: makeScannerView
                 )
             }
@@ -63,11 +82,12 @@ public struct AthleteRootView: View {
 
     @ViewBuilder
     private var content: some View {
-        let state = AthleteRuntimeSession.shared.state
-        switch AthleteShellRoute.route(for: state) {
+        let legacyState = AthleteRuntimeSession.shared.state
+        let backendState = root.container.resolve(AthleteBackendConnectionCoordinator.self).state
+        switch AthleteShellRoute.route(legacyState: legacyState, backendState: backendState) {
         case .gate:
             AthleteConnectionGateView(
-                state: state,
+                state: legacyState,
                 onScanConnectionCode: { isPresentingScanner = true },
                 onStartDeviceAuthorization: { isPresentingDeviceAuthorizationScanner = true }
             )

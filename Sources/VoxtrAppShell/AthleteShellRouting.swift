@@ -38,6 +38,36 @@ enum AthleteShellRoute: Equatable {
             return .gate
         }
     }
+
+    /// Athlete hydration/activation integration slice (§5.2): the
+    /// combined routing decision across BOTH the legacy CKShare path
+    /// (`AthleteConnectionRuntimeState`, unmodified) and the new
+    /// backend device-authorization path
+    /// (`AthleteBackendConnectionCoordinator.State`) — two independent
+    /// systems that, per the CloudKit transition plan §4.6, "must be
+    /// surfaced distinctly, never merged into one misleadingly
+    /// reassuring status." This function does not merge their STATUS
+    /// presentation (the gate view still reads whichever state is
+    /// actually active); it only decides WHICH of the two, if either,
+    /// has reached a usable `CurrentSessionActor` — the one question
+    /// this routing layer itself needs answered. The legacy path is
+    /// checked first for no reason beyond matching this app's existing
+    /// precedent; a device connected via EITHER path alone already
+    /// reaches the shell, since §4.1 guarantees both converge on the
+    /// same stable-ID rows for the same athlete, never two conflicting
+    /// identities.
+    static func route(
+        legacyState: AthleteConnectionRuntimeState,
+        backendState: AthleteBackendConnectionCoordinator.State
+    ) -> AthleteShellRoute {
+        if case .connected(let actor) = legacyState {
+            return .shell(actor: actor)
+        }
+        if case .connected(let actor, _) = backendState {
+            return .shell(actor: actor)
+        }
+        return .gate
+    }
 }
 
 /// Athlete App Shell / UX Foundation: the ONE canonical way AthleteApp

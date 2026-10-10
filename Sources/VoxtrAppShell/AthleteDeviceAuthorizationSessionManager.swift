@@ -223,7 +223,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
         inFlightTasks.removeAll()
     }
 
-    private func resolveActiveSession(deviceGrantId: UUID, generationAtStart: Int) async throws -> String {
+    private func resolveActiveSession(deviceGrantId: UUID, generationAtStart: Int, forceOnlineCheck: Bool = false) async throws -> String {
         // R6 follow-up (ChatGPT review 6025279987): checked HERE,
         // before touching the store or the service at all. The Task
         // this method runs in is not guaranteed to start executing
@@ -251,7 +251,21 @@ public final class AthleteDeviceAuthorizationSessionManager {
                 throw SessionFailure.installationKeyUnavailable
             }
             if now < stored.expiresAt {
-                if now < stored.expiresAt.addingTimeInterval(-Self.slidingWindowRenewalLeadTime) {
+                // `forceOnlineCheck` (Athlete hydration/activation
+                // integration slice, §5.2's own correction): a restoration/
+                // online-validation caller must never present "freshly
+                // verified" on the strength of a merely-unexpired cached
+                // token — this policy's own sliding-window fast path below
+                // is the EXACT thing that requirement forbids relying on.
+                // Skipping straight to a real `session_renew` here, for
+                // ANY remaining sliding-window time (not only within the
+                // renewal lead time), is what `ensureFreshlyVerifiedSession`
+                // below requires; `ensureActiveSession`'s own ordinary
+                // fast path is completely unaffected (`forceOnlineCheck`
+                // defaults to `false`, and this branch's shape for that
+                // default case is byte-for-byte what it was before this
+                // parameter existed).
+                if !forceOnlineCheck && now < stored.expiresAt.addingTimeInterval(-Self.slidingWindowRenewalLeadTime) {
                     // Comfortably within the sliding window — no
                     // network call needed; this IS the policy's own
                     // sliding-window definition (see this type's own
@@ -279,6 +293,31 @@ public final class AthleteDeviceAuthorizationSessionManager {
             // handles both cases identically.
         }
         return try await attemptIssue(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart)
+    }
+
+    /// Athlete hydration/activation integration slice (§5.2): forces a
+    /// genuine `session_issue`/`session_renew` network round trip for
+    /// `deviceGrantId`, even when a locally-cached, unexpired session
+    /// exists — the one thing `ensureActiveSession()`'s own intentional
+    /// sliding-window fast path (this type's own top-level doc comment)
+    /// can never provide on its own. A caller presenting "connected via
+    /// backend session, freshly verified" (CloudKit transition plan
+    /// §4.6 state 2) MUST have obtained its token from this method, not
+    /// `ensureActiveSession()` — the correction that document's §5.2
+    /// makes explicitly: "the manager's existing cached-token fast path
+    /// must not satisfy this requirement."
+    ///
+    /// Deliberately does NOT join `inFlightTasks`' coalescing (unlike
+    /// `ensureActiveSession()`): a forced-fresh caller must never
+    /// silently share another caller's already-resolved (possibly
+    /// fast-pathed) result — it always performs its own attempt, though
+    /// it still participates in the SAME `sessionGeneration` staleness
+    /// protocol as every other operation this type performs (captured
+    /// at entry, rechecked after every awaited call, exactly like
+    /// `ensureActiveSession()`'s own task body).
+    public func ensureFreshlyVerifiedSession(deviceGrantId: UUID) async throws -> String {
+        let generationAtStart = sessionGeneration
+        return try await resolveActiveSession(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart, forceOnlineCheck: true)
     }
 
     /// R6 follow-up (ChatGPT review 6025069937): checked immediately

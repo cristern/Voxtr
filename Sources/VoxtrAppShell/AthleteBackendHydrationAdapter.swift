@@ -206,8 +206,18 @@ public final class AthleteBackendHydrationAdapter {
             // attempt's own ack already landed server-side (a lost-
             // response retry) — this attempt's local hydrate() call
             // just above was a safe, idempotent no-op; both cases are
-            // equally genuine success.
-            return .hydratedAndAcked
+            // equally genuine success. Either way, `fields` (from this
+            // call's own `.hydrated(fields)` GET response, above) names
+            // the exact target this grant just hydrated/reconfirmed —
+            // carried out so a caller (the activation integration slice)
+            // can proceed to canonical acceptance/binding/activation for
+            // that EXACT target without a second lookup or any
+            // display-name/order heuristic.
+            return .hydratedAndAcked(
+                workspaceId: fields.workspaceId,
+                participantId: fields.intendedParticipantId,
+                athleteId: fields.intendedAthleteId
+            )
         case .notAvailable, .sessionInvalid, .grantNotAvailable, .deadlinePassed, .grantRevoked:
             // The LOCAL upsert above already happened and is safely
             // resumable (see this type's own doc comment) — this is
@@ -291,12 +301,26 @@ public final class AthleteBackendHydrationAdapter {
 public enum AthleteBackendHydrationOutcome: Equatable, Sendable {
     /// `AthleteIdentityHydrationService.hydrate(_:)` succeeded this
     /// call AND the backend confirms the grant's hydration lifecycle is
-    /// complete.
-    case hydratedAndAcked
+    /// complete. Carries the exact target this grant hydrated — the
+    /// SAME stable IDs `hydrate(_:)` itself just upserted by, never a
+    /// separate lookup — so a caller can proceed straight to canonical
+    /// acceptance/binding/activation for this exact target.
+    case hydratedAndAcked(workspaceId: UUID, participantId: UUID, athleteId: UUID)
     /// The grant's permanent `hydration_outcome` marker was already
     /// `'acked'` at the GET step itself — nothing to hydrate (or ack)
     /// this call; a strictly earlier attempt already fully completed
-    /// this grant's hydration end to end.
+    /// this grant's hydration end to end. Deliberately carries NO
+    /// target IDs: the GET step's own early short-circuit on this
+    /// permanent marker (confirmed in
+    /// `AthleteDeviceAuthorizationHydrationGetOutcome.alreadyCompleted`'s
+    /// own doc comment) never returns a payload, so this type has no
+    /// target to report — never fabricated from a prior call's memory
+    /// or any other inference. A caller that needs the target for this
+    /// case must derive it from its OWN previously-persisted local
+    /// checkpoint for this exact grant, if one exists — and must show
+    /// an honest recovery/re-approval state, never invented success, if
+    /// it does not (see this task's own "`.alreadyCompleted` cannot
+    /// fabricate lost bootstrap data" requirement).
     case alreadyCompleted
     case deadlinePassed
     case grantRevoked

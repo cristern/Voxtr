@@ -72,6 +72,7 @@
 		752B9CC192C9F44AECB39CA8 /* AthleteDeviceAuthorizationSessionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */; };
 		06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */; };
 		F7C0D3C9998E85200FE0A898 /* AthleteBackendHydrationAdapterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */; };
+		A972A773FE6861A40FA9DBDE /* AthleteBackendConnectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */; };
 		F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */; };
 		80AE6315D3DB06F8C76C940A /* ParentAuthenticationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */; };
 		37CD5F774905CA0507D00AB3 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */; };
@@ -159,6 +160,7 @@
 		90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionServiceTests.swift; sourceTree = "<group>"; };
 		E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionManagerTests.swift; sourceTree = "<group>"; };
 		FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteBackendHydrationAdapterTests.swift; sourceTree = "<group>"; };
+		A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteBackendConnectionCoordinatorTests.swift; sourceTree = "<group>"; };
 		B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift; sourceTree = "<group>"; };
 		1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentAuthenticationServiceTests.swift; sourceTree = "<group>"; };
 		0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationInvitationCoordinatorTests.swift; sourceTree = "<group>"; };
@@ -306,6 +308,7 @@
 				90FB0D2BFF036D0AD979696A /* AthleteDeviceAuthorizationSessionServiceTests.swift */,
 				E94A3D0BB2390DEC14D33208 /* AthleteDeviceAuthorizationSessionManagerTests.swift */,
 				FD95E9A3F72F6DA90591D9FE /* AthleteBackendHydrationAdapterTests.swift */,
+				A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */,
 				B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */,
 				1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */,
 				0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */,
@@ -563,6 +566,7 @@
 				06196C436A597C5899AB8F2C /* AthleteDeviceAuthorizationSessionManagerTests.swift in Sources */,
 				F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */,
 				F7C0D3C9998E85200FE0A898 /* AthleteBackendHydrationAdapterTests.swift in Sources */,
+				A972A773FE6861A40FA9DBDE /* AthleteBackendConnectionCoordinatorTests.swift in Sources */,
 				80AE6315D3DB06F8C76C940A /* ParentAuthenticationServiceTests.swift in Sources */,
 				37CD5F774905CA0507D00AB3 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift in Sources */,
 				2BC0A872918EA159AC5A230A /* ParentHydrationUploadServiceTests.swift in Sources */,
