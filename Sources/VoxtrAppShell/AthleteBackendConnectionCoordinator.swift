@@ -605,6 +605,23 @@ public final class AthleteBackendConnectionCoordinator {
 /// adapter's OWN session/wire-mapping/ack-gating logic remains covered
 /// by `AthleteBackendHydrationAdapterTests.swift`, never re-tested
 /// here).
+///
+/// `@MainActor` (Codemagic build 279 compiler diagnostic): this
+/// requirement has no closure parameter, but the real implementation
+/// (`AthleteBackendHydrationAdapter`) is `@MainActor`-isolated, and the
+/// coordinator holds its `hydrationAdapter` property on itself as a
+/// `@MainActor`-isolated class. Calling a non-isolated async protocol
+/// requirement through a `@MainActor`-isolated `self` still requires
+/// "sending" that isolated `self` across the (nonexistent) boundary of
+/// a non-isolated requirement, which the compiler rejects. Marking the
+/// protocol itself `@MainActor` states the real isolation relationship
+/// instead of concealing it: every conformer/caller
+/// (`AthleteBackendHydrationAdapter`, `AthleteBackendConnectionCoordinator`,
+/// `FakeCoordinatorHydrationAdapter` in
+/// `AthleteBackendConnectionCoordinatorTests.swift`) is already
+/// `@MainActor`, so this changes no behavior. No `@unchecked`/
+/// `@preconcurrency` escape hatch used.
+@MainActor
 public protocol AthleteBackendHydrating {
     func hydrate(deviceGrantId: UUID) async throws -> AthleteBackendHydrationOutcome
 }
@@ -619,9 +636,9 @@ extension AthleteBackendHydrationAdapter: AthleteBackendHydrating {}
 /// teardown.
 ///
 /// `@MainActor` (Codemagic build 278 compiler diagnostic, confirmed via
-/// real Xcode logs — unlike `AthleteBackendHydrating` above, whose own
-/// `hydrate(deviceGrantId:)` has no closure parameter and no actor
-/// annotation issue): `ensureFreshlyVerifiedSession`'s `isStillWanted`
+/// real Xcode logs — `AthleteBackendHydrating` above needed the same
+/// correction for a related but distinct reason, confirmed by build
+/// 279's own diagnostic): `ensureFreshlyVerifiedSession`'s `isStillWanted`
 /// closure parameter is not itself `Sendable`, and the ONLY real
 /// implementation (`AthleteDeviceAuthorizationSessionManager`) is
 /// `@MainActor`-isolated — calling an async, non-isolated protocol
