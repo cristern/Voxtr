@@ -62,10 +62,15 @@ public final class AthleteDeviceAuthorizationSessionManager {
         /// `clearStoredSession()` ran while THIS exact operation was
         /// still suspended on a network await (R6, ChatGPT review
         /// 6024820299) — mirrors `ParentAuthenticationService
-        /// .sessionGeneration`'s own established guard exactly. The
-        /// operation's result is discarded rather than persisted or
-        /// returned as if it succeeded; never retried automatically by
-        /// this type itself.
+        /// .sessionGeneration`'s own established guard exactly. ALSO
+        /// thrown when a caller's own `isStillWanted` closure (passed
+        /// to `ensureFreshlyVerifiedSession(deviceGrantId:isStillWanted:)`)
+        /// starts returning `false` — i.e. the caller's OWN cancellation/
+        /// generation-fencing has superseded this exact operation, even
+        /// though nothing here was literally cleared (PR #120 R2). Either
+        /// way, the operation's result is discarded rather than
+        /// persisted or returned as if it succeeded; never retried
+        /// automatically by this type itself.
         case sessionCleared
     }
 
@@ -223,7 +228,9 @@ public final class AthleteDeviceAuthorizationSessionManager {
         inFlightTasks.removeAll()
     }
 
-    private func resolveActiveSession(deviceGrantId: UUID, generationAtStart: Int, forceOnlineCheck: Bool = false) async throws -> String {
+    private func resolveActiveSession(
+        deviceGrantId: UUID, generationAtStart: Int, forceOnlineCheck: Bool = false, isStillWanted: @escaping () -> Bool = { true }
+    ) async throws -> String {
         // R6 follow-up (ChatGPT review 6025279987): checked HERE,
         // before touching the store or the service at all. The Task
         // this method runs in is not guaranteed to start executing
@@ -233,7 +240,21 @@ public final class AthleteDeviceAuthorizationSessionManager {
         // fast-path return below, or the signing-key-check branch's
         // own store.clearSession()) or starting service work under a
         // generation that no longer applies.
-        try checkNotCleared(generationAtStart: generationAtStart)
+        //
+        // `isStillWanted` (Athlete hydration/activation integration
+        // slice, §5.2 follow-up, ChatGPT review on PR #120 R2):
+        // `ensureFreshlyVerifiedSession`'s own caller may be a
+        // coordinator attempt a NEWER attempt has already superseded
+        // at ITS OWN layer — a cancellation `clearStoredSession()`
+        // alone cannot see, since no sign-out happened. Checked at
+        // every point `checkNotCleared` already is, so a superseded
+        // caller's forced renew/issue never submits a further
+        // network step and never persists/overwrites the shared
+        // Keychain session slot on the strength of a result nobody
+        // wants anymore. `ensureActiveSession()`'s own task body
+        // passes the default (always `true`), so its existing
+        // behavior is completely unaffected.
+        try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
         let now = clock.now()
         if let stored = store.loadSession(), stored.deviceGrantId == deviceGrantId {
             // Review round 4 (PR #116, ChatGPT review 6020919614): a
@@ -278,7 +299,9 @@ public final class AthleteDeviceAuthorizationSessionManager {
                 // (see `slidingWindowRenewalLeadTime`'s own doc
                 // comment for the confirmed backend check this
                 // satisfies).
-                if let renewed = try await attemptRenew(deviceGrantId: deviceGrantId, stored: stored, generationAtStart: generationAtStart) {
+                if let renewed = try await attemptRenew(
+                    deviceGrantId: deviceGrantId, stored: stored, generationAtStart: generationAtStart, isStillWanted: isStillWanted
+                ) {
                     return renewed
                 }
                 // Cleanly rejected (not a transient network issue —
@@ -292,7 +315,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
             // with the SAME key is still fully automatic (§3.5) and
             // handles both cases identically.
         }
-        return try await attemptIssue(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart)
+        return try await attemptIssue(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart, isStillWanted: isStillWanted)
     }
 
     /// Athlete hydration/activation integration slice (§5.2): forces a
@@ -315,9 +338,22 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// protocol as every other operation this type performs (captured
     /// at entry, rechecked after every awaited call, exactly like
     /// `ensureActiveSession()`'s own task body).
-    public func ensureFreshlyVerifiedSession(deviceGrantId: UUID) async throws -> String {
+    /// `isStillWanted`: checked at every point `generationAtStart` already
+    /// is (see `resolveActiveSession`'s own doc comment on this
+    /// parameter) — a caller whose OWN cancellation/generation-fencing
+    /// (e.g. `AthleteBackendConnectionCoordinator`'s `isCurrent(_:)`)
+    /// has already superseded this exact call passes a closure that
+    /// starts returning `false`, stopping a further network step or a
+    /// stale persist into the shared Keychain session slot before it
+    /// happens — not merely having its result ignored afterward, which
+    /// cannot undo an already-issued/renewed and already-persisted
+    /// session. Defaults to always-`true` for a caller with no such
+    /// fencing of its own.
+    public func ensureFreshlyVerifiedSession(deviceGrantId: UUID, isStillWanted: @escaping () -> Bool = { true }) async throws -> String {
         let generationAtStart = sessionGeneration
-        return try await resolveActiveSession(deviceGrantId: deviceGrantId, generationAtStart: generationAtStart, forceOnlineCheck: true)
+        return try await resolveActiveSession(
+            deviceGrantId: deviceGrantId, generationAtStart: generationAtStart, forceOnlineCheck: true, isStillWanted: isStillWanted
+        )
     }
 
     /// R6 follow-up (ChatGPT review 6025069937): checked immediately
@@ -332,8 +368,8 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// `session_issue` in particular has a real server-side effect
     /// (revoking the grant's current active session) that a merely-
     /// discarded LOCAL result can never undo.
-    private func checkNotCleared(generationAtStart: Int) throws {
-        guard generationAtStart == sessionGeneration else {
+    private func checkNotCleared(generationAtStart: Int, isStillWanted: () -> Bool = { true }) throws {
+        guard generationAtStart == sessionGeneration, isStillWanted() else {
             throw SessionFailure.sessionCleared
         }
     }
@@ -342,7 +378,10 @@ public final class AthleteDeviceAuthorizationSessionManager {
     /// or `nil` if renewal was cleanly rejected so the caller falls
     /// through to a fresh `session_issue` — never `nil` for a
     /// transient network failure, which is retried here first.
-    private func attemptRenew(deviceGrantId: UUID, stored: AthleteDeviceAuthorizationSessionRecord, generationAtStart: Int) async throws -> String? {
+    private func attemptRenew(
+        deviceGrantId: UUID, stored: AthleteDeviceAuthorizationSessionRecord, generationAtStart: Int,
+        isStillWanted: @escaping () -> Bool = { true }
+    ) async throws -> String? {
         var lastFailure: SessionFailure = .network
         for _ in 0..<Self.maxAttemptsPerCall {
             let outcome: AthleteDeviceAuthorizationSessionRenewOutcome
@@ -354,10 +393,10 @@ public final class AthleteDeviceAuthorizationSessionManager {
                     // submitting — so a stale operation's SUBMIT (a real
                     // server-side effect) is never sent in the first
                     // place, not merely discarded once it returns.
-                    try checkNotCleared(generationAtStart: generationAtStart)
+                    try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
                 }
             } catch let error as AthleteDeviceAuthorizationSessionError {
-                try checkNotCleared(generationAtStart: generationAtStart)
+                try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
                 switch error {
                 case .network:
                     lastFailure = .network
@@ -371,7 +410,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
                     throw SessionFailure.gatewayConfigurationMissing
                 }
             }
-            try checkNotCleared(generationAtStart: generationAtStart)
+            try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
             switch outcome {
             case .renewed(let expiresAt, let absoluteExpiresAt):
                 let updated = AthleteDeviceAuthorizationSessionRecord(
@@ -389,7 +428,9 @@ public final class AthleteDeviceAuthorizationSessionManager {
         throw lastFailure
     }
 
-    private func attemptIssue(deviceGrantId: UUID, generationAtStart: Int) async throws -> String {
+    private func attemptIssue(
+        deviceGrantId: UUID, generationAtStart: Int, isStillWanted: @escaping () -> Bool = { true }
+    ) async throws -> String {
         var lastFailure: SessionFailure = .network
         for _ in 0..<Self.maxAttemptsPerCall {
             let outcome: AthleteDeviceAuthorizationSessionIssueOutcome
@@ -397,10 +438,10 @@ public final class AthleteDeviceAuthorizationSessionManager {
                 outcome = try await service.issueSession(deviceGrantId: deviceGrantId) {
                     // R6 follow-up (ChatGPT review 6025279987): same
                     // reasoning as attemptRenew's own identical closure.
-                    try checkNotCleared(generationAtStart: generationAtStart)
+                    try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
                 }
             } catch let error as AthleteDeviceAuthorizationSessionError {
-                try checkNotCleared(generationAtStart: generationAtStart)
+                try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
                 switch error {
                 case .network:
                     lastFailure = .network
@@ -414,7 +455,7 @@ public final class AthleteDeviceAuthorizationSessionManager {
                     throw SessionFailure.gatewayConfigurationMissing
                 }
             }
-            try checkNotCleared(generationAtStart: generationAtStart)
+            try checkNotCleared(generationAtStart: generationAtStart, isStillWanted: isStillWanted)
             switch outcome {
             case .issued(let sessionToken, let expiresAt, let absoluteExpiresAt):
                 let record = AthleteDeviceAuthorizationSessionRecord(

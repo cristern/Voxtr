@@ -84,18 +84,49 @@ public struct AthleteRootView: View {
     private var content: some View {
         let legacyState = AthleteRuntimeSession.shared.state
         let backendState = root.container.resolve(AthleteBackendConnectionCoordinator.self).state
-        switch AthleteShellRoute.route(legacyState: legacyState, backendState: backendState) {
-        case .gate:
-            AthleteConnectionGateView(
-                state: legacyState,
-                onScanConnectionCode: { isPresentingScanner = true },
-                onStartDeviceAuthorization: { isPresentingDeviceAuthorizationScanner = true }
-            )
-        case .shell(let actor):
-            AthleteShellView(
-                actor: actor,
-                athleteRepository: root.container.resolve(AthleteRepository.self)
-            )
+        VStack(spacing: 0) {
+            // ChatGPT review on PR #120, R1: the backend path's own
+            // honest status must remain visible even once
+            // `AthleteDeviceAuthorizationScanView` (where this same
+            // copy also appears) has been dismissed, and even when a
+            // separately-connected legacy actor would otherwise let the
+            // routing decision below reach the shell with nothing to
+            // say about it — see `AthleteShellRoute.backendStatusNotice(for:)`'s
+            // own doc comment for exactly what this does and does not
+            // decide.
+            if let notice = AthleteShellRoute.backendStatusNotice(for: backendState) {
+                backendStatusBanner(notice)
+            }
+            switch AthleteShellRoute.route(legacyState: legacyState, backendState: backendState) {
+            case .gate:
+                AthleteConnectionGateView(
+                    state: legacyState,
+                    onScanConnectionCode: { isPresentingScanner = true },
+                    onStartDeviceAuthorization: { isPresentingDeviceAuthorizationScanner = true }
+                )
+            case .shell(let actor):
+                AthleteShellView(
+                    actor: actor,
+                    athleteRepository: root.container.resolve(AthleteRepository.self)
+                )
+            }
         }
+    }
+
+    private func backendStatusBanner(_ notice: (title: String, message: String)) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(notice.title)
+                .font(VoxtrTypography.cardTitle)
+                .foregroundStyle(VoxtrColor.textPrimary)
+            Text(notice.message)
+                .font(.footnote)
+                .foregroundStyle(VoxtrColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(VoxtrColor.surfaceSubtle, in: RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+        .padding(.top, 8)
+        .accessibilityIdentifier("athleteRoot.backendStatusBanner")
     }
 }

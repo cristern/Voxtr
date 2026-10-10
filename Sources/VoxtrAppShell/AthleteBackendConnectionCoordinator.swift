@@ -79,6 +79,23 @@ public final class AthleteBackendConnectionCoordinator {
         /// viewable, but no new protected sync is attempted while in
         /// this state.
         case connected(CurrentSessionActor, verified: Bool)
+        /// First-time activation genuinely succeeded this exact attempt
+        /// (accept/bind/activate all committed for real) but the local
+        /// checkpoint needed to resume a LATER `.alreadyCompleted`
+        /// hydration response could not be saved (PR #120 R4) — unlike
+        /// `AthleteDeviceAuthorizationSessionManager`'s own session-save
+        /// failures (wasteful but never incorrect, since a fresh
+        /// `session_issue` is always possible again), a missing
+        /// checkpoint here is a genuine future restorability gap: the
+        /// GET step's permanent-marker short-circuit returns no payload
+        /// (`AthleteBackendHydrationOutcome.alreadyCompleted`'s own doc
+        /// comment), so a relaunch before this installation's next
+        /// successful ACK would otherwise have nothing to resume from
+        /// and would show `.recoveryRequired` instead. Never collapsed
+        /// into plain `.connected`, which would promise a restorability
+        /// guarantee this attempt could not actually keep; the `actor`
+        /// is still genuinely usable right now.
+        case connectedButCheckpointUnsaved(CurrentSessionActor, verified: Bool)
         /// The SPECIFIC, unambiguous "Parent has revoked" outcome —
         /// reachable only from the hydration lifecycle's own permanent
         /// `hydration_outcome = 'revoked'` marker. Never produced by a
@@ -247,7 +264,7 @@ public final class AthleteBackendConnectionCoordinator {
         case .hydratedAndAcked(let workspaceId, let participantId, let athleteId):
             await completeLocalActivation(
                 deviceGrantId: deviceGrantId, workspaceId: workspaceId, participantId: participantId, athleteId: athleteId,
-                verified: true, myGeneration: myGeneration
+                myGeneration: myGeneration
             )
         case .alreadyCompleted:
             // The GET step's own permanent-marker short-circuit carries
@@ -262,7 +279,7 @@ public final class AthleteBackendConnectionCoordinator {
             }
             await completeLocalActivation(
                 deviceGrantId: deviceGrantId, workspaceId: checkpoint.workspaceId, participantId: checkpoint.participantId,
-                athleteId: checkpoint.athleteId, verified: true, myGeneration: myGeneration
+                athleteId: checkpoint.athleteId, myGeneration: myGeneration
             )
         case .deadlinePassed:
             state = .hydrationWindowExpired
@@ -278,12 +295,17 @@ public final class AthleteBackendConnectionCoordinator {
     /// resumed from a prior checkpoint. Re-fetches eligibility/participant
     /// facts fresh (never trusted from an earlier moment), rejects a
     /// cross-workspace athlete link by construction (see the
-    /// `AthleteEligibilityFacts` built below), and persists the local
-    /// checkpoint ONLY after `bind`/`activate` have themselves already
-    /// succeeded.
+    /// `AthleteEligibilityFacts` built below), rejects a bound athlete
+    /// that does not match the claimed/checkpointed target (PR #120 R3
+    /// — see the explicit guard below), persists the local checkpoint
+    /// ONLY after `bind`/`activate` have themselves already succeeded,
+    /// and — PR #120 R5 — never labels the result "freshly verified"
+    /// from the hydration call alone: `performFreshVerification` always
+    /// performs its own genuine `session_issue`/`session_renew` round
+    /// trip before this method decides the final `verified` flag,
+    /// exactly like the restoration flow's own step 2.
     private func completeLocalActivation(
-        deviceGrantId: UUID, workspaceId: UUID, participantId: UUID, athleteId: UUID,
-        verified: Bool, myGeneration: Int
+        deviceGrantId: UUID, workspaceId: UUID, participantId: UUID, athleteId: UUID, myGeneration: Int
     ) async {
         let targetAthleteId = AthleteId(rawValue: athleteId)
         let targetWorkspaceId = WorkspaceId(rawValue: workspaceId)
@@ -339,6 +361,22 @@ public final class AthleteBackendConnectionCoordinator {
         }
         guard isCurrent(myGeneration) else { return }
 
+        // R3 (ChatGPT review on PR #120): `bind` matches by
+        // `participantId` alone and resolves whatever athlete that
+        // participant is CURRENTLY linked to — never trusted here as
+        // automatically matching the `athleteId` this call was given
+        // (from a fresh hydration payload, or a prior checkpoint). A
+        // stale/corrupt checkpoint or a relink since it was saved could
+        // otherwise silently activate a DIFFERENT athlete than the one
+        // this exact grant names — rejected explicitly, never silently
+        // accepted.
+        guard bound.athleteId.rawValue == athleteId else {
+            guard isCurrent(myGeneration) else { return }
+            log.error("Athlete backend connection: bound athlete does not match the claimed target — recovery required")
+            state = .recoveryRequired
+            return
+        }
+
         let actor: CurrentSessionActor
         do {
             actor = try sessionActivationService.activate(boundIdentity: bound)
@@ -350,21 +388,52 @@ public final class AthleteBackendConnectionCoordinator {
         }
         guard isCurrent(myGeneration) else { return }
 
-        // Write ordering: the checkpoint is persisted ONLY here, after
+        // Write ordering: the checkpoint is attempted ONLY here, after
         // local acceptance/binding/activation have ALL already
         // succeeded for real — never before, and never on any failure
-        // path above. A failed save is deliberately never surfaced as
-        // if activation itself failed (it genuinely succeeded); it only
-        // means a future relaunch may need a fresh hydration GET
-        // (itself idempotent) rather than finding a usable checkpoint —
-        // wasteful, never incorrect, mirroring
+        // path above. R4 (ChatGPT review on PR #120): UNLIKE
         // `AthleteDeviceAuthorizationSessionManager.persist(_:)`'s own
-        // identical reasoning for its own save failures.
-        try? checkpointStore.saveCheckpoint(AthleteBackendConnectionCheckpoint(
-            deviceGrantId: deviceGrantId, workspaceId: workspaceId, participantId: participantId, athleteId: athleteId
-        ))
+        // save failures (wasteful but never incorrect — a fresh
+        // `session_issue` is always possible again), a missing
+        // checkpoint here is a genuine future restorability gap — the
+        // GET step's permanent-marker short-circuit returns no payload,
+        // so a relaunch before this installation's next successful ACK
+        // would otherwise have nothing to resume from. Never swallowed
+        // via `try?`: surfaced as the distinct `.connectedButCheckpointUnsaved`
+        // warning below rather than silently promising a restorability
+        // guarantee this attempt could not keep.
+        let checkpointSaved: Bool
+        do {
+            try checkpointStore.saveCheckpoint(AthleteBackendConnectionCheckpoint(
+                deviceGrantId: deviceGrantId, workspaceId: workspaceId, participantId: participantId, athleteId: athleteId
+            ))
+            checkpointSaved = true
+        } catch {
+            log.error("Athlete backend connection: checkpoint save failed after genuine local activation: \(String(describing: error), privacy: .public)")
+            checkpointSaved = false
+        }
+        guard isCurrent(myGeneration) else { return }
 
-        state = .connected(actor, verified: verified)
+        // R5 (ChatGPT review on PR #120): hydration GET/ACK succeeding
+        // never itself proves a genuine `session_issue`/`session_renew`
+        // round trip happened THIS attempt — `hydrationAdapter.hydrate(_:)`
+        // calls `ensureActiveSession`, whose own intended cached-token
+        // fast path may skip the network entirely. "Freshly verified"
+        // is only ever earned by `performFreshVerification`'s own
+        // explicit, forced round trip — exactly the same check the
+        // restoration flow's step 2 performs — never assumed from local
+        // success alone.
+        switch await performFreshVerification(deviceGrantId: deviceGrantId, myGeneration: myGeneration) {
+        case .verified:
+            guard isCurrent(myGeneration) else { return }
+            state = checkpointSaved ? .connected(actor, verified: true) : .connectedButCheckpointUnsaved(actor, verified: true)
+        case .unverified:
+            guard isCurrent(myGeneration) else { return }
+            state = checkpointSaved ? .connected(actor, verified: false) : .connectedButCheckpointUnsaved(actor, verified: false)
+        case .denied(let deniedState):
+            guard isCurrent(myGeneration) else { return }
+            state = deniedState
+        }
     }
 
     // MARK: - Restoration (launch/foreground)
@@ -385,39 +454,21 @@ public final class AthleteBackendConnectionCoordinator {
         // Step 2 (§5.2's own correction): a GENUINE `session_issue`/
         // `session_renew` round trip — never a hydration call, and
         // never satisfied by `ensureActiveSession()`'s own cached-token
-        // fast path. `ensureFreshlyVerifiedSession(deviceGrantId:)` is
-        // this task's own narrow, additive seam on the existing manager
-        // for exactly this requirement.
-        do {
-            _ = try await sessionManager.ensureFreshlyVerifiedSession(deviceGrantId: checkpoint.deviceGrantId)
-        } catch let failure as AthleteDeviceAuthorizationSessionManager.SessionFailure {
+        // fast path. `performFreshVerification` is shared with
+        // first-time activation's own identical requirement (R5).
+        switch await performFreshVerification(deviceGrantId: checkpoint.deviceGrantId, myGeneration: myGeneration) {
+        case .denied(let deniedState):
             guard isCurrent(myGeneration) else { return }
-            switch failure {
-            case .grantUnavailable:
-                // NEUTRAL copy only — never "Parent has revoked" (that
-                // specific claim is reachable only via a hydration
-                // call's own permanent marker, never this session-only
-                // check — see this type's own `.connectionUnavailable`
-                // doc comment).
-                state = .connectionUnavailable
-            case .installationKeyUnavailable:
-                state = .installationKeyUnavailable
-            case .network, .malformedResponse, .gatewayConfigurationMissing, .sessionCleared:
-                // Stay at the cached/unverified presentation already
-                // shown in step 1 — a transient/local-generation issue
-                // is never itself evidence of denial, and never
-                // silently promoted to "verified" either.
-                break
-            }
+            state = deniedState
             return
-        } catch {
-            guard isCurrent(myGeneration) else { return }
-            log.error("Athlete backend connection: unexpected online-validation failure: \(String(describing: error), privacy: .public)")
-            // Same reasoning as the typed-failure branch above: stay at
-            // the already-shown cached/unverified presentation rather
-            // than fabricate either success or denial from an
-            // unrecognized error.
+        case .unverified:
+            // Stay at the cached/unverified presentation already shown
+            // in step 1 — a transient/local-generation issue is never
+            // itself evidence of denial, and never silently promoted to
+            // "verified" either.
             return
+        case .verified:
+            break
         }
         guard isCurrent(myGeneration) else { return }
 
@@ -433,16 +484,59 @@ public final class AthleteBackendConnectionCoordinator {
         state = .connected(freshActor, verified: true)
     }
 
+    /// Shared by first-time activation (R5) and restoration's own step
+    /// 2: forces a genuine `session_issue`/`session_renew` round trip
+    /// via `ensureFreshlyVerifiedSession`, classifying the result into
+    /// exactly one of three outcomes this coordinator itself needs —
+    /// never a fourth hidden possibility. Threads this attempt's own
+    /// `isCurrent(myGeneration)` through as `isStillWanted` (R2): if a
+    /// NEWER attempt has already superseded this one by the time the
+    /// forced renew/issue would otherwise submit or persist, the
+    /// session manager itself refuses to do either, rather than merely
+    /// having its late result ignored here afterward.
+    private func performFreshVerification(deviceGrantId: UUID, myGeneration: Int) async -> FreshVerificationOutcome {
+        do {
+            _ = try await sessionManager.ensureFreshlyVerifiedSession(
+                deviceGrantId: deviceGrantId, isStillWanted: { [weak self] in self?.isCurrent(myGeneration) ?? false }
+            )
+            return .verified
+        } catch let failure as AthleteDeviceAuthorizationSessionManager.SessionFailure {
+            switch failure {
+            case .grantUnavailable:
+                // NEUTRAL copy only — never "Parent has revoked" (that
+                // specific claim is reachable only via a hydration
+                // call's own permanent marker, never this session-only
+                // check — see `.connectionUnavailable`'s own doc
+                // comment).
+                return .denied(.connectionUnavailable)
+            case .installationKeyUnavailable:
+                return .denied(.installationKeyUnavailable)
+            case .network, .malformedResponse, .gatewayConfigurationMissing, .sessionCleared:
+                return .unverified
+            }
+        } catch {
+            log.error("Athlete backend connection: unexpected online-validation failure: \(String(describing: error), privacy: .public)")
+            return .unverified
+        }
+    }
+
     /// Pure, local, no-network re-validation of an already-persisted
     /// checkpoint — reuses B2.3/B2.4 exactly as a fresh activation
     /// would, never a separate "trust the checkpoint" shortcut. Throws
     /// whatever `bind`/`activate` themselves throw if the local graph
     /// no longer supports this checkpoint (participant
-    /// removed/revoked/re-linked since it was saved).
+    /// removed/revoked/re-linked since it was saved), or
+    /// `CheckpointAthleteMismatchError` (R3) if the participant this
+    /// checkpoint names is now bound to a DIFFERENT athlete than the
+    /// checkpoint itself claims — never silently resolved to whichever
+    /// athlete the participant currently happens to link to.
     private func locallyRevalidate(checkpoint: AthleteBackendConnectionCheckpoint) throws -> CurrentSessionActor {
         let bound = try identityBindingService.bind(
             acceptedWorkspaceId: checkpoint.workspaceId, intendedParticipantId: checkpoint.participantId
         )
+        guard bound.athleteId.rawValue == checkpoint.athleteId else {
+            throw CheckpointAthleteMismatchError()
+        }
         return try sessionActivationService.activate(boundIdentity: bound)
     }
 
@@ -480,6 +574,24 @@ public final class AthleteBackendConnectionCoordinator {
         log.error("Athlete backend connection: unrecognized hydration failure: \(String(describing: error), privacy: .public)")
         return .recoveryRequired
     }
+
+    /// `performFreshVerification`'s own three possible outcomes — never
+    /// a fourth hidden case; see that method's own doc comment.
+    private enum FreshVerificationOutcome {
+        case verified
+        case unverified
+        case denied(State)
+    }
+
+    /// R3 (ChatGPT review on PR #120): thrown by `locallyRevalidate`
+    /// when the participant a checkpoint names is bound to a DIFFERENT
+    /// athlete than the checkpoint itself claims — e.g. a relink since
+    /// the checkpoint was saved, or a corrupted/stale checkpoint. Never
+    /// surfaced beyond this file: every caller already swallows
+    /// `locallyRevalidate`'s throw via `try?` and reports
+    /// `.recoveryRequired`, exactly as it would for any other local
+    /// graph inconsistency.
+    private struct CheckpointAthleteMismatchError: Error {}
 }
 
 /// Test-substitution seam for `AthleteBackendHydrationAdapter.hydrate(deviceGrantId:)`
@@ -506,7 +618,7 @@ extension AthleteBackendHydrationAdapter: AthleteBackendHydrating {}
 /// forced online re-verification, and `signOutOrInvalidate()`'s session
 /// teardown.
 public protocol AthleteFreshSessionVerifying {
-    func ensureFreshlyVerifiedSession(deviceGrantId: UUID) async throws -> String
+    func ensureFreshlyVerifiedSession(deviceGrantId: UUID, isStillWanted: @escaping () -> Bool) async throws -> String
     func clearStoredSession()
 }
 

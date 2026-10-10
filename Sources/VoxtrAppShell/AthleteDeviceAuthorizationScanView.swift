@@ -183,7 +183,9 @@ public struct AthleteDeviceAuthorizationScanView: View {
         case .idle, .activating:
             waitingView(message: "Setting up this athlete's data…")
         case .connected(_, let verified):
-            connectedView(verified: verified)
+            connectedView(verified: verified, checkpointUnsaved: false)
+        case .connectedButCheckpointUnsaved(_, let verified):
+            connectedView(verified: verified, checkpointUnsaved: true)
         case .grantRevoked:
             backendOutcomeView(
                 title: "Connection revoked",
@@ -229,7 +231,7 @@ public struct AthleteDeviceAuthorizationScanView: View {
         return nil
     }
 
-    private func connectedView(verified: Bool) -> some View {
+    private func connectedView(verified: Bool, checkpointUnsaved: Bool) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
@@ -242,6 +244,17 @@ public struct AthleteDeviceAuthorizationScanView: View {
                     .foregroundStyle(VoxtrColor.textSecondary)
                     .padding(.horizontal, 32)
                     .accessibilityIdentifier("athleteDeviceAuthorizationScan.unverifiedBanner")
+            }
+            if checkpointUnsaved {
+                // Same wording as `AthleteShellRoute.backendStatusNotice(for:)`'s
+                // own `.connectedButCheckpointUnsaved` case, so this
+                // screen and the persistent root-level banner never
+                // diverge (ChatGPT review on PR #120, R1/R4).
+                Text("Vǫxtr couldn't save what's needed to reconnect automatically. If the app restarts before this is resolved, you may need to scan a new connection code.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.checkpointUnsavedWarning")
             }
             if let warning = coordinator.unpersistedAuthorizationWarning {
                 Text(warning)

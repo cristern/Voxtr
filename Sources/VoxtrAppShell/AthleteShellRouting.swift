@@ -66,7 +66,101 @@ enum AthleteShellRoute: Equatable {
         if case .connected(let actor, _) = backendState {
             return .shell(actor: actor)
         }
+        if case .connectedButCheckpointUnsaved(let actor, _) = backendState {
+            // The connection is genuinely live right now (see that
+            // case's own doc comment) — only the checkpoint failed to
+            // save, which `backendStatusNotice(for:)` below surfaces as
+            // its own honest warning; it never itself blocks reaching
+            // the shell.
+            return .shell(actor: actor)
+        }
         return .gate
+    }
+
+    /// Athlete hydration/activation integration slice (§5.2 follow-up,
+    /// ChatGPT review on PR #120, finding R1): the backend connection
+    /// path's own honest status, to render ALONGSIDE whichever screen
+    /// `route(for:)`/`route(legacyState:backendState:)` selects — never
+    /// folded into, or allowed to silently disappear behind, the
+    /// routing decision itself. `route(legacyState:backendState:)`
+    /// prefers the LEGACY actor when both paths are independently
+    /// connected (unchanged — §4.1 guarantees both converge on the same
+    /// stable-ID rows for the same athlete, so this is only ever a
+    /// choice of which already-valid actor to pass through, never two
+    /// conflicting identities), but that choice must never cause the
+    /// backend path's own distinct status to silently vanish — exactly
+    /// what this function fixes.
+    ///
+    /// Returns `nil` when there is nothing to say: `.idle`/`.activating`
+    /// (nothing attempted, or already shown by the scan sheet's own
+    /// progress view) or `.connected(_, verified: true)` (freshly
+    /// verified, nothing to warn about). Every other case — the
+    /// cached/unverified D3 state, the checkpoint-unsaved warning, and
+    /// every denial/problem outcome — returns honest copy here, so it
+    /// remains visible even once `AthleteDeviceAuthorizationScanView`
+    /// (where this same copy also appears, via this exact function) has
+    /// been dismissed, and even when a separately-connected legacy actor
+    /// would otherwise let the combined route reach the shell with
+    /// nothing to say about the backend path's own state.
+    ///
+    /// Deliberately does NOT decide whether backend denial should BLOCK
+    /// access when a legacy actor is independently connected — the
+    /// CloudKit transition plan §8 explicitly defers "local membership
+    /// revocation" as its own Product Owner Decision, which this task is
+    /// not authorized to make. This fixes only the disappearing-status
+    /// bug the review identified: the honest status is always shown,
+    /// never silently dropped; it is not itself an access-control
+    /// decision.
+    static func backendStatusNotice(for backendState: AthleteBackendConnectionCoordinator.State) -> (title: String, message: String)? {
+        switch backendState {
+        case .idle, .activating, .connected(_, true):
+            return nil
+        case .connected(_, false):
+            return (
+                "Connection cannot be verified",
+                "Showing the last known information for this device's backend connection. No new protected sync will happen until this is verified again."
+            )
+        case .connectedButCheckpointUnsaved:
+            return (
+                "Connection may need reconnecting after restart",
+                "This device is connected, but Vǫxtr couldn't save what's needed to reconnect automatically. If the app restarts before this is resolved, you may need to scan a new connection code."
+            )
+        case .grantRevoked:
+            return (
+                "Backend connection revoked",
+                "The parent has revoked this device's backend connection. Ask them to approve a new connection code."
+            )
+        case .connectionUnavailable:
+            return (
+                "Backend connection unavailable",
+                "This device's backend connection isn't available right now. Ask the parent to approve a new connection code."
+            )
+        case .waitingForParentApproval:
+            return (
+                "Backend connection pending",
+                "Waiting for the parent to finish approving this device's backend connection."
+            )
+        case .hydrationWindowExpired:
+            return (
+                "Backend connection window expired",
+                "This device's backend connection attempt took too long. Ask the parent to approve a new connection code."
+            )
+        case .installationKeyUnavailable:
+            return (
+                "Backend connection needs reconnecting",
+                "This device's secure key no longer matches a backend connection in progress. Please scan a new code."
+            )
+        case .ackNotConfirmed, .temporarilyUnavailable:
+            return (
+                "Backend connection couldn't finish",
+                "This device's backend connection couldn't be confirmed with Vǫxtr. Check the connection and try again."
+            )
+        case .recoveryRequired:
+            return (
+                "Backend connection needs reconnecting",
+                "This device's backend connection needs to reconnect. Please scan a new code."
+            )
+        }
     }
 }
 
