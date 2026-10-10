@@ -163,7 +163,7 @@ private final class FakeCoordinatorSessionManager: AthleteFreshSessionVerifying 
 /// `AthleteBackendHydrationAdapterTests.FakeAdapterSessionStore`'s own
 /// established shape.
 @MainActor
-private final class FakeCoordinatorCheckpointStore: AthleteBackendConnectionCheckpointStoring {
+private final class FakeCoordinatorCheckpointStore: AthleteBackendConnectionCheckpointStoring, @unchecked Sendable {
     var stored: AthleteBackendConnectionCheckpoint?
     var saveShouldThrow = false
     private(set) var saveCallCount = 0
