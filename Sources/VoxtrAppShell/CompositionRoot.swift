@@ -372,6 +372,20 @@ public final class CompositionRoot {
         )
         container.register(AthleteDeviceAuthorizationInvitationService.self) { athleteDeviceAuthorizationInvitationService }
 
+        // Parent hydration-upload integration (merged CloudKit
+        // transition plan §5.1): registration only, same rationale as
+        // every other B2.x/Athlete-Connection-V1 service above — no
+        // network call happens here, and nothing here calls
+        // `upload(...)`, which only ever runs after an actual, explicit
+        // Parent approval decision inside
+        // `AthleteDeviceAuthorizationInvitationCoordinator.decide(...)`.
+        let parentHydrationUploadService = ParentHydrationUploadService(
+            parentWorkspaceRepository: container.resolve(ParentWorkspaceRepository.self),
+            athleteRepository: container.resolve(AthleteRepository.self),
+            parentAuthenticationService: parentAuthenticationService
+        )
+        container.register(ParentHydrationUploadService.self) { parentHydrationUploadService }
+
         // S3.2: the one place both Planning and Training repositories
         // are used together — see TrainingPlanningCoordinationService's
         // own doc comment for why this can't live in either domain

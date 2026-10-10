@@ -81,6 +81,7 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     public init(
         invitationService: AthleteDeviceAuthorizationInvitationService,
         parentAuthenticationService: ParentAuthenticationService,
+        hydrationUploadService: ParentHydrationUploadService,
         athleteId: AthleteId,
         workspaceId: WorkspaceId,
         invitedBy: ActorId,
@@ -90,7 +91,8 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
     ) {
         self._coordinator = State(initialValue: AthleteDeviceAuthorizationInvitationCoordinator(
             invitationService: invitationService,
-            parentAuthenticationService: parentAuthenticationService
+            parentAuthenticationService: parentAuthenticationService,
+            hydrationUploadService: hydrationUploadService
         ))
         self.athleteId = athleteId
         self.workspaceId = workspaceId
@@ -237,6 +239,12 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
             awaitingRequestsView(invitation: invitation, requests: requests)
         case .decided(let outcome):
             decidedView(outcome: outcome)
+        case .uploadingHydration:
+            uploadingHydrationView()
+        case .hydrationUploaded(_, let outcome):
+            hydrationUploadedView(outcome: outcome)
+        case .hydrationUploadFailed(_, let message):
+            hydrationUploadFailedView(message: message)
         case .authenticationRequired(let requirement):
             authenticationRequiredView(requirement: requirement)
         case .failed(let message):
@@ -353,6 +361,16 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
         VStack(spacing: 16) {
             switch outcome {
             case .approved:
+                // Parent hydration-upload integration: unreachable in
+                // practice — `decide()` now routes an `.approved`
+                // outcome straight into the upload sequence
+                // (`.uploadingHydration`/`.hydrationUploaded`/
+                // `.hydrationUploadFailed`) instead of landing here.
+                // Kept as a defensive, harmless branch rather than
+                // removed, so a future change to that routing can never
+                // silently fall through to the generic `default` copy
+                // below, which would be actively misleading for an
+                // approval.
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 56))
                     .foregroundStyle(.green)
@@ -378,6 +396,130 @@ public struct AthleteDeviceAuthorizationInvitationView: View {
         .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.decidedState")
+    }
+
+    /// Parent hydration-upload integration: the approved request's exact
+    /// 11-field bootstrap payload is being sent via the existing
+    /// `hydration-upload` endpoint. Calm by Default: a real spinner, not
+    /// a fake progress percentage or countdown.
+    private func uploadingHydrationView() -> some View {
+        VStack(spacing: 16) {
+            ProgressView()
+            Text("Sending connection details…")
+                .foregroundStyle(VoxtrColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.uploadingHydration")
+    }
+
+    /// Every `HydrationUploadOutcome` case is shown with its own
+    /// truthful copy — never a generic "success"/"failure" — and never
+    /// claims athlete activation or that the Athlete app is connected
+    /// (CLAUDE.md §10): this slice ends at a successfully delivered
+    /// upload, not at athlete runtime activation.
+    @ViewBuilder
+    private func hydrationUploadedView(outcome: HydrationUploadOutcome) -> some View {
+        VStack(spacing: 16) {
+            switch outcome {
+            case .staged, .uploaded:
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.green)
+                Text("Connection details sent")
+                    .font(VoxtrTypography.cardTitle)
+                Text("Ask \(athleteDisplayName) to finish connecting on their device.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .uploadRejected:
+                // Review round: the backend rejects ANY retry against an
+                // already-associated upload outright, before comparing
+                // payload bytes (see `HydrationUploadOutcome`'s own doc
+                // comment) — this attempt's own details were never
+                // verified or delivered, even though a PRIOR attempt for
+                // this same invitation likely already succeeded. Kept
+                // distinct from `.staged`/`.uploaded`'s "Connection
+                // details sent" copy, which would falsely claim THIS
+                // attempt's bytes were accepted.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.green)
+                Text("Connection details already recorded")
+                    .font(VoxtrTypography.cardTitle)
+                Text("A connection attempt for this invitation was already received. These details weren't sent again.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .alreadyCompleted:
+                // Review round: the backend's permanent `acked` marker
+                // proves hydration completed at some point — never that
+                // the device is CURRENTLY authorized or connected (a
+                // later-revoked grant can still produce this outcome).
+                // Copy deliberately avoids any present-tense "connected"
+                // claim.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 56))
+                    .foregroundStyle(.green)
+                Text("Already received")
+                    .font(VoxtrTypography.cardTitle)
+                Text("\(athleteDisplayName)'s device already used these connection details to finish this step.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .deadlinePassed:
+                Text("This connection window has expired.")
+                    .font(VoxtrTypography.cardTitle)
+                Text("Create a new connection code and try again.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .grantRevoked:
+                Text("This connection was revoked.")
+                    .font(VoxtrTypography.cardTitle)
+                Text("Create a new connection code and try again.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            case .payloadMismatch, .requestNotFound, .invitationNotFound, .ownerBindingNotActive, .notYetApproved:
+                Text("Couldn't send connection details.")
+                    .font(VoxtrTypography.cardTitle)
+                Text("Create a new connection code and try again.")
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button("Done") {
+                onDismiss()
+                dismiss()
+            }
+            .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.hydrationUploadedDoneButton")
+        }
+        .padding(.horizontal, 32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.hydrationUploadedState")
+    }
+
+    /// A local projection-resolution problem or a plain network/
+    /// malformed-response failure from the upload call — never a
+    /// reason to show "sign in again" (that's
+    /// `.authenticationRequired`, handled separately, via the existing
+    /// reauthentication sheet). Actionable: `retryHydrationUpload()`
+    /// resends the exact same frozen payload once already resolved, or
+    /// re-attempts resolution fresh if resolution itself failed last
+    /// time — the coordinator, not this view, decides which.
+    private func hydrationUploadFailedView(message: String) -> some View {
+        VStack(spacing: 16) {
+            Text(message)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Try again") {
+                Task { await coordinator.retryHydrationUpload() }
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.retryHydrationUploadButton")
+            Button("Done") {
+                onDismiss()
+                dismiss()
+            }
+            .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.hydrationUploadFailedDoneButton")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("athleteDeviceAuthorizationInvitation.hydrationUploadFailedState")
     }
 
     private func failedView(message: String) -> some View {

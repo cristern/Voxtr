@@ -111,6 +111,10 @@ public struct AthleteFamilyManagementView: View {
     /// above — passed straight through to `AthleteSettingsView` below
     /// for its own "Connect this device" entry point.
     private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    /// Parent hydration-upload integration: same family-level threading
+    /// rationale as `athleteDeviceAuthorizationInvitationService`
+    /// immediately above.
+    private let parentHydrationUploadService: ParentHydrationUploadService
 
     public init(
         viewModel: AthleteFamilyManagementViewModel,
@@ -119,7 +123,8 @@ public struct AthleteFamilyManagementView: View {
         familyCalendarSourcesViewModel: FamilyCalendarSourcesViewModel,
         parentAuthenticationService: ParentAuthenticationService,
         enrollableWorkspaces: [EnrollableWorkspace],
-        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         _viewModel = State(initialValue: viewModel)
         self.presentationMode = presentationMode
@@ -128,6 +133,7 @@ public struct AthleteFamilyManagementView: View {
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentHydrationUploadService = parentHydrationUploadService
     }
 
     public var body: some View {
@@ -296,7 +302,8 @@ public struct AthleteFamilyManagementView: View {
                 sleepSettingsViewModel: sleepSettingsViewModel(athlete),
                 athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
                 parentAuthenticationService: parentAuthenticationService,
-                enrollableWorkspaces: enrollableWorkspaces
+                enrollableWorkspaces: enrollableWorkspaces,
+                parentHydrationUploadService: parentHydrationUploadService
             )
         } label: {
             HStack(spacing: 8) {
@@ -428,6 +435,11 @@ struct AthleteSettingsView: View {
     private let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
     private let parentAuthenticationService: ParentAuthenticationService
     private let enrollableWorkspaces: [EnrollableWorkspace]
+    /// Parent hydration-upload integration: same threading rationale as
+    /// `athleteDeviceAuthorizationInvitationService` above — passed
+    /// straight through to `AthleteDeviceAuthorizationInvitationView`
+    /// below.
+    private let parentHydrationUploadService: ParentHydrationUploadService
     @State private var isPresentingDeviceAuthorizationInvitation = false
 
     init(
@@ -436,7 +448,8 @@ struct AthleteSettingsView: View {
         sleepSettingsViewModel: AthleteSleepSettingsViewModel,
         athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
         parentAuthenticationService: ParentAuthenticationService,
-        enrollableWorkspaces: [EnrollableWorkspace]
+        enrollableWorkspaces: [EnrollableWorkspace],
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         self.viewModel = viewModel
         self.athlete = athlete
@@ -445,6 +458,7 @@ struct AthleteSettingsView: View {
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
+        self.parentHydrationUploadService = parentHydrationUploadService
     }
 
     var body: some View {
@@ -765,6 +779,7 @@ struct AthleteSettingsView: View {
             AthleteDeviceAuthorizationInvitationView(
                 invitationService: athleteDeviceAuthorizationInvitationService,
                 parentAuthenticationService: parentAuthenticationService,
+                hydrationUploadService: parentHydrationUploadService,
                 athleteId: athlete.athleteId,
                 workspaceId: viewModel.currentWorkspaceId,
                 invitedBy: viewModel.currentParentActorId,

@@ -81,6 +81,9 @@ public struct FamilyHomeView: View {
     /// Athlete Connection V1 (backend device authorization): same
     /// threading rationale as `parentAuthenticationService` above.
     public let athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+    /// Parent hydration-upload integration: same threading rationale as
+    /// `athleteDeviceAuthorizationInvitationService` immediately above.
+    public let parentHydrationUploadService: ParentHydrationUploadService
 
     public init(
         family: RestoredFamily,
@@ -102,7 +105,8 @@ public struct FamilyHomeView: View {
         athleteConnectionOwnerHandoffService: AthleteConnectionOwnerHandoffService,
         parentAuthenticationService: ParentAuthenticationService,
         enrollableWorkspaces: [EnrollableWorkspace],
-        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService
+        athleteDeviceAuthorizationInvitationService: AthleteDeviceAuthorizationInvitationService,
+        parentHydrationUploadService: ParentHydrationUploadService
     ) {
         self.family = family
         self.planningService = planningService
@@ -124,6 +128,7 @@ public struct FamilyHomeView: View {
         self.parentAuthenticationService = parentAuthenticationService
         self.enrollableWorkspaces = enrollableWorkspaces
         self.athleteDeviceAuthorizationInvitationService = athleteDeviceAuthorizationInvitationService
+        self.parentHydrationUploadService = parentHydrationUploadService
     }
 
     public var body: some View {
@@ -147,7 +152,8 @@ public struct FamilyHomeView: View {
                 sportRepository: sportRepository,
                 parentAuthenticationService: parentAuthenticationService,
                 enrollableWorkspaces: enrollableWorkspaces,
-                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+                athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                parentHydrationUploadService: parentHydrationUploadService
             )
         } else {
             NavigationStack {
@@ -170,7 +176,8 @@ public struct FamilyHomeView: View {
                     ),
                     parentAuthenticationService: parentAuthenticationService,
                     enrollableWorkspaces: enrollableWorkspaces,
-                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService
+                    athleteDeviceAuthorizationInvitationService: athleteDeviceAuthorizationInvitationService,
+                    parentHydrationUploadService: parentHydrationUploadService
                 )
             }
         }

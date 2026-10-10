@@ -416,6 +416,91 @@ public final class ParentAuthenticationService {
         return try Self.mapConnectionRequestDecisionOutcome(decoded)
     }
 
+    /// Uploads the exact 11 §2.4 bootstrap fields for `connectionRequestId`
+    /// via `hydration-upload` — the Parent-authenticated prerequisite
+    /// runtime contract §4.2/the merged CloudKit transition plan §5.1
+    /// describe. Every parameter is a raw, already-resolved identifier/
+    /// string value — this method neither infers nor validates their
+    /// relationship to each other, mirroring
+    /// `createConnectionInvitation`'s own established convention; the
+    /// caller (`ParentHydrationUploadService`, in `VoxtrAppShell`) owns
+    /// resolving and FREEZING this exact payload once, at approval time,
+    /// and must resend the IDENTICAL values on every retry — never
+    /// recomputed from possibly-changed current profile data, per the
+    /// backend's own same-byte-idempotent/different-byte-rejected
+    /// contract (see `HydrationUploadOutcome`'s own doc comment).
+    /// SENSITIVE operation per the backend's own 10-minute freshness
+    /// gate, same session-handling shape as `createConnectionInvitation`/
+    /// `decideConnectionRequest`. `public` — same reason as those two
+    /// methods: this method's real caller lives in `VoxtrAppShell`.
+    public func uploadHydration(
+        connectionRequestId: UUID,
+        workspaceId: UUID,
+        intendedParticipantId: UUID,
+        intendedAthleteId: UUID,
+        parentId: UUID,
+        parentGivenName: String,
+        workspaceDisplayName: String,
+        ownerParticipantId: UUID,
+        athleteGivenName: String,
+        athleteBirthDateIso: String,
+        athleteTimeZoneId: String,
+        athleteDevelopmentStage: String
+    ) async throws -> HydrationUploadOutcome {
+        guard let token = sessionStore.loadToken() else {
+            throw ParentAuthenticationError.notSignedIn
+        }
+        var request = makeRequest(path: "hydration-upload")
+        request.setValue(token, forHTTPHeaderField: parentSessionHeaderName)
+        request.httpBody = try encode(HydrationUploadRequestBody(
+            connectionRequestId: connectionRequestId.uuidString,
+            workspaceId: workspaceId.uuidString,
+            intendedParticipantId: intendedParticipantId.uuidString,
+            intendedAthleteId: intendedAthleteId.uuidString,
+            parentId: parentId.uuidString,
+            parentGivenName: parentGivenName,
+            workspaceDisplayName: workspaceDisplayName,
+            ownerParticipantId: ownerParticipantId.uuidString,
+            athleteGivenName: athleteGivenName,
+            athleteBirthDateIso: athleteBirthDateIso,
+            athleteTimeZoneId: athleteTimeZoneId,
+            athleteDevelopmentStage: athleteDevelopmentStage
+        ))
+        let (data, response) = try await transport.send(request)
+
+        if response.statusCode == 401 {
+            let decoded = try? decode(ErrorResponseBody.self, from: data)
+            // Only clear the stored token if it is STILL the exact token
+            // this call started with. This call's own `token` was
+            // captured before the network `await` above; if the Parent
+            // signed out and completed a brand-new SIWA handshake while
+            // this call was suspended, a DIFFERENT, valid token may now
+            // be stored — deleting it here would destroy a session that
+            // has nothing to do with this stale rejection, incorrectly
+            // signing the Parent out of a session they only just
+            // established (review finding: a delayed 401 for an old
+            // token must never erase a freshly-authenticated one).
+            let tokenStillCurrent = sessionStore.loadToken() == token
+            switch decoded?.error {
+            case "session_invalid":
+                if tokenStillCurrent { sessionStore.deleteToken() }
+                throw ParentAuthenticationError.sessionInvalid
+            case "session_expired":
+                if tokenStillCurrent { sessionStore.deleteToken() }
+                throw ParentAuthenticationError.sessionExpired
+            case "reauthentication_required":
+                throw ParentAuthenticationError.reauthenticationRequired
+            default:
+                if tokenStillCurrent { sessionStore.deleteToken() }
+                throw ParentAuthenticationError.sessionInvalid
+            }
+        }
+
+        guard response.statusCode == 200 else { throw ParentAuthenticationError.network }
+        let decoded = try decode(HydrationUploadResponseBody.self, from: data)
+        return try Self.mapHydrationUploadOutcome(decoded)
+    }
+
     // MARK: - Wire mapping
 
     private static func mapConnectionInvitationCreationOutcome(_ body: ConnectionInvitationCreateResponseBody) throws -> ConnectionInvitationCreationOutcome {
@@ -471,6 +556,24 @@ public final class ParentAuthenticationService {
         case "invitation_expired": return .invitationExpired
         case "invitation_consumed": return .invitationConsumed
         case "invitation_already_has_approved_request": return .invitationAlreadyHasApprovedRequest
+        default:
+            throw ParentAuthenticationError.malformedResponse
+        }
+    }
+
+    private static func mapHydrationUploadOutcome(_ body: HydrationUploadResponseBody) throws -> HydrationUploadOutcome {
+        switch body.outcome {
+        case "staged": return .staged
+        case "uploaded": return .uploaded
+        case "upload_rejected": return .uploadRejected
+        case "already_completed": return .alreadyCompleted
+        case "deadline_passed": return .deadlinePassed
+        case "grant_revoked": return .grantRevoked
+        case "payload_mismatch": return .payloadMismatch
+        case "request_not_found": return .requestNotFound
+        case "invitation_not_found": return .invitationNotFound
+        case "owner_binding_not_active": return .ownerBindingNotActive
+        case "not_yet_approved": return .notYetApproved
         default:
             throw ParentAuthenticationError.malformedResponse
         }
@@ -628,5 +731,33 @@ private struct ConnectionRequestDecideRequestBody: Encodable, Sendable {
 }
 
 private struct ConnectionRequestDecideResponseBody: Decodable, Sendable {
+    let outcome: String
+}
+
+/// Flat wire shape, matching `hydration-upload/index.ts`'s own
+/// `parseRequestBody` exactly — `connection_request_id` plus the 11
+/// §2.4 fields are all top-level, never nested under a "payload" key.
+/// `athleteBirthDateIso`: deliberately capital-I-lowercase-"so" — NOT
+/// `athleteBirthDateISO` — per this codebase's own proven
+/// `.convertToSnakeCase`/`.convertFromSnakeCase` precedent for this
+/// exact field (see `AthleteDeviceAuthorizationSessionService.swift`'s
+/// own doc comment: "`athlete_birth_date_iso` decodes to
+/// `athleteBirthDateIso` ... never `athleteBirthDateISO`").
+private struct HydrationUploadRequestBody: Encodable, Sendable {
+    let connectionRequestId: String
+    let workspaceId: String
+    let intendedParticipantId: String
+    let intendedAthleteId: String
+    let parentId: String
+    let parentGivenName: String
+    let workspaceDisplayName: String
+    let ownerParticipantId: String
+    let athleteGivenName: String
+    let athleteBirthDateIso: String
+    let athleteTimeZoneId: String
+    let athleteDevelopmentStage: String
+}
+
+private struct HydrationUploadResponseBody: Decodable, Sendable {
     let outcome: String
 }

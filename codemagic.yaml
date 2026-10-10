@@ -266,6 +266,7 @@ workflows:
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            '-skip-testing:VoxtrSprint0Tests/ParentAuthenticationServiceTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -285,6 +286,7 @@ workflows:
             -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            '-only-testing:VoxtrSprint0Tests/ParentAuthenticationServiceTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -339,8 +341,12 @@ workflows:
           fi
           KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
-          if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
-            echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
+          # Two hosted tests now: AthleteDeviceAuthorizationSessionManagerTests
+          # and ParentAuthenticationServiceTests each have their own
+          # keychainStoreRoundTrips() — both need the real Keychain-capable
+          # host, so both are in the -only-testing selector list above.
+          if [ "$KEYCHAIN_MATCH_COUNT" -ne 2 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 2 ]; then
+            echo "FAILING BUILD: expected exactly 2 tests, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended tests."
             exit 1
           fi
           TOTAL_TEST_COUNT=$((MAIN_TEST_COUNT + KEYCHAIN_TEST_COUNT))
@@ -703,6 +709,7 @@ workflows:
             -resultBundlePath "$RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             '-skip-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            '-skip-testing:VoxtrSprint0Tests/ParentAuthenticationServiceTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -722,6 +729,7 @@ workflows:
             -resultBundlePath "$KEYCHAIN_RESULT_BUNDLE" \
             -parallel-testing-enabled NO \
             '-only-testing:VoxtrSprint0Tests/AthleteDeviceAuthorizationSessionManagerTests/keychainStoreRoundTrips()' \
+            '-only-testing:VoxtrSprint0Tests/ParentAuthenticationServiceTests/keychainStoreRoundTrips()' \
             CODE_SIGN_IDENTITY=- \
             CODE_SIGNING_REQUIRED=YES \
             CODE_SIGNING_ALLOWED=YES \
@@ -774,8 +782,12 @@ workflows:
           fi
           KEYCHAIN_MATCH_COUNT=$(python3 -c "import xml.etree.ElementTree as ET; root = ET.parse('$KEYCHAIN_JUNIT_OUTPUT').getroot(); ids = [tc.get('classname', '') for tc in root.iter('testcase')]; print(sum(1 for n in ids if 'keychainStoreRoundTrips' in n))")
           echo "Isolated Keychain bundle occurrences of keychainStoreRoundTrips: $KEYCHAIN_MATCH_COUNT"
-          if [ "$KEYCHAIN_MATCH_COUNT" -ne 1 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 1 ]; then
-            echo "FAILING BUILD: expected exactly 1 test, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended test."
+          # Two hosted tests now: AthleteDeviceAuthorizationSessionManagerTests
+          # and ParentAuthenticationServiceTests each have their own
+          # keychainStoreRoundTrips() — both need the real Keychain-capable
+          # host, so both are in the -only-testing selector list above.
+          if [ "$KEYCHAIN_MATCH_COUNT" -ne 2 ] || [ "$KEYCHAIN_TEST_COUNT" -ne 2 ]; then
+            echo "FAILING BUILD: expected exactly 2 tests, named keychainStoreRoundTrips, in the isolated Keychain bundle — found $KEYCHAIN_TEST_COUNT test(s) with $KEYCHAIN_MATCH_COUNT matching occurrence(s). The -only-testing selector is not selecting exactly (and only) the intended tests."
             exit 1
           fi
           TOTAL_TEST_COUNT=$((MAIN_TEST_COUNT + KEYCHAIN_TEST_COUNT))
