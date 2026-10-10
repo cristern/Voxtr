@@ -612,6 +612,38 @@ struct AthleteBackendConnectionCoordinatorTests {
         #expect(fixture.coordinator.state == .activating)
     }
 
+    @Test("cancel() while a suspended hydration would otherwise resolve to .hydratedAndAcked suppresses the ENTIRE accept -> bind -> activate -> checkpoint chain, never just the simple outcome cases (R6)")
+    func cancelSuppressesFullLocalActivationChainNotJustSimpleOutcomes() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.suspendNextCall()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await fixture.hydrationAdapter.waitUntilSuspended()
+        #expect(fixture.coordinator.state == .activating)
+
+        // Mirrors `AthleteDeviceAuthorizationScanView`'s own `.onDisappear`
+        // (R6 fix): dismissing the sheet mid-flight cancels the SHARED
+        // `AthleteBackendConnectionCoordinator`, not just the screen-local
+        // pairing coordinator.
+        fixture.coordinator.cancel()
+        #expect(fixture.coordinator.state == .activating)
+
+        fixture.hydrationAdapter.resumeSuspendedCall()
+        // Bounded settle window for the whole (now-stale) accept -> bind
+        // -> activate -> checkpoint -> fresh-verification chain to run
+        // to completion and attempt (and fail) its own state/storage
+        // writes.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(fixture.coordinator.state == .activating, "a dismissed/cancelled attempt's late result must never activate or publish success")
+        #expect(fixture.checkpointStore.saveCallCount == 0, "a cancelled attempt must never persist a checkpoint, even after its own local activation work would otherwise have succeeded")
+        #expect(fixture.sessionManager.callCount == 0, "a cancelled attempt must never even reach the fresh-verification step")
+    }
+
     // MARK: - Restoration (launch/foreground)
 
     @Test("restoreOnLaunchOrForeground() with no saved checkpoint stays .idle and never touches hydration/session collaborators")

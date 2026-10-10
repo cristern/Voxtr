@@ -64,8 +64,26 @@ public struct AthleteDeviceAuthorizationScanView: View {
         // AND an interactive swipe dismissal alike (`.onDisappear` runs
         // either way), so no orphaned poll loop keeps running after the
         // Athlete has left this screen.
+        //
+        // ChatGPT review on PR #120, R6: cancelling `coordinator` (the
+        // claim-submit pairing state machine) alone is not enough once
+        // pairing reaches `.authorized(grantId:)` — `backendConnectionView`
+        // below hands off to the SEPARATE, shared `connectionCoordinator`,
+        // whose own `activate(deviceGrantId:)` runs on an OWNED `Task` it
+        // stores on itself, never tied to this view's `.task(id:)`
+        // wrapper's own lifetime (that wrapper's body already returned,
+        // synchronously, the moment `activate(_:)` was called). Without
+        // this, dismissing the sheet mid-hydration would leave that
+        // attempt running, free to hydrate/accept/bind/activate, save a
+        // checkpoint, and publish `.connected` after the Athlete already
+        // left this flow. `connectionCoordinator.cancel()` mirrors
+        // `coordinator.cancel()`'s own "a merely-dismissed screen is not
+        // the Athlete discarding anything" semantics exactly — it never
+        // touches `state` or persisted storage itself; it only stops a
+        // now-unwanted attempt from mutating either going forward.
         .onDisappear {
             coordinator.cancel()
+            connectionCoordinator.cancel()
         }
     }
 
