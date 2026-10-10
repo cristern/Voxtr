@@ -456,6 +456,16 @@ struct AthleteDeviceAuthorizationInvitationCoordinatorTests {
         }
         #expect(fixture.transport.sentPaths == ["connection-invitation-create", "connection-request-list"])
 
+        // The `.sessionInvalid` mapping above deliberately deletes the
+        // now-invalid stored token (same as
+        // `ParentAuthenticationServiceTests.listConnectionRequestsUnrecognized401FailsClosed`'s
+        // own production behavior). `retryAfterReauthentication()` requires a
+        // genuinely fresh, signed-in session — simulate the Parent actually
+        // completing SIWA reauthentication, exactly like
+        // `startWithNoSessionMapsNotSignedInWithoutAnyNetworkCall` does, rather
+        // than asserting retry can succeed without one.
+        fixture.sessionStore.currentToken = "fresh-session-token"
+
         let requestId = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         fixture.transport.enqueue(path: "connection-request-list", statusCode: 200, json: [
             "outcome": "ok",
