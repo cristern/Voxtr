@@ -617,6 +617,28 @@ extension AthleteBackendHydrationAdapter: AthleteBackendHydrating {}
 /// this coordinator itself calls directly: the restoration flow's own
 /// forced online re-verification, and `signOutOrInvalidate()`'s session
 /// teardown.
+///
+/// `@MainActor` (Codemagic build 278 compiler diagnostic, confirmed via
+/// real Xcode logs — unlike `AthleteBackendHydrating` above, whose own
+/// `hydrate(deviceGrantId:)` has no closure parameter and no actor
+/// annotation issue): `ensureFreshlyVerifiedSession`'s `isStillWanted`
+/// closure parameter is not itself `Sendable`, and the ONLY real
+/// implementation (`AthleteDeviceAuthorizationSessionManager`) is
+/// `@MainActor`-isolated — calling an async, non-isolated protocol
+/// requirement whose implementation is actor-isolated would require
+/// "sending" that non-Sendable closure across the isolation boundary,
+/// which the compiler correctly rejects. Marking the protocol itself
+/// `@MainActor` removes the boundary entirely: every real caller
+/// (`AthleteBackendConnectionCoordinator`) and every conformer (the
+/// real manager, and `FakeCoordinatorSessionManager` in
+/// `AthleteBackendConnectionCoordinatorTests.swift`) is already
+/// `@MainActor`, so this exactly matches how this protocol is actually
+/// used — never a weakening of the `isStillWanted` cancellation/
+/// generation-fencing semantics those callers depend on (PR #120
+/// R2), and never an `@unchecked`/`@preconcurrency` escape hatch that
+/// would merely conceal the real isolation relationship instead of
+/// stating it.
+@MainActor
 public protocol AthleteFreshSessionVerifying {
     func ensureFreshlyVerifiedSession(deviceGrantId: UUID, isStillWanted: @escaping () -> Bool) async throws -> String
     func clearStoredSession()
