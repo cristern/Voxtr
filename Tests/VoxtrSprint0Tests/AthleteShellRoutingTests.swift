@@ -56,6 +56,134 @@ struct AthleteShellRoutingTests {
         #expect(AthleteShellRoute.route(for: .connected(actor)) == .shell(actor: actor))
     }
 
+    // MARK: - AthleteShellRoute.route(legacyState:backendState:)
+    //
+    // Athlete hydration/activation integration slice (§5.2): the
+    // combined routing decision across the legacy CKShare path and the
+    // new backend device-authorization path. Neither path's own status
+    // presentation is exercised here (that remains each state's own
+    // concern) — only which one, if either, resolves to `.shell`.
+
+    @Test("legacy connected routes to shell even when backend is not connected")
+    func legacyConnectedRoutesToShellWhenBackendIsNot() {
+        let actor = Self.makeActor()
+        let route = AthleteShellRoute.route(legacyState: .connected(actor), backendState: .idle)
+        #expect(route == .shell(actor: actor))
+    }
+
+    @Test("backend connected routes to shell when legacy is not connected")
+    func backendConnectedRoutesToShellWhenLegacyIsNot() {
+        let actor = Self.makeActor()
+        let route = AthleteShellRoute.route(
+            legacyState: .notConnected,
+            backendState: .connected(actor, verified: true)
+        )
+        #expect(route == .shell(actor: actor))
+    }
+
+    @Test("backend connected but unverified still routes to shell, carrying the same actor")
+    func backendConnectedUnverifiedStillRoutesToShell() {
+        let actor = Self.makeActor()
+        let route = AthleteShellRoute.route(
+            legacyState: .lifecycleServiceNotReady,
+            backendState: .connected(actor, verified: false)
+        )
+        #expect(route == .shell(actor: actor))
+    }
+
+    @Test("legacy connected wins over a also-connected backend state")
+    func legacyConnectedWinsOverBackendConnected() {
+        let legacyActor = Self.makeActor(linkedAthleteId: AthleteId())
+        let backendActor = Self.makeActor(linkedAthleteId: AthleteId())
+        let route = AthleteShellRoute.route(
+            legacyState: .connected(legacyActor),
+            backendState: .connected(backendActor, verified: true)
+        )
+        #expect(route == .shell(actor: legacyActor))
+    }
+
+    @Test("neither connected routes to .gate")
+    func neitherConnectedRoutesToGate() {
+        let route = AthleteShellRoute.route(legacyState: .notConnected, backendState: .idle)
+        #expect(route == .gate)
+    }
+
+    @Test("backend activating with legacy not connected routes to .gate")
+    func backendActivatingRoutesToGate() {
+        let route = AthleteShellRoute.route(legacyState: .notConnected, backendState: .activating)
+        #expect(route == .gate)
+    }
+
+    @Test("backend recoveryRequired with legacy not connected routes to .gate")
+    func backendRecoveryRequiredRoutesToGate() {
+        let route = AthleteShellRoute.route(legacyState: .notConnected, backendState: .recoveryRequired)
+        #expect(route == .gate)
+    }
+
+    @Test("backend connectedButCheckpointUnsaved with legacy not connected still routes to shell, carrying the same actor")
+    func backendConnectedButCheckpointUnsavedRoutesToShell() {
+        let actor = Self.makeActor()
+        let route = AthleteShellRoute.route(
+            legacyState: .notConnected,
+            backendState: .connectedButCheckpointUnsaved(actor, verified: true)
+        )
+        #expect(route == .shell(actor: actor))
+    }
+
+    // MARK: - AthleteShellRoute.backendStatusNotice(for:)
+    //
+    // ChatGPT review on PR #120, R1: the backend path's own honest
+    // status must remain visible (as a notice rendered alongside
+    // whichever screen `route(...)` selects) even once the backend
+    // connection scan sheet has been dismissed, and even when a
+    // separately-connected legacy actor lets `route(...)` reach the
+    // shell with nothing else to say about it.
+
+    @Test("idle backend state has no notice")
+    func idleBackendStateHasNoNotice() {
+        #expect(AthleteShellRoute.backendStatusNotice(for: .idle) == nil)
+    }
+
+    @Test("activating backend state has no notice")
+    func activatingBackendStateHasNoNotice() {
+        #expect(AthleteShellRoute.backendStatusNotice(for: .activating) == nil)
+    }
+
+    @Test("freshly verified connected backend state has no notice")
+    func verifiedConnectedBackendStateHasNoNotice() {
+        #expect(AthleteShellRoute.backendStatusNotice(for: .connected(Self.makeActor(), verified: true)) == nil)
+    }
+
+    @Test("cached/unverified connected backend state has a D3 notice")
+    func unverifiedConnectedBackendStateHasNotice() {
+        #expect(AthleteShellRoute.backendStatusNotice(for: .connected(Self.makeActor(), verified: false)) != nil)
+    }
+
+    @Test("connectedButCheckpointUnsaved always has a notice, verified or not")
+    func connectedButCheckpointUnsavedAlwaysHasNotice() {
+        #expect(AthleteShellRoute.backendStatusNotice(for: .connectedButCheckpointUnsaved(Self.makeActor(), verified: true)) != nil)
+        #expect(AthleteShellRoute.backendStatusNotice(for: .connectedButCheckpointUnsaved(Self.makeActor(), verified: false)) != nil)
+    }
+
+    @Test("every denial/problem backend state has a notice")
+    func everyDenialOrProblemBackendStateHasNotice() {
+        let states: [AthleteBackendConnectionCoordinator.State] = [
+            .grantRevoked, .connectionUnavailable, .waitingForParentApproval, .hydrationWindowExpired,
+            .installationKeyUnavailable, .ackNotConfirmed, .temporarilyUnavailable, .recoveryRequired,
+        ]
+        for state in states {
+            #expect(AthleteShellRoute.backendStatusNotice(for: state) != nil, "expected a notice for \(state)")
+        }
+    }
+
+    @Test("grantRevoked and connectionUnavailable notices are never worded identically — the SPECIFIC revocation claim must never be reachable from the neutral outcome")
+    func grantRevokedAndConnectionUnavailableNoticesAreDistinct() {
+        let revoked = AthleteShellRoute.backendStatusNotice(for: .grantRevoked)
+        let unavailable = AthleteShellRoute.backendStatusNotice(for: .connectionUnavailable)
+        #expect(revoked?.title != unavailable?.title)
+        #expect(revoked?.message != unavailable?.message)
+    }
+
     // MARK: - AthleteConnectionGateView.showsScanButton(for:)
     //
     // PR #86 follow-up (lead review): `.lifecycleServiceNotReady`

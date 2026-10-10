@@ -478,6 +478,58 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         #expect(!fixture.transport.sentRequests.isEmpty, "exactly at the lead-time boundary must trigger renewal, never be treated as comfortably within the window")
     }
 
+    // MARK: - ensureFreshlyVerifiedSession(deviceGrantId:) (Athlete hydration/activation integration slice, §5.2)
+
+    @Test("ensureFreshlyVerifiedSession(deviceGrantId:) performs a genuine session_renew round trip even while the stored token is COMFORTABLY within the sliding window — the one thing ensureActiveSession()'s own intentional fast path would skip")
+    func ensureFreshlyVerifiedSessionNeverTakesTheCachedFastPath() async throws {
+        let fixture = makeFixture()
+        // Comfortably within the window: far more than
+        // `slidingWindowRenewalLeadTime` remains — `ensureActiveSession()`
+        // would return this cached token with ZERO network calls.
+        fixture.store.stored = AthleteDeviceAuthorizationSessionRecord(
+            deviceGrantId: Self.deviceGrantId, sessionToken: "comfortably-cached-token",
+            expiresAt: Self.referenceNow.addingTimeInterval(6 * 24 * 60 * 60), absoluteExpiresAt: Self.date("2027-01-03T00:00:00Z")
+        )
+        enqueueRenewSuccess(fixture.transport, expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+
+        let token = try await fixture.manager.ensureFreshlyVerifiedSession(deviceGrantId: Self.deviceGrantId)
+
+        #expect(token == "comfortably-cached-token", "session_renew never rotates the bearer token itself")
+        #expect(fixture.transport.sentRequests.count == 2, "a real challenge+submit round trip must occur despite the comfortably-unexpired cached token")
+    }
+
+    @Test("ensureFreshlyVerifiedSession(deviceGrantId:) issues a brand-new chain when no session is stored at all — same automatic-reissue policy as ensureActiveSession()")
+    func ensureFreshlyVerifiedSessionIssuesFreshChainWhenNoneStored() async throws {
+        let fixture = makeFixture()
+        enqueueIssueSuccess(fixture.transport, sessionToken: "freshly-issued-token", expiresAt: "2026-10-19T00:00:00Z", absoluteExpiresAt: "2027-01-03T00:00:00Z")
+
+        let token = try await fixture.manager.ensureFreshlyVerifiedSession(deviceGrantId: Self.deviceGrantId)
+
+        #expect(token == "freshly-issued-token")
+        #expect(fixture.store.saveCallCount == 1)
+    }
+
+    @Test("ensureFreshlyVerifiedSession(deviceGrantId:) still reports .grantUnavailable and clears the stored session when the backend reports the grant is gone — same denial policy as ensureActiveSession()")
+    func ensureFreshlyVerifiedSessionReportsGrantUnavailable() async throws {
+        let fixture = makeFixture()
+        // No stored session at all: `ensureFreshlyVerifiedSession` goes
+        // straight to `attemptIssue`, whose own `.grantNotAvailable`
+        // branch throws `.grantUnavailable` directly (unlike
+        // `attemptRenew`'s own `.grantNotAvailable`, which instead
+        // falls through to a fresh issue attempt).
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
+            "outcome": "issued", "challenge_id": UUID().uuidString,
+            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
+            "expires_at": "2026-10-05T00:01:00Z",
+        ])
+        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": "grant_not_available"])
+
+        await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.grantUnavailable) {
+            _ = try await fixture.manager.ensureFreshlyVerifiedSession(deviceGrantId: Self.deviceGrantId)
+        }
+        #expect(fixture.store.clearCallCount == 1)
+    }
+
     // MARK: - Reinstall / missing installation key
 
     @Test("ensureActiveSession() throws .installationKeyUnavailable and clears any stored session when the installation key is missing (reinstall) — never minting a replacement, and never even attempting a network call")

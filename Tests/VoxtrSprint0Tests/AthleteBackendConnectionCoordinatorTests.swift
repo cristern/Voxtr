@@ -1,0 +1,847 @@
+import Testing
+import Foundation
+import SwiftData
+import VoxtrCoreContracts
+@testable import VoxtrAppShell
+@testable import VoxtrCore
+import VoxtrParentDomain
+import VoxtrAthleteDomain
+
+// Athlete hydration/activation integration slice (transition-plan §5.2,
+// task brief `Docs/Tasks/AthleteHydrationActivationIntegration-2026-10-10.md`).
+//
+// `AthleteBackendConnectionCoordinator`'s own hydrate -> accept -> bind
+// -> activate sequencing, restoration flow, and cancellation/generation
+// safety are exercised here against REAL canonical collaborators
+// (`AcceptWorkspaceInvitationService`, `AthleteConnectionIdentityBindingService`,
+// `AthleteSessionActivationService`, `AthleteRepository`, all backed by a
+// real in-memory SwiftData family — matching `AthleteConnectionLifecycleServiceTests
+// .swift`'s own established fixture pattern) and FAKES only for the two
+// network-touching seams this coordinator itself introduced
+// (`AthleteBackendHydrating`, `AthleteFreshSessionVerifying` — both
+// thin, single-purpose test-substitution protocols mirroring this
+// codebase's own existing `AthleteSessionActivating` precedent) plus the
+// Keychain-backed checkpoint store (`AthleteBackendConnectionCheckpointStoring`,
+// already a protocol).
+//
+// Every nested service's OWN exhaustive error/eligibility matrix
+// (acceptance outcomes, binding failures, eligibility reasons) already
+// has its own dedicated test file — never re-derived here. This suite
+// proves only the coordinator's OWN orchestration contract: which state
+// each hydration/session outcome maps to, that a local activation
+// failure of ANY kind folds into `.recoveryRequired` without fabricating
+// a connection, that the checkpoint is written only after a real local
+// success, and that cancellation/generation-fencing never lets a stale
+// attempt overwrite a newer one's state.
+//
+// Like the other persistence-backed tests in this suite, the tests that
+// build a real family via `InMemoryPersistenceController` exercise
+// `@Model` types through actual SwiftData persistence and require the
+// Xcode/macOS SwiftData runtime — written but not executed in this
+// sandbox.
+@MainActor
+private final class FakeCoordinatorHydrationAdapter: AthleteBackendHydrating {
+    enum Step {
+        case outcome(AthleteBackendHydrationOutcome)
+        case failure(Error)
+    }
+
+    private var queue: [Step] = []
+    private(set) var callCount = 0
+    private var suspensionContinuation: CheckedContinuation<Void, Never>?
+    private var shouldSuspend = false
+
+    func enqueue(_ step: Step) { queue.append(step) }
+
+    /// Makes the NEXT `hydrate(deviceGrantId:)` call park until
+    /// `resumeSuspendedCall()` releases it — lets a test build a real
+    /// cancellation/generation-replacement scenario instead of trusting
+    /// `Task.yield()` scheduling order, mirroring this suite's sibling
+    /// test doubles' own established suspend/resume gate shape (see
+    /// `AthleteBackendHydrationAdapterTests.FakeAdapterTransport`).
+    func suspendNextCall() { shouldSuspend = true }
+
+    func resumeSuspendedCall() {
+        suspensionContinuation?.resume()
+        suspensionContinuation = nil
+    }
+
+    func waitUntilSuspended() async {
+        while suspensionContinuation == nil { await Task.yield() }
+    }
+
+    func hydrate(deviceGrantId: UUID) async throws -> AthleteBackendHydrationOutcome {
+        callCount += 1
+        // Reserves THIS call's own step before ever suspending — a
+        // later, separate call must dequeue ITS OWN enqueued step, not
+        // steal the one this call already claimed, mirroring
+        // `AthleteBackendHydrationAdapterTests.FakeAdapterTransport
+        // .send(_:)`'s own established "remove the stub, then suspend"
+        // ordering exactly.
+        guard !queue.isEmpty else {
+            struct NoStepConfigured: Error {}
+            throw NoStepConfigured()
+        }
+        let step = queue.removeFirst()
+        if shouldSuspend {
+            shouldSuspend = false
+            await withCheckedContinuation { continuation in
+                suspensionContinuation = continuation
+            }
+        }
+        switch step {
+        case .outcome(let outcome): return outcome
+        case .failure(let error): throw error
+        }
+    }
+}
+
+@MainActor
+private final class FakeCoordinatorSessionManager: AthleteFreshSessionVerifying {
+    enum Step {
+        case token(String)
+        case failure(Error)
+    }
+
+    private var queue: [Step] = []
+    private(set) var callCount = 0
+    private(set) var clearStoredSessionCallCount = 0
+    private var suspensionContinuation: CheckedContinuation<Void, Never>?
+    private var shouldSuspend = false
+    /// Simulates the ONE shared Keychain session slot the real
+    /// `AthleteDeviceAuthorizationSessionManager` persists to,
+    /// regardless of which grant requested it — lets a test prove a
+    /// superseded call's `isStillWanted` guard stops it from
+    /// overwriting what a newer call already wrote (ChatGPT review on
+    /// PR #120, R2), mirroring the real manager's own
+    /// "check `isStillWanted` immediately before returning/persisting"
+    /// ordering.
+    private(set) var sharedPersistedToken: String?
+
+    func enqueue(_ step: Step) { queue.append(step) }
+    func suspendNextCall() { shouldSuspend = true }
+
+    func resumeSuspendedCall() {
+        suspensionContinuation?.resume()
+        suspensionContinuation = nil
+    }
+
+    func waitUntilSuspended() async {
+        while suspensionContinuation == nil { await Task.yield() }
+    }
+
+    func ensureFreshlyVerifiedSession(deviceGrantId: UUID, isStillWanted: @escaping () -> Bool) async throws -> String {
+        callCount += 1
+        guard !queue.isEmpty else {
+            struct NoStepConfigured: Error {}
+            throw NoStepConfigured()
+        }
+        let step = queue.removeFirst()
+        if shouldSuspend {
+            shouldSuspend = false
+            await withCheckedContinuation { continuation in
+                suspensionContinuation = continuation
+            }
+        }
+        guard isStillWanted() else {
+            throw AthleteDeviceAuthorizationSessionManager.SessionFailure.sessionCleared
+        }
+        switch step {
+        case .token(let token):
+            sharedPersistedToken = token
+            return token
+        case .failure(let error): throw error
+        }
+    }
+
+    func clearStoredSession() {
+        clearStoredSessionCallCount += 1
+    }
+}
+
+/// Deterministic, in-memory — never real Keychain I/O, matching
+/// `AthleteBackendHydrationAdapterTests.FakeAdapterSessionStore`'s own
+/// established shape.
+@MainActor
+private final class FakeCoordinatorCheckpointStore: AthleteBackendConnectionCheckpointStoring, @unchecked Sendable {
+    var stored: AthleteBackendConnectionCheckpoint?
+    var saveShouldThrow = false
+    private(set) var saveCallCount = 0
+    private(set) var clearCallCount = 0
+
+    func loadCheckpoint() -> AthleteBackendConnectionCheckpoint? { stored }
+
+    func saveCheckpoint(_ checkpoint: AthleteBackendConnectionCheckpoint) throws {
+        saveCallCount += 1
+        if saveShouldThrow {
+            throw AthleteBackendConnectionCheckpointStoreError.encodingFailed
+        }
+        stored = checkpoint
+    }
+
+    func clearCheckpoint() {
+        clearCallCount += 1
+        stored = nil
+    }
+}
+
+@Suite("AthleteBackendConnectionCoordinator (Athlete hydration/activation integration slice, §5.2)", .serialized)
+@MainActor
+struct AthleteBackendConnectionCoordinatorTests {
+
+    private static let deviceGrantId = UUID(uuidString: "55555555-5555-5555-5555-555555555555")!
+    private static let otherDeviceGrantId = UUID(uuidString: "66666666-6666-6666-6666-666666666666")!
+
+    private struct Fixture {
+        // Retained for the fixture's entire lifetime — see
+        // `AthleteConnectionLifecycleServiceTests.swift`'s own
+        // established precedent.
+        let container: ModelContainer
+        let coordinator: AthleteBackendConnectionCoordinator
+        let hydrationAdapter: FakeCoordinatorHydrationAdapter
+        let sessionManager: FakeCoordinatorSessionManager
+        let checkpointStore: FakeCoordinatorCheckpointStore
+        let parentWorkspaceRepository: ParentWorkspaceRepository
+        let athleteRepository: AthleteRepository
+        let invitedParticipantId: UUID
+        let workspaceRawId: UUID
+        let athleteRawId: UUID
+    }
+
+    /// Builds a real, canonically-created family with a single
+    /// `.athlete`-role participant left genuinely `.invited` — the
+    /// coordinator's own job is to drive the real `.invited -> .active`
+    /// transition itself via `acceptanceService`, matching
+    /// `AthleteConnectionLifecycleServiceTests.makeFixture(preAccept:
+    /// false)`'s own established precedent.
+    private static func makeFixture() throws -> Fixture {
+        let controller = InMemoryPersistenceController(modelTypes: AppSchema.modelTypes)
+        let container = try controller.makeModelContainer()
+        let parentWorkspaceRepository = ParentWorkspaceRepository(modelContext: container.mainContext)
+        let athleteRepository = AthleteRepository(modelContext: container.mainContext)
+        let athleteAccessGrantRepository = AthleteAccessGrantRepository(modelContext: container.mainContext)
+        let coordinatorOnboarding = FamilyOnboardingCoordinator(
+            modelContext: container.mainContext,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let created = try coordinatorOnboarding.createFamily(
+            parentGivenName: "Kari",
+            athleteGivenName: "Jonas",
+            athleteBirthDate: LocalDate(year: 2012, month: 4, day: 10),
+            athleteTimeZoneId: TimeZoneId(rawValue: "Europe/Oslo"),
+            athleteDevelopmentStage: .parentLed
+        )
+        let ownerActorId = ActorId(rawValue: created.participant.id)
+        let invitedParticipant = try parentWorkspaceRepository.createInvitedAthleteParticipant(
+            workspaceId: created.workspace.workspaceId,
+            linkedAthleteId: created.athlete.athleteId,
+            invitedBy: ownerActorId
+        )
+
+        let acceptanceService = AcceptWorkspaceInvitationService(
+            repository: parentWorkspaceRepository,
+            eligibilityService: AthleteParticipantEligibilityService()
+        )
+        let restorationService = FamilyRestorationService(
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            athleteAccessGrantRepository: athleteAccessGrantRepository
+        )
+        let identityBindingService = AthleteConnectionIdentityBindingService(familyRestorationService: restorationService)
+        let sessionActivationService = AthleteSessionActivationService(parentWorkspaceRepository: parentWorkspaceRepository)
+
+        let hydrationAdapter = FakeCoordinatorHydrationAdapter()
+        let sessionManager = FakeCoordinatorSessionManager()
+        let checkpointStore = FakeCoordinatorCheckpointStore()
+
+        let coordinator = AthleteBackendConnectionCoordinator(
+            hydrationAdapter: hydrationAdapter,
+            sessionManager: sessionManager,
+            athleteRepository: athleteRepository,
+            acceptanceService: acceptanceService,
+            identityBindingService: identityBindingService,
+            sessionActivationService: sessionActivationService,
+            checkpointStore: checkpointStore
+        )
+
+        return Fixture(
+            container: container,
+            coordinator: coordinator,
+            hydrationAdapter: hydrationAdapter,
+            sessionManager: sessionManager,
+            checkpointStore: checkpointStore,
+            parentWorkspaceRepository: parentWorkspaceRepository,
+            athleteRepository: athleteRepository,
+            invitedParticipantId: invitedParticipant.id,
+            workspaceRawId: created.workspace.id,
+            athleteRawId: created.athlete.id
+        )
+    }
+
+    /// Real-sleep-based bounded wait for the coordinator's own
+    /// fire-and-forget `Task` to settle, mirroring
+    /// `AthleteDeviceAuthorizationInvitationCoordinatorTests.waitUntil(_:_:)`'s
+    /// own established shape exactly — `activate`/`restoreOnLaunchOrForeground`
+    /// are themselves synchronous (they only kick off the background
+    /// work and return), so no `await` on them alone can observe the
+    /// eventual settled state.
+    private func waitUntil(
+        _ coordinator: AthleteBackendConnectionCoordinator,
+        timeoutMS: Int = 2000,
+        _ predicate: (AthleteBackendConnectionCoordinator.State) -> Bool
+    ) async {
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(timeoutMS))
+        while ContinuousClock.now < deadline {
+            if predicate(coordinator.state) { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+    }
+
+    private func isSettled(_ state: AthleteBackendConnectionCoordinator.State) -> Bool {
+        if case .activating = state { return false }
+        return true
+    }
+
+    // MARK: - First-time activation: hydration outcomes
+
+    @Test(".hydratedAndAcked drives accept -> bind -> activate -> a genuine fresh-verification round trip, and reports .connected(verified: true), saving a checkpoint with the exact hydrated IDs")
+    func hydratedAndAckedProducesConnectedVerified() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        // R5 (ChatGPT review on PR #120): hydration succeeding alone
+        // never earns "verified: true" — an explicit, separate
+        // fresh-verification round trip must also succeed.
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        guard case .connected(let actor, let verified) = fixture.coordinator.state else {
+            Issue.record("expected .connected, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verified == true)
+        #expect(actor.participantId == fixture.invitedParticipantId)
+        #expect(actor.workspaceId == WorkspaceId(rawValue: fixture.workspaceRawId))
+        #expect(actor.linkedAthleteId == AthleteId(rawValue: fixture.athleteRawId))
+
+        #expect(fixture.checkpointStore.saveCallCount == 1)
+        #expect(fixture.checkpointStore.stored == AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        ))
+    }
+
+    @Test(".alreadyCompleted resumes from a matching previously-saved checkpoint for the SAME grant and still reaches .connected(verified: true)")
+    func alreadyCompletedResumesFromMatchingCheckpoint() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.hydrationAdapter.enqueue(.outcome(.alreadyCompleted))
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        guard case .connected(_, let verified) = fixture.coordinator.state else {
+            Issue.record("expected .connected, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verified == true)
+    }
+
+    @Test(".alreadyCompleted with NO saved checkpoint at all honestly reports .recoveryRequired, never fabricating a target")
+    func alreadyCompletedWithNoCheckpointReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.alreadyCompleted))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.checkpointStore.saveCallCount == 0)
+    }
+
+    @Test(".alreadyCompleted with a checkpoint saved for a DIFFERENT grant is never reused — reports .recoveryRequired")
+    func alreadyCompletedWithCheckpointForDifferentGrantReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.otherDeviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.hydrationAdapter.enqueue(.outcome(.alreadyCompleted))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.checkpointStore.saveCallCount == 0)
+    }
+
+    @Test(".deadlinePassed reports .hydrationWindowExpired")
+    func deadlinePassedReportsHydrationWindowExpired() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.deadlinePassed))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .hydrationWindowExpired)
+    }
+
+    @Test(".grantRevoked reports the SPECIFIC .grantRevoked state")
+    func grantRevokedReportsGrantRevoked() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.grantRevoked))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .grantRevoked)
+    }
+
+    @Test(".notYetAvailable reports .waitingForParentApproval")
+    func notYetAvailableReportsWaitingForParentApproval() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.notYetAvailable))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .waitingForParentApproval)
+    }
+
+    // MARK: - First-time activation: hydrate() throwing
+
+    @Test("SessionFailure.grantUnavailable from hydrate() reports the NEUTRAL .connectionUnavailable, never .grantRevoked")
+    func grantUnavailableFailureReportsConnectionUnavailable() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.failure(AthleteDeviceAuthorizationSessionManager.SessionFailure.grantUnavailable))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .connectionUnavailable)
+    }
+
+    @Test("SessionFailure.installationKeyUnavailable from hydrate() reports .installationKeyUnavailable")
+    func installationKeyUnavailableFailureReportsInstallationKeyUnavailable() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.failure(AthleteDeviceAuthorizationSessionManager.SessionFailure.installationKeyUnavailable))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .installationKeyUnavailable)
+    }
+
+    @Test("AthleteBackendHydrationError.ackNotConfirmed reports .ackNotConfirmed, never a completed connection")
+    func ackNotConfirmedFailureReportsAckNotConfirmed() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.failure(AthleteBackendHydrationError.ackNotConfirmed(.notAvailable)))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .ackNotConfirmed)
+    }
+
+    @Test("An unrecognized hydrate() failure (e.g. a local persistence/graph error) folds into .recoveryRequired, never misclassified as a security denial")
+    func unrecognizedFailureReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        struct SomeUnrelatedError: Error {}
+        fixture.hydrationAdapter.enqueue(.failure(SomeUnrelatedError()))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+    }
+
+    // MARK: - Local activation correctness
+
+    @Test("A hydrated target whose participant/athlete IDs do not exist in this device's own local family folds into .recoveryRequired, never fabricating a connection, and never saves a checkpoint")
+    func foreignHydrationTargetReportsRecoveryRequiredWithoutCheckpoint() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: UUID(), athleteId: UUID()
+        )))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.checkpointStore.saveCallCount == 0)
+    }
+
+    @Test("A checkpoint-store save failure never blocks the genuine local activation from reaching the Athlete — but it must be reported as .connectedButCheckpointUnsaved, never plain .connected (R4)")
+    func checkpointSaveFailureReportsConnectedButCheckpointUnsaved() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.checkpointStore.saveShouldThrow = true
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        guard case .connectedButCheckpointUnsaved(_, let verified) = fixture.coordinator.state else {
+            Issue.record("expected .connectedButCheckpointUnsaved despite the genuine local activation, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verified == true)
+        #expect(fixture.checkpointStore.saveCallCount == 1)
+        #expect(fixture.checkpointStore.stored == nil)
+    }
+
+    @Test("A bound athlete that does not match the claimed/checkpointed athleteId folds into .recoveryRequired, never silently activating the wrong athlete (R3)")
+    func boundAthleteMismatchReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        // Pre-accept the REAL participant (so `bind` genuinely succeeds
+        // and resolves to this family's REAL, only athlete) — then
+        // claim a DIFFERENT, unrelated athleteId for the same
+        // workspace/participant, simulating a stale/corrupt checkpoint
+        // or a relink since an earlier attempt.
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        let wrongAthleteId = UUID()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: wrongAthleteId
+        )))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.checkpointStore.saveCallCount == 0)
+        #expect(fixture.sessionManager.callCount == 0, "fresh verification must never even be attempted once the athlete mismatch is detected")
+    }
+
+    @Test("Local activation succeeding does not itself earn verified: true — a denied fresh-verification round trip overrides it with the matching denial state (R5)")
+    func localActivationSucceedsButFreshVerificationDeniedOverridesState() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        fixture.sessionManager.enqueue(.failure(AthleteDeviceAuthorizationSessionManager.SessionFailure.grantUnavailable))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        #expect(fixture.coordinator.state == .connectionUnavailable, "a genuine local success must never be reported as .connected when the immediately-following fresh verification is denied")
+        // The checkpoint is still saved — local activation itself truly
+        // succeeded; only the SESSION-level verification was denied.
+        #expect(fixture.checkpointStore.saveCallCount == 1)
+    }
+
+    @Test("Local activation succeeding with no successful fresh-verification round trip reports .connected(verified: false), never true (R5)")
+    func localActivationSucceedsWithoutFreshVerificationReportsUnverified() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        // Deliberately no sessionManager stub enqueued — the fake
+        // throws `NoStepConfigured`, an unrecognized error that
+        // `performFreshVerification` folds into `.unverified`, exactly
+        // like a transient network failure would.
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+
+        guard case .connected(_, let verified) = fixture.coordinator.state else {
+            Issue.record("expected .connected(verified: false), got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verified == false)
+    }
+
+    // MARK: - Cancellation / generation safety
+
+    @Test("A second activate() call supersedes an in-flight first attempt — the first's late-arriving result never overwrites the second's own final state")
+    func secondActivateSupersedesInFlightFirst() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.suspendNextCall()
+        fixture.hydrationAdapter.enqueue(.outcome(.grantRevoked))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await fixture.hydrationAdapter.waitUntilSuspended()
+        #expect(fixture.coordinator.state == .activating)
+
+        // A fresh attempt for a DIFFERENT grant, resolving immediately.
+        fixture.hydrationAdapter.enqueue(.outcome(.waitingForParentApproval))
+        fixture.coordinator.activate(deviceGrantId: Self.otherDeviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+        #expect(fixture.coordinator.state == .waitingForParentApproval)
+
+        // Release the FIRST attempt's suspended call now — its own
+        // `.grantRevoked` result must never land, since it is no longer
+        // the current generation.
+        fixture.hydrationAdapter.resumeSuspendedCall()
+        // Give the (now-stale) first Task a real chance to run to
+        // completion and attempt (and fail) its own state write.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fixture.coordinator.state == .waitingForParentApproval)
+    }
+
+    @Test("cancel() while activating stops the in-flight attempt without itself changing state, and the cancelled attempt's own eventual result never lands")
+    func cancelLeavesStateUnchangedAndSuppressesStaleResult() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.suspendNextCall()
+        fixture.hydrationAdapter.enqueue(.outcome(.grantRevoked))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await fixture.hydrationAdapter.waitUntilSuspended()
+        #expect(fixture.coordinator.state == .activating)
+
+        fixture.coordinator.cancel()
+        #expect(fixture.coordinator.state == .activating)
+
+        fixture.hydrationAdapter.resumeSuspendedCall()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        #expect(fixture.coordinator.state == .activating)
+    }
+
+    @Test("cancel() while a suspended hydration would otherwise resolve to .hydratedAndAcked suppresses the ENTIRE accept -> bind -> activate -> checkpoint chain, never just the simple outcome cases (R6)")
+    func cancelSuppressesFullLocalActivationChainNotJustSimpleOutcomes() async throws {
+        let fixture = try Self.makeFixture()
+        fixture.hydrationAdapter.suspendNextCall()
+        fixture.hydrationAdapter.enqueue(.outcome(.hydratedAndAcked(
+            workspaceId: fixture.workspaceRawId, participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )))
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.activate(deviceGrantId: Self.deviceGrantId)
+        await fixture.hydrationAdapter.waitUntilSuspended()
+        #expect(fixture.coordinator.state == .activating)
+
+        // Mirrors `AthleteDeviceAuthorizationScanView`'s own `.onDisappear`
+        // (R6 fix): dismissing the sheet mid-flight cancels the SHARED
+        // `AthleteBackendConnectionCoordinator`, not just the screen-local
+        // pairing coordinator.
+        fixture.coordinator.cancel()
+        #expect(fixture.coordinator.state == .activating)
+
+        fixture.hydrationAdapter.resumeSuspendedCall()
+        // Bounded settle window for the whole (now-stale) accept -> bind
+        // -> activate -> checkpoint -> fresh-verification chain to run
+        // to completion and attempt (and fail) its own state/storage
+        // writes.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(fixture.coordinator.state == .activating, "a dismissed/cancelled attempt's late result must never activate or publish success")
+        #expect(fixture.checkpointStore.saveCallCount == 0, "a cancelled attempt must never persist a checkpoint, even after its own local activation work would otherwise have succeeded")
+        #expect(fixture.sessionManager.callCount == 0, "a cancelled attempt must never even reach the fresh-verification step")
+    }
+
+    // MARK: - Restoration (launch/foreground)
+
+    @Test("restoreOnLaunchOrForeground() with no saved checkpoint stays .idle and never touches hydration/session collaborators")
+    func restorationWithNoCheckpointStaysIdle() async throws {
+        let fixture = try Self.makeFixture()
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+
+        #expect(fixture.coordinator.state == .idle)
+        #expect(fixture.hydrationAdapter.callCount == 0)
+        #expect(fixture.sessionManager.callCount == 0)
+    }
+
+    @Test("restoreOnLaunchOrForeground() presents cached/unverified FIRST, then promotes to verified only after a genuine online round trip succeeds")
+    func restorationPresentsCachedThenPromotesToVerified() async throws {
+        let fixture = try Self.makeFixture()
+        // Already a genuinely-active local participant — simulating a
+        // prior successful activation this same device already
+        // completed.
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.sessionManager.suspendNextCall()
+        fixture.sessionManager.enqueue(.token("fresh-token"))
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+
+        await fixture.sessionManager.waitUntilSuspended()
+        guard case .connected(_, let verifiedWhileSuspended) = fixture.coordinator.state else {
+            Issue.record("expected the cached .connected(verified: false) presentation before the online check resolves, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verifiedWhileSuspended == false)
+
+        fixture.sessionManager.resumeSuspendedCall()
+        await waitUntil(fixture.coordinator) { state in
+            if case .connected(_, true) = state { return true }
+            return false
+        }
+        guard case .connected(_, let verifiedAfter) = fixture.coordinator.state else {
+            Issue.record("expected .connected(verified: true) after the online check succeeds, got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verifiedAfter == true)
+    }
+
+    @Test("restoreOnLaunchOrForeground(): a forced online check denied with .grantUnavailable reports the NEUTRAL .connectionUnavailable, overwriting the cached presentation")
+    func restorationOnlineDenialReportsConnectionUnavailable() async throws {
+        let fixture = try Self.makeFixture()
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.sessionManager.enqueue(.failure(AthleteDeviceAuthorizationSessionManager.SessionFailure.grantUnavailable))
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+        await waitUntil(fixture.coordinator) { $0 == .connectionUnavailable }
+
+        #expect(fixture.coordinator.state == .connectionUnavailable)
+    }
+
+    @Test("restoreOnLaunchOrForeground(): a transient network failure on the online check stays at the already-shown cached/unverified presentation — never promoted, never denied")
+    func restorationTransientNetworkFailureStaysCached() async throws {
+        let fixture = try Self.makeFixture()
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.sessionManager.enqueue(.failure(AthleteDeviceAuthorizationSessionManager.SessionFailure.network))
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+        await waitUntil(fixture.coordinator) { state in
+            fixture.sessionManager.callCount > 0
+        }
+        // Bounded settle window for the (already-dispatched) state write.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        guard case .connected(_, let verified) = fixture.coordinator.state else {
+            Issue.record("expected to remain at the cached .connected(verified: false), got \(fixture.coordinator.state)")
+            return
+        }
+        #expect(verified == false)
+    }
+
+    @Test("restoreOnLaunchOrForeground(): a checkpoint whose local graph no longer supports it (still .invited, never actually accepted) reports .recoveryRequired and never calls the session manager")
+    func restorationWithUnsupportedLocalGraphReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        // Deliberately NOT accepted — the checkpoint claims an
+        // activation that never actually completed locally.
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+        await waitUntil(fixture.coordinator) { $0 == .recoveryRequired }
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.sessionManager.callCount == 0)
+    }
+
+    @Test("restoreOnLaunchOrForeground(): a checkpoint whose participant is now bound to a DIFFERENT athlete than the checkpoint claims reports .recoveryRequired, never silently resolving to that other athlete (R3)")
+    func restorationWithMismatchedCheckpointAthleteReportsRecoveryRequired() async throws {
+        let fixture = try Self.makeFixture()
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        // The checkpoint itself claims a DIFFERENT athleteId than the
+        // one this participant is actually bound to — simulating
+        // either a corrupted checkpoint or a relink since it was saved.
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: UUID()
+        )
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+        await waitUntil(fixture.coordinator) { $0 == .recoveryRequired }
+
+        #expect(fixture.coordinator.state == .recoveryRequired)
+        #expect(fixture.sessionManager.callCount == 0, "the forced online check must never even be attempted once the checkpoint/athlete mismatch is detected locally")
+    }
+
+    @Test("A suspended old-grant restoration's forced session verification never persists into the shared session slot, and never overwrites state, once a newer activation has superseded it (R2)")
+    func supersededRestorationNeverPersistsStaleSessionOrState() async throws {
+        let fixture = try Self.makeFixture()
+        _ = AcceptWorkspaceInvitationService(
+            repository: fixture.parentWorkspaceRepository, eligibilityService: AthleteParticipantEligibilityService()
+        ).accept(
+            athleteId: AthleteId(rawValue: fixture.athleteRawId), workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId),
+            eligibilityFacts: AthleteEligibilityFacts(workspaceId: WorkspaceId(rawValue: fixture.workspaceRawId), isArchived: false)
+        )
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+        fixture.sessionManager.suspendNextCall()
+        fixture.sessionManager.enqueue(.token("stale-old-grant-token"))
+
+        fixture.coordinator.restoreOnLaunchOrForeground()
+        await fixture.sessionManager.waitUntilSuspended()
+
+        // A brand-new activation attempt for an entirely DIFFERENT
+        // grant supersedes the still-suspended restoration at the
+        // coordinator's own generation layer.
+        fixture.hydrationAdapter.enqueue(.outcome(.waitingForParentApproval))
+        fixture.coordinator.activate(deviceGrantId: Self.otherDeviceGrantId)
+        await waitUntil(fixture.coordinator, isSettled)
+        #expect(fixture.coordinator.state == .waitingForParentApproval)
+
+        // Release the stale restoration's own suspended call now — its
+        // `isStillWanted` closure must already report `false` (the
+        // coordinator's generation moved on), so it must neither
+        // persist into the shared session slot nor overwrite the
+        // newer attempt's state.
+        fixture.sessionManager.resumeSuspendedCall()
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(fixture.sessionManager.sharedPersistedToken == nil, "the superseded old-grant call must never persist into the shared session slot")
+        #expect(fixture.coordinator.state == .waitingForParentApproval, "the stale restoration's late result must never overwrite the newer attempt's own state")
+    }
+
+    // MARK: - Sign-out / invalidation
+
+    @Test("signOutOrInvalidate() clears the checkpoint and the session manager's stored session, and returns to .idle")
+    func signOutClearsCheckpointAndSessionAndReturnsToIdle() throws {
+        let fixture = try Self.makeFixture()
+        fixture.checkpointStore.stored = AthleteBackendConnectionCheckpoint(
+            deviceGrantId: Self.deviceGrantId, workspaceId: fixture.workspaceRawId,
+            participantId: fixture.invitedParticipantId, athleteId: fixture.athleteRawId
+        )
+
+        fixture.coordinator.signOutOrInvalidate()
+
+        #expect(fixture.coordinator.state == .idle)
+        #expect(fixture.checkpointStore.clearCallCount == 1)
+        #expect(fixture.checkpointStore.stored == nil)
+        #expect(fixture.sessionManager.clearStoredSessionCallCount == 1)
+    }
+}
