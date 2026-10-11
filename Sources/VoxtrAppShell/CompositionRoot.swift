@@ -341,6 +341,23 @@ public final class CompositionRoot {
         )
         container.register(AthleteConnectionLifecycleService.self) { athleteConnectionLifecycleService }
 
+        // Athlete hydration, activation and runtime connection UI
+        // integration slice (transition-plan §5.2): the backend
+        // device-authorization path's own orchestrator, picking up
+        // exactly where `AthleteDeviceAuthorizationPairingCoordinator`
+        // ends (`.authorized(grantId:)`). Reuses every collaborator
+        // already registered above — no second implementation of
+        // hydration/acceptance/binding/activation.
+        let athleteBackendConnectionCoordinator = AthleteBackendConnectionCoordinator(
+            hydrationAdapter: athleteBackendHydrationAdapter,
+            sessionManager: athleteDeviceAuthorizationSessionManager,
+            athleteRepository: container.resolve(AthleteRepository.self),
+            acceptanceService: acceptWorkspaceInvitationService,
+            identityBindingService: athleteConnectionIdentityBindingService,
+            sessionActivationService: athleteSessionActivationService
+        )
+        container.register(AthleteBackendConnectionCoordinator.self) { athleteBackendConnectionCoordinator }
+
         // Athlete Connection Foundation B2.6: the ParentApp-side owner
         // handoff — registration only, exactly like every other B2.x
         // service above: no CloudKit network call happens here

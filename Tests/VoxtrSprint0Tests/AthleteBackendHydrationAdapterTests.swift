@@ -363,7 +363,11 @@ struct AthleteBackendHydrationAdapterTests {
 
         let outcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
 
-        #expect(outcome == .hydratedAndAcked)
+        #expect(outcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
         #expect(fixture.transport.sentRequests.count == 6, "session-issue (2) + hydration-get (2) + hydration-ack (2), with the second ensureActiveSession() reusing the cached token")
 
         let fields = Self.wellFormedHydrationFields
@@ -533,7 +537,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
         let firstOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(firstOutcome == .hydratedAndAcked)
+        #expect(firstOutcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
 
         let parentCountAfterFirst = try fixture.parentWorkspaceRepository.fetchAllParentProfiles().count
         let workspaceCountAfterFirst = try fixture.parentWorkspaceRepository.fetchAllWorkspaces().count
@@ -910,7 +918,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(acceptingFixture.transport, wireOutcome: "acked")
 
         let outcome = try await acceptingFixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(outcome == .hydratedAndAcked)
+        #expect(outcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
         #expect(try acceptingFixture.athleteRepository.fetchAllAthletes().first?.birthDate.isoString == "2024-02-29")
     }
 
@@ -1105,7 +1117,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
         let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(secondOutcome == .hydratedAndAcked)
+        #expect(secondOutcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
 
         // Re-running hydrate(_:) against the identical payload is a
         // pure no-op — no duplicate rows.
@@ -1155,7 +1171,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
         let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(secondOutcome == .hydratedAndAcked)
+        #expect(secondOutcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
 
         let signedAfterRetry = ackSignedMessages()
         #expect(signedAfterRetry.count == 2, "the retry signed its OWN new ACK challenge rather than skipping straight to a (nonexistent) cached proof")
@@ -1259,7 +1279,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
         let secondOutcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(secondOutcome == .hydratedAndAcked)
+        #expect(secondOutcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
 
         // 4 (first attempt) + hydration-get (2) + hydration-ack (2) = 8
         // — no further session-issue, since the cached token is reused.
@@ -1432,7 +1456,11 @@ struct AthleteBackendHydrationAdapterTests {
         enqueueHydrationAck(fixture.transport, wireOutcome: "acked")
 
         let outcome = try await fixture.adapter.hydrate(deviceGrantId: Self.deviceGrantId)
-        #expect(outcome == .hydratedAndAcked)
+        #expect(outcome == .hydratedAndAcked(
+            workspaceId: Self.wellFormedHydrationFields.workspaceId,
+            participantId: Self.wellFormedHydrationFields.intendedParticipantId,
+            athleteId: Self.wellFormedHydrationFields.intendedAthleteId
+        ))
 
         // Exactly one of each: the pre-existing parent/workspace/owner
         // were reused (never duplicated), and the three remaining steps

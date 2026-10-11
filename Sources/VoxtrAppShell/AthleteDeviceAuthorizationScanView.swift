@@ -17,6 +17,13 @@ import VoxtrCore
 @MainActor
 public struct AthleteDeviceAuthorizationScanView: View {
     let makeScannerView: AthleteConnectionScannerBuilder
+    /// Athlete hydration/activation integration slice (§5.2): once
+    /// `coordinator` reaches `.authorized(grantId:)`, this screen hands
+    /// off to the SAME, `CompositionRoot`-resolved connection
+    /// coordinator the rest of AthleteApp uses — never a second,
+    /// screen-local orchestrator — so hydration/activation state
+    /// started here is visible everywhere else too.
+    let connectionCoordinator: AthleteBackendConnectionCoordinator
     @Environment(\.dismiss) private var dismiss
     @State private var coordinator: AthleteDeviceAuthorizationPairingCoordinator
     @State private var scanAttempt = 0
@@ -24,9 +31,11 @@ public struct AthleteDeviceAuthorizationScanView: View {
 
     public init(
         service: AthleteDeviceAuthorizationService,
+        connectionCoordinator: AthleteBackendConnectionCoordinator,
         makeScannerView: @escaping AthleteConnectionScannerBuilder
     ) {
         self.makeScannerView = makeScannerView
+        self.connectionCoordinator = connectionCoordinator
         self._coordinator = State(initialValue: AthleteDeviceAuthorizationPairingCoordinator(service: service))
     }
 
@@ -55,8 +64,26 @@ public struct AthleteDeviceAuthorizationScanView: View {
         // AND an interactive swipe dismissal alike (`.onDisappear` runs
         // either way), so no orphaned poll loop keeps running after the
         // Athlete has left this screen.
+        //
+        // ChatGPT review on PR #120, R6: cancelling `coordinator` (the
+        // claim-submit pairing state machine) alone is not enough once
+        // pairing reaches `.authorized(grantId:)` — `backendConnectionView`
+        // below hands off to the SEPARATE, shared `connectionCoordinator`,
+        // whose own `activate(deviceGrantId:)` runs on an OWNED `Task` it
+        // stores on itself, never tied to this view's `.task(id:)`
+        // wrapper's own lifetime (that wrapper's body already returned,
+        // synchronously, the moment `activate(_:)` was called). Without
+        // this, dismissing the sheet mid-hydration would leave that
+        // attempt running, free to hydrate/accept/bind/activate, save a
+        // checkpoint, and publish `.connected` after the Athlete already
+        // left this flow. `connectionCoordinator.cancel()` mirrors
+        // `coordinator.cancel()`'s own "a merely-dismissed screen is not
+        // the Athlete discarding anything" semantics exactly — it never
+        // touches `state` or persisted storage itself; it only stops a
+        // now-unwanted attempt from mutating either going forward.
         .onDisappear {
             coordinator.cancel()
+            connectionCoordinator.cancel()
         }
     }
 
@@ -73,8 +100,8 @@ public struct AthleteDeviceAuthorizationScanView: View {
             waitingView(message: "Confirming…")
         case .awaitingApproval(_, let displayCode):
             awaitingApprovalView(displayCode: displayCode)
-        case .authorized:
-            successView
+        case .authorized(let grantId):
+            backendConnectionView(deviceGrantId: grantId)
         case .interrupted(let displayCode):
             interruptedView(displayCode: displayCode)
         case .failed(let message):
@@ -151,26 +178,102 @@ public struct AthleteDeviceAuthorizationScanView: View {
         .accessibilityIdentifier("athleteDeviceAuthorizationScan.awaitingApproval")
     }
 
-    /// Deliberately NOT "Connected" — this slice's own boundary ends at
-    /// confirmed backend device authorization. It never hydrates athlete
-    /// data, accepts a CKShare, activates business membership, or shows
-    /// the normal athlete dashboard as a consequence of this result, so
-    /// the copy says exactly that rather than implying a fuller
-    /// connection than what actually happened. When the backend
-    /// confirmed this but the local receipt recording it couldn't be
-    /// saved, `coordinator.unpersistedAuthorizationWarning` says so
-    /// honestly too, rather than silently hiding that gap.
-    private var successView: some View {
+    /// Athlete hydration/activation integration slice (§5.2): backend
+    /// device authorization alone (`.authorized(grantId:)`) is never
+    /// shown as "Connected" on its own — this view hands off to
+    /// `connectionCoordinator`, the SAME orchestrator the rest of
+    /// AthleteApp reads, and renders whatever honest state it reaches
+    /// (hydrating/activating, freshly-connected, cached/unverified, a
+    /// specific denial, or a distinct retryable reason) rather than a
+    /// fixed "Device authorized" dead end. `.task(id:)` starts
+    /// activation exactly once per distinct `deviceGrantId` — never
+    /// re-triggered by an unrelated body re-evaluation.
+    private func backendConnectionView(deviceGrantId: UUID) -> some View {
+        content(for: connectionCoordinator.state)
+            .task(id: deviceGrantId) {
+                connectionCoordinator.activate(deviceGrantId: deviceGrantId)
+            }
+    }
+
+    @ViewBuilder
+    private func content(for state: AthleteBackendConnectionCoordinator.State) -> some View {
+        switch state {
+        case .idle, .activating:
+            waitingView(message: "Setting up this athlete's data…")
+        case .connected(_, let verified):
+            connectedView(verified: verified, checkpointUnsaved: false)
+        case .connectedButCheckpointUnsaved(_, let verified):
+            connectedView(verified: verified, checkpointUnsaved: true)
+        case .grantRevoked:
+            backendOutcomeView(
+                title: "Connection revoked",
+                message: "The parent has revoked this device's connection. Ask them to approve a new connection code."
+            )
+        case .connectionUnavailable:
+            backendOutcomeView(
+                title: "Connection unavailable",
+                message: "This connection isn't available right now. Ask the parent to approve a new connection code."
+            )
+        case .waitingForParentApproval:
+            waitingView(message: "Waiting for the parent to finish approving this connection.")
+        case .hydrationWindowExpired:
+            backendOutcomeView(
+                title: "Connection window expired",
+                message: "This connection attempt took too long. Ask the parent to approve a new connection code."
+            )
+        case .installationKeyUnavailable:
+            backendOutcomeView(
+                title: "Reinstall detected",
+                message: "This device's secure key no longer matches a connection in progress. Please scan a new code."
+            )
+        case .ackNotConfirmed, .temporarilyUnavailable:
+            backendOutcomeView(
+                title: "Couldn't finish setting up",
+                message: "We couldn't confirm this with Vǫxtr. Check your connection and try again.",
+                showsRetry: true, deviceGrantId: currentDeviceGrantId
+            )
+        case .recoveryRequired:
+            backendOutcomeView(
+                title: "Couldn't finish setting up",
+                message: "This device needs to reconnect. Please scan a new code.",
+                showsRetry: false
+            )
+        }
+    }
+
+    /// `coordinator.state` already carries the exact `grantId` this
+    /// screen is driving — read fresh rather than duplicated as a
+    /// separate stored property.
+    private var currentDeviceGrantId: UUID? {
+        if case .authorized(let grantId) = coordinator.state { return grantId }
+        return nil
+    }
+
+    private func connectedView(verified: Bool, checkpointUnsaved: Bool) -> some View {
         VStack(spacing: 16) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(.green)
-            Text("Device authorized")
+            Text("Connected")
                 .font(VoxtrTypography.cardTitle)
-            Text("This device is now authorized with Vǫxtr. Setting up the athlete's data on this device isn't available yet.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(VoxtrColor.textSecondary)
-                .padding(.horizontal, 32)
+            if !verified {
+                Text("Connection cannot be verified right now. Showing the last known information.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.unverifiedBanner")
+            }
+            if checkpointUnsaved {
+                // Same wording as `AthleteShellRoute.backendStatusNotice(for:)`'s
+                // own `.connectedButCheckpointUnsaved` case, so this
+                // screen and the persistent root-level banner never
+                // diverge (ChatGPT review on PR #120, R1/R4).
+                Text("Vǫxtr couldn't save what's needed to reconnect automatically. If the app restarts before this is resolved, you may need to scan a new connection code.")
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(VoxtrColor.textSecondary)
+                    .padding(.horizontal, 32)
+                    .accessibilityIdentifier("athleteDeviceAuthorizationScan.checkpointUnsavedWarning")
+            }
             if let warning = coordinator.unpersistedAuthorizationWarning {
                 Text(warning)
                     .multilineTextAlignment(.center)
@@ -183,6 +286,28 @@ public struct AthleteDeviceAuthorizationScanView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("athleteDeviceAuthorizationScan.successState")
+    }
+
+    private func backendOutcomeView(title: String, message: String, showsRetry: Bool = false, deviceGrantId: UUID? = nil) -> some View {
+        VStack(spacing: 16) {
+            Text(title)
+                .font(VoxtrTypography.cardTitle)
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(VoxtrColor.textSecondary)
+                .padding(.horizontal, 32)
+            if showsRetry, let deviceGrantId {
+                Button("Try again") {
+                    connectionCoordinator.activate(deviceGrantId: deviceGrantId)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("athleteDeviceAuthorizationScan.backendRetryButton")
+            }
+            Button("Done") { dismiss() }
+                .accessibilityIdentifier("athleteDeviceAuthorizationScan.doneButton")
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("athleteDeviceAuthorizationScan.backendOutcomeState")
     }
 
     /// A resumable interruption: the receipt this attempt was bound to
