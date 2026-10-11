@@ -56,6 +56,23 @@ public struct AthleteBackendConnectionCheckpoint: Codable, Equatable, Sendable {
     }
 }
 
+/// `@MainActor` (Codemagic build 280 compiler diagnostic): this
+/// requirement was previously non-isolated, which the real
+/// `KeychainAthleteBackendConnectionCheckpointStore` below satisfies
+/// either way (a nonisolated witness can satisfy an isolated or a
+/// non-isolated requirement), but the test double
+/// `FakeCoordinatorCheckpointStore` in
+/// `AthleteBackendConnectionCoordinatorTests.swift` is `@MainActor`,
+/// and an actor-isolated witness cannot satisfy a non-isolated
+/// requirement. Marking the protocol itself `@MainActor` states the
+/// real relationship: the only caller, `AthleteBackendConnectionCoordinator`,
+/// is already `@MainActor`. The `Sendable` inheritance and both
+/// conformers' existing `@unchecked Sendable` are kept unchanged —
+/// actor isolation and `Sendable` conformance are independent
+/// requirements, and removing an already-correct `@unchecked Sendable`
+/// here would be an unverified, unnecessary change with no toolchain
+/// available in this sandbox to confirm it.
+@MainActor
 public protocol AthleteBackendConnectionCheckpointStoring: Sendable {
     func loadCheckpoint() -> AthleteBackendConnectionCheckpoint?
     func saveCheckpoint(_ checkpoint: AthleteBackendConnectionCheckpoint) throws
