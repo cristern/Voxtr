@@ -579,7 +579,7 @@ struct AthleteBackendConnectionCoordinatorTests {
         #expect(fixture.coordinator.state == .activating)
 
         // A fresh attempt for a DIFFERENT grant, resolving immediately.
-        fixture.hydrationAdapter.enqueue(.outcome(.waitingForParentApproval))
+        fixture.hydrationAdapter.enqueue(.outcome(.notYetAvailable))
         fixture.coordinator.activate(deviceGrantId: Self.otherDeviceGrantId)
         await waitUntil(fixture.coordinator, isSettled)
         #expect(fixture.coordinator.state == .waitingForParentApproval)
@@ -810,7 +810,7 @@ struct AthleteBackendConnectionCoordinatorTests {
         // A brand-new activation attempt for an entirely DIFFERENT
         // grant supersedes the still-suspended restoration at the
         // coordinator's own generation layer.
-        fixture.hydrationAdapter.enqueue(.outcome(.waitingForParentApproval))
+        fixture.hydrationAdapter.enqueue(.outcome(.notYetAvailable))
         fixture.coordinator.activate(deviceGrantId: Self.otherDeviceGrantId)
         await waitUntil(fixture.coordinator, isSettled)
         #expect(fixture.coordinator.state == .waitingForParentApproval)
