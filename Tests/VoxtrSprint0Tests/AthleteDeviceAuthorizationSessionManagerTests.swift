@@ -516,13 +516,11 @@ struct AthleteDeviceAuthorizationSessionManagerTests {
         // straight to `attemptIssue`, whose own `.grantNotAvailable`
         // branch throws `.grantUnavailable` directly (unlike
         // `attemptRenew`'s own `.grantNotAvailable`, which instead
-        // falls through to a fresh issue attempt).
-        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: [
-            "outcome": "issued", "challenge_id": UUID().uuidString,
-            "nonce": AthleteDeviceAuthorizationSessionService.base64UrlEncode(Self.wellFormedNonce),
-            "expires_at": "2026-10-05T00:01:00Z",
-        ])
-        fixture.transport.enqueue(path: "device-session-submit", statusCode: 200, json: ["outcome": "grant_not_available"])
+        // falls through to a fresh issue attempt). `.grantNotAvailable`
+        // is produced at the CHALLENGE step (wire `challenge_not_available`)
+        // — `issueSession` returns it immediately without ever calling
+        // submit, so no submit stub is enqueued here.
+        fixture.transport.enqueue(path: "device-session-challenge", statusCode: 200, json: ["outcome": "challenge_not_available"])
 
         await #expect(throws: AthleteDeviceAuthorizationSessionManager.SessionFailure.grantUnavailable) {
             _ = try await fixture.manager.ensureFreshlyVerifiedSession(deviceGrantId: Self.deviceGrantId)
