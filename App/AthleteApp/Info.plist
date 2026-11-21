@@ -24,6 +24,13 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- T1 (issue #122): see App/ParentApp/Info.plist's own comment on
+	     these same two keys — identical rationale, same build-setting
+	     names, same Debug/Release default split in project.pbxproj. -->
+	<key>VoxtrHostedBackendBaseURL</key>
+	<string>$(VOXTR_HOSTED_BACKEND_BASE_URL)</string>
+	<key>VoxtrHostedSupabaseAnonKey</key>
+	<string>$(VOXTR_HOSTED_SUPABASE_ANON_KEY)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- Athlete Connection Foundation B1 (corrected — ParentApp CloudKit

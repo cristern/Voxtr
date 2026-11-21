@@ -75,6 +75,7 @@
 		A972A773FE6861A40FA9DBDE /* AthleteBackendConnectionCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */; };
 		F3F87280B6602C3FCACB910C /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */; };
 		80AE6315D3DB06F8C76C940A /* ParentAuthenticationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */; };
+		8B3CBE3D1ED90F8245C89705 /* HostedBackendConfigurationResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F7532EE003B461B0D11A508 /* HostedBackendConfigurationResolverTests.swift */; };
 		37CD5F774905CA0507D00AB3 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */; };
 		2BC0A872918EA159AC5A230A /* ParentHydrationUploadServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D81BC13EDB5BAC6E734E36 /* ParentHydrationUploadServiceTests.swift */; };
 		0474E76F0DEF706145BC9BB4 /* VoxtrCore in Frameworks */ = {isa = PBXBuildFile; productRef = 19FF02A00F8E1C4D367DB5C0 /* VoxtrCore */; };
@@ -163,6 +164,7 @@
 		A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteBackendConnectionCoordinatorTests.swift; sourceTree = "<group>"; };
 		B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift; sourceTree = "<group>"; };
 		1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentAuthenticationServiceTests.swift; sourceTree = "<group>"; };
+		5F7532EE003B461B0D11A508 /* HostedBackendConfigurationResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedBackendConfigurationResolverTests.swift; sourceTree = "<group>"; };
 		0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AthleteDeviceAuthorizationInvitationCoordinatorTests.swift; sourceTree = "<group>"; };
 		B5D81BC13EDB5BAC6E734E36 /* ParentHydrationUploadServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ParentHydrationUploadServiceTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -311,6 +313,7 @@
 				A0F91A1BF2C4CE5D718990FC /* AthleteBackendConnectionCoordinatorTests.swift */,
 				B4873FB8FCEC3886E26FB452 /* AthleteDeviceAuthorizationSessionCanonicalMessageCrossImplementationFixtureTests.swift */,
 				1FDA466A941A84D8484BF2DF /* ParentAuthenticationServiceTests.swift */,
+				5F7532EE003B461B0D11A508 /* HostedBackendConfigurationResolverTests.swift */,
 				0F20AD6BBCAAAA7CCFB74324 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift */,
 				B5D81BC13EDB5BAC6E734E36 /* ParentHydrationUploadServiceTests.swift */,
 			);
@@ -568,6 +571,7 @@
 				F7C0D3C9998E85200FE0A898 /* AthleteBackendHydrationAdapterTests.swift in Sources */,
 				A972A773FE6861A40FA9DBDE /* AthleteBackendConnectionCoordinatorTests.swift in Sources */,
 				80AE6315D3DB06F8C76C940A /* ParentAuthenticationServiceTests.swift in Sources */,
+				8B3CBE3D1ED90F8245C89705 /* HostedBackendConfigurationResolverTests.swift in Sources */,
 				37CD5F774905CA0507D00AB3 /* AthleteDeviceAuthorizationInvitationCoordinatorTests.swift in Sources */,
 				2BC0A872918EA159AC5A230A /* ParentHydrationUploadServiceTests.swift in Sources */,
 			);
@@ -651,6 +655,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VOXTR_HOSTED_BACKEND_BASE_URL = "http://localhost:54321/functions/v1";
+				VOXTR_HOSTED_SUPABASE_ANON_KEY = REPLACE_WITH_SUPABASE_ANON_KEY;
 			};
 			name = Debug;
 		};
@@ -672,6 +678,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VOXTR_HOSTED_BACKEND_BASE_URL = "";
+				VOXTR_HOSTED_SUPABASE_ANON_KEY = "";
 			};
 			name = Release;
 		};
@@ -695,6 +703,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VOXTR_HOSTED_BACKEND_BASE_URL = "http://localhost:54321/functions/v1";
+				VOXTR_HOSTED_SUPABASE_ANON_KEY = REPLACE_WITH_SUPABASE_ANON_KEY;
 			};
 			name = Debug;
 		};
@@ -716,6 +726,8 @@
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				VOXTR_HOSTED_BACKEND_BASE_URL = "";
+				VOXTR_HOSTED_SUPABASE_ANON_KEY = "";
 			};
 			name = Release;
 		};

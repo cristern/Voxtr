@@ -24,6 +24,23 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- T1 (issue #122): the hosted backend's public base URL and gateway
+	     key, resolved only in Release builds by
+	     HostedBackendConfigurationResolver.resolveFromMainBundle() (see
+	     that type's own doc comment). Each build setting below is a
+	     User-Defined setting in project.pbxproj: Debug keeps the SAME
+	     local-development values CompositionRoot.build()'s own defaults
+	     already use (unread in Debug — see CompositionRootLoaderView),
+	     and Release defaults to an empty string so a Codemagic archive
+	     that forgets to provide the real Environment-variable-backed
+	     value fails closed instead of silently publishing a
+	     misconfigured build. Neither value is a secret committed here —
+	     both are plain $(VAR) references with no literal key material in
+	     this file or in project.pbxproj's own committed defaults. -->
+	<key>VoxtrHostedBackendBaseURL</key>
+	<string>$(VOXTR_HOSTED_BACKEND_BASE_URL)</string>
+	<key>VoxtrHostedSupabaseAnonKey</key>
+	<string>$(VOXTR_HOSTED_SUPABASE_ANON_KEY)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- ParentApp CloudKit sharing runtime fix: Apple's own CKShare class

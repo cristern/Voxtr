@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import VoxtrParentAuthentication
 
 /// Builds `CompositionRoot` once, asynchronously, at app launch, and
 /// injects the resulting `ModelContainer` into the SwiftUI environment
@@ -55,7 +56,37 @@ public struct CompositionRootLoaderView<Content: View>: View {
         .task {
             guard root == nil, loadError == nil else { return }
             do {
+                #if DEBUG
+                // T1 (issue #122): unchanged local-development path —
+                // `CompositionRoot.build()`'s own default parameters
+                // (local Supabase Functions port, placeholder gateway
+                // key), exactly as before this task. Never reads
+                // `HostedBackendConfigurationResolver` or the app
+                // bundle's Info.plist at all, so Debug/Simulator/CI
+                // native-test builds (which host inside AthleteApp but
+                // carry no real hosted configuration) are byte-for-byte
+                // unaffected by the Release branch below.
                 root = try await CompositionRoot.build()
+                #else
+                // T1 (issue #122) §4: a physical Release build never
+                // silently falls back to the Debug defaults above.
+                // Missing/malformed hosted configuration fails closed,
+                // legibly, through the SAME `loadError`/`StartupDiagnostics`
+                // path any other startup failure already uses — before
+                // `CompositionRoot.build()` is ever called, so no
+                // Parent/Athlete network call can be attempted with an
+                // unreviewed base URL or gateway key.
+                switch HostedBackendConfigurationResolver.resolveFromMainBundle() {
+                case .success(let values):
+                    root = try await CompositionRoot.build(
+                        parentAuthenticationConfiguration: ParentAuthenticationConfiguration(baseURL: values.baseURL),
+                        athleteDeviceAuthorizationGatewayConfiguration: AthleteDeviceAuthorizationGatewayConfiguration(anonKey: values.anonKey)
+                    )
+                case .failure(let configurationError):
+                    loadError = configurationError
+                    return
+                }
+                #endif
             } catch {
                 loadError = error
             }
