@@ -80,7 +80,19 @@ The three simulator/test workflows (`package-tests`, `athlete-simulator-build`, 
 - **Group name expected by `codemagic.yaml`:** `voxtr_ios_signing`
 - This group is referenced by all three TestFlight workflows (`environment.groups: [voxtr_ios_signing]`) but none of them currently requires you to put anything specific in it beyond what the App Store Connect integration already supplies — it's there as the sanctioned place to add any future signing-related variable (e.g. an explicit Apple Developer **Team ID**, if your API key ever needs disambiguation across multiple teams) without touching `codemagic.yaml` itself. Mark any variable you do add as **Secure**.
 
-### 3. Bundle identifiers
+### 3. Hosted backend configuration (T1, issue #122)
+
+- **Location:** Codemagic → your app → Environment variables → create a group named exactly:
+- **Group name expected by `codemagic.yaml`:** `voxtr_hosted_backend_t1`
+- This group is referenced by all three TestFlight workflows (`environment.groups`, alongside `voxtr_ios_signing`) and must contain exactly these two **Secure** variables:
+  - `VOXTR_HOSTED_BACKEND_BASE_URL` — the hosted Supabase Edge Functions base URL for the real backend project (e.g. `https://<project-ref>.supabase.co/functions/v1`). Must be `https`, must not resolve to `localhost`/`127.0.0.1`/`::1`, and must end in `/functions/v1` with no trailing slash.
+  - `VOXTR_HOSTED_SUPABASE_ANON_KEY` — that backend's **legacy anon key** (the JWT-shaped key: three non-empty, dot-separated, base64url segments). Per issue #122 §3, this must stay the legacy anon key, never a modern `sb_publishable_...`/`sb_secret_...` key — the three `verify_jwt=true` Athlete-facing Edge Functions require this exact legacy JWT shape as both their `apikey` and `Authorization: Bearer` header.
+- Each TestFlight workflow's own `Fail clearly if required hosted backend configuration is missing` step fails immediately, before any signing or build work, if either variable is absent.
+- A later `Provision hosted backend configuration (T1)` step (`Scripts/provision_hosted_backend_config.py`) patches these two values into `project.pbxproj`'s Release build settings in that ephemeral build checkout only, immediately before archiving — never committed back to the repository. A `Validate <App> hosted backend configuration (T1)` step (`Scripts/validate_hosted_backend_config.sh`) then confirms, after each archive, that the exact signed, exported `.ipa`'s own processed `Info.plist` carries validly-shaped values — neither script ever prints either value.
+- `pr-validation` does **not** reference this group at all, and never reads a real secret: its own `Verify hosted backend configuration wiring (T1)` step (`Scripts/check_hosted_backend_config_wiring.py`) only confirms the committed source/wiring (Info.plist keys, Debug defaults, empty Release placeholders) is intact — see that script's own doc comment.
+- Debug builds (Simulator/local development) are unaffected — they keep using `CompositionRoot.build()`'s existing local-development defaults (`http://localhost:54321/functions/v1`, `REPLACE_WITH_SUPABASE_ANON_KEY`) and never read this group.
+
+### 4. Bundle identifiers
 
 `codemagic.yaml` uses:
 - `app.voxtr.athlete` (AthleteApp) — used by `testflight-release` and `testflight-athlete`
@@ -88,11 +100,11 @@ The three simulator/test workflows (`package-tests`, `athlete-simulator-build`, 
 
 These must exist as registered App IDs in your Apple Developer account and as apps in App Store Connect before any of the three TestFlight workflows can fetch signing files or publish a build. If you use different identifiers, update both `codemagic.yaml`'s `vars` block (in all three workflows) and the `PRODUCT_BUNDLE_IDENTIFIER` build setting in `App/Voxtr.xcodeproj`.
 
-### 4. Triggering a build
+### 5. Triggering a build
 
 - `testflight-release` triggers on a pushed git tag matching `release/*` (e.g. `release/1.0.0`) — not on every push to `main`, unlike the simulator workflows. Push a matching tag when you want to ship a TestFlight build of both apps.
 - `testflight-parent` and `testflight-athlete` have no automatic trigger at all — start either one manually from the Codemagic dashboard whenever you want to ship just that one app to TestFlight without a tag.
 
 ### What is deliberately never in this repository
 
-Apple Team ID, App Store Connect API private key, certificate passwords, provisioning profile UUIDs, Issuer ID, Key ID. All of these are either supplied automatically by the App Store Connect integration above, or belong in the `voxtr_ios_signing` environment variable group as **Secure** variables — never as literal values in `codemagic.yaml` or anywhere else in this repo.
+Apple Team ID, App Store Connect API private key, certificate passwords, provisioning profile UUIDs, Issuer ID, Key ID, the hosted backend base URL, the hosted Supabase anon key. All of these are either supplied automatically by the App Store Connect integration above, or belong in the `voxtr_ios_signing`/`voxtr_hosted_backend_t1` environment variable groups as **Secure** variables — never as literal values in `codemagic.yaml` or anywhere else in this repo.
