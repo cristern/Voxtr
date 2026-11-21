@@ -79,6 +79,48 @@ struct HostedBackendConfigurationResolverTests {
         }
     }
 
+    // ChatGPT review (PR #123, R1): the original rule accepted ANY
+    // well-formed, non-loopback https host whose path ended in
+    // `/functions/v1` — including an attacker-controlled domain, a
+    // lookalike suffix host, or a different, otherwise-valid Supabase
+    // project that simply isn't the one T1 approved. These cases prove
+    // the resolver now pins to that one approved host instead.
+    @Test(
+        "A well-formed, non-loopback https URL whose host is not the approved T1 project fails closed as untrustedBaseURLHost",
+        arguments: [
+            "https://attacker.example/functions/v1",
+            "https://pxbjctflgcxwjsaablkf.supabase.co.evil.example/functions/v1",
+            "https://otherproject123456.supabase.co/functions/v1",
+        ]
+    )
+    func untrustedBaseURLHostFailsClosed(raw: String) {
+        #expect(throws: HostedBackendConfigurationError.untrustedBaseURLHost) {
+            try HostedBackendConfigurationResolver.resolve(rawBaseURL: raw, rawAnonKey: Self.validAnonKey).get()
+        }
+    }
+
+    // ChatGPT review (PR #123, R1): the original `hasSuffix`-only path
+    // check would have accepted an unreviewed path prefix
+    // (`/extra/functions/v1` ends with `/functions/v1` too); these
+    // prove the approved-host URL is now rejected for ANY additional
+    // component — path prefix, query, fragment, userinfo, or port —
+    // not just a wrong host.
+    @Test(
+        "An approved-host https URL carrying a path prefix, query, fragment, userinfo, or port fails closed as malformedBaseURL",
+        arguments: [
+            "https://pxbjctflgcxwjsaablkf.supabase.co/extra/functions/v1",
+            "https://pxbjctflgcxwjsaablkf.supabase.co/functions/v1?foo=bar",
+            "https://pxbjctflgcxwjsaablkf.supabase.co/functions/v1#fragment",
+            "https://user:pass@pxbjctflgcxwjsaablkf.supabase.co/functions/v1",
+            "https://pxbjctflgcxwjsaablkf.supabase.co:8443/functions/v1",
+        ]
+    )
+    func unexpectedURLComponentsFailClosedAsMalformed(raw: String) {
+        #expect(throws: HostedBackendConfigurationError.malformedBaseURL) {
+            try HostedBackendConfigurationResolver.resolve(rawBaseURL: raw, rawAnonKey: Self.validAnonKey).get()
+        }
+    }
+
     // MARK: - Anon key failures
 
     @Test("A missing or empty gateway key fails closed as missingAnonKey", arguments: [nil, "", "   "] as [String?])
@@ -131,7 +173,7 @@ struct HostedBackendConfigurationResolverTests {
     func errorDescriptionsNeverEchoRawInput() {
         let secretLookingInput = "sb_secret_should-never-appear-in-any-message"
         let allCases: [HostedBackendConfigurationError] = [
-            .missingBaseURL, .malformedBaseURL, .insecureBaseURL,
+            .missingBaseURL, .malformedBaseURL, .insecureBaseURL, .untrustedBaseURLHost,
             .missingAnonKey, .placeholderAnonKey, .malformedAnonKeyFormat,
         ]
         for errorCase in allCases {

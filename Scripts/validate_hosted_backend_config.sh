@@ -21,10 +21,32 @@
 # count, segment count). This script fails the build (non-zero exit) on
 # any violation; it never relaxes a check to let a misconfigured archive
 # through.
+#
+# ChatGPT review (PR #123, R2): the original version only checked that
+# the embedded Info.plist values LOOKED plausible (https + non-loopback
+# + /functions/v1 suffix shape; 3-segment JWT shape) — it never compared
+# them against what Codemagic actually provisioned, so a different
+# project URL or a different well-shaped token could still pass. This
+# version additionally: (1) requires the provisioned
+# VOXTR_HOSTED_BACKEND_BASE_URL itself to be the one approved T1 project
+# endpoint (the same canonical pinning
+# Sources/VoxtrAppShell/HostedBackendConfigurationResolver.swift applies
+# at runtime), and (2) requires the embedded Info.plist's own values to
+# EXACTLY match (byte-for-byte) what was provisioned — never just "has
+# the right shape." The original shape checks are kept as a first,
+# more-diagnostic layer; the exact-match checks are the actual gate.
 set -euo pipefail
 
 : "${APP_NAME:?APP_NAME is required (e.g. ParentApp or AthleteApp)}"
 : "${BUNDLE_ID:?BUNDLE_ID is required}"
+: "${VOXTR_HOSTED_BACKEND_BASE_URL:?VOXTR_HOSTED_BACKEND_BASE_URL is required — configure the 'voxtr_hosted_backend_t1' Codemagic environment variable group.}"
+: "${VOXTR_HOSTED_SUPABASE_ANON_KEY:?VOXTR_HOSTED_SUPABASE_ANON_KEY is required — configure the 'voxtr_hosted_backend_t1' Codemagic environment variable group.}"
+
+# The ONE approved T1 hosted Supabase project — must match
+# HostedBackendConfigurationResolver.swift's own
+# `canonicalHostedProjectHost` exactly (cross-referenced there too).
+EXPECTED_BASE_URL="https://pxbjctflgcxwjsaablkf.supabase.co/functions/v1"
+PLACEHOLDER_ANON_KEY="REPLACE_WITH_SUPABASE_ANON_KEY"
 
 IPA_DIR="build/ios/ipa"
 WORK_DIR="$(mktemp -d)"
@@ -97,9 +119,47 @@ else
   fi
 fi
 
+echo "== Verifying the PROVISIONED (Codemagic environment) values themselves, not just the embedded IPA values =="
+
+if [ "$VOXTR_HOSTED_BACKEND_BASE_URL" != "$EXPECTED_BASE_URL" ]; then
+  echo "FAILING CHECK: the provisioned VOXTR_HOSTED_BACKEND_BASE_URL does not exactly match the one approved T1 hosted project endpoint. A different, even otherwise-valid-looking, Supabase project URL is not acceptable here (ChatGPT review PR #123 R1/R2)."
+  FAILED=1
+else
+  echo "PASS: the provisioned VOXTR_HOSTED_BACKEND_BASE_URL is exactly the approved T1 hosted project endpoint."
+fi
+
+if [ -z "$VOXTR_HOSTED_SUPABASE_ANON_KEY" ] || [ "$VOXTR_HOSTED_SUPABASE_ANON_KEY" = "$PLACEHOLDER_ANON_KEY" ]; then
+  echo "FAILING CHECK: the provisioned VOXTR_HOSTED_SUPABASE_ANON_KEY is missing or still the development placeholder."
+  FAILED=1
+else
+  PROVISIONED_SEGMENT_COUNT="$(awk -F'.' '{print NF}' <<< "$VOXTR_HOSTED_SUPABASE_ANON_KEY")"
+  if [ "$PROVISIONED_SEGMENT_COUNT" -ne 3 ] || ! [[ "$VOXTR_HOSTED_SUPABASE_ANON_KEY" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]; then
+    echo "FAILING CHECK: the provisioned VOXTR_HOSTED_SUPABASE_ANON_KEY is not shaped like the required legacy anon-key (JWT) format."
+    FAILED=1
+  else
+    echo "PASS: the provisioned VOXTR_HOSTED_SUPABASE_ANON_KEY has the expected three-segment JWT shape."
+  fi
+fi
+
+echo "== Verifying the final signed Info.plist's embedded values EXACTLY match what was provisioned (not just a plausible shape) =="
+
+if [ "$BASE_URL" != "$VOXTR_HOSTED_BACKEND_BASE_URL" ]; then
+  echo "FAILING CHECK: the final signed Info.plist's VoxtrHostedBackendBaseURL does not exactly match the provisioned VOXTR_HOSTED_BACKEND_BASE_URL value — the archived build does not carry the value Codemagic actually provisioned."
+  FAILED=1
+else
+  echo "PASS: the final signed Info.plist's VoxtrHostedBackendBaseURL exactly matches the provisioned value."
+fi
+
+if [ "$ANON_KEY" != "$VOXTR_HOSTED_SUPABASE_ANON_KEY" ]; then
+  echo "FAILING CHECK: the final signed Info.plist's VoxtrHostedSupabaseAnonKey does not exactly match the provisioned VOXTR_HOSTED_SUPABASE_ANON_KEY value — the archived build does not carry the value Codemagic actually provisioned."
+  FAILED=1
+else
+  echo "PASS: the final signed Info.plist's VoxtrHostedSupabaseAnonKey exactly matches the provisioned value."
+fi
+
 if [ "$FAILED" -ne 0 ]; then
-  echo "FAILING BUILD: $APP_NAME's final signed Info.plist does not carry valid hosted backend configuration — refusing to let this release publish a build that would fail closed (or worse, silently misbehave) at launch. See the checks above; no raw value is ever printed."
+  echo "FAILING BUILD: $APP_NAME's final signed Info.plist does not carry valid, exactly-provisioned hosted backend configuration — refusing to let this release publish a build that would fail closed (or worse, silently misbehave, or silently talk to the wrong project) at launch. See the checks above; no raw value is ever printed."
   exit 1
 fi
 
-echo "== $APP_NAME hosted backend configuration validation PASSED =="
+echo "== $APP_NAME hosted backend configuration validation PASSED (embedded values exactly match the approved, provisioned configuration) =="

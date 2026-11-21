@@ -46,13 +46,28 @@ enum HostedBackendConfigurationResolver {
     /// forbids on a physical build.
     private static let loopbackHosts: Set<String> = ["localhost", "127.0.0.1", "::1"]
 
-    /// The one fixed path suffix every reviewed hosted base URL must
-    /// end with — matches `ParentAuthenticationConfiguration`'s own doc
-    /// comment (`https://<project>.supabase.co/functions/v1`, NO
-    /// trailing slash) and `AthleteDeviceAuthorizationService`'s
+    /// ChatGPT review (PR #123, R1): the ONE approved T1 hosted
+    /// Supabase project this bounded task may ever point a Release
+    /// build at — `https`/non-loopback/`/functions/v1`-suffix alone
+    /// (the original rule) accepted ANY matching host, including an
+    /// attacker-controlled domain, a lookalike suffix host
+    /// (`<this-host>.evil.example`), or a different, entirely valid
+    /// Supabase project that is simply not the one issue #122 approved.
+    /// Pinning to this exact host closes that: a misconfigured or
+    /// substituted value now fails closed instead of merely "looking
+    /// like a plausible HTTPS Supabase Functions URL."
+    private static let canonicalHostedProjectHost = "pxbjctflgcxwjsaablkf.supabase.co"
+
+    /// The one fixed path every reviewed hosted base URL must have —
+    /// matches `ParentAuthenticationConfiguration`'s own doc comment
+    /// (`https://<project>.supabase.co/functions/v1`, NO trailing
+    /// slash) and `AthleteDeviceAuthorizationService`'s
     /// `baseURL.appendingPathComponent(path)` call sites, which assume
-    /// exactly this shape.
-    private static let requiredBasePathSuffix = "/functions/v1"
+    /// exactly this shape. ChatGPT review (PR #123, R1): compared via
+    /// `URLComponents.path` for an EXACT match, not `hasSuffix` — a
+    /// suffix check alone would accept an unreviewed path prefix
+    /// (`/some/other/prefix/functions/v1`).
+    private static let requiredBasePath = "/functions/v1"
 
     /// Reads the two real Info.plist keys above from the actual running
     /// app's own bundle — the only call site this task adds in
@@ -90,21 +105,53 @@ enum HostedBackendConfigurationResolver {
         }
     }
 
+    /// ChatGPT review (PR #123, R1): rebuilt on `URLComponents` rather
+    /// than plain `URL` so every component — host, port, userinfo,
+    /// query, fragment, and the exact path — is checked individually
+    /// instead of relying on a whole-string `hasSuffix`/`hasPrefix`
+    /// heuristic that an unreviewed extra component could slip past.
+    /// Debug/Simulator builds never call this (see
+    /// `CompositionRootLoaderView`'s `#if DEBUG` branch) — unchanged by
+    /// this tightening.
     private static func validateBaseURL(_ raw: String?) -> Result<URL, HostedBackendConfigurationError> {
         let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return .failure(.missingBaseURL)
         }
-        guard let url = URL(string: trimmed), let scheme = url.scheme, let host = url.host else {
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme,
+              let host = components.host, !host.isEmpty else {
             return .failure(.malformedBaseURL)
         }
         guard scheme.lowercased() == "https" else {
             return .failure(.insecureBaseURL)
         }
-        guard !host.isEmpty, !loopbackHosts.contains(host.lowercased()) else {
+        guard !loopbackHosts.contains(host.lowercased()) else {
             return .failure(.insecureBaseURL)
         }
-        guard !trimmed.hasSuffix("/"), url.path.hasSuffix(requiredBasePathSuffix) else {
+        // The ONE approved T1 hosted project — not merely "some HTTPS
+        // host ending in /functions/v1" (see `canonicalHostedProjectHost`'s
+        // own doc comment for exactly what this closes). Host comparison
+        // is case-insensitive per URL semantics; the literal below is
+        // already lowercase, so this also rejects a same-host-different-case
+        // input consistently with an exact-match intent.
+        guard host.lowercased() == canonicalHostedProjectHost else {
+            return .failure(.untrustedBaseURLHost)
+        }
+        // No port, userinfo (user/password), query, or fragment — only
+        // the bare canonical origin plus the exact required path.
+        // `components.path` is case-sensitive and compared for EXACT
+        // equality, not `hasSuffix`, so an extra path prefix
+        // (`/some/prefix/functions/v1`) is rejected too.
+        guard components.port == nil,
+              components.user == nil,
+              components.password == nil,
+              components.query == nil,
+              components.fragment == nil,
+              components.path == requiredBasePath else {
+            return .failure(.malformedBaseURL)
+        }
+        guard let url = URL(string: trimmed) else {
             return .failure(.malformedBaseURL)
         }
         return .success(url)
@@ -158,17 +205,27 @@ enum HostedBackendConfigurationError: Error, Equatable, Sendable, LocalizedError
     /// No value at all for the hosted base URL key (Release build was
     /// archived without the Codemagic-provisioned build setting).
     case missingBaseURL
-    /// A value was present but is not a well-formed absolute URL, or
-    /// its path does not end with the one required `/functions/v1`
-    /// suffix (or ends with a trailing slash — see
-    /// `ParentAuthenticationConfiguration`'s own "NO trailing slash"
-    /// doc comment).
+    /// A value was present but is not a well-formed absolute URL, has a
+    /// path other than exactly `/functions/v1` (a prefix, a trailing
+    /// slash, or anything else — see `ParentAuthenticationConfiguration`'s
+    /// own "NO trailing slash" doc comment), or carries a port,
+    /// userinfo, query, or fragment component.
     case malformedBaseURL
     /// The URL is well-formed but is not `https`, or its host is empty
     /// or one of the local-development loopback hosts — the exact
     /// "never silently fall back to localhost on physical builds" case
     /// issue #122 §4 names explicitly.
     case insecureBaseURL
+    /// ChatGPT review (PR #123, R1): the host is a well-formed,
+    /// non-loopback `https` host ending in the required path, but is
+    /// NOT the one approved T1 hosted project
+    /// (`canonicalHostedProjectHost`) — e.g. an attacker-controlled
+    /// domain, a lookalike suffix host, or a different, otherwise-valid
+    /// Supabase project. Distinct from `insecureBaseURL` (which is
+    /// specifically "local-development host") since this is a
+    /// different failure reason: a well-formed but unapproved
+    /// destination.
+    case untrustedBaseURLHost
     /// No value at all for the hosted gateway key.
     case missingAnonKey
     /// The value is literally the known non-functional development
@@ -192,6 +249,8 @@ enum HostedBackendConfigurationError: Error, Equatable, Sendable, LocalizedError
             return "Hosted backend base URL is not a well-formed https://<project>.supabase.co/functions/v1 URL."
         case .insecureBaseURL:
             return "Hosted backend base URL must be https and must not be a local-development host."
+        case .untrustedBaseURLHost:
+            return "Hosted backend base URL does not match the approved T1 hosted project host."
         case .missingAnonKey:
             return "Hosted backend gateway key is not configured for this build."
         case .placeholderAnonKey:
