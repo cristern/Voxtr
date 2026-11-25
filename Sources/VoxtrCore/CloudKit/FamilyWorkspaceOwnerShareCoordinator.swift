@@ -329,9 +329,36 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
     /// coordinator's own root record/share (no `.parent` relationship —
     /// see the mapping type's own doc comment).
     ///
-    /// `publicPermission = .none`: mirrors `ensureShare`'s own choice
-    /// exactly — only the specific person the Parent selects when
-    /// presenting this share can ever join it.
+    /// PERMISSION CONTRACT CORRECTION (unknownItem fix): this share's
+    /// `publicPermission` is `.readOnly`, NOT `.none` — deliberately
+    /// different from `ensureShare`'s own FamilyWorkspace root share,
+    /// which remains `.none` and is untouched by this method. Athlete
+    /// Connection V1 is QR-first: the Athlete's iCloud identity is
+    /// genuinely unknown to the Parent at invitation-creation time, so
+    /// `CKShare.addParticipant(_:)` (which requires an already-known
+    /// recipient identity) is not usable here, and no participant is
+    /// ever added to this share. Per Apple's own documented contract,
+    /// `publicPermission` "defines what permission a user has when not
+    /// explicitly added to the share," and only a share whose
+    /// `publicPermission` is MORE permissive than `.none` "can be joined
+    /// by any user with access to the share's shareURL" — `.none` alone,
+    /// with no participant ever added, leaves the share resolvable by no
+    /// one but its own owner. The QR/link itself (a fresh, randomly-
+    /// generated, non-deterministic invitation identity per invitation —
+    /// see `AthleteConnectionInvitationCloudRecordMapping`'s own doc
+    /// comment) is, and was always intended to be, this flow's actual
+    /// confidentiality boundary — `.readOnly` is what makes that already-
+    /// intended contract functionally correct rather than merely
+    /// declared. `.readOnly`, not `.readWrite`: the Athlete-side
+    /// acceptance path (`FamilyWorkspaceParticipantShareCoordinator
+    /// .resolveAcceptedShare`) only ever fetches this record, never
+    /// writes to it. This share is rooted on exactly one, otherwise-
+    /// unparented `AthleteConnectionInvitation` record (no `.parent`
+    /// relationship to the FamilyWorkspace root or to anything else), so
+    /// this permission grants read access to ONLY that one record's own
+    /// fields — never the FamilyWorkspace record, other AthleteProfiles,
+    /// sibling data, or any Planning/Training/Reflection record, none of
+    /// which is rooted under this share at all.
     public func createInvitationShare(
         zoneID: CKRecordZone.ID,
         payload: AthleteConnectionInvitationCloudRecordPayload
@@ -340,7 +367,7 @@ public final class FamilyWorkspaceOwnerShareCoordinator {
         let invitationId = UUID()
         let record = AthleteConnectionInvitationCloudRecordMapping.makeRecord(invitationId: invitationId, payload: payload, zoneID: zoneID)
         let share = CKShare(rootRecord: record)
-        share.publicPermission = .none
+        share.publicPermission = .readOnly
 
         do {
             let result = try await database.modifyRecords(saving: [record, share], deleting: [])

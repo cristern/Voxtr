@@ -20,11 +20,19 @@ import UIKit
 ///
 /// PRIVACY: the QR code is only ever the opaque `CKShare.url` — no
 /// athlete name, DOB, or raw workspace/participant/athlete ID is encoded
-/// into it. `share.publicPermission == .none` (set once, at share
+/// into it. `share.publicPermission == .readOnly` (set once, at share
 /// creation, by `FamilyWorkspaceOwnerShareCoordinator.createInvitationShare` —
-/// unchanged by this screen) already means possessing this URL alone is
-/// not sufficient to join; CloudKit's own accept flow still applies.
-/// Never logged: the QR image is rendered directly from
+/// unchanged by this screen, and unrelated to the separate FamilyWorkspace
+/// root share, which stays `.none`) is what makes this URL the ACTUAL
+/// confidentiality boundary — see that method's own doc comment for the
+/// full permission-contract rationale (this screen is QR-first precisely
+/// because the Athlete's identity is not known ahead of time, so no
+/// participant is ever added and `.none` alone would leave the share
+/// resolvable by no one at all). This share is rooted on exactly one
+/// invitation record with no children, so `.readOnly` here exposes only
+/// that record's own already-intended hydration payload — never the
+/// FamilyWorkspace record, sibling athletes, or any other data. Never
+/// logged: the QR image is rendered directly from
 /// `handoff.share.url` in-memory, never written to a diagnostic or
 /// persisted anywhere by this screen.
 public struct AthleteConnectionQRPairingView: View {
